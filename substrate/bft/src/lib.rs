@@ -56,6 +56,7 @@ extern crate error_chain;
 use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Instant, Duration};
 
 use codec::Encode;
 use ed25519::LocalizedSignature;
@@ -210,6 +211,23 @@ struct BftInstance<B: Block, P> {
 	proposer: P,
 }
 
+impl<B: Block, P: Proposer<B>> BftInstance<B, P>
+	where
+		B: Clone + Eq,
+		B::Hash: ::std::hash::Hash
+
+{
+	fn round_timeout_duration(&self, round: usize) -> Duration {
+		let round = round / 3;
+		let round = ::std::cmp::min(63, round) as u32;
+		let timeout = 1u64.checked_shl(round)
+			.unwrap_or_else(u64::max_value)
+			.saturating_mul(self.round_timeout_multiplier);
+
+		Duration::from_secs(timeout)
+	}
+}
+
 impl<B: Block, P: Proposer<B>> rhododendron::Context for BftInstance<B, P>
 	where
 		B: Clone + Eq,
@@ -249,15 +267,8 @@ impl<B: Block, P: Proposer<B>> rhododendron::Context for BftInstance<B, P>
 	}
 
 	fn begin_round_timeout(&self, round: usize) -> Self::RoundTimeout {
-		use std::time::{Instant, Duration};
-
-		let round = round / 3;
-		let round = ::std::cmp::min(63, round) as u32;
-		let timeout = 1u64.checked_shl(round)
-			.unwrap_or_else(u64::max_value)
-			.saturating_mul(self.round_timeout_multiplier);
-
-		let fut = Delay::new(Instant::now() + Duration::from_secs(timeout))
+		let timeout = self.round_timeout_duration(round);
+		let fut = Delay::new(Instant::now() + timeout)
 			.map_err(|e| Error::from(ErrorKind::FaultyTimer(e)))
 			.map_err(Into::into);
 
@@ -276,7 +287,10 @@ impl<B: Block, P: Proposer<B>> rhododendron::Context for BftInstance<B, P>
 			.map(|p| ::ed25519::Public::from_raw(p.0))
 			.collect();
 
+		let round_timeout = self.round_timeout_duration(next_round);
+
 		info!("Advancing to round {} from {}. Observed authorities: {:?}", next_round, round, authority_pubkeys);
+		info!("Round {} should end in at most {} seconds from now", next_round, round_timeout.as_secs());
 		if let AdvanceRoundReason::Timeout = reason {
 			self.proposer.on_round_end(round, accumulator.proposal().is_some());
 		}
