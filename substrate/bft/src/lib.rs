@@ -268,9 +268,15 @@ impl<B: Block, P: Proposer<B>> rhododendron::Context for BftInstance<B, P>
 		&self,
 		accumulator: &::rhododendron::Accumulator<B, B::Hash, Self::AuthorityId, Self::Signature>,
 		round: usize,
-		_next_round: usize,
+		next_round: usize,
 		reason: AdvanceRoundReason,
 	) {
+		let authority_pubkeys: Vec<_> = accumulator.participants()
+			.into_iter()
+			.map(|p| ::ed25519::Public::from_raw(p.0))
+			.collect();
+
+		info!("Advancing to round {} from {}. Observed authorities: {:?}", next_round, round, authority_pubkeys);
 		if let AdvanceRoundReason::Timeout = reason {
 			self.proposer.on_round_end(round, accumulator.proposal().is_some());
 		}
