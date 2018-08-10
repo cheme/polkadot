@@ -20,11 +20,6 @@
 
 extern crate demo_cli as cli;
 
-#[macro_use]
-extern crate error_chain;
-
-quick_main!(run);
-
-fn run() -> cli::error::Result<()> {
+fn main() -> cli::error::Result<()> {
 	cli::run(::std::env::args())
 }

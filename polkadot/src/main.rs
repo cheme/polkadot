@@ -22,9 +22,6 @@ extern crate polkadot_cli as cli;
 extern crate ctrlc;
 extern crate futures;
 
-#[macro_use]
-extern crate error_chain;
-
 use cli::{ServiceComponents, Service, VersionInfo};
 use futures::sync::oneshot;
 use futures::{future, Future};
@@ -63,9 +60,7 @@ impl cli::Worker for Worker {
 	}
 }
 
-quick_main!(run);
-
-fn run() -> cli::error::Result<()> {
+fn main() -> cli::error::Result<()> {
 	let version = VersionInfo {
 		commit: vergen::short_sha(),
 		version: env!("CARGO_PKG_VERSION"),
