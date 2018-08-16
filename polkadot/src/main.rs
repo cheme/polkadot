@@ -18,6 +18,9 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "memory_profiling")]
+use std::alloc::System;
+
 extern crate polkadot_cli as cli;
 extern crate ctrlc;
 extern crate futures;
@@ -27,6 +30,10 @@ use futures::sync::oneshot;
 use futures::{future, Future};
 
 use std::cell::RefCell;
+
+#[cfg(feature = "memory_profiling")]
+#[global_allocator]
+static A: System = System;
 
 mod vergen {
 	#![allow(unused)]

@@ -88,6 +88,16 @@ exclude = [
 	"substrate/test-runtime/wasm",
 ]
 
+
+[features]
+# to create a memory profile (requires nightly rust), use e.g.
+# `heaptrack /path/to/parity <parity params>`,
+# to visualize a memory profile, use `heaptrack_gui`
+# or
+# `valgrind --tool=massif /path/to/parity <parity params>`
+# and `massif-visualizer` for visualization
+memory_profiling = []
+
 [badges]
 travis-ci = { repository = "paritytech/polkadot", branch = "master" }
 maintenance = { status = "actively-developed" }

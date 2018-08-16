@@ -1812,7 +1812,6 @@ name = "polkadot"
 version = "0.3.0"
 dependencies = [
  "ctrlc 1.1.1 (git+https://github.com/paritytech/rust-ctrlc.git)",
- "error-chain 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.21 (registry+https://github.com/rust-lang/crates.io-index)",
  "polkadot-cli 0.3.0",
  "vergen 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
