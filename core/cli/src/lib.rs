@@ -34,7 +34,6 @@ extern crate names;
 extern crate backtrace;
 extern crate sysinfo;
 
-extern crate substrate_client as client;
 extern crate substrate_network as network;
 extern crate substrate_network_libp2p as network_libp2p;
 extern crate sr_primitives as runtime_primitives;

@@ -1,3 +1,7 @@
+#![feature(rust_2018_preview)]
+
+cargo-features = ["rename-dependency"]
+
 [package]
 name = "substrate-cli"
 version = "0.3.0"
@@ -24,7 +28,7 @@ futures = "0.1.17"
 fdlimit = "0.1"
 exit-future = "0.1"
 sysinfo = "0.6.2"
-substrate-client = { path = "../../core/client" }
+client = { path = "../../core/client", package = "substrate-client" }
 substrate-network = { path = "../../core/network" }
 substrate-network-libp2p = { path = "../../core/network-libp2p" }
 sr-primitives = { path = "../../core/sr-primitives" }
