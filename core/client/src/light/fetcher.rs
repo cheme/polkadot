@@ -26,10 +26,10 @@ use runtime_primitives::traits::{As, Block as BlockT, Header as HeaderT, NumberF
 use state_machine::{CodeExecutor, ChangesTrieRootsStorage, read_proof_check,
 	key_changes_proof_check};
 
-use call_executor::CallResult;
-use cht;
-use error::{Error as ClientError, ErrorKind as ClientErrorKind, Result as ClientResult};
-use light::call_executor::check_execution_proof;
+use crate::call_executor::CallResult;
+use crate::cht;
+use crate::error::{Error as ClientError, ErrorKind as ClientErrorKind, Result as ClientResult};
+use crate::light::call_executor::check_execution_proof;
 
 /// Remote call request.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -264,15 +264,15 @@ impl<'a, H, Hash> ChangesTrieRootsStorage<H> for RootsStorage<'a, Hash>
 pub mod tests {
 	use futures::future::{ok, err, FutureResult};
 	use parking_lot::Mutex;
-	use call_executor::CallResult;
-	use client::tests::prepare_client_with_key_changes;
+	use crate::call_executor::CallResult;
+	use crate::client::tests::prepare_client_with_key_changes;
 	use executor::{self, NativeExecutionDispatch};
-	use error::Error as ClientError;
+	use crate::error::Error as ClientError;
 	use test_client::{self, TestClient};
 	use test_client::runtime::{self, Hash, Block, Header};
 	use test_client::client::BlockOrigin;
-	use in_mem::{Blockchain as InMemoryBlockchain};
-	use light::fetcher::{Fetcher, FetchChecker, LightDataChecker,
+	use crate::in_mem::{Blockchain as InMemoryBlockchain};
+	use crate::light::fetcher::{Fetcher, FetchChecker, LightDataChecker,
 		RemoteCallRequest, RemoteHeaderRequest};
 	use primitives::{Blake2Hasher};
 	use primitives::storage::well_known_keys;
@@ -327,7 +327,7 @@ pub mod tests {
 			remote_block_header.clone(),
 			None,
 			None,
-			::backend::NewBlockState::Final,
+			crate::backend::NewBlockState::Final,
 		).unwrap();
 		let local_executor = test_client::LocalExecutor::new();
 		let local_checker = LightDataChecker::new(local_executor);

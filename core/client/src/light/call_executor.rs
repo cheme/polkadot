@@ -27,10 +27,10 @@ use state_machine::{Backend as StateBackend, CodeExecutor, OverlayedChanges,
 	execution_proof_check, ExecutionManager};
 use hash_db::Hasher;
 
-use blockchain::Backend as ChainBackend;
-use call_executor::{CallExecutor, CallResult};
-use error::{Error as ClientError, ErrorKind as ClientErrorKind, Result as ClientResult};
-use light::fetcher::{Fetcher, RemoteCallRequest};
+use crate::blockchain::Backend as ChainBackend;
+use crate::call_executor::{CallExecutor, CallResult};
+use crate::error::{Error as ClientError, ErrorKind as ClientErrorKind, Result as ClientResult};
+use crate::light::fetcher::{Fetcher, RemoteCallRequest};
 use executor::{RuntimeVersion, NativeVersion};
 use codec::Decode;
 use heapsize::HeapSizeOf;

@@ -17,7 +17,7 @@
 //! Substrate Client
 
 use std::sync::Arc;
-use error::{Error, ErrorKind};
+use crate::error::{Error, ErrorKind};
 use futures::sync::mpsc;
 use parking_lot::{Mutex, RwLock};
 use primitives::AuthorityId;
@@ -28,7 +28,7 @@ use runtime_primitives::{
 };
 use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, As, NumberFor, CurrentHeight, BlockNumberToHash};
 use runtime_primitives::{ApplyResult, BuildStorage};
-use runtime_api as api;
+use crate::runtime_api as api;
 use primitives::{Blake2Hasher, H256, ChangesTrieConfiguration};
 use primitives::storage::{StorageKey, StorageData};
 use primitives::storage::well_known_keys;
@@ -38,13 +38,16 @@ use state_machine::{
 	ExecutionStrategy, ExecutionManager, prove_read,
 	key_changes, key_changes_proof, OverlayedChanges
 };
-
-use backend::{self, BlockImportOperation};
-use blockchain::{self, Info as ChainInfo, Backend as ChainBackend, HeaderBackend as ChainHeaderBackend};
-use call_executor::{CallExecutor, LocalCallExecutor};
+use log::{info, warn, trace};
+use substrate_telemetry::telemetry;
+use slog::slog_info;
+use error_chain::bail;
+use crate::backend::{self, BlockImportOperation};
+use crate::blockchain::{self, Info as ChainInfo, Backend as ChainBackend, HeaderBackend as ChainHeaderBackend};
+use crate::call_executor::{CallExecutor, LocalCallExecutor};
 use executor::{RuntimeVersion, RuntimeInfo};
-use notifications::{StorageNotifications, StorageEventStream};
-use {cht, error, in_mem, block_builder, genesis};
+use crate::notifications::{StorageNotifications, StorageEventStream};
+use crate::{cht, error, in_mem, block_builder, genesis};
 
 /// Type that implements `futures::Stream` of block import events.
 pub type ImportNotifications<Block> = mpsc::UnboundedReceiver<BlockImportNotification<Block>>;
@@ -277,7 +280,7 @@ impl<B, E, Block> Client<B, E, Block> where
 				genesis_block.deconstruct().0,
 				Some(vec![]),
 				None,
-				::backend::NewBlockState::Final
+				crate::backend::NewBlockState::Final
 			)?;
 			backend.commit_operation(op)?;
 		}
@@ -628,7 +631,7 @@ impl<B, E, Block> Client<B, E, Block> where
 		let (storage_update, changes_update, storage_changes) = match transaction.state()? {
 			Some(transaction_state) => {
 				let mut overlay = Default::default();
-				let mut r = self.executor.call_at_state(
+				let r = self.executor.call_at_state(
 					transaction_state,
 					&mut overlay,
 					"execute_block",
@@ -661,11 +664,11 @@ impl<B, E, Block> Client<B, E, Block> where
 		// TODO: non longest-chain rule.
 		let is_new_best = finalized || header.number() > &last_best_number;
 		let leaf_state = if finalized {
-			::backend::NewBlockState::Final
+			crate::backend::NewBlockState::Final
 		} else if is_new_best {
-			::backend::NewBlockState::Best
+			crate::backend::NewBlockState::Best
 		} else {
-			::backend::NewBlockState::Normal
+			crate::backend::NewBlockState::Normal
 		};
 
 		trace!("Imported {}, (#{}), best={}, origin={:?}", hash, header.number(), is_new_best, origin);
@@ -726,7 +729,7 @@ impl<B, E, Block> Client<B, E, Block> where
 		let last_finalized = self.backend.blockchain().last_finalized()?;
 
 		if block == last_finalized { return Ok(()) }
-		let route_from_finalized = ::blockchain::tree_route(
+		let route_from_finalized = crate::blockchain::tree_route(
 			self.backend.blockchain(),
 			BlockId::Hash(last_finalized),
 			BlockId::Hash(block),
@@ -739,7 +742,7 @@ impl<B, E, Block> Client<B, E, Block> where
 			bail!(error::ErrorKind::NotInFinalizedChain);
 		}
 
-		let route_from_best = ::blockchain::tree_route(
+		let route_from_best = crate::blockchain::tree_route(
 			self.backend.blockchain(),
 			BlockId::Hash(best_block),
 			BlockId::Hash(block),

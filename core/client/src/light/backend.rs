@@ -26,11 +26,11 @@ use runtime_primitives::{generic::BlockId, Justification};
 use state_machine::{Backend as StateBackend, InMemoryChangesTrieStorage, TrieBackend};
 use runtime_primitives::traits::{Block as BlockT, NumberFor};
 
-use backend::{Backend as ClientBackend, BlockImportOperation, RemoteBackend, NewBlockState};
-use blockchain::HeaderBackend as BlockchainHeaderBackend;
-use error::{Error as ClientError, ErrorKind as ClientErrorKind, Result as ClientResult};
-use light::blockchain::{Blockchain, Storage as BlockchainStorage};
-use light::fetcher::{Fetcher, RemoteReadRequest};
+use crate::backend::{Backend as ClientBackend, BlockImportOperation, RemoteBackend, NewBlockState};
+use crate::blockchain::HeaderBackend as BlockchainHeaderBackend;
+use crate::error::{Error as ClientError, ErrorKind as ClientErrorKind, Result as ClientResult};
+use crate::light::blockchain::{Blockchain, Storage as BlockchainStorage};
+use crate::light::fetcher::{Fetcher, RemoteReadRequest};
 use hash_db::Hasher;
 use trie::MemoryDB;
 use heapsize::HeapSizeOf;

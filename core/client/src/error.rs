@@ -19,6 +19,7 @@
 use std;
 use state_machine;
 use runtime_primitives::ApplyError;
+use error_chain::*;
 
 error_chain! {
 	errors {

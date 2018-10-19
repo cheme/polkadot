@@ -16,7 +16,7 @@
 
 //! Substrate Client data backend
 
-use error;
+use crate::error;
 use primitives::AuthorityId;
 use runtime_primitives::{generic::BlockId, Justification};
 use runtime_primitives::traits::{Block as BlockT, NumberFor};
@@ -95,7 +95,7 @@ where
 	/// Associated block insertion operation type.
 	type BlockImportOperation: BlockImportOperation<Block, H>;
 	/// Associated blockchain backend type.
-	type Blockchain: ::blockchain::Backend<Block>;
+	type Blockchain: crate::blockchain::Backend<Block>;
 	/// Associated state backend type.
 	type State: StateBackend<H>;
 	/// Changes trie storage.

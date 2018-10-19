@@ -45,16 +45,17 @@ mod tests {
 	use codec::{Encode, Decode, Joiner};
 	use keyring::Keyring;
 	use executor::NativeExecutionDispatch;
+	use executor::native_executor_instance;
 	use state_machine::{execute, OverlayedChanges, ExecutionStrategy, InMemoryChangesTrieStorage};
 	use state_machine::backend::InMemory;
-	use test_client;
 	use test_client::runtime::genesismap::{GenesisConfig, additional_storage_with_genesis};
 	use test_client::runtime::{Hash, Transfer, Block, BlockNumber, Header, Digest, Extrinsic};
 	use primitives::{Blake2Hasher, ed25519::{Public, Pair}};
+  use hex_literal::{hex, hex_impl};
 
 	native_executor_instance!(Executor, test_client::runtime::api::dispatch, test_client::runtime::native_version, include_bytes!("../../test-runtime/wasm/target/wasm32-unknown-unknown/release/substrate_test_runtime.compact.wasm"));
 
-	fn executor() -> ::executor::NativeExecutor<Executor> {
+	fn executor() -> executor::NativeExecutor<Executor> {
 		NativeExecutionDispatch::new()
 	}
 
