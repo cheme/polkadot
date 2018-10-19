@@ -1,3 +1,5 @@
+#![feature(rust_2018_preview)]
+
 [package]
 name = "substrate-client-db"
 version = "0.1.0"

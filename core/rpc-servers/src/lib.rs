@@ -18,7 +18,7 @@
 //! Substrate RPC servers.
 // end::description[]
 
-#[warn(missing_docs)]
+#![warn(missing_docs)]
 
 pub extern crate substrate_rpc as apis;
 

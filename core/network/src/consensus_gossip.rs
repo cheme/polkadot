@@ -242,9 +242,9 @@ where
 	}
 
 	/// Multicast a message to all peers.
-	pub fn multicast(&mut self, protocol: &mut Context<B>, topic: B::Hash, message: ConsensusMessage) {
+	pub fn multicast(&mut self, protocol: &mut Context<B>, topic: B::Hash, message: Vec<u8>) {
 		let message_hash = HashFor::<B>::hash(&message);
-		self.multicast_inner(protocol, message_hash, topic, || message.clone());
+		self.multicast_inner(protocol, message_hash, topic, || message.to_vec());
 	}
 
 	fn multicast_inner<F>(&mut self, protocol: &mut Context<B>, message_hash: B::Hash, topic: B::Hash, get_message: F)

@@ -16,18 +16,13 @@
 
 //! Initialization errors.
 
-use client;
-use error_chain::error_chain;
-use error_chain::error_chain_processing;
-use error_chain::impl_error_chain_processed;
-use error_chain::impl_error_chain_kind;
-use error_chain::impl_extract_backtrace;
+use error_chain::*;
 
 error_chain! {
 	foreign_links {
-		Io(::std::io::Error) #[doc="IO error"];
-		Cli(::clap::Error) #[doc="CLI error"];
-		Service(::service::Error) #[doc="Substrate service error"];
+		Io(std::io::Error) #[doc="IO error"];
+		Cli(clap::Error) #[doc="CLI error"];
+		Service(service::Error) #[doc="Substrate service error"];
 	}
 	links {
 		Client(client::error::Error, client::error::ErrorKind) #[doc="Client error"];

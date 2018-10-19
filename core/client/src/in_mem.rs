@@ -148,7 +148,7 @@ impl<Block: BlockT> Blockchain<Block> {
 		Blockchain {
 			storage: storage.clone(),
 			cache: Cache {
-				storage: storage,
+				storage,
 				authorities_at: Default::default(),
 			},
 		}

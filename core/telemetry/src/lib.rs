@@ -23,20 +23,12 @@
 //! so that the logging thread doesn't get held up at all.
 // end::description[]
 
-extern crate parking_lot;
-extern crate ws;
-extern crate slog_async;
-extern crate slog_json;
-#[macro_use]
-extern crate log;
-#[macro_use(o, kv)]
-extern crate slog;
-extern crate slog_scope;
 
 use std::{io, time, thread};
 use std::sync::Arc;
 use parking_lot::Mutex;
-use slog::Drain;
+use slog::{o, Drain};
+use log::trace;
 pub use slog_scope::with_logger;
 
 /// Configuration for telemetry.
@@ -51,7 +43,7 @@ pub struct TelemetryConfig {
 pub type Telemetry = slog_scope::GlobalLoggerGuard;
 
 /// Size of the channel for passing messages to telemetry thread.
-const CHANNEL_SIZE: usize = 262144;
+const CHANNEL_SIZE: usize = 262_144;
 
 /// Initialise telemetry.
 pub fn init_telemetry(config: TelemetryConfig) -> slog_scope::GlobalLoggerGuard {

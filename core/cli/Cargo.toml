@@ -1,4 +1,3 @@
-#![feature(rust_2018_preview)]
 
 cargo-features = ["rename-dependency"]
 
@@ -8,7 +7,7 @@ version = "0.3.0"
 authors = ["Parity Technologies <admin@parity.io>"]
 description = "Substrate CLI interface."
 build = "build.rs"
-#edition = "2018"
+edition = "2018"
 
 [dependencies]
 clap = { version = "~2.32", features = ["yaml"] }
@@ -29,11 +28,11 @@ fdlimit = "0.1"
 exit-future = "0.1"
 sysinfo = "0.6.2"
 client = { path = "../../core/client", package = "substrate-client" }
-substrate-network = { path = "../../core/network" }
-substrate-network-libp2p = { path = "../../core/network-libp2p" }
-sr-primitives = { path = "../../core/sr-primitives" }
-substrate-primitives = { path = "../../core/primitives" }
-substrate-service = { path = "../../core/service" }
+network = { path = "../../core/network", package = "substrate-network" }
+network_libp2p = { path = "../../core/network-libp2p", package = "substrate-network-libp2p" }
+runtime_primitives = { path = "../../core/sr-primitives", package = "sr-primitives" }
+primitives = { path = "../../core/primitives", package = "substrate-primitives" }
+service = { path = "../../core/service", package = "substrate-service" }
 substrate-telemetry = { path = "../../core/telemetry" }
 names = "0.11.0"
 

@@ -26,6 +26,9 @@ use sysinfo::{get_current_pid, ProcessExt, System, SystemExt};
 use network::{SyncState, SyncProvider};
 use client::BlockchainEvents;
 use runtime_primitives::traits::{Header, As};
+use slog::slog_info;
+use substrate_telemetry::telemetry;
+use log::{info, debug, warn};
 
 const TIMER_INTERVAL_MS: u64 = 5000;
 

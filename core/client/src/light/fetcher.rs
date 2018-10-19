@@ -431,7 +431,7 @@ pub mod tests {
 				last_block: (end, end_hash),
 				max_block: (max, max_hash),
 				tries_roots: local_roots_range,
-				key: key,
+				key,
 				retry_count: None,
 			};
 			let local_result = local_checker.check_changes_proof(
@@ -469,7 +469,7 @@ pub mod tests {
 			last_block: (end, end_hash),
 			max_block: (max, max_hash),
 			tries_roots: local_roots_range.clone(),
-			key: key,
+			key,
 			retry_count: None,
 		};
 
