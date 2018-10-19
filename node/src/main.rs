@@ -25,7 +25,7 @@ extern crate futures;
 #[macro_use]
 extern crate error_chain;
 
-use cli::VersionInfo;
+use self::cli::VersionInfo;
 use futures::sync::oneshot;
 use futures::{future, Future};
 
