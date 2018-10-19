@@ -33,6 +33,7 @@ extern crate tokio;
 extern crate names;
 extern crate backtrace;
 extern crate sysinfo;
+extern crate client;
 
 extern crate substrate_network as network;
 extern crate substrate_network_libp2p as network_libp2p;
