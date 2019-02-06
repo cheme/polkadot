@@ -11,3 +11,14 @@ log = "0.4"
 serde = "1.0"
 substrate-rpc = { path = "../rpc", version = "0.1" }
 sr-primitives = { path = "../sr-primitives" }
+
+# fuzzing over rpc is wrong: except if we fuzz jsonrpc -> handler as entry point
+#[features]
+#fuzzing = []
+#fuzzing = ["jsonrpc-http-server/fuzzing"]
+
+
+#[patch.crates-io]
+#jsonrpc-http-server = { git = "https://github.com/cheme/jsonrpc.git", branch = "fuzzing" }
+#jsonrpc-pubsub = { git = "https://github.com/cheme/jsonrpc.git", branch = "fuzzing" }
+#jsonrpc-ws-server = { git = "https://github.com/cheme/jsonrpc.git", branch = "fuzzing" }

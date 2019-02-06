@@ -29,7 +29,7 @@ use primitives::ed25519::Pair;
 use node_primitives::Block;
 use node_runtime::{GenesisConfig, RuntimeApi};
 use substrate_service::{
-	FactoryFullConfiguration, LightComponents, FullComponents, FullBackend,
+	FactoryFullConfiguration, LightComponents, FullComponents, FullBackend, StartRPC,
 	FullClient, LightClient, LightBackend, FullExecutor, LightExecutor, TaskExecutor,
 };
 use transaction_pool::{self, txpool::{Pool as TransactionPool}};
@@ -120,6 +120,9 @@ construct_service_factory! {
 		},
 		LightService = LightComponents<Self>
 			{ |config, executor| <LightComponents<Factory>>::new(config, executor) },
+		FuzzService = <Self::FullService as StartRPC<FullComponents<Self>>>::RpcHandle
+			{ |config, executor|
+        substrate_service::Service::<FullComponents<Factory>>::rpc_handle_native(config, executor) },
 		FullImportQueue = AuraImportQueue<
 			Self::Block,
 			FullClient<Self>,

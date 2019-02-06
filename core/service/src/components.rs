@@ -139,6 +139,8 @@ impl<T: Serialize + DeserializeOwned + BuildStorage> RuntimeGenesis for T {}
 /// Something that can start the RPC service.
 pub trait StartRPC<C: Components> {
 	type ServersHandle: Send + Sync;
+	//#[cfg(feature = "fuzzing")]
+	type RpcHandle;
 
 	fn start_rpc(
 		client: Arc<ComponentClient<C>>,
@@ -150,13 +152,56 @@ pub trait StartRPC<C: Components> {
 		task_executor: TaskExecutor,
 		transaction_pool: Arc<TransactionPool<C::TransactionPoolApi>>,
 	) -> error::Result<Self::ServersHandle>;
+
+  // TODO in its own trait
+	//#[cfg(feature = "fuzzing")]
+  fn rpc_handler(
+		client: Arc<ComponentClient<C>>,
+		network: Arc<network::SyncProvider<ComponentBlock<C>>>,
+		should_have_peers: bool,
+		rpc_system_info: SystemInfo,
+		task_executor: TaskExecutor,
+		transaction_pool: Arc<TransactionPool<C::TransactionPoolApi>>,
+	) -> Self::RpcHandle;
+		
 }
+
+fn rpc_handler<C: Components> (
+	client: &Arc<ComponentClient<C>>,
+	network: &Arc<network::SyncProvider<ComponentBlock<C>>>,
+	should_have_peers: bool,
+	rpc_system_info: &SystemInfo,
+	task_executor: &TaskExecutor,
+	transaction_pool: &Arc<TransactionPool<C::TransactionPoolApi>>,
+) -> rpc::RpcHandler where
+	ComponentClient<C>: ProvideRuntimeApi,
+	<ComponentClient<C> as ProvideRuntimeApi>::Api: Metadata<ComponentBlock<C>>,
+{
+	let subscriptions = rpc::apis::Subscriptions::new(task_executor.clone());
+	let chain = rpc::apis::chain::Chain::new(client.clone(), subscriptions.clone());
+	let state = rpc::apis::state::State::new(client.clone(), subscriptions.clone());
+	let author = rpc::apis::author::Author::new(
+		client.clone(), transaction_pool.clone(), subscriptions
+	);
+	let system = rpc::apis::system::System::new(
+		rpc_system_info.clone(), network.clone(), should_have_peers
+	);
+	rpc::rpc_handler::<ComponentBlock<C>, ComponentExHash<C>, _, _, _, _>(
+		state,
+		chain,
+		author,
+		system,
+	)
+}
+
 
 impl<C: Components> StartRPC<Self> for C where
 	ComponentClient<C>: ProvideRuntimeApi,
 	<ComponentClient<C> as ProvideRuntimeApi>::Api: Metadata<ComponentBlock<C>>,
 {
 	type ServersHandle = (Option<rpc::HttpServer>, Option<Mutex<rpc::WsServer>>);
+	//#[cfg(feature = "fuzzing")]
+	type RpcHandle = rpc::RpcHandler;
 
 	fn start_rpc(
 		client: Arc<ComponentClient<C>>,
@@ -169,21 +214,13 @@ impl<C: Components> StartRPC<Self> for C where
 		transaction_pool: Arc<TransactionPool<C::TransactionPoolApi>>,
 	) -> error::Result<Self::ServersHandle> {
 		let handler = || {
-			let client = client.clone();
-			let subscriptions = rpc::apis::Subscriptions::new(task_executor.clone());
-			let chain = rpc::apis::chain::Chain::new(client.clone(), subscriptions.clone());
-			let state = rpc::apis::state::State::new(client.clone(), subscriptions.clone());
-			let author = rpc::apis::author::Author::new(
-				client.clone(), transaction_pool.clone(), subscriptions
-			);
-			let system = rpc::apis::system::System::new(
-				rpc_system_info.clone(), network.clone(), should_have_peers
-			);
-			rpc::rpc_handler::<ComponentBlock<C>, ComponentExHash<C>, _, _, _, _>(
-				state,
-				chain,
-				author,
-				system,
+			rpc_handler::<C>(
+				&client,
+				&network,
+				should_have_peers,
+				&rpc_system_info,
+				&task_executor,
+				&transaction_pool,
 			)
 		};
 
@@ -192,6 +229,26 @@ impl<C: Components> StartRPC<Self> for C where
 			maybe_start_server(rpc_ws, |address| rpc::start_ws(address, handler()))?.map(Mutex::new),
 		))
 	}
+
+	//#[cfg(feature = "fuzzing")]
+	fn rpc_handler(
+		client: Arc<ComponentClient<C>>,
+		network: Arc<network::SyncProvider<ComponentBlock<C>>>,
+		should_have_peers: bool,
+		rpc_system_info: SystemInfo,
+		task_executor: TaskExecutor,
+		transaction_pool: Arc<TransactionPool<C::TransactionPoolApi>>,
+	) -> Self::RpcHandle {
+		rpc_handler::<C>(
+			&client,
+			&network,
+			should_have_peers,
+			&rpc_system_info,
+			&task_executor,
+			&transaction_pool,
+		)
+	}
+
 }
 
 /// Something that can maintain transaction pool on every imported block.
@@ -277,6 +334,9 @@ pub trait ServiceFactory: 'static + Sized {
 	type FullService: ServiceTrait<FullComponents<Self>>;
 	/// Extended light service type.
 	type LightService: ServiceTrait<LightComponents<Self>>;
+  //#[cfg(feature = "fuzzing")]
+  /// Fuzzing handle
+	type FuzzHandler;
 	/// ImportQueue for full client
 	type FullImportQueue: consensus_common::import_queue::ImportQueue<Self::Block> + 'static;
 	/// ImportQueue for light clients
@@ -294,6 +354,11 @@ pub trait ServiceFactory: 'static + Sized {
 	fn build_network_protocol(config: &FactoryFullConfiguration<Self>)
 		-> Result<Self::NetworkProtocol, error::Error>;
 
+	//#[cfg(feature = "fuzzing")]
+  /// Build Rpc only fuzzing.
+	fn new_fuzz(config: FactoryFullConfiguration<Self>, executor: TaskExecutor)
+		-> Result<<Self::FullService as StartRPC<FullComponents<Self>>>::RpcHandle, error::Error>;
+	
 	/// Build full service.
 	fn new_full(config: FactoryFullConfiguration<Self>, executor: TaskExecutor)
 		-> Result<Self::FullService, error::Error>;

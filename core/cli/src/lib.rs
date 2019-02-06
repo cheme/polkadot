@@ -229,6 +229,55 @@ where
 	}
 }
 
+pub fn parse_and_execute_fuzz<'a, F, CC, RP, S, RS, E, I, T>(
+	spec_factory: S,
+	version: &VersionInfo,
+	impl_name: &'static str,
+	args: I,
+	exit: E,
+	run_service: RS,
+) -> error::Result<Option<CC>>
+where
+	F: ServiceFactory,
+	S: FnOnce(&str) -> Result<Option<ChainSpec<FactoryGenesis<F>>>, String>,
+	CC: StructOpt + Clone + GetLogFilter,
+	RP: StructOpt + Clone + AugmentClap,
+	E: IntoExit,
+	RS: FnOnce(E, RP, FactoryFullConfiguration<F>) -> Result<(), String>,
+	I: IntoIterator<Item = T>,
+	T: Into<std::ffi::OsString> + Clone,
+{
+	//panic_handler::set(version.support_url);
+
+	let full_version = service::config::full_version_from_strs(
+		version.version,
+		version.commit
+	);
+
+	let matches = CoreParams::<CC, RP>::clap()
+		.name(version.executable_name)
+		.author(version.author)
+		.about(version.description)
+		.version(&(full_version + "\n")[..])
+		.setting(AppSettings::GlobalVersion)
+		.setting(AppSettings::ArgsNegateSubcommands)
+		.setting(AppSettings::SubcommandsNegateReqs)
+		.get_matches_from(args);
+	let cli_args = CoreParams::<CC, RP>::from_clap(&matches);
+
+	//init_logger(cli_args.get_log_filter().as_ref().map(|v| v.as_ref()).unwrap_or(""));
+	//fdlimit::raise_fd_limit();
+
+	match cli_args {
+		params::CoreParams::Run(params) => run_node::<F, _, _, _, _>(
+			params, spec_factory, exit, run_service, impl_name, version,
+		).map(|_| None),
+    _ => unreachable!(),
+	}
+}
+
+
+
 fn parse_node_key(key: Option<String>) -> error::Result<Option<Secret>> {
 	match key.map(|k| H256::from_str(&k)) {
 		Some(Ok(secret)) => Ok(Some(secret.into())),

@@ -1,0 +1,29 @@
+
+[package]
+name = "substrate-fuzz"
+version = "0.0.1"
+authors = []
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+node-cli = { path = ".." }
+futures = "0.1"
+afl = "0.4.3"
+honggfuzz = "0.5"
+libfuzzer-sys = { git = "https://github.com/rust-fuzz/libfuzzer-sys.git" }
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "global_rpc"
+path = "fuzz_targets/global_rpc.rs"
+
+[[bin]]
+name = "hfuzz_global_rpc"
+path = "hongfuzz_targets/global_rpc.rs"

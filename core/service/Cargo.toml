@@ -32,3 +32,8 @@ substrate-telemetry = { path = "../../core/telemetry" }
 
 [dev-dependencies]
 substrate-test-client = { path = "../test-client" }
+
+
+[features]
+fuzzing = []
+#fuzzing = ["substrate-rpc-servers/fuzzing"]

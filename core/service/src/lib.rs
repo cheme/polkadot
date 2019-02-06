@@ -89,7 +89,9 @@ pub use components::{ServiceFactory, FullBackend, FullExecutor, LightBackend,
 	FactoryFullConfiguration, RuntimeGenesis, FactoryGenesis,
 	ComponentExHash, ComponentExtrinsic, FactoryExtrinsic
 };
-use components::{StartRPC, MaintainTransactionPool};
+use components::{MaintainTransactionPool};
+// TODO get fuzz out of start rpc to keep it private 
+pub use components::{StartRPC};
 #[doc(hidden)]
 pub use network::OnDemand;
 
@@ -122,6 +124,79 @@ pub fn new_client<Factory: components::ServiceFactory>(config: &FactoryFullConfi
 }
 
 impl<Components: components::Components> Service<Components> {
+  // TODO fuzzing in a task executor is a no go - at this point it goes to author subscription
+  // TODO not the right place of implementation
+  //#[cfg(feature = "fuzzing")]
+  pub fn rpc_handle_native(
+    mut config: FactoryFullConfiguration<Components::Factory>,
+    task_executor: TaskExecutor,
+  )
+	-> Result<<Components::RPC as StartRPC<Components>>::RpcHandle, error::Error>
+	{
+		// Create client
+		let executor = NativeExecutor::new(config.default_heap_pages);
+
+		let mut keystore = Keystore::open(config.keystore_path.as_str().into())?;
+
+		// This is meant to be for testing only
+		// FIXME #1063 remove this
+		for seed in &config.keys {
+			keystore.generate_from_seed(seed)?;
+		}
+		let (client, on_demand) = Components::build_client(&config, executor)?;
+		let import_queue = Arc::new(Components::build_import_queue(&mut config, client.clone())?);
+
+		let network_protocol = <Components::Factory>::build_network_protocol(&config)?;
+		let transaction_pool = Arc::new(
+			Components::build_transaction_pool(config.transaction_pool.clone(), client.clone())?
+		);
+		let transaction_pool_adapter = Arc::new(TransactionPoolAdapter::<Components> {
+			imports_external_transactions: !(config.roles == Roles::LIGHT),
+			pool: transaction_pool.clone(),
+			client: client.clone(),
+		 });
+
+		let network_params = network::config::Params {
+			config: network::config::ProtocolConfig { roles: config.roles },
+			network_config: config.network.clone(),
+			chain: client.clone(),
+			on_demand: on_demand.as_ref().map(|d| d.clone() as _),
+			transaction_pool: transaction_pool_adapter.clone() as _,
+			specialization: network_protocol,
+		};
+
+		let protocol_id = {
+			let protocol_id_full = config.chain_spec.protocol_id().unwrap_or(DEFAULT_PROTOCOL_ID).as_bytes();
+			let mut protocol_id = network::ProtocolId::default();
+			if protocol_id_full.len() > protocol_id.len() {
+				warn!("Protocol ID truncated to {} chars", protocol_id.len());
+			}
+			let id_len = protocol_id_full.len().min(protocol_id.len());
+			&mut protocol_id[0..id_len].copy_from_slice(&protocol_id_full[0..id_len]);
+			protocol_id
+		};
+
+		let has_bootnodes = !network_params.network_config.boot_nodes.is_empty();
+		let network = network::Service::new(
+			network_params,
+			protocol_id,
+			import_queue
+		)?;
+		on_demand.map(|on_demand| on_demand.set_service_link(Arc::downgrade(&network)));
+
+		// RPC
+		let system_info = rpc::apis::system::SystemInfo {
+			chain_name: config.chain_spec.name().into(),
+			impl_name: config.impl_name.into(),
+			impl_version: config.impl_version.into(),
+			properties: config.chain_spec.properties(),
+		};
+		Ok(Components::RPC::rpc_handler(
+			client, network, has_bootnodes, system_info,
+      task_executor, transaction_pool,
+		))
+	}
+
 	/// Creates a new service.
 	pub fn new(
 		mut config: FactoryFullConfiguration<Components::Factory>,
@@ -534,6 +609,7 @@ macro_rules! construct_service_factory {
 			FullService = $full_service:ty { $( $full_service_init:tt )* },
 			AuthoritySetup = { $( $authority_setup:tt )* },
 			LightService = $light_service:ty { $( $light_service_init:tt )* },
+			$( FuzzService = $fuzz_handler:ty { $( $fuzz_service_init:tt )* }, )*
 			FullImportQueue = $full_import_queue:ty
 				{ $( $full_import_queue_init:tt )* },
 			LightImportQueue = $light_import_queue:ty
@@ -555,6 +631,7 @@ macro_rules! construct_service_factory {
 			type Configuration = $config;
 			type FullService = $full_service;
 			type LightService = $light_service;
+			type FuzzHandler = $( $fuzz_handler )*;
 			type FullImportQueue = $full_import_queue;
 			type LightImportQueue = $light_import_queue;
 
@@ -601,6 +678,16 @@ macro_rules! construct_service_factory {
 			{
 				( $( $light_service_init )* ) (config, executor)
 			}
+
+      $(
+			fn new_fuzz(
+				config: $crate::FactoryFullConfiguration<Self>,
+				executor: $crate::TaskExecutor
+			) -> $crate::Result<Self::FuzzHandler, $crate::Error>
+			{
+				( $( $fuzz_service_init )* ) (config, executor)
+			}
+      )*
 
 			fn new_full(
 				config: $crate::FactoryFullConfiguration<Self>,

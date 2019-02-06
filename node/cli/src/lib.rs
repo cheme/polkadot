@@ -105,6 +105,89 @@ pub fn run<I, T, E>(args: I, exit: E, version: cli::VersionInfo) -> error::Resul
 	).map_err(Into::into).map(|_| ())
 }
 
+//#[cfg(feature = "fuzzing")]
+pub fn init_fuzz<I, T, E>(args: I, exit: E, version: cli::VersionInfo, input: &[u8]) -> error::Result<()> where
+	I: IntoIterator<Item = T>,
+	T: Into<std::ffi::OsString> + Clone,
+	E: IntoExit,
+//	C: substrate_service::Components,
+{
+	cli::parse_and_execute_fuzz::<service::Factory, NoCustom, NoCustom, _, _, _, _, _>(
+		load_spec, &version, "substrate-node", args, exit,
+		|_exit, _custom_args, config| {
+			let runtime = Runtime::new().map_err(|e| format!("{:?}", e))?;
+			let executor = runtime.executor();
+      let rpc_handle = service::Factory::new_fuzz(config, executor).map_err(|e| format!("{:?}", e))?;
+      let mut ix = 0;
+      // TODO move those fuzzer logi in fuzzer crate
+      let size_name = if let Some(v) = input.get(ix) {
+        *v as usize // 256 length only (might be not enough)
+      } else {
+        return Ok(());
+      };
+      ix += 1;
+      let meth_name = if input.len() > ix + size_name {
+        // go for invalid utf8 char :)
+        String::from_utf8_lossy(&input[ix..ix+size_name])
+      } else { return Ok(()) };
+      ix += size_name;
+      let params = String::from_utf8_lossy(&input[ix..]); // TODO change that
+/*	    let nb_param = if let Some(v) = input.get(ix) {
+        (v & 31u8 as usize;// 31 max param is maybe not enough
+      } else {
+        return Ok(());
+      }
+      ix += 1;
+
+
+   TODO help param construct   let nb_param = if let Some(v) = input.get(ix) {
+        (v & 31u8 as usize;// TODO allow bigger param this is super biased
+      } else {
+        return Ok(());
+      }
+
+      let mut params = String::new();
+      for pix in 0..nb_param {
+        let mut is_string = false;
+	      let ty_param = if let Some(v) = input.get(ix) {
+          ix += 1;
+          match v % 16 {
+            0 => {
+              params += "true, ";
+            },
+            1 => {
+              params += "false, ";
+              continue;
+            },
+            2..8 => {
+              // int TODO helpers for correct int ? (still need)
+            },
+            _ => {
+              is_string = true;
+              params += "\"";
+            }
+            // TODO specialize 0x and hex too as it is super common
+          }
+        } else {
+        return Ok(());
+        }
+  
+      }*/
+
+	    let request = r#"{"jsonrpc": "2.0", "method": "#.to_string()
+        + &meth_name
+        +  r#"params": ["#
+        + &params
+        + r#"], "id": 1}"#;
+      // contains session for pub sub (need to build multiple queries) -> strategie after params helpers
+      let meta = Default::default();
+      //let meta = substrate_rpc::metadata::Metadata::default();
+      let _ = rpc_handle.handle_request_sync(&request, meta); // TODO those meta?? (second param)
+      Ok(())
+		}
+	).map_err(Into::into).map(|_| ())
+}
+
 fn run_until_exit<T, C, E>(
 	mut runtime: Runtime,
 	service: T,
