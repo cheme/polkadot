@@ -22,6 +22,7 @@
 use srml_support::{StorageValue, StorageMap, Parameter, decl_module, decl_event, decl_storage, ensure};
 use primitives::traits::{Member, SimpleArithmetic, Zero, StaticLookup};
 use system::ensure_signed;
+use substrate_metadata_derive::EncodeMetadata;
 
 pub trait Trait: system::Trait {
 	/// The overarching event type.
