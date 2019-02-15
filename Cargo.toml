@@ -99,3 +99,9 @@ is-it-maintained-open-issues = { repository = "paritytech/substrate" }
 [profile.release]
 # Substrate runtime requires unwinding.
 panic = "unwind"
+
+[patch.crates-io]
+trie-db = { git = "https://github.com/cheme/trie.git", branch = "no_ext_variant" }
+hash-db = { git = "https://github.com/cheme/trie.git", branch = "no_ext_variant" }
+memory-db = { git = "https://github.com/cheme/trie.git", branch = "no_ext_variant" }
+keccak-hasher = { git = "https://github.com/cheme/trie.git", branch = "no_ext_variant" }

@@ -15,7 +15,6 @@ harness = false
 codec = { package = "parity-codec", version = "3.0" }
 hash-db = { version = "0.11", default-features = false }
 trie-db = { version = "0.11", optional = true }
-trie-root = { version = "0.11", default-features = false }
 memory-db = { version = "0.11", optional = true }
 
 [dev-dependencies]
@@ -32,5 +31,4 @@ std = [
 	"hash-db/std",
 	"memory-db",
 	"trie-db",
-	"trie-root/std"
 ]

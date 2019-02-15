@@ -1309,8 +1309,6 @@ dependencies = [
  "substrate-panic-handler 0.1.0",
  "substrate-primitives 0.1.0",
  "substrate-trie 0.4.0",
- "trie-db 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "trie-root 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1367,7 +1365,6 @@ dependencies = [
  "memory-db 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-codec 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "trie-db 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "trie-root 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1583,14 +1580,6 @@ dependencies = [
  "hash-db 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "trie-root"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "hash-db 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1882,7 +1871,6 @@ dependencies = [
 "checksum tokio-uds 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)" = "99ce87382f6c1a24b513a72c048b2c8efe66cb5161c9061d00bee510f08dc168"
 "checksum toml 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)" = "758664fc71a3a69038656bee8b6be6477d2a6c315a6b81f7081f591bffa4111f"
 "checksum trie-db 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3c7319e28ca295f27359d944a682f7f65b419158bf1590c92cadc0000258d788"
-"checksum trie-root 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e3c6fef2705af3258ec46a7e22286090394a44216201a1cf7d04b78db825e543"
 "checksum twox-hash 1.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "555cd4909480122bbbf21e34faac4cb08a171f324775670447ed116726c474af"
 "checksum typenum 1.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "612d636f949607bdf9b123b4a6f6d966dedf3ff669f7f045890d3a4a73948169"
 "checksum uint 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "e7780bb27fd8a22295e0d9d53ae3be253f715a0dccb1808527f478f1c2603708"

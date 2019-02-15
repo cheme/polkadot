@@ -21,7 +21,7 @@ use super::{EMPTY_TRIE, LEAF_NODE_OFFSET, LEAF_NODE_BIG, EXTENSION_NODE_OFFSET,
 	EXTENSION_NODE_BIG, BRANCH_NODE_NO_VALUE, BRANCH_NODE_WITH_VALUE, LEAF_NODE_THRESHOLD,
 	EXTENSION_NODE_THRESHOLD, LEAF_NODE_SMALL_MAX, EXTENSION_NODE_SMALL_MAX};
 
-/// A node header.
+/// A node header. TODO refacto to fit branch extensions in (limit key size more than here)
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum NodeHeader {
 	Null,
@@ -72,7 +72,6 @@ impl Decode for NodeHeader {
 
 			BRANCH_NODE_NO_VALUE => NodeHeader::Branch(false),		// 254
 			BRANCH_NODE_WITH_VALUE => NodeHeader::Branch(true),		// 255
-			_ => unreachable!(),
 		})
 	}
 }
