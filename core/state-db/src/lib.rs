@@ -45,6 +45,9 @@ use log::trace;
 /// Database value type.
 pub type DBValue = Vec<u8>;
 
+/// Database keyspace type.
+pub type KeySpace = Vec<u8>;
+
 /// Basic set of requirements for the Block hash and node key types.
 pub trait Hash: Send + Sync + Sized + Eq + PartialEq + Clone + Default + fmt::Debug + Codec + std::hash::Hash + 'static {}
 impl<T: Send + Sync + Sized + Eq + PartialEq + Clone + Default + fmt::Debug + Codec + std::hash::Hash + 'static> Hash for T {}
@@ -63,7 +66,7 @@ pub trait HashDb {
 	type Error: fmt::Debug;
 
 	/// Get state trie node.
-	fn get(&self, key: &Self::Hash) -> Result<Option<DBValue>, Self::Error>;
+	fn get(&self, key_space: &KeySpace, key: &Self::Hash) -> Result<Option<DBValue>, Self::Error>;
 }
 
 /// Error type.
@@ -96,9 +99,11 @@ impl<E: fmt::Debug> fmt::Debug for Error<E> {
 #[derive(Default, Debug, Clone)]
 pub struct ChangeSet<H: Hash> {
 	/// Inserted nodes.
-	pub inserted: Vec<(H, DBValue)>,
+	pub inserted: Vec<((KeySpace, H), DBValue)>,
 	/// Deleted nodes.
-	pub deleted: Vec<H>,
+	pub deleted: Vec<(KeySpace, H)>,
+	/// Deleted keyspace.
+	pub deleted_keyspace: Vec<KeySpace>,
 }
 
 
@@ -156,6 +161,7 @@ impl Default for PruningMode {
 	}
 }
 
+// TODO see if suffix could not use a keyspace instead (only if no prefix stuff)
 fn to_meta_key<S: Codec>(suffix: &[u8], data: &S) -> Vec<u8> {
 	let mut buffer = data.encode();
 	buffer.extend(suffix);
@@ -193,6 +199,7 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 		match self.mode {
 			PruningMode::ArchiveAll => {
 				changeset.deleted.clear();
+				changeset.deleted_keyspace.clear();
 				// write changes immediately
 				Ok(CommitSet {
 					data: changeset,
@@ -213,6 +220,7 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 			PruningMode::ArchiveCanonical => {
 				let mut commit = self.non_canonical.canonicalize(hash)?;
 				commit.data.deleted.clear();
+				commit.data.deleted_keyspace.clear();
 				commit
 			},
 			PruningMode::Constrained(_) => {
@@ -285,11 +293,11 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 		self.pinned.remove(hash);
 	}
 
-	pub fn get<D: HashDb<Hash=Key>>(&self, key: &Key, db: &D) -> Result<Option<DBValue>, Error<D::Error>> {
+	pub fn get<D: HashDb<Hash=Key>>(&self, key: &(KeySpace, Key), db: &D) -> Result<Option<DBValue>, Error<D::Error>> {
 		if let Some(value) = self.non_canonical.get(key) {
 			return Ok(Some(value));
 		}
-		db.get(key).map_err(|e| Error::Db(e))
+		db.get(&key.0, &key.1).map_err(|e| Error::Db(e))
 	}
 
 	pub fn apply_pending(&mut self) {
@@ -349,7 +357,7 @@ impl<BlockHash: Hash, Key: Hash> StateDb<BlockHash, Key> {
 	}
 
 	/// Get a value from non-canonical/pruning overlay or the backing DB.
-	pub fn get<D: HashDb<Hash=Key>>(&self, key: &Key, db: &D) -> Result<Option<DBValue>, Error<D::Error>> {
+	pub fn get<D: HashDb<Hash=Key>>(&self, key: &(KeySpace, Key), db: &D) -> Result<Option<DBValue>, Error<D::Error>> {
 		self.db.read().get(key, db)
 	}
 
@@ -386,10 +394,10 @@ mod tests {
 	use std::io;
 	use primitives::H256;
 	use crate::{StateDb, PruningMode, Constraints};
-	use crate::test::{make_db, make_changeset, TestDb};
+	use crate::test::{make_db_ks0, make_changeset_ks0, TestDb};
 
 	fn make_test_db(settings: PruningMode) -> (TestDb, StateDb<H256, H256>) {
-		let mut db = make_db(&[91, 921, 922, 93, 94]);
+		let mut db = make_db_ks0(&[91, 921, 922, 93, 94]);
 		let state_db = StateDb::new(settings, &db).unwrap();
 
 		db.commit(
@@ -398,7 +406,7 @@ mod tests {
 					&H256::from_low_u64_be(1),
 					1,
 					&H256::from_low_u64_be(0),
-					make_changeset(&[1], &[91]),
+					make_changeset_ks0(&[1], &[91]),
 				)
 				.unwrap(),
 		);
@@ -408,7 +416,7 @@ mod tests {
 					&H256::from_low_u64_be(21),
 					2,
 					&H256::from_low_u64_be(1),
-					make_changeset(&[21], &[921, 1]),
+					make_changeset_ks0(&[21], &[921, 1]),
 				)
 				.unwrap(),
 		);
@@ -418,7 +426,7 @@ mod tests {
 					&H256::from_low_u64_be(22),
 					2,
 					&H256::from_low_u64_be(1),
-					make_changeset(&[22], &[922]),
+					make_changeset_ks0(&[22], &[922]),
 				)
 				.unwrap(),
 		);
@@ -428,7 +436,7 @@ mod tests {
 					&H256::from_low_u64_be(3),
 					3,
 					&H256::from_low_u64_be(21),
-					make_changeset(&[3], &[93]),
+					make_changeset_ks0(&[3], &[93]),
 				)
 				.unwrap(),
 		);
@@ -441,7 +449,7 @@ mod tests {
 					&H256::from_low_u64_be(4),
 					4,
 					&H256::from_low_u64_be(3),
-					make_changeset(&[4], &[94]),
+					make_changeset_ks0(&[4], &[94]),
 				)
 				.unwrap(),
 		);
@@ -457,14 +465,14 @@ mod tests {
 	#[test]
 	fn full_archive_keeps_everything() {
 		let (db, sdb) = make_test_db(PruningMode::ArchiveAll);
-		assert!(db.data_eq(&make_db(&[1, 21, 22, 3, 4, 91, 921, 922, 93, 94])));
+		assert!(db.data_eq(&make_db_ks0(&[1, 21, 22, 3, 4, 91, 921, 922, 93, 94])));
 		assert!(!sdb.is_pruned(&H256::from_low_u64_be(0), 0));
 	}
 
 	#[test]
 	fn canonical_archive_keeps_canonical() {
 		let (db, _) = make_test_db(PruningMode::ArchiveCanonical);
-		assert!(db.data_eq(&make_db(&[1, 21, 3, 91, 921, 922, 93, 94])));
+		assert!(db.data_eq(&make_db_ks0(&[1, 21, 3, 91, 921, 922, 93, 94])));
 	}
 
 	#[test]
@@ -473,7 +481,7 @@ mod tests {
 			max_blocks: Some(0),
 			max_mem: None,
 		}));
-		assert!(db.data_eq(&make_db(&[21, 3, 922, 94])));
+		assert!(db.data_eq(&make_db_ks0(&[21, 3, 922, 94])));
 	}
 
 	#[test]
@@ -486,7 +494,7 @@ mod tests {
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(1), 1));
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(21), 2));
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(22), 2));
-		assert!(db.data_eq(&make_db(&[21, 3, 922, 93, 94])));
+		assert!(db.data_eq(&make_db_ks0(&[21, 3, 922, 93, 94])));
 	}
 
 	#[test]
@@ -499,6 +507,6 @@ mod tests {
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(1), 1));
 		assert!(!sdb.is_pruned(&H256::from_low_u64_be(21), 2));
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(22), 2));
-		assert!(db.data_eq(&make_db(&[1, 21, 3, 921, 922, 93, 94])));
+		assert!(db.data_eq(&make_db_ks0(&[1, 21, 3, 921, 922, 93, 94])));
 	}
 }

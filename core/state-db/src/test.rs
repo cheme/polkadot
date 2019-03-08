@@ -18,19 +18,20 @@
 
 use std::collections::HashMap;
 use primitives::H256;
-use crate::{DBValue, ChangeSet, CommitSet, MetaDb, HashDb};
+use crate::{DBValue, ChangeSet, CommitSet, MetaDb, HashDb, KeySpace};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct TestDb {
-	pub data: HashMap<H256, DBValue>,
-	pub meta: HashMap<Vec<u8>, DBValue>,
+	pub data: HashMap<(KeySpace, H256), DBValue>,
+	pub meta: HashMap<(KeySpace, Vec<u8>), DBValue>,
 }
 
 impl MetaDb for TestDb {
 	type Error = ();
 
 	fn get_meta(&self, key: &[u8]) -> Result<Option<DBValue>, ()> {
-		Ok(self.meta.get(key).cloned())
+    // terrible access (for test only)
+		Ok(self.meta.get(&(Vec::new(), key.to_vec())).cloned())
 	}
 }
 
@@ -38,8 +39,8 @@ impl HashDb for TestDb {
 	type Error = ();
 	type Hash = H256;
 
-	fn get(&self, key: &H256) -> Result<Option<DBValue>, ()> {
-		Ok(self.data.get(key).cloned())
+	fn get(&self, key_space: &KeySpace, key: &H256) -> Result<Option<DBValue>, ()> {
+		Ok(self.data.get(&(key_space.clone(), *key)).cloned())
 	}
 }
 
@@ -61,34 +62,61 @@ impl TestDb {
 	}
 }
 
-pub fn make_changeset(inserted: &[u64], deleted: &[u64]) -> ChangeSet<H256> {
+pub fn make_changeset(inserted: &[(u64,u64)], deleted: &[(u64,u64)], deleted_ks: &[u64]) -> ChangeSet<H256> {
 	ChangeSet {
 		inserted: inserted
 			.iter()
-			.map(|v| {
-				(H256::from_low_u64_be(*v), H256::from_low_u64_be(*v).as_bytes().to_vec())
+			.map(|(ks, v)| {
+				((ks.to_be_bytes().to_vec(), H256::from_low_u64_be(*v)),
+        H256::from_low_u64_be(*v).as_bytes().to_vec())
 			})
 			.collect(),
-		deleted: deleted.iter().map(|v| H256::from_low_u64_be(*v)).collect(),
+		deleted: deleted.iter().map(|v| (v.0.to_be_bytes().to_vec(), H256::from_low_u64_be(v.1))).collect(),
+		deleted_keyspace: deleted_ks.iter().map(|v| v.to_be_bytes().to_vec()).collect(),
 	}
 }
 
-pub fn make_commit(inserted: &[u64], deleted: &[u64]) -> CommitSet<H256> {
+pub fn make_commit(inserted: &[(u64,u64)], deleted: &[(u64,u64)], deleted_ks: &[u64]) -> CommitSet<H256> {
 	CommitSet {
-		data: make_changeset(inserted, deleted),
+		data: make_changeset(inserted, deleted, deleted_ks),
 		meta: ChangeSet::default(),
 	}
 }
 
-pub fn make_db(inserted: &[u64]) -> TestDb {
+pub fn make_changeset_ks0(inserted: &[u64], deleted: &[u64]) -> ChangeSet<H256> {
+  let inserted_0: Vec<(u64,u64)> = inserted.iter().map(|i|(0u64,*i)).collect();
+  let deleted_0: Vec<(u64,u64)> = deleted.iter().map(|i|(0u64,*i)).collect();
+  make_changeset(&inserted_0[..], &deleted_0[..], &[])
+}
+
+pub fn make_commit_ks0(inserted: &[u64], deleted: &[u64]) -> CommitSet<H256> {
+  let inserted_0: Vec<(u64,u64)> = inserted.iter().map(|i|(0u64,*i)).collect();
+  let deleted_0: Vec<(u64,u64)> = deleted.iter().map(|i|(0u64,*i)).collect();
+  make_commit(&inserted_0[..], &deleted_0[..], &[])
+}
+
+
+pub fn make_db(inserted: &[(u64,u64)]) -> TestDb {
 	TestDb {
 		data: inserted
 			.iter()
-			.map(|v| {
-				(H256::from_low_u64_be(*v), H256::from_low_u64_be(*v).as_bytes().to_vec())
+			.map(|(ks,v)| {
+				((ks.to_be_bytes().to_vec(), H256::from_low_u64_be(*v)),
+        H256::from_low_u64_be(*v).as_bytes().to_vec())
 			})
 			.collect(),
 		meta: Default::default(),
 	}
 }
-
+pub fn make_db_ks0(inserted: &[u64]) -> TestDb {
+	TestDb {
+		data: inserted
+			.iter()
+			.map(|v| {
+				((0u64.to_be_bytes().to_vec(), H256::from_low_u64_be(*v)),
+        H256::from_low_u64_be(*v).as_bytes().to_vec())
+			})
+			.collect(),
+		meta: Default::default(),
+	}
+}
