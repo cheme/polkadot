@@ -96,6 +96,7 @@ impl<E: fmt::Debug> fmt::Debug for Error<E> {
 }
 
 /// A set of state node changes.
+/// Deletion is applyied first.
 #[derive(Default, Debug, Clone)]
 pub struct ChangeSet<H: Hash> {
 	/// Inserted nodes.
@@ -103,7 +104,7 @@ pub struct ChangeSet<H: Hash> {
 	/// Deleted nodes.
 	pub deleted: Vec<(KeySpace, H)>,
 	/// Deleted keyspace.
-	pub deleted_keyspace: Vec<KeySpace>,
+	pub deleted_keyspace: Vec<(KeySpace, Vec<H>)>,
 }
 
 
@@ -162,6 +163,7 @@ impl Default for PruningMode {
 }
 
 // TODO see if suffix could not use a keyspace instead (only if no prefix stuff)
+// aka does using keyspace intead make sense
 fn to_meta_key<S: Codec>(suffix: &[u8], data: &S) -> Vec<u8> {
 	let mut buffer = data.encode();
 	buffer.extend(suffix);
@@ -294,7 +296,7 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 	}
 
 	pub fn get<D: HashDb<Hash=Key>>(&self, key: &(KeySpace, Key), db: &D) -> Result<Option<DBValue>, Error<D::Error>> {
-		if let Some(value) = self.non_canonical.get(key) {
+		if let Some(value) = self.non_canonical.get(&key.1) {
 			return Ok(Some(value));
 		}
 		db.get(&key.0, &key.1).map_err(|e| Error::Db(e))
@@ -400,6 +402,8 @@ mod tests {
 		let mut db = make_db_ks0(&[91, 921, 922, 93, 94]);
 		let state_db = StateDb::new(settings, &db).unwrap();
 
+    // TODO put ks 1 values in block 1 (make_change_set), then drop ks 0 in 22 and drop ks 1 in 3
+    // (can add/drop 1 in 22 and drop ks 1 in 3 instead) 
 		db.commit(
 			&state_db
 				.insert_block::<io::Error>(

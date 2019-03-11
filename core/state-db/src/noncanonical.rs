@@ -19,9 +19,11 @@
 //! The overlays are added in `insert` and removed in `canonicalize`.
 //! All pending changes are kept in memory until next call to `apply_pending` or
 //! `revert_pending`
+//! The current implementation should only be use for content with key being
+//! their hash value as in storage trie.
 
 use std::fmt;
-use std::collections::{HashMap, VecDeque, hash_map::Entry};
+use std::collections::{HashMap, VecDeque, hash_map::Entry, HashSet};
 use super::{Error, DBValue, ChangeSet, CommitSet, MetaDb, Hash, to_meta_key, KeySpace};
 use crate::codec::{Encode, Decode};
 use log::trace;
@@ -36,16 +38,19 @@ pub struct NonCanonicalOverlay<BlockHash: Hash, Key: Hash> {
 	parents: HashMap<BlockHash, BlockHash>,
 	pending_canonicalizations: Vec<BlockHash>,
 	pending_insertions: Vec<BlockHash>,
-	values: HashMap<(KeySpace, Key), (u32, DBValue)>, //ref counted
+	/// This value cache depends on key being calculated from value
+	values: HashMap<Key, (u32, DBValue)>, //ref counted
 }
 
+// TODO this is stored in meta and is therefore a breaking change (breaks chain as it is or
+// migration required)
 #[derive(Encode, Decode)]
 struct JournalRecord<BlockHash: Hash, Key: Hash> {
 	hash: BlockHash,
 	parent_hash: BlockHash,
 	inserted: Vec<((KeySpace, Key), DBValue)>,
 	deleted: Vec<(KeySpace, Key)>,
-	deleted_keyspace: Vec<KeySpace>,
+	deleted_keyspace: Vec<(KeySpace, Vec<Key>)>,
 }
 
 fn to_journal_key(block: u64, index: u64) -> Vec<u8> {
@@ -58,20 +63,20 @@ struct BlockOverlay<BlockHash: Hash, Key: Hash> {
 	journal_key: Vec<u8>,
 	inserted: Vec<(KeySpace, Key)>,
 	deleted: Vec<(KeySpace, Key)>,
-	deleted_keyspace: Vec<KeySpace>,
+	deleted_keyspace: Vec<(KeySpace, Vec<Key>)>,
 }
 
-fn insert_values<Key: Hash>(values: &mut HashMap<(KeySpace, Key), (u32, DBValue)>, inserted: Vec<((KeySpace, Key), DBValue)>) {
+fn insert_values<Key: Hash>(values: &mut HashMap<Key, (u32, DBValue)>, inserted: Vec<((KeySpace, Key), DBValue)>) {
 	for (k, v) in inserted {
-		debug_assert!(values.get(&k).map_or(true, |(_, value)| *value == v));
-		let (ref mut counter, _) = values.entry(k).or_insert_with(|| (0, v));
+		debug_assert!(values.get(&k.1).map_or(true, |(_, value)| *value == v));
+		let (ref mut counter, _) = values.entry(k.1).or_insert_with(|| (0, v));
 		*counter += 1;
 	}
 }
 
-fn discard_values<Key: Hash>(values: &mut HashMap<(KeySpace, Key), (u32, DBValue)>, inserted: Vec<(KeySpace, Key)>) {
+fn discard_values<Key: Hash>(values: &mut HashMap<Key, (u32, DBValue)>, inserted: Vec<(KeySpace, Key)>) {
 	for k in inserted {
-		match values.entry(k) {
+		match values.entry(k.1) {
 			Entry::Occupied(mut e) => {
 				let (ref mut counter, _) = e.get_mut();
 				*counter -= 1;
@@ -88,7 +93,7 @@ fn discard_values<Key: Hash>(values: &mut HashMap<(KeySpace, Key), (u32, DBValue
 
 fn discard_descendants<BlockHash: Hash, Key: Hash>(
 	levels: &mut VecDeque<Vec<BlockOverlay<BlockHash, Key>>>,
-	mut values: &mut HashMap<(KeySpace, Key), (u32, DBValue)>,
+	mut values: &mut HashMap<Key, (u32, DBValue)>,
 	index: usize,
 	parents: &mut HashMap<BlockHash, BlockHash>,
 	hash: &BlockHash,
@@ -178,7 +183,7 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 		})
 	}
 
-	/// Insert a new block into the overlay. If inserted on the second level or lover expects parent to be present in the window.
+	/// Insert a new block into the overlay. If inserted on the second level or lower expects parent to be present in the window.
 	pub fn insert<E: fmt::Debug>(&mut self, hash: &BlockHash, number: u64, parent_hash: &BlockHash, changeset: ChangeSet<Key>) -> Result<CommitSet<Key>, Error<E>> {
 		let mut commit = CommitSet::default();
 		let front_block_number = self.front_block_number();
@@ -241,8 +246,6 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 			journal_record.deleted.len(),
 			journal_record.deleted_keyspace.len());
 		insert_values(&mut self.values, journal_record.inserted);
-    // TODO should we remove deleted and deleted_keyspace to ? It seems the overlay only support
-    // value insertion : order of deletion insertion is another open question
 		self.pending_insertions.push(hash.clone());
 		Ok(commit)
 	}
@@ -299,7 +302,7 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 			if i == index {
 				// that's the one we need to canonicalize
 				commit.data.inserted = overlay.inserted.iter()
-					.map(|k| (k.clone(), self.values.get(k).expect("For each key in verlays there's a value in values").1.clone()))
+					.map(|k| (k.clone(), self.values.get(&k.1).expect("For each key in overlays there's a value in values").1.clone()))
 					.collect();
 				commit.data.deleted = overlay.deleted.clone();
 				commit.data.deleted_keyspace = overlay.deleted_keyspace.clone();
@@ -322,6 +325,7 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 		for hash in self.pending_canonicalizations.drain(..) {
 			trace!(target: "state-db", "Post canonicalizing {:?}", hash);
 			let level = self.levels.pop_front().expect("Hash validity is checked in `canonicalize`");
+			// TODO move index test in next loop
 			let index = level
 				.iter()
 				.position(|overlay| overlay.hash == hash)
@@ -343,7 +347,11 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 	}
 
 	/// Get a value from the node overlay. This searches in every existing changeset.
-	pub fn get(&self, key: &(KeySpace, Key)) -> Option<DBValue> {
+	/// This produces false positive (do not account for removal and go into every branch 
+  /// and do not use keyspace).
+  /// But is use for storage access of trie where every content is addressed by hash,
+  /// so it is acceptable and more optimal.
+	pub fn get(&self, key: &Key) -> Option<DBValue> {
 		if let Some((_, value)) = self.values.get(key) {
 			return Some(value.clone());
 		}
@@ -409,8 +417,8 @@ mod tests {
 	use crate::ChangeSet;
 	use crate::test::{make_db_ks0, make_changeset_ks0};
 
-	fn contains_ks0(overlay: &NonCanonicalOverlay<H256, H256>, key: u64) -> bool {
-		overlay.get(&(0u64.to_be_bytes().to_vec(), H256::from_low_u64_be(key))) == Some(H256::from_low_u64_be(key).as_bytes().to_vec())
+	fn contains(overlay: &NonCanonicalOverlay<H256, H256>, key: u64) -> bool {
+		overlay.get(&H256::from_low_u64_be(key)) == Some(H256::from_low_u64_be(key).as_bytes().to_vec())
 	}
 
 	#[test]
@@ -538,21 +546,21 @@ mod tests {
 		let changeset1 = make_changeset_ks0(&[5, 6], &[2]);
 		let changeset2 = make_changeset_ks0(&[7, 8], &[5, 3]);
 		db.commit(&overlay.insert::<io::Error>(&h1, 1, &H256::default(), changeset1).unwrap());
-		assert!(contains_ks0(&overlay, 5));
+		assert!(contains(&overlay, 5));
 		db.commit(&overlay.insert::<io::Error>(&h2, 2, &h1, changeset2).unwrap());
-		assert!(contains_ks0(&overlay, 7));
-		assert!(contains_ks0(&overlay, 5));
+		assert!(contains(&overlay, 7));
+		assert!(contains(&overlay, 5));
 		assert_eq!(overlay.levels.len(), 2);
 		assert_eq!(overlay.parents.len(), 2);
 		db.commit(&overlay.canonicalize::<io::Error>(&h1).unwrap());
-		assert!(contains_ks0(&overlay, 5));
+		assert!(contains(&overlay, 5));
 		assert_eq!(overlay.levels.len(), 2);
 		assert_eq!(overlay.parents.len(), 2);
 		overlay.apply_pending();
 		assert_eq!(overlay.levels.len(), 1);
 		assert_eq!(overlay.parents.len(), 1);
-		assert!(!contains_ks0(&overlay, 5));
-		assert!(contains_ks0(&overlay, 7));
+		assert!(!contains(&overlay, 5));
+		assert!(contains(&overlay, 7));
 		db.commit(&overlay.canonicalize::<io::Error>(&h2).unwrap());
 		overlay.apply_pending();
 		assert_eq!(overlay.levels.len(), 0);
@@ -569,11 +577,11 @@ mod tests {
 		let mut overlay = NonCanonicalOverlay::<H256, H256>::new(&db).unwrap();
 		db.commit(&overlay.insert::<io::Error>(&h_1, 1, &H256::default(), c_1).unwrap());
 		db.commit(&overlay.insert::<io::Error>(&h_2, 1, &H256::default(), c_2).unwrap());
-		assert!(contains_ks0(&overlay, 1));
+		assert!(contains(&overlay, 1));
 		db.commit(&overlay.canonicalize::<io::Error>(&h_1).unwrap());
-		assert!(contains_ks0(&overlay, 1));
+		assert!(contains(&overlay, 1));
 		overlay.apply_pending();
-		assert!(!contains_ks0(&overlay, 1));
+		assert!(!contains(&overlay, 1));
 	}
 
 	#[test]
@@ -640,12 +648,12 @@ mod tests {
 		db.commit(&overlay.insert::<io::Error>(&h_1_2_3, 3, &h_1_2, c_1_2_3).unwrap());
 		db.commit(&overlay.insert::<io::Error>(&h_2_1_1, 3, &h_2_1, c_2_1_1).unwrap());
 
-		assert!(contains_ks0(&overlay, 2));
-		assert!(contains_ks0(&overlay, 11));
-		assert!(contains_ks0(&overlay, 21));
-		assert!(contains_ks0(&overlay, 111));
-		assert!(contains_ks0(&overlay, 122));
-		assert!(contains_ks0(&overlay, 211));
+		assert!(contains(&overlay, 2));
+		assert!(contains(&overlay, 11));
+		assert!(contains(&overlay, 21));
+		assert!(contains(&overlay, 111));
+		assert!(contains(&overlay, 122));
+		assert!(contains(&overlay, 211));
 		assert_eq!(overlay.levels.len(), 3);
 		assert_eq!(overlay.parents.len(), 11);
 		assert_eq!(overlay.last_canonicalized, Some((H256::default(), 0)));
@@ -661,13 +669,13 @@ mod tests {
 		overlay.apply_pending();
 		assert_eq!(overlay.levels.len(), 2);
 		assert_eq!(overlay.parents.len(), 6);
-		assert!(!contains_ks0(&overlay, 1));
-		assert!(!contains_ks0(&overlay, 2));
-		assert!(!contains_ks0(&overlay, 21));
-		assert!(!contains_ks0(&overlay, 22));
-		assert!(!contains_ks0(&overlay, 211));
-		assert!(contains_ks0(&overlay, 111));
-		assert!(!contains_ks0(&overlay, 211));
+		assert!(!contains(&overlay, 1));
+		assert!(!contains(&overlay, 2));
+		assert!(!contains(&overlay, 21));
+		assert!(!contains(&overlay, 22));
+		assert!(!contains(&overlay, 211));
+		assert!(contains(&overlay, 111));
+		assert!(!contains(&overlay, 211));
 		// check that journals are deleted
 		assert!(db.get_meta(&to_journal_key(1, 0)).unwrap().is_none());
 		assert!(db.get_meta(&to_journal_key(1, 1)).unwrap().is_none());
@@ -680,11 +688,11 @@ mod tests {
 		overlay.apply_pending();
 		assert_eq!(overlay.levels.len(), 1);
 		assert_eq!(overlay.parents.len(), 3);
-		assert!(!contains_ks0(&overlay, 11));
-		assert!(!contains_ks0(&overlay, 111));
-		assert!(contains_ks0(&overlay, 121));
-		assert!(contains_ks0(&overlay, 122));
-		assert!(contains_ks0(&overlay, 123));
+		assert!(!contains(&overlay, 11));
+		assert!(!contains(&overlay, 111));
+		assert!(contains(&overlay, 121));
+		assert!(contains(&overlay, 122));
+		assert!(contains(&overlay, 123));
 		assert!(overlay.have_block(&h_1_2_1));
 		assert!(!overlay.have_block(&h_1_2));
 		assert!(!overlay.have_block(&h_1_1));
@@ -710,11 +718,11 @@ mod tests {
 		let changeset2 = make_changeset_ks0(&[7, 8], &[5, 3]);
 		db.commit(&overlay.insert::<io::Error>(&h1, 1, &H256::default(), changeset1).unwrap());
 		db.commit(&overlay.insert::<io::Error>(&h2, 2, &h1, changeset2).unwrap());
-		assert!(contains_ks0(&overlay, 7));
+		assert!(contains(&overlay, 7));
 		db.commit(&overlay.revert_one().unwrap());
 		assert_eq!(overlay.parents.len(), 1);
-		assert!(contains_ks0(&overlay, 5));
-		assert!(!contains_ks0(&overlay, 7));
+		assert!(contains(&overlay, 5));
+		assert!(!contains(&overlay, 7));
 		db.commit(&overlay.revert_one().unwrap());
 		assert_eq!(overlay.levels.len(), 0);
 		assert_eq!(overlay.parents.len(), 0);
@@ -732,16 +740,16 @@ mod tests {
 		let changeset2 = make_changeset_ks0(&[7, 8], &[5, 3]);
 		let changeset3 = make_changeset_ks0(&[9], &[]);
 		overlay.insert::<io::Error>(&h1, 1, &H256::default(), changeset1).unwrap();
-		assert!(contains_ks0(&overlay, 5));
+		assert!(contains(&overlay, 5));
 		overlay.insert::<io::Error>(&h2_1, 2, &h1, changeset2).unwrap();
 		overlay.insert::<io::Error>(&h2_2, 2, &h1, changeset3).unwrap();
-		assert!(contains_ks0(&overlay, 7));
-		assert!(contains_ks0(&overlay, 5));
-		assert!(contains_ks0(&overlay, 9));
+		assert!(contains(&overlay, 7));
+		assert!(contains(&overlay, 5));
+		assert!(contains(&overlay, 9));
 		assert_eq!(overlay.levels.len(), 2);
 		assert_eq!(overlay.parents.len(), 3);
 		overlay.revert_pending();
-		assert!(!contains_ks0(&overlay, 5));
+		assert!(!contains(&overlay, 5));
 		assert_eq!(overlay.levels.len(), 0);
 		assert_eq!(overlay.parents.len(), 0);
 	}

@@ -46,15 +46,17 @@ struct DeathRow<BlockHash: Hash, Key: Hash> {
 	hash: BlockHash,
 	journal_key: Vec<u8>,
 	deleted: HashSet<(KeySpace, Key)>,
-	deleted_keyspace: HashSet<KeySpace>,
+  /// value in map are keys that should not be deleted from KeySpace
+	deleted_keyspace: HashMap<KeySpace, HashSet<Key>>,
 }
 
+// TODO this is stored as meta: this is therefore a breaking change!!
 #[derive(Encode, Decode)]
 struct JournalRecord<BlockHash: Hash, Key: Hash> {
 	hash: BlockHash,
 	inserted: Vec<(KeySpace, Key)>,
 	deleted: Vec<(KeySpace, Key)>,
-	deleted_keyspace: Vec<KeySpace>,
+	deleted_keyspace: Vec<(KeySpace, Vec<Key>)>,
 }
 
 fn to_journal_key(block: u64) -> Vec<u8> {
@@ -105,12 +107,16 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 		journal_key: Vec<u8>,
 		inserted: I,
 		deleted: Vec<(KeySpace, Key)>,
-		deleted_keyspace: Vec<KeySpace>,
+		deleted_keyspace: Vec<(KeySpace, Vec<Key>)>,
 	) {
 		// remove all re-inserted keys from death rows
 		for k in inserted {
 			if let Some(block) = self.death_index.remove(&k) {
 				self.death_rows[(block - self.pending_number) as usize].deleted.remove(&k);
+			}
+			if let Some(block) = self.death_index_keyspace.remove(&k.0) {
+				self.death_rows[(block - self.pending_number) as usize].deleted_keyspace.entry(k.0)
+          .or_insert_with(|| HashSet::new()).insert(k.1);
 			}
 		}
 
@@ -120,14 +126,14 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			self.death_index.insert(k.clone(), imported_block);
 		}
 		for k in deleted_keyspace.iter() {
-			self.death_index_keyspace.insert(k.clone(), imported_block);
+			self.death_index_keyspace.insert(k.0.clone(), imported_block);
 		}
 
 		self.death_rows.push_back(
 			DeathRow {
 				hash: hash.clone(),
 				deleted: deleted.into_iter().collect(),
-				deleted_keyspace: deleted_keyspace.into_iter().collect(),
+				deleted_keyspace: deleted_keyspace.into_iter().map(|(k,v)|(k,v.into_iter().collect())).collect(),
 				journal_key: journal_key,
 			}
 		);
@@ -161,7 +167,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			trace!(target: "state-db", "Pruning {:?} ({} deleted)", pruned.hash, pruned.deleted.len());
 			let index = self.pending_number + self.pending_prunings as u64;
 			commit.data.deleted.extend(pruned.deleted.iter().cloned());
-			commit.data.deleted_keyspace.extend(pruned.deleted_keyspace.iter().cloned());
+			commit.data.deleted_keyspace.extend(pruned.deleted_keyspace.iter().map(|(k, v)|(k.clone(), v.iter().cloned().collect())));
 			commit.meta.inserted.push(((Vec::new(), to_meta_key(LAST_PRUNED, &())), index.encode()));
 			commit.meta.deleted.push((Vec::new(), pruned.journal_key.clone()));
 			self.pending_prunings += 1;

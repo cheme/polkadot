@@ -16,7 +16,7 @@
 
 //! Test utils
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use primitives::H256;
 use crate::{DBValue, ChangeSet, CommitSet, MetaDb, HashDb, KeySpace};
 
@@ -48,6 +48,7 @@ impl TestDb {
 	pub fn commit(&mut self, commit: &CommitSet<H256>) {
 		self.data.extend(commit.data.inserted.iter().cloned());
 		self.meta.extend(commit.meta.inserted.iter().cloned());
+    // TODO keyspace delete
 		for k in commit.data.deleted.iter() {
 			self.data.remove(k);
 		}
@@ -72,7 +73,7 @@ pub fn make_changeset(inserted: &[(u64,u64)], deleted: &[(u64,u64)], deleted_ks:
 			})
 			.collect(),
 		deleted: deleted.iter().map(|v| (v.0.to_be_bytes().to_vec(), H256::from_low_u64_be(v.1))).collect(),
-		deleted_keyspace: deleted_ks.iter().map(|v| v.to_be_bytes().to_vec()).collect(),
+		deleted_keyspace: deleted_ks.iter().map(|v| (v.to_be_bytes().to_vec(), Vec::new())).collect(),
 	}
 }
 
