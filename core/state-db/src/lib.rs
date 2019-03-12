@@ -396,21 +396,19 @@ mod tests {
 	use std::io;
 	use primitives::H256;
 	use crate::{StateDb, PruningMode, Constraints};
-	use crate::test::{make_db_ks0, make_changeset_ks0, TestDb};
+	use crate::test::{make_db, make_db_ks0, make_changeset, make_changeset_ks0, TestDb};
 
 	fn make_test_db(settings: PruningMode) -> (TestDb, StateDb<H256, H256>) {
 		let mut db = make_db_ks0(&[91, 921, 922, 93, 94]);
 		let state_db = StateDb::new(settings, &db).unwrap();
 
-    // TODO put ks 1 values in block 1 (make_change_set), then drop ks 0 in 22 and drop ks 1 in 3
-    // (can add/drop 1 in 22 and drop ks 1 in 3 instead) 
 		db.commit(
 			&state_db
 				.insert_block::<io::Error>(
 					&H256::from_low_u64_be(1),
 					1,
 					&H256::from_low_u64_be(0),
-					make_changeset_ks0(&[1], &[91]),
+					make_changeset(&[(0,1), (1,1)], &[(0,91)], &[]),
 				)
 				.unwrap(),
 		);
@@ -420,7 +418,7 @@ mod tests {
 					&H256::from_low_u64_be(21),
 					2,
 					&H256::from_low_u64_be(1),
-					make_changeset_ks0(&[21], &[921, 1]),
+					make_changeset(&[(0,21), (1,21)], &[(0,921), (0,1)], &[]),
 				)
 				.unwrap(),
 		);
@@ -430,7 +428,7 @@ mod tests {
 					&H256::from_low_u64_be(22),
 					2,
 					&H256::from_low_u64_be(1),
-					make_changeset_ks0(&[22], &[922]),
+					make_changeset(&[(0,22), (1,22)], &[(0,922)], &[0]),
 				)
 				.unwrap(),
 		);
@@ -440,7 +438,7 @@ mod tests {
 					&H256::from_low_u64_be(3),
 					3,
 					&H256::from_low_u64_be(21),
-					make_changeset_ks0(&[3], &[93]),
+					make_changeset(&[(0,3)], &[(0,93)], &[1]),
 				)
 				.unwrap(),
 		);
@@ -469,14 +467,16 @@ mod tests {
 	#[test]
 	fn full_archive_keeps_everything() {
 		let (db, sdb) = make_test_db(PruningMode::ArchiveAll);
-		assert!(db.data_eq(&make_db_ks0(&[1, 21, 22, 3, 4, 91, 921, 922, 93, 94])));
+		assert!(db.data_eq(&make_db(&[(0,1), (0,21), (0,22), (0,3), (0,4), (0,91), (0,921), (0,922), (0,93), (0,94),
+			(1,1), (1,21), (1,22)])));
 		assert!(!sdb.is_pruned(&H256::from_low_u64_be(0), 0));
 	}
 
 	#[test]
 	fn canonical_archive_keeps_canonical() {
 		let (db, _) = make_test_db(PruningMode::ArchiveCanonical);
-		assert!(db.data_eq(&make_db_ks0(&[1, 21, 3, 91, 921, 922, 93, 94])));
+		assert!(db.data_eq(&make_db(&[(0,1), (0,21), (0,3), (0,91), (0,921), (0,922), (0,93), (0,94),
+			(1,1), (1,21)])));
 	}
 
 	#[test]
@@ -498,7 +498,8 @@ mod tests {
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(1), 1));
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(21), 2));
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(22), 2));
-		assert!(db.data_eq(&make_db_ks0(&[21, 3, 922, 93, 94])));
+		assert!(db.data_eq(&make_db(&[(0,21), (0,3), (0,922), (0,93), (0,94),
+			(1,1), (1,21)])));
 	}
 
 	#[test]
@@ -511,6 +512,7 @@ mod tests {
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(1), 1));
 		assert!(!sdb.is_pruned(&H256::from_low_u64_be(21), 2));
 		assert!(sdb.is_pruned(&H256::from_low_u64_be(22), 2));
-		assert!(db.data_eq(&make_db_ks0(&[1, 21, 3, 921, 922, 93, 94])));
+		assert!(db.data_eq(&make_db(&[(0,1), (0,21), (0,3), (0,921), (0,922), (0,93), (0,94),
+			(1,1), (1,21)])));
 	}
 }
