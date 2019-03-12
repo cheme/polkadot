@@ -379,40 +379,25 @@ struct StorageDb<Block: BlockT> {
 
 impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 	fn get(&self, key: &H256) -> Result<Option<DBValue>, String> {
-		self.state_db.get(key, self).map(|r| r.map(|v| DBValue::from_slice(&v)))
+    // TODO EMCH here switch state_machine trait (purpose of the pr anyway but do not forget
+    //setting teh keyspace call)
+    // TODO key.clone() is super bad : change state_db get proto!!
+		self.state_db.get(&(Vec::new(), key.clone()), self).map(|r| r.map(|v| DBValue::from_slice(&v)))
 			.map_err(|e| format!("Database backend error: {:?}", e))
 	}
 }
 
 // use prefixed key for keyspace TODO put keyspace support at KeyValueDB level
-// This use up to 96 first keyspace bit (seen as enough for uniqueid TODO move cursor if needed)
-// TODO this scheme is ultimately super bad and broken in case of very long non random key just
-// keep it for testing and proposal before kvdb trait update/additional.
 // TODO for default impl in kvdb run a hashing first??
-pub fn keyspace_as_prefix(ks: &state_db::KeySpace, key: &H256) -> H256 {
-	let mut dst = key.clone();
-	{
-		let last_dst: &mut [u8] = &mut *dst;
-		let lower = max(ks.len(), 12);
-		if lower == 12 {
-			last_dst[..12].copy_from_slice(&ks[..12]);
-			let higher = max(ks.len(), 32);
-			for (k, a) in dst[lower..higher].iter_mut().zip(&ks[lower..higher]) {
-				// TODO any use of xor val? (preventing some targeted collision I would say)
-				*k ^= *a;
-			}
-	
-		} else {
-			for (k, a) in dst[..lower].iter_mut().zip(&ks[..lower]) {
-				*k = *a;
-			}
-		}
-
-		}
-		for (k, a) in last_dst[12..].iter_mut().zip(&last_src[12..]) {
-			*k ^= *a
+// Note that this scheme must produce new key same as old key if ks is the empty vec
+pub fn keyspace_as_prefix(ks: &state_db::KeySpace, key: &H256, dst: &mut[u8]) {
+  assert!(dst.len() == ks.len() + 32);
+	dst[..ks.len()].copy_from_slice(&ks[..]);
+	dst[ks.len()..].copy_from_slice(&key[..]);
+	for (k, a) in dst[ks.len()..].iter_mut().zip(&key[..]) {
+		// TODO any use of xor val? (preventing some targeted collision I would say)
+		*k ^= *a;
 	}
-	dst
 }
 
 impl<Block: BlockT> state_db::HashDb for StorageDb<Block> {
@@ -420,7 +405,9 @@ impl<Block: BlockT> state_db::HashDb for StorageDb<Block> {
 	type Hash = H256;
 
 	fn get(&self, ks: &state_db::KeySpace, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.db.get(columns::STATE, key.as_bytes()).map(|r| r.map(|v| v.to_vec()))
+    let mut cat_key = vec![0;ks.len()+32];
+    keyspace_as_prefix(ks, key, &mut cat_key[..]);
+		self.db.get(columns::STATE, &cat_key[..]).map(|r| r.map(|v| v.to_vec()))
 	}
 }
 
@@ -864,11 +851,12 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			}
 
 			let mut changeset: state_db::ChangeSet<H256> = state_db::ChangeSet::default();
+      // TODO EMCH keyspaced db_updates + ks drop operation
 			for (key, (val, rc)) in operation.db_updates.drain() {
 				if rc > 0 {
-					changeset.inserted.push((key, val.to_vec()));
+					changeset.inserted.push(((Vec::new(), key), val.to_vec()));
 				} else if rc < 0 {
-					changeset.deleted.push(key);
+					changeset.deleted.push((Vec::new(), key));
 				}
 			}
 			let number_u64 = number.as_();
@@ -1014,16 +1002,22 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 fn apply_state_commit(transaction: &mut DBTransaction, commit: state_db::CommitSet<H256>) {
 	for (key, val) in commit.data.inserted.into_iter() {
-		transaction.put(columns::STATE, &key[..], &val);
+    let mut cat_key = vec![0;key.0.len()+32];
+    keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
+		transaction.put(columns::STATE, &cat_key[..], &val);
 	}
 	for key in commit.data.deleted.into_iter() {
-		transaction.delete(columns::STATE, &key[..]);
+    let mut cat_key = vec![0;key.0.len()+32];
+    keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
+		transaction.delete(columns::STATE, &cat_key[..]);
 	}
 	for (key, val) in commit.meta.inserted.into_iter() {
-		transaction.put(columns::STATE_META, &key[..], &val);
+    // warning no keyspace support with meta
+		transaction.put(columns::STATE_META, &key.1[..], &val);
 	}
 	for key in commit.meta.deleted.into_iter() {
-		transaction.delete(columns::STATE_META, &key[..]);
+    // warning no keyspace support with meta
+		transaction.delete(columns::STATE_META, &key.1[..]);
 	}
 }
 
