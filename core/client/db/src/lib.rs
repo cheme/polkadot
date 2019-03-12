@@ -388,7 +388,8 @@ impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 }
 
 // use prefixed key for keyspace TODO put keyspace support at KeyValueDB level
-// TODO for default impl in kvdb run a hashing first??
+// TODO for default impl in kvdb run a hashing first?? -> warn to keep key for no ks (some
+// test code is accessing directly the db over the memorydb key!!
 // Note that this scheme must produce new key same as old key if ks is the empty vec
 pub fn keyspace_as_prefix(ks: &state_db::KeySpace, key: &H256, dst: &mut[u8]) {
 	assert!(dst.len() == ks.len() + 32);
