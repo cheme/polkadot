@@ -347,10 +347,10 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 	}
 
 	/// Get a value from the node overlay. This searches in every existing changeset.
-	/// This produces false positive (do not account for removal and go into every branch 
-  /// and do not use keyspace).
-  /// But is use for storage access of trie where every content is addressed by hash,
-  /// so it is acceptable and more optimal.
+	/// This produces false positive (do not account for removal and go into every branch
+	/// and do not use keyspace).
+	/// But is use for storage access of trie where every content is addressed by hash,
+	/// so it is acceptable and more optimal.
 	pub fn get(&self, key: &Key) -> Option<DBValue> {
 		if let Some((_, value)) = self.values.get(key) {
 			return Some(value.clone());

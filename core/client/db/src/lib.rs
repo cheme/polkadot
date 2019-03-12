@@ -379,9 +379,9 @@ struct StorageDb<Block: BlockT> {
 
 impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 	fn get(&self, key: &H256) -> Result<Option<DBValue>, String> {
-    // TODO EMCH here switch state_machine trait (purpose of the pr anyway but do not forget
-    //setting teh keyspace call)
-    // TODO key.clone() is super bad : change state_db get proto!!
+		// TODO EMCH here switch state_machine trait (purpose of the pr anyway but do not forget
+		//setting teh keyspace call)
+		// TODO key.clone() is super bad : change state_db get proto!!
 		self.state_db.get(&(Vec::new(), key.clone()), self).map(|r| r.map(|v| DBValue::from_slice(&v)))
 			.map_err(|e| format!("Database backend error: {:?}", e))
 	}
@@ -391,10 +391,11 @@ impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 // TODO for default impl in kvdb run a hashing first??
 // Note that this scheme must produce new key same as old key if ks is the empty vec
 pub fn keyspace_as_prefix(ks: &state_db::KeySpace, key: &H256, dst: &mut[u8]) {
-  assert!(dst.len() == ks.len() + 32);
+	assert!(dst.len() == ks.len() + 32);
 	dst[..ks.len()].copy_from_slice(&ks[..]);
 	dst[ks.len()..].copy_from_slice(&key[..]);
-	for (k, a) in dst[ks.len()..].iter_mut().zip(&key[..]) {
+  let high = std::cmp::min(ks.len(), 32);
+	for (k, a) in dst[ks.len()..high].iter_mut().zip(&key[..high]) {
 		// TODO any use of xor val? (preventing some targeted collision I would say)
 		*k ^= *a;
 	}
@@ -405,8 +406,8 @@ impl<Block: BlockT> state_db::HashDb for StorageDb<Block> {
 	type Hash = H256;
 
 	fn get(&self, ks: &state_db::KeySpace, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
-    let mut cat_key = vec![0;ks.len()+32];
-    keyspace_as_prefix(ks, key, &mut cat_key[..]);
+		let mut cat_key = vec![0;ks.len()+32];
+		keyspace_as_prefix(ks, key, &mut cat_key[..]);
 		self.db.get(columns::STATE, &cat_key[..]).map(|r| r.map(|v| v.to_vec()))
 	}
 }
@@ -851,7 +852,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			}
 
 			let mut changeset: state_db::ChangeSet<H256> = state_db::ChangeSet::default();
-      // TODO EMCH keyspaced db_updates + ks drop operation
+			// TODO EMCH keyspaced db_updates + ks drop operation
 			for (key, (val, rc)) in operation.db_updates.drain() {
 				if rc > 0 {
 					changeset.inserted.push(((Vec::new(), key), val.to_vec()));
@@ -1002,21 +1003,21 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 fn apply_state_commit(transaction: &mut DBTransaction, commit: state_db::CommitSet<H256>) {
 	for (key, val) in commit.data.inserted.into_iter() {
-    let mut cat_key = vec![0;key.0.len()+32];
-    keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
+		let mut cat_key = vec![0;key.0.len()+32];
+		keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
 		transaction.put(columns::STATE, &cat_key[..], &val);
 	}
 	for key in commit.data.deleted.into_iter() {
-    let mut cat_key = vec![0;key.0.len()+32];
-    keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
+		let mut cat_key = vec![0;key.0.len()+32];
+		keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
 		transaction.delete(columns::STATE, &cat_key[..]);
 	}
 	for (key, val) in commit.meta.inserted.into_iter() {
-    // warning no keyspace support with meta
+		// warning no keyspace support with meta
 		transaction.put(columns::STATE_META, &key.1[..], &val);
 	}
 	for key in commit.meta.deleted.into_iter() {
-    // warning no keyspace support with meta
+		// warning no keyspace support with meta
 		transaction.delete(columns::STATE_META, &key.1[..]);
 	}
 }
@@ -1142,7 +1143,7 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 						|| client::error::ErrorKind::UnknownBlock(
 							format!("Error reverting to {}. Block hash not found.", best)))?;
 
-					best -= As::sa(1);  // prev block
+					best -= As::sa(1); // prev block
 					let hash = self.blockchain.hash(best)?.ok_or_else(
 						|| client::error::ErrorKind::UnknownBlock(
 							format!("Error reverting to {}. Block hash not found.", best)))?;
