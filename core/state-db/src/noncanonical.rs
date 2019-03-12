@@ -23,7 +23,7 @@
 //! their hash value as in storage trie.
 
 use std::fmt;
-use std::collections::{HashMap, VecDeque, hash_map::Entry, HashSet};
+use std::collections::{HashMap, VecDeque, hash_map::Entry};
 use super::{Error, DBValue, ChangeSet, CommitSet, MetaDb, Hash, to_meta_key, KeySpace};
 use crate::codec::{Encode, Decode};
 use log::trace;
