@@ -384,11 +384,42 @@ impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 	}
 }
 
+// use prefixed key for keyspace TODO put keyspace support at KeyValueDB level
+// This use up to 96 first keyspace bit (seen as enough for uniqueid TODO move cursor if needed)
+// TODO this scheme is ultimately super bad and broken in case of very long non random key just
+// keep it for testing and proposal before kvdb trait update/additional.
+// TODO for default impl in kvdb run a hashing first??
+pub fn keyspace_as_prefix(ks: &state_db::KeySpace, key: &H256) -> H256 {
+	let mut dst = key.clone();
+	{
+		let last_dst: &mut [u8] = &mut *dst;
+		let lower = max(ks.len(), 12);
+		if lower == 12 {
+			last_dst[..12].copy_from_slice(&ks[..12]);
+			let higher = max(ks.len(), 32);
+			for (k, a) in dst[lower..higher].iter_mut().zip(&ks[lower..higher]) {
+				// TODO any use of xor val? (preventing some targeted collision I would say)
+				*k ^= *a;
+			}
+	
+		} else {
+			for (k, a) in dst[..lower].iter_mut().zip(&ks[..lower]) {
+				*k = *a;
+			}
+		}
+
+		}
+		for (k, a) in last_dst[12..].iter_mut().zip(&last_src[12..]) {
+			*k ^= *a
+	}
+	dst
+}
+
 impl<Block: BlockT> state_db::HashDb for StorageDb<Block> {
 	type Error = io::Error;
 	type Hash = H256;
 
-	fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
+	fn get(&self, ks: &state_db::KeySpace, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.db.get(columns::STATE, key.as_bytes()).map(|r| r.map(|v| v.to_vec()))
 	}
 }
