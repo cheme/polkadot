@@ -115,6 +115,8 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 				self.death_rows[(block - self.pending_number) as usize].deleted.remove(&k);
 			}
 			if let Some(block) = self.death_index_keyspace.remove(&k.0) {
+        // this is different from death_index : it can possibly move deleted_keyspace forever
+        // (up to the no insert in keyspace)
 				self.death_rows[(block - self.pending_number) as usize].deleted_keyspace.entry(k.0)
           .or_insert_with(|| HashSet::new()).insert(k.1);
 			}
