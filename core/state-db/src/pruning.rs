@@ -35,7 +35,11 @@ const PRUNING_JOURNAL: &[u8] = b"pruning_journal";
 pub struct RefWindow<BlockHash: Hash, Key: Hash> {
 	death_rows: VecDeque<DeathRow<BlockHash, Key>>,
 	death_index: HashMap<(KeySpace, Key), u64>,
-	death_index_keyspace: HashMap<KeySpace, u64>,
+	// for individual death row we move index on reinsert, for 
+	// keyspace we maintain multiple index : this is 
+	// costy but sensible when considering keyspace deletion
+	// to be less frequent than insertion into this keyspace
+	death_index_keyspace: HashMap<KeySpace, Vec<u64>>,
 	pending_number: u64,
 	pending_records: Vec<(u64, JournalRecord<BlockHash, Key>)>,
 	pending_prunings: usize,
@@ -46,7 +50,7 @@ struct DeathRow<BlockHash: Hash, Key: Hash> {
 	hash: BlockHash,
 	journal_key: Vec<u8>,
 	deleted: HashSet<(KeySpace, Key)>,
-  /// value in map are keys that should not be deleted from KeySpace
+	/// value in map are keys that should not be deleted from KeySpace
 	deleted_keyspace: HashMap<KeySpace, HashSet<Key>>,
 }
 
@@ -114,11 +118,11 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			if let Some(block) = self.death_index.remove(&k) {
 				self.death_rows[(block - self.pending_number) as usize].deleted.remove(&k);
 			}
-			if let Some(block) = self.death_index_keyspace.remove(&k.0) {
-        // this is different from death_index : it can possibly move deleted_keyspace forever
-        // (up to the no insert in keyspace)
-				self.death_rows[(block - self.pending_number) as usize].deleted_keyspace.entry(k.0)
-          .or_insert_with(|| HashSet::new()).insert(k.1);
+			if let Some(blocks) = self.death_index_keyspace.get(&k.0) {
+				for block in blocks.iter() {
+					self.death_rows[(block - self.pending_number) as usize].deleted_keyspace.entry(k.0.clone())
+						.or_insert_with(|| HashSet::new()).insert(k.1.clone());
+				}
 			}
 		}
 
@@ -128,7 +132,8 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			self.death_index.insert(k.clone(), imported_block);
 		}
 		for k in deleted_keyspace.iter() {
-			self.death_index_keyspace.insert(k.0.clone(), imported_block);
+			self.death_index_keyspace.entry(k.0.clone())
+				.or_insert_with(|| Vec::new()).push(imported_block);
 		}
 
 		self.death_rows.push_back(
@@ -221,6 +226,21 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			trace!(target: "state-db", "Applying pruning {:?} ({} deleted)", pruned.hash, pruned.deleted.len());
 			for k in pruned.deleted.iter() {
 				self.death_index.remove(&k);
+			}
+			trace!(target: "state-db", "Applying pruning {:?} ({} keyspace deleted)", pruned.hash, pruned.deleted_keyspace.len());
+			for k in pruned.deleted_keyspace.keys() {
+				// reinsert case consider an exception so pay removal cost
+				// otherwhise iterate and delete all range would be faster
+				let reinsert = if let Some(mut v) = self.death_index_keyspace.remove(k) {
+					if v.len() > 1 {
+						// insertion of index by growing death_raws order so remove first is safe
+						// we do not use vecdeque as it is not consider the common case
+						Some(v.split_off(1))
+					} else {
+						None
+					}
+				} else { None };
+				if let Some(v) = reinsert { self.death_index_keyspace.insert(k.clone(), v); }
 			}
 			self.pending_number += 1;
 		}
