@@ -18,7 +18,7 @@
 
 use std::{error, fmt};
 use std::cmp::Ord;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use log::warn;
 use hash_db::Hasher;
@@ -26,7 +26,6 @@ use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::TrieBackendStorage;
 use trie::{TrieDBMut, TrieMut, MemoryDB, trie_root, child_trie_root, default_child_trie_root};
 use heapsize::HeapSizeOf;
-use primitives::KeySpace;
 
 /// A state backend is used to read state data and can have changes committed
 /// to it.
@@ -113,11 +112,9 @@ impl Consolidate for Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)> {
 	}
 }
 
-impl<H: Hasher> Consolidate for BTreeMap<KeySpace, MemoryDB<H>> {
+impl<H: Hasher> Consolidate for MemoryDB<H> {
 	fn consolidate(&mut self, other: Self) {
-    for (ks, db) in other.into_iter() {
-      self.entry(ks).or_insert_with(Default::default).consolidate(db);
-    }
+		MemoryDB::consolidate(self, other)
 	}
 }
 
@@ -220,7 +217,7 @@ impl super::Error for Void {}
 impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: HeapSizeOf {
 	type Error = Void;
 	type Transaction = Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>;
-	type TrieBackendStorage = BTreeMap<KeySpace, MemoryDB<H>>;
+	type TrieBackendStorage = MemoryDB<H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		Ok(self.inner.get(&None).and_then(|map| map.get(key).map(Clone::clone)))

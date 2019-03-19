@@ -25,8 +25,6 @@ use trie::{Recorder, MemoryDB, TrieError, default_child_trie_root, read_trie_val
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::{Error, ExecutionError, Backend};
-use primitives::KeySpace;
-use std::collections::BTreeMap;
 
 /// Patricia trie-based backend essence which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
@@ -118,8 +116,8 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		H::Out: Ord + HeapSizeOf,
 {
 	type Error = String;
-	type Transaction = BTreeMap<KeySpace, MemoryDB<H>>;
-	type TrieBackendStorage = BTreeMap<KeySpace, MemoryDB<H>>;
+	type Transaction = MemoryDB<H>;
+	type TrieBackendStorage = MemoryDB<H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		ProvingBackendEssence {
@@ -153,7 +151,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		self.backend.keys(prefix)
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, BTreeMap<KeySpace, MemoryDB<H>>)
+	fn storage_root<I>(&self, delta: I) -> (H::Out, MemoryDB<H>)
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		self.backend.storage_root(delta)
@@ -176,7 +174,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 pub fn create_proof_check_backend<H>(
 	root: H::Out,
 	proof: Vec<Vec<u8>>
-) -> Result<TrieBackend<BTreeMap<KeySpace, MemoryDB<H>>, H>, Box<Error>>
+) -> Result<TrieBackend<MemoryDB<H>, H>, Box<Error>>
 where
 	H: Hasher,
 	H::Out: HeapSizeOf,
@@ -212,7 +210,7 @@ mod tests {
 	use super::*;
 	use primitives::{Blake2Hasher};
 
-	fn test_proving<'a>(trie_backend: &'a TrieBackend<BTreeMap<KeySpace, MemoryDB<Blake2Hasher>>, Blake2Hasher>) -> ProvingBackend<'a, MemoryDB<Blake2Hasher>, Blake2Hasher> {
+	fn test_proving<'a>(trie_backend: &'a TrieBackend<MemoryDB<Blake2Hasher>, Blake2Hasher>) -> ProvingBackend<'a, MemoryDB<Blake2Hasher>, Blake2Hasher> {
 		ProvingBackend::new(trie_backend)
 	}
 

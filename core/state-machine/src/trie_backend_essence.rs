@@ -18,30 +18,27 @@
 //! from storage.
 
 use std::ops::Deref;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use log::{debug, warn};
 use hash_db::{self, Hasher};
 use heapsize::HeapSizeOf;
 use trie::{TrieDB, Trie, MemoryDB, DBValue, TrieError, default_child_trie_root, read_trie_value, read_child_trie_value, for_keys_in_child_trie};
 use crate::changes_trie::Storage as ChangesTrieStorage;
-use primitives::KeySpace;
 
 /// Patricia trie-based storage trait.
 pub trait Storage<H: Hasher>: Send + Sync {
 	/// Get a trie node.
-	fn get(&self, key_space: &KeySpace, key: &H::Out) -> Result<Option<DBValue>, String>;
+	fn get(&self, key: &H::Out) -> Result<Option<DBValue>, String>;
 }
 
-/// Patricia trie-based pairs storage essence. TODO EMCH currently multi-trie
+/// Patricia trie-based pairs storage essence.
 pub struct TrieBackendEssence<S: TrieBackendStorage<H>, H: Hasher> {
 	storage: S,
 	root: H::Out,
 }
 
 impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out: HeapSizeOf {
-	/// Create new trie-based backend. TODO EMCH currently it is a multi-trie backend (cannot really
-  /// keep it unitary)
+	/// Create new trie-based backend.
 	pub fn new(storage: S, root: H::Out) -> Self {
 		TrieBackendEssence {
 			storage,
@@ -279,26 +276,26 @@ impl<'a,
 /// Key-value pairs storage that is used by trie backend essence.
 pub trait TrieBackendStorage<H: Hasher>: Send + Sync {
 	/// Get the value stored at key.
-	fn get(&self, ks: &KeySpace, key: &H::Out) -> Result<Option<DBValue>, String>;
+	fn get(&self, key: &H::Out) -> Result<Option<DBValue>, String>;
 }
 
 // This implementation is used by normal storage trie clients.
 impl<H: Hasher> TrieBackendStorage<H> for Arc<Storage<H>> {
-	fn get(&self, ks: &KeySpace, key: &H::Out) -> Result<Option<DBValue>, String> {
-		Storage::<H>::get(self.deref(), ks, key)
+	fn get(&self, key: &H::Out) -> Result<Option<DBValue>, String> {
+		Storage::<H>::get(self.deref(), key)
 	}
 }
 
 // This implementation is used by test storage trie clients.
-impl<H: Hasher> TrieBackendStorage<H> for BTreeMap<KeySpace, MemoryDB<H>> {
-	fn get(&self, ks: &KeySpace, key: &H::Out) -> Result<Option<DBValue>, String> {
-		Ok(self.get(ks).map(|mdb|hash_db::PlainDB::get(mdb, key)))
+impl<H: Hasher> TrieBackendStorage<H> for MemoryDB<H> {
+	fn get(&self, key: &H::Out) -> Result<Option<DBValue>, String> {
+		Ok(hash_db::PlainDB::get(self, key))
 	}
 }
 
 // This implementation is used by changes trie clients.
 impl<'a, S, H: Hasher> TrieBackendStorage<H> for &'a S where S: ChangesTrieStorage<H> {
-	fn get(&self, ks: &KeySpace, key: &H::Out) -> Result<Option<DBValue>, String> {
-		ChangesTrieStorage::<H>::get(*self, ks, key)
+	fn get(&self, key: &H::Out) -> Result<Option<DBValue>, String> {
+		ChangesTrieStorage::<H>::get(*self, key)
 	}
 }

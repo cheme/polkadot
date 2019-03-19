@@ -22,8 +22,6 @@ use heapsize::HeapSizeOf;
 use trie::{TrieDB, TrieError, Trie, MemoryDB, delta_trie_root, default_child_trie_root, child_delta_trie_root};
 use crate::trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral};
 use crate::Backend;
-use std::collections::BTreeMap;
-use primitives::KeySpace;
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
@@ -65,7 +63,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	H::Out: Ord + HeapSizeOf,
 {
 	type Error = String;
-	type Transaction = BTreeMap<KeySpace, MemoryDB<H>>;
+	type Transaction = MemoryDB<H>;
 	type TrieBackendStorage = S;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
@@ -128,7 +126,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		collect_all().map_err(|e| debug!(target: "trie", "Error extracting trie keys: {}", e)).unwrap_or_default()
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, BTreeMap<KeySpace, MemoryDB<H>>)
+	fn storage_root<I>(&self, delta: I) -> (H::Out, MemoryDB<H>)
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		let mut write_overlay = MemoryDB::default();

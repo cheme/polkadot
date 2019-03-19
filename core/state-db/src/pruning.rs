@@ -35,8 +35,8 @@ const PRUNING_JOURNAL: &[u8] = b"pruning_journal";
 pub struct RefWindow<BlockHash: Hash, Key: Hash> {
 	death_rows: VecDeque<DeathRow<BlockHash, Key>>,
 	death_index: HashMap<(KeySpace, Key), u64>,
-	// for individual death row we move index on reinsert, for
-	// keyspace we maintain multiple index : it is
+	// for individual death row we move index on reinsert, for 
+	// keyspace we maintain multiple index : this is 
 	// costy but sensible when considering keyspace deletion
 	// to be less frequent than insertion into this keyspace
 	death_index_keyspace: HashMap<KeySpace, Vec<u64>>,

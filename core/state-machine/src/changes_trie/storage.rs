@@ -24,7 +24,6 @@ use trie::MemoryDB;
 use parking_lot::RwLock;
 use crate::changes_trie::{AnchorBlockId, RootsStorage, Storage};
 use crate::trie_backend_essence::TrieBackendStorage;
-use primitives::KeySpace;
 
 #[cfg(test)]
 use std::collections::HashSet;
@@ -129,7 +128,7 @@ impl<'a, H: Hasher, S: 'a + Storage<H>> TrieBackendAdapter<'a, H, S> {
 }
 
 impl<'a, H: Hasher, S: 'a + Storage<H>> TrieBackendStorage<H> for TrieBackendAdapter<'a, H, S> {
-	fn get(&self, ks: &KeySpace, key: &H::Out) -> Result<Option<DBValue>, String> {
-		self.storage.get(ks, key)
+	fn get(&self, key: &H::Out) -> Result<Option<DBValue>, String> {
+		self.storage.get(key)
 	}
 }
