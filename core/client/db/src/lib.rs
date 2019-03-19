@@ -373,14 +373,14 @@ where Block: BlockT<Hash=H256>,
 }
 
 struct StorageDb<Block: BlockT> {
+  // db without prefix support (need require primitive to inner trait).
 	pub db: Arc<KeyValueDB>,
+  // state db support prefix
 	pub state_db: StateDb<Block::Hash, H256>,
 }
 
 impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 	fn get(&self, key: &H256) -> Result<Option<DBValue>, String> {
-		// TODO EMCH here switch state_machine trait (purpose of the pr anyway but do not forget
-		//setting teh keyspace call)
 		// TODO key.clone() is super bad : change state_db get proto!!
 		self.state_db.get(&(Vec::new(), key.clone()), self).map(|r| r.map(|v| DBValue::from_slice(&v)))
 			.map_err(|e| format!("Database backend error: {:?}", e))

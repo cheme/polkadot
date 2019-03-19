@@ -80,7 +80,7 @@ pub fn prune<S: Storage<H>, H: Hasher, F: FnMut(H::Out)>(
 		let mut proof_recorder: Recorder<H::Out> = Default::default();
 		{
 			let mut trie = ProvingBackendEssence::<_, H> {
-				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
+				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), Vec::new(), root), // TODO keyspace support
 				proof_recorder: &mut proof_recorder,
 			};
 			trie.record_all_keys();

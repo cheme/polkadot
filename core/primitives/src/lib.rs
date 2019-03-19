@@ -181,3 +181,6 @@ impl parity_codec::Decode for NeverNativeValue {
 		None
 	}
 }
+
+/// keyspace type, isolate content.
+pub type KeySpace = Vec<u8>;
