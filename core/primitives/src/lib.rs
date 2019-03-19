@@ -81,6 +81,17 @@ pub use self::hasher::blake2::Blake2Hasher;
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize, Debug, Hash, PartialOrd, Ord))]
 pub struct Bytes(#[cfg_attr(feature = "std", serde(with="bytes"))] pub Vec<u8>);
 
+/// child trie stored info
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize, Debug, Hash, PartialOrd, Ord))]
+pub struct SubTrie {
+	#[cfg_attr(feature = "std", serde(with="bytes"))]
+	pub keyspace: KeySpace,
+	#[cfg_attr(feature = "std", serde(with="bytes"))]
+	pub root: Vec<u8>,
+}
+
+
 impl From<Vec<u8>> for Bytes {
 	fn from(s: Vec<u8>) -> Self { Bytes(s) }
 }
@@ -181,3 +192,6 @@ impl parity_codec::Decode for NeverNativeValue {
 		None
 	}
 }
+
+/// keyspace type.
+pub type KeySpace = Vec<u8>;

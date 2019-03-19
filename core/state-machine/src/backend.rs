@@ -18,7 +18,7 @@
 
 use std::{error, fmt};
 use std::cmp::Ord;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::marker::PhantomData;
 use log::warn;
 use hash_db::Hasher;
@@ -26,6 +26,7 @@ use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::TrieBackendStorage;
 use trie::{TrieDBMut, TrieMut, MemoryDB, trie_root, child_trie_root, default_child_trie_root};
 use heapsize::HeapSizeOf;
+use primitives::KeySpace;
 
 /// A state backend is used to read state data and can have changes committed
 /// to it.
@@ -109,6 +110,14 @@ impl Consolidate for () {
 impl Consolidate for Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)> {
 	fn consolidate(&mut self, mut other: Self) {
 		self.append(&mut other);
+	}
+}
+
+impl<H: Hasher> Consolidate for BTreeMap<KeySpace, MemoryDB<H>> {
+	fn consolidate(&mut self, other: Self) {
+		for (ks, db) in other.into_iter() {
+			self.entry(ks).or_insert_with(Default::default).consolidate(db);
+		}
 	}
 }
 

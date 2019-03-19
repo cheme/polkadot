@@ -41,12 +41,10 @@ use std::collections::HashSet;
 use noncanonical::NonCanonicalOverlay;
 use pruning::RefWindow;
 use log::trace;
+use primitives::KeySpace;
 
 /// Database value type.
 pub type DBValue = Vec<u8>;
-
-/// Database keyspace type.
-pub type KeySpace = Vec<u8>;
 
 /// Basic set of requirements for the Block hash and node key types.
 pub trait Hash: Send + Sync + Sized + Eq + PartialEq + Clone + Default + fmt::Debug + Codec + std::hash::Hash + 'static {}

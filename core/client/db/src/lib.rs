@@ -33,6 +33,7 @@ mod utils;
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::io;
+use std::collections::BTreeMap;
 
 use client::backend::NewBlockState;
 use client::blockchain::HeaderBackend;
@@ -42,12 +43,13 @@ use hash_db::Hasher;
 use kvdb::{KeyValueDB, DBTransaction};
 use trie::MemoryDB;
 use parking_lot::RwLock;
-use primitives::{H256, Blake2Hasher, ChangesTrieConfiguration, convert_hash};
+use primitives::{H256, Blake2Hasher, ChangesTrieConfiguration, convert_hash, KeySpace};
 use primitives::storage::well_known_keys;
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, As, NumberFor, Zero, Digest, DigestItem, AuthorityIdFor};
 use runtime_primitives::BuildStorage;
 use state_machine::backend::Backend as StateBackend;
+use state_machine::backend::Consolidate;
 use executor::RuntimeInfo;
 use state_machine::{CodeExecutor, DBValue};
 use crate::utils::{Meta, db_err, meta_keys, open_database, read_db, block_id_to_lookup_key, read_meta};
@@ -259,7 +261,7 @@ impl<Block: BlockT> client::blockchain::Backend<Block> for BlockchainDb<Block> {
 /// Database transaction
 pub struct BlockImportOperation<Block: BlockT, H: Hasher> {
 	old_state: CachingState<Blake2Hasher, DbState, Block>,
-	db_updates: MemoryDB<H>, // TODO in map of keyspaced memdb?
+	db_updates: BTreeMap<KeySpace, MemoryDB<H>>,
 	storage_updates: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	changes_trie_updates: MemoryDB<H>,
 	pending_block: Option<PendingBlock<Block>>,
@@ -310,7 +312,7 @@ where Block: BlockT<Hash=H256>,
 		// currently authorities are not cached on full nodes
 	}
 
-	fn update_db_storage(&mut self, update: MemoryDB<Blake2Hasher>) -> Result<(), client::error::Error> {
+	fn update_db_storage(&mut self, update: BTreeMap<KeySpace, MemoryDB<Blake2Hasher>>) -> Result<(), client::error::Error> {
 		self.db_updates = update;
 		Ok(())
 	}
@@ -321,7 +323,7 @@ where Block: BlockT<Hash=H256>,
 			return Err(client::error::ErrorKind::GenesisInvalid.into());
 		}
 
-		let mut transaction: MemoryDB<Blake2Hasher> = Default::default();
+		let mut transaction: BTreeMap<KeySpace, MemoryDB<Blake2Hasher>> = Default::default();
 
 		for (child_key, child_map) in children {
 			if !well_known_keys::is_child_storage_key(&child_key) {
@@ -391,11 +393,11 @@ impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 // TODO for default impl in kvdb run a hashing first?? -> warn to keep key for no ks (some
 // test code is accessing directly the db over the memorydb key!!
 // Note that this scheme must produce new key same as old key if ks is the empty vec
-pub fn keyspace_as_prefix(ks: &state_db::KeySpace, key: &H256, dst: &mut[u8]) {
+pub fn keyspace_as_prefix(ks: &KeySpace, key: &H256, dst: &mut[u8]) {
 	assert!(dst.len() == ks.len() + 32);
 	dst[..ks.len()].copy_from_slice(&ks[..]);
 	dst[ks.len()..].copy_from_slice(&key[..]);
-  let high = std::cmp::min(ks.len(), 32);
+	let high = std::cmp::min(ks.len(), 32);
 	for (k, a) in dst[ks.len()..high].iter_mut().zip(&key[..high]) {
 		// TODO any use of xor val? (preventing some targeted collision I would say)
 		*k ^= *a;
@@ -406,7 +408,7 @@ impl<Block: BlockT> state_db::HashDb for StorageDb<Block> {
 	type Error = io::Error;
 	type Hash = H256;
 
-	fn get(&self, ks: &state_db::KeySpace, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
+	fn get(&self, ks: &KeySpace, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
 		let mut cat_key = vec![0;ks.len()+32];
 		keyspace_as_prefix(ks, key, &mut cat_key[..]);
 		self.db.get(columns::STATE, &cat_key[..]).map(|r| r.map(|v| v.to_vec()))
@@ -854,11 +856,13 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 			let mut changeset: state_db::ChangeSet<H256> = state_db::ChangeSet::default();
 			// TODO EMCH keyspaced db_updates + ks drop operation
-			for (key, (val, rc)) in operation.db_updates.drain() {
-				if rc > 0 {
-					changeset.inserted.push(((Vec::new(), key), val.to_vec()));
-				} else if rc < 0 {
-					changeset.deleted.push((Vec::new(), key));
+			for (keyspace, mut db_updates) in operation.db_updates.into_iter() {
+				for (key, (val, rc)) in db_updates.drain() {
+					if rc > 0 {
+						changeset.inserted.push(((keyspace.clone(), key), val.to_vec()));
+					} else if rc < 0 {
+						changeset.deleted.push((keyspace.clone(), key));
+					}
 				}
 			}
 			let number_u64 = number.as_();
@@ -1058,7 +1062,7 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 		Ok(BlockImportOperation {
 			pending_block: None,
 			old_state,
-			db_updates: MemoryDB::default(),
+			db_updates: Default::default(),
 			storage_updates: Default::default(),
 			changes_trie_updates: MemoryDB::default(),
 			aux_ops: Vec::new(),
@@ -1437,7 +1441,8 @@ mod tests {
 
 			op.reset_storage(storage.iter().cloned().collect(), Default::default()).unwrap();
 
-			key = op.db_updates.insert(b"hello");
+			key = op.db_updates.entry(Vec::new())
+				.or_insert_with(Default::default).insert(b"hello");
 			op.set_block_data(
 				header,
 				Some(vec![]),
@@ -1471,8 +1476,10 @@ mod tests {
 			).0.into();
 			let hash = header.hash();
 
-			op.db_updates.insert(b"hello");
-			op.db_updates.remove(&key);
+			op.db_updates.entry(Vec::new())
+				.or_insert_with(Default::default).insert(b"hello");
+			op.db_updates.entry(Vec::new())
+				.or_insert_with(Default::default).remove(&key);
 			op.set_block_data(
 				header,
 				Some(vec![]),
@@ -1506,7 +1513,8 @@ mod tests {
 			).0.into();
 			let hash = header.hash();
 
-			op.db_updates.remove(&key);
+			op.db_updates.entry(Vec::new())
+				.or_insert_with(Default::default).remove(&key);
 			op.set_block_data(
 				header,
 				Some(vec![]),

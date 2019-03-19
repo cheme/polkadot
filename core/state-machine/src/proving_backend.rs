@@ -25,6 +25,8 @@ use trie::{Recorder, MemoryDB, TrieError, default_child_trie_root, read_trie_val
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::{Error, ExecutionError, Backend};
+use primitives::KeySpace;
+use std::collections::BTreeMap;
 
 /// Patricia trie-based backend essence which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
@@ -116,7 +118,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		H::Out: Ord + HeapSizeOf,
 {
 	type Error = String;
-	type Transaction = MemoryDB<H>;
+	type Transaction = BTreeMap<KeySpace, MemoryDB<H>>; // TODO simple pair ?
 	type TrieBackendStorage = MemoryDB<H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
@@ -151,7 +153,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		self.backend.keys(prefix)
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, MemoryDB<H>)
+	fn storage_root<I>(&self, delta: I) -> (H::Out, BTreeMap<KeySpace, MemoryDB<H>>)
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		self.backend.storage_root(delta)
@@ -241,10 +243,14 @@ mod tests {
 		assert_eq!(trie_backend.storage(b"key").unwrap(), proving_backend.storage(b"key").unwrap());
 		assert_eq!(trie_backend.pairs(), proving_backend.pairs());
 
-		let (trie_root, mut trie_mdb) = trie_backend.storage_root(::std::iter::empty());
-		let (proving_root, mut proving_mdb) = proving_backend.storage_root(::std::iter::empty());
+		let (trie_root, trie_mdb) = trie_backend.storage_root(::std::iter::empty());
+		let (proving_root, proving_mdb) = proving_backend.storage_root(::std::iter::empty());
 		assert_eq!(trie_root, proving_root);
-		assert_eq!(trie_mdb.drain(), proving_mdb.drain());
+		assert_eq!(trie_mdb.len(), proving_mdb.len());
+		for ((k1,mut v1), (k2,mut v2)) in trie_mdb.into_iter().zip(proving_mdb.into_iter()) {
+			assert_eq!(k1, k2);
+			assert_eq!(v1.drain(), v2.drain());
+		}
 	}
 
 	#[test]

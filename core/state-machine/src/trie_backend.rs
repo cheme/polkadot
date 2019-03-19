@@ -22,6 +22,8 @@ use heapsize::HeapSizeOf;
 use trie::{TrieDB, TrieError, Trie, MemoryDB, delta_trie_root, default_child_trie_root, child_delta_trie_root};
 use crate::trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral};
 use crate::Backend;
+use std::collections::BTreeMap;
+use primitives::{KeySpace, SubTrie};
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
@@ -63,7 +65,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	H::Out: Ord + HeapSizeOf,
 {
 	type Error = String;
-	type Transaction = MemoryDB<H>;
+	type Transaction = BTreeMap<KeySpace, MemoryDB<H>>; // TODO resolve to simple pair?
 	type TrieBackendStorage = S;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
@@ -126,11 +128,12 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		collect_all().map_err(|e| debug!(target: "trie", "Error extracting trie keys: {}", e)).unwrap_or_default()
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, MemoryDB<H>)
+	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		let mut write_overlay = MemoryDB::default();
 		let mut root = *self.essence.root();
+		let mut res = BTreeMap::new();
 
 		{
 			let mut eph = Ephemeral::new(
@@ -144,40 +147,53 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 			}
 		}
 
-		(root, write_overlay)
+		res.insert(Vec::new(), write_overlay);
+		(root, res)
 	}
 
+	// TODO probably need to return SubTrie (not only root), otherwhise generate keyspace is not
+	// needed (running in any keyspace should be the same for root calculation).
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		H::Out: Ord
 	{
+		// TODO EMCH check called with storage_root when needed + TODO see trie_root to Transaction
+		// could be a pair
 		let default_root = default_child_trie_root::<H>(storage_key);
+		let new_subtrie = || SubTrie {
+			root: default_root.clone(),
+			keyspace: unimplemented!("TODO a generate keyspace impl for here (see contract)"),
+		};
+
+		let mut res = BTreeMap::new();
 
 		let mut write_overlay = MemoryDB::default();
-		let mut root = match self.storage(storage_key) {
-			Ok(value) => value.unwrap_or(default_child_trie_root::<H>(storage_key)),
+		let mut subtrie: SubTrie = match self.storage(storage_key) {
+			Ok(value) => value.and_then(|v|parity_codec::Decode::decode(&mut std::io::Cursor::new(v)))
+				.unwrap_or_else(|| new_subtrie()), // and_then is borderline
 			Err(e) => {
 				warn!(target: "trie", "Failed to read child storage root: {}", e);
-				default_root.clone()
+				new_subtrie()
 			},
 		};
 
 		{
 			let mut eph = Ephemeral::new(
-				self.essence.backend_storage(),
+				self.essence.backend_storage(), // TODO here we should have keyspace info in backend storage or use in child_delta_trie_root method as param.
 				&mut write_overlay,
 			);
 
-			match child_delta_trie_root::<H, _, _, _, _>(storage_key, &mut eph, root.clone(), delta) {
-				Ok(ret) => root = ret,
+			match child_delta_trie_root::<H, _, _, _, _>(storage_key, &mut eph, subtrie.root.clone(), delta) {
+				Ok(ret) => subtrie.root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
 		}
 
-		let is_default = root == default_root;
+		let is_default = subtrie.root == default_root;
 
-		(root, is_default, write_overlay)
+		res.insert(subtrie.keyspace, write_overlay);
+		(subtrie.root, is_default, res)
 	}
 
 	fn try_into_trie_backend(self) -> Option<TrieBackend<Self::TrieBackendStorage, H>> {
@@ -243,13 +259,15 @@ pub mod tests {
 
 	#[test]
 	fn storage_root_transaction_is_empty() {
-		assert!(test_trie().storage_root(::std::iter::empty()).1.drain().is_empty());
+		for (_, mut m) in test_trie().storage_root(::std::iter::empty()).1.into_iter() {
+			assert!(m.drain().is_empty());
+		}
 	}
 
 	#[test]
 	fn storage_root_transaction_is_non_empty() {
 		let (new_root, mut tx) = test_trie().storage_root(vec![(b"new-key".to_vec(), Some(b"new-value".to_vec()))]);
-		assert!(!tx.drain().is_empty());
+		assert!(tx.into_iter().any(|(_, mut m)| !m.drain().is_empty()));
 		assert!(new_root != test_trie().storage_root(::std::iter::empty()).0);
 	}
 
