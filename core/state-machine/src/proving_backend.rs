@@ -21,11 +21,11 @@ use log::debug;
 use hash_db::Hasher;
 use heapsize::HeapSizeOf;
 use hash_db::HashDB;
-use trie::{Recorder, MemoryDB, TrieError, default_child_trie_root, read_trie_value_with, read_child_trie_value_with, record_all_keys};
+use trie::{Recorder, MemoryDB, TrieError, default_child_trie_root, read_trie_value_with, read_child_trie_value_with, read_child_trie_value, record_all_keys};
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::{Error, ExecutionError, Backend};
-use primitives::KeySpace;
+use primitives::{KeySpace, SubTrie};
 use std::collections::BTreeMap;
 
 /// Patricia trie-based backend essence which also tracks all touched storage trie values.
@@ -54,17 +54,25 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 	}
 
 	pub fn child_storage(&mut self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		let root = self.storage(storage_key)?.unwrap_or(default_child_trie_root::<H>(storage_key));
+    // use default value if no storage (proof does not change if incorrect keyspace).
+  	let o_subtrie: Option<SubTrie> = self.storage(storage_key)?
+			.map(std::io::Cursor::new).as_mut()
+			.and_then(parity_codec::Decode::decode);
 
-		let mut read_overlay = MemoryDB::default();
-		let eph = Ephemeral::new(
-			self.backend.backend_storage(),
-			&mut read_overlay,
-		);
+    if let Some(subtrie) = o_subtrie {
+      let mut read_overlay = MemoryDB::default();
+      let eph = Ephemeral::new(
+        self.backend.backend_storage(),
+        &mut read_overlay,
+      );
 
-		let map_e = |e| format!("Trie lookup error: {}", e);
+      let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_child_trie_value_with(storage_key, &eph, &root, key, &mut *self.proof_recorder).map_err(map_e)
+      read_child_trie_value(storage_key, &eph, &subtrie, key).map_err(map_e)
+    } else {
+      // No subtrie same as no value
+      Ok(None)
+    }
 	}
 
 	pub fn record_all_keys(&mut self) {
@@ -118,7 +126,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		H::Out: Ord + HeapSizeOf,
 {
 	type Error = String;
-	type Transaction = BTreeMap<KeySpace, MemoryDB<H>>; // TODO simple pair ?
+	type Transaction = BTreeMap<KeySpace, MemoryDB<H>>;
 	type TrieBackendStorage = MemoryDB<H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {

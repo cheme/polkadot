@@ -43,7 +43,7 @@ use hash_db::Hasher;
 use kvdb::{KeyValueDB, DBTransaction};
 use trie::MemoryDB;
 use parking_lot::RwLock;
-use primitives::{H256, Blake2Hasher, ChangesTrieConfiguration, convert_hash, KeySpace};
+use primitives::{H256, Blake2Hasher, ChangesTrieConfiguration, convert_hash, KeySpace, keyspace_as_prefix, keyspace_expected_len};
 use primitives::storage::well_known_keys;
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, As, NumberFor, Zero, Digest, DigestItem, AuthorityIdFor};
@@ -389,27 +389,12 @@ impl<Block: BlockT> state_machine::Storage<Blake2Hasher> for StorageDb<Block> {
 	}
 }
 
-// use prefixed key for keyspace TODO put keyspace support at KeyValueDB level
-// TODO for default impl in kvdb run a hashing first?? -> warn to keep key for no ks (some
-// test code is accessing directly the db over the memorydb key!!
-// Note that this scheme must produce new key same as old key if ks is the empty vec
-pub fn keyspace_as_prefix(ks: &KeySpace, key: &H256, dst: &mut[u8]) {
-	assert!(dst.len() == ks.len() + 32);
-	dst[..ks.len()].copy_from_slice(&ks[..]);
-	dst[ks.len()..].copy_from_slice(&key[..]);
-	let high = std::cmp::min(ks.len(), 32);
-	for (k, a) in dst[ks.len()..high].iter_mut().zip(&key[..high]) {
-		// TODO any use of xor val? (preventing some targeted collision I would say)
-		*k ^= *a;
-	}
-}
-
 impl<Block: BlockT> state_db::HashDb for StorageDb<Block> {
 	type Error = io::Error;
 	type Hash = H256;
 
 	fn get(&self, ks: &KeySpace, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
-		let mut cat_key = vec![0;ks.len()+32];
+		let mut cat_key = vec![0;keyspace_expected_len(ks, key)];
 		keyspace_as_prefix(ks, key, &mut cat_key[..]);
 		self.db.get(columns::STATE, &cat_key[..]).map(|r| r.map(|v| v.to_vec()))
 	}
@@ -1008,12 +993,12 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 fn apply_state_commit(transaction: &mut DBTransaction, commit: state_db::CommitSet<H256>) {
 	for (key, val) in commit.data.inserted.into_iter() {
-		let mut cat_key = vec![0;key.0.len()+32];
+		let mut cat_key = vec![0;keyspace_expected_len(&key.0, &key.1)];
 		keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
 		transaction.put(columns::STATE, &cat_key[..], &val);
 	}
 	for key in commit.data.deleted.into_iter() {
-		let mut cat_key = vec![0;key.0.len()+32];
+		let mut cat_key = vec![0;keyspace_expected_len(&key.0, &key.1)];
 		keyspace_as_prefix(&key.0, &key.1, &mut cat_key[..]);
 		transaction.delete(columns::STATE, &cat_key[..]);
 	}

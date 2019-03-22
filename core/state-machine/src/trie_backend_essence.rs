@@ -24,6 +24,7 @@ use hash_db::{self, Hasher};
 use heapsize::HeapSizeOf;
 use trie::{TrieDB, Trie, MemoryDB, DBValue, TrieError, default_child_trie_root, read_trie_value, read_child_trie_value, for_keys_in_child_trie};
 use crate::changes_trie::Storage as ChangesTrieStorage;
+use primitives::SubTrie;
 
 /// Patricia trie-based storage trait.
 pub trait Storage<H: Hasher>: Send + Sync {
@@ -76,38 +77,51 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 
 	/// Get the value of child storage at given key.
 	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		let root = self.storage(storage_key)?.unwrap_or(default_child_trie_root::<H>(storage_key));
 
-		let mut read_overlay = MemoryDB::default();
-		let eph = Ephemeral {
-			storage: &self.storage,
-			overlay: &mut read_overlay,
-		};
+		let o_subtrie: Option<SubTrie> = self.storage(storage_key)?
+			.map(std::io::Cursor::new).as_mut()
+			.and_then(parity_codec::Decode::decode);
 
-		let map_e = |e| format!("Trie lookup error: {}", e);
+    if let Some(subtrie) = o_subtrie {
+      let mut read_overlay = MemoryDB::default();
+      let eph = Ephemeral {
+        storage: &self.storage,
+        overlay: &mut read_overlay,
+      };
 
-		read_child_trie_value(storage_key, &eph, &root, key).map_err(map_e)
+      let map_e = |e| format!("Trie lookup error: {}", e);
+
+      read_child_trie_value(storage_key, &eph, &subtrie, key).map_err(map_e)
+    } else {
+      // No subtrie same as no value
+      Ok(None)
+    }
 	}
 
 	/// Retrieve all entries keys of child storage and call `f` for each of those keys.
 	pub fn for_keys_in_child_storage<F: FnMut(&[u8])>(&self, storage_key: &[u8], f: F) {
-		let root = match self.storage(storage_key) {
-			Ok(v) => v.unwrap_or(default_child_trie_root::<H>(storage_key)),
+		let oencoded = match self.storage(storage_key) {
+			Ok(v) => v,
 			Err(e) => {
 				debug!(target: "trie", "Error while iterating child storage: {}", e);
 				return;
 			}
 		};
+		let o_subtrie: Option<SubTrie> = oencoded
+			.map(std::io::Cursor::new).as_mut()
+			.and_then(parity_codec::Decode::decode);
 
-		let mut read_overlay = MemoryDB::default();
-		let eph = Ephemeral {
-			storage: &self.storage,
-			overlay: &mut read_overlay,
-		};
+    if let Some(subtrie) = o_subtrie {
+      let mut read_overlay = MemoryDB::default();
+      let eph = Ephemeral {
+        storage: &self.storage,
+        overlay: &mut read_overlay,
+      };
 
-		if let Err(e) = for_keys_in_child_trie::<H, _, Ephemeral<S, H>>(storage_key, &eph, &root, f) {
-			debug!(target: "trie", "Error while iterating child storage: {}", e);
-		}
+      if let Err(e) = for_keys_in_child_trie::<H, _, Ephemeral<S, H>>(storage_key, &eph, &subtrie, f) {
+        debug!(target: "trie", "Error while iterating child storage: {}", e);
+      }
+    }
 	}
 
 	/// Execute given closure for all keys starting with prefix.

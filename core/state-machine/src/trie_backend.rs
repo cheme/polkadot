@@ -171,12 +171,14 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		let mut write_overlay = MemoryDB::default();
 		let mut subtrie: SubTrie = match self.storage(storage_key) {
 			Ok(value) => value.and_then(|v|parity_codec::Decode::decode(&mut std::io::Cursor::new(v)))
-				.unwrap_or_else(|| new_subtrie()), // and_then is borderline
+				.unwrap_or_else(new_subtrie), // and_then is borderline
 			Err(e) => {
 				warn!(target: "trie", "Failed to read child storage root: {}", e);
 				new_subtrie()
 			},
 		};
+
+		let is_default = subtrie.root == default_root;
 
 		{
 			let mut eph = Ephemeral::new(
@@ -184,13 +186,12 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				&mut write_overlay,
 			);
 
-			match child_delta_trie_root::<H, _, _, _, _>(storage_key, &mut eph, subtrie.root.clone(), delta) {
+			match child_delta_trie_root::<H, _, _, _, _>(storage_key, &mut eph, &subtrie, delta) {
 				Ok(ret) => subtrie.root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
 		}
 
-		let is_default = subtrie.root == default_root;
 
 		res.insert(subtrie.keyspace, write_overlay);
 		(subtrie.root, is_default, res)
@@ -266,7 +267,7 @@ pub mod tests {
 
 	#[test]
 	fn storage_root_transaction_is_non_empty() {
-		let (new_root, mut tx) = test_trie().storage_root(vec![(b"new-key".to_vec(), Some(b"new-value".to_vec()))]);
+		let (new_root, tx) = test_trie().storage_root(vec![(b"new-key".to_vec(), Some(b"new-value".to_vec()))]);
 		assert!(tx.into_iter().any(|(_, mut m)| !m.drain().is_empty()));
 		assert!(new_root != test_trie().storage_root(::std::iter::empty()).0);
 	}
