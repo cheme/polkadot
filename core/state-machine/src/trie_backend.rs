@@ -72,16 +72,16 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		self.essence.storage(key)
 	}
 
-	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.essence.child_storage(storage_key, key)
+	fn child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+		self.essence.child_storage(subtrie, key)
 	}
 
 	fn for_keys_with_prefix<F: FnMut(&[u8])>(&self, prefix: &[u8], f: F) {
 		self.essence.for_keys_with_prefix(prefix, f)
 	}
 
-	fn for_keys_in_child_storage<F: FnMut(&[u8])>(&self, storage_key: &[u8], f: F) {
-		self.essence.for_keys_in_child_storage(storage_key, f)
+	fn for_keys_in_child_storage<F: FnMut(&[u8])>(&self, subtrie: &SubTrie, f: F) {
+		self.essence.for_keys_in_child_storage(subtrie, f)
 	}
 
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -153,40 +153,25 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 	// TODO probably need to return SubTrie (not only root), otherwhise generate keyspace is not
 	// needed (running in any keyspace should be the same for root calculation).
-	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
+  // TODO would want to update transaction instead of new & colliding ??
+	fn child_storage_root<I>(&self, subtrie: &SubTrie, delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		H::Out: Ord
 	{
-		// TODO EMCH check called with storage_root when needed + TODO see trie_root to Transaction
-		// could be a pair
-		let default_root = default_child_trie_root::<H>(storage_key);
-		let new_subtrie = || SubTrie {
-			root: default_root.clone(),
-			keyspace: unimplemented!("TODO a generate keyspace impl for here (see contract)"),
-		};
-
 		let mut res = BTreeMap::new();
 
 		let mut write_overlay = MemoryDB::default();
-		let mut subtrie: SubTrie = match self.storage(storage_key) {
-			Ok(value) => value.and_then(|v|parity_codec::Decode::decode(&mut std::io::Cursor::new(v)))
-				.unwrap_or_else(new_subtrie), // and_then is borderline
-			Err(e) => {
-				warn!(target: "trie", "Failed to read child storage root: {}", e);
-				new_subtrie()
-			},
-		};
-
+		let default_root = default_child_trie_root::<H>(subtrie);
 		let is_default = subtrie.root == default_root;
 
 		{
 			let mut eph = Ephemeral::new(
-				self.essence.backend_storage(), // TODO here we should have keyspace info in backend storage or use in child_delta_trie_root method as param.
+				self.essence.backend_storage(),
 				&mut write_overlay,
 			);
 
-			match child_delta_trie_root::<H, _, _, _, _>(storage_key, &mut eph, &subtrie, delta) {
+			match child_delta_trie_root::<H, _, _, _, _>(&subtrie, &mut eph, delta) {
 				Ok(ret) => subtrie.root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}

@@ -23,6 +23,7 @@ use crate::changes_trie::{AnchorBlockId, Storage as ChangesTrieStorage, compute_
 use crate::{Externalities, OverlayedChanges};
 use hash_db::Hasher;
 use primitives::storage::well_known_keys::is_child_storage_key;
+use primitives::SubTrie;
 use trie::{MemoryDB, TrieDBMut, TrieMut, default_child_trie_root, is_child_trie_key_valid};
 use heapsize::HeapSizeOf;
 
@@ -126,7 +127,7 @@ where
 	}
 
 	/// Fetch child storage root together with its transaction.
-	fn child_storage_root_transaction(&mut self, storage_key: &[u8]) -> (Vec<u8>, B::Transaction) {
+	fn child_storage_root_transaction(&mut self, storage_key: &[u8], subtrie: &SubTrie) -> (Vec<u8>, B::Transaction) {
 		self.mark_dirty();
 
 		let (root, is_default, transaction) = {
@@ -137,13 +138,13 @@ where
 						.into_iter()
 						.flat_map(|map| map.1.iter().map(|(k, v)| (k.clone(), v.clone()))));
 
-			self.backend.child_storage_root(storage_key, delta)
+			self.backend.child_storage_root(subtrie, delta)
 		};
 
 		let root_val = if is_default {
 			None
 		} else {
-			Some(root.clone())
+			Some(SubTrie {root: root.clone(), keyspace: subtrie.keyspace.clone()})
 		};
 		self.overlay.sync_child_storage_root(storage_key, root_val);
 
@@ -192,10 +193,10 @@ where
 			self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL))
 	}
 
-	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> Option<Vec<u8>> {
 		let _guard = panic_handler::AbortGuard::new(true);
-		self.overlay.child_storage(storage_key, key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
-			self.backend.child_storage(storage_key, key).expect(EXT_NOT_ALLOWED_TO_FAIL))
+		self.overlay.child_storage(subtrie, key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
+			self.backend.child_storage(subtrie, key).expect(EXT_NOT_ALLOWED_TO_FAIL))
 	}
 
 	fn exists_storage(&self, key: &[u8]) -> bool {

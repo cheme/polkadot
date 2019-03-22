@@ -53,13 +53,13 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 		read_trie_value_with::<H, _, Ephemeral<S, H>>(&eph, self.backend.root(), key, &mut *self.proof_recorder).map_err(map_e)
 	}
 
-	pub fn child_storage(&mut self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-    // use default value if no storage (proof does not change if incorrect keyspace).
+	pub fn child_storage(&mut self, subtrie: &SubTrie, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+/*    // use default value if no storage (proof does not change if incorrect keyspace).
   	let o_subtrie: Option<SubTrie> = self.storage(storage_key)?
 			.map(std::io::Cursor::new).as_mut()
 			.and_then(parity_codec::Decode::decode);
 
-    if let Some(subtrie) = o_subtrie {
+    if let Some(subtrie) = o_subtrie {*/
       let mut read_overlay = MemoryDB::default();
       let eph = Ephemeral::new(
         self.backend.backend_storage(),
@@ -68,11 +68,11 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 
       let map_e = |e| format!("Trie lookup error: {}", e);
 
-      read_child_trie_value(storage_key, &eph, &subtrie, key).map_err(map_e)
-    } else {
+      read_child_trie_value(subtrie, &eph, subtrie, key).map_err(map_e)
+/*    } else {
       // No subtrie same as no value
       Ok(None)
-    }
+    }*/
 	}
 
 	pub fn record_all_keys(&mut self) {
@@ -137,16 +137,16 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		}.storage(key)
 	}
 
-	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+	fn child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		ProvingBackendEssence {
 			backend: self.backend.essence(),
 			proof_recorder: &mut *self.proof_recorder.try_borrow_mut()
 				.expect("only fails when already borrowed; child_storage() is non-reentrant; qed"),
-		}.child_storage(storage_key, key)
+		}.child_storage(subtrie, key)
 	}
 
-	fn for_keys_in_child_storage<F: FnMut(&[u8])>(&self, storage_key: &[u8], f: F) {
-		self.backend.for_keys_in_child_storage(storage_key, f)
+	fn for_keys_in_child_storage<F: FnMut(&[u8])>(&self, subtrie: &SubTrie, f: F) {
+		self.backend.for_keys_in_child_storage(subtrie, f)
 	}
 
 	fn for_keys_with_prefix<F: FnMut(&[u8])>(&self, prefix: &[u8], f: F) {
@@ -167,12 +167,12 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		self.backend.storage_root(delta)
 	}
 
-	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
+	fn child_storage_root<I>(&self, subtrie: &SubTrie, delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		H::Out: Ord
 	{
-		self.backend.child_storage_root(storage_key, delta)
+		self.backend.child_storage_root(subtrie, delta)
 	}
 
 	fn try_into_trie_backend(self) -> Option<TrieBackend<Self::TrieBackendStorage, H>> {

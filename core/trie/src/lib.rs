@@ -136,7 +136,7 @@ pub fn is_child_trie_key_valid<H: Hasher>(_storage_key: &[u8]) -> bool {
 }
 
 /// Determine the default child trie root.
-pub fn default_child_trie_root<H: Hasher>(_storage_key: &[u8]) -> Vec<u8> {
+pub fn default_child_trie_root<H: Hasher>(_subtrie: &SubTrie) -> Vec<u8> {
 	let mut db = MemoryDB::default();
 	let mut root = H::Out::default();
 	let mut empty = TrieDBMut::<H>::new(&mut db, &mut root);
@@ -146,7 +146,7 @@ pub fn default_child_trie_root<H: Hasher>(_storage_key: &[u8]) -> Vec<u8> {
 
 /// Determine a child trie root given its ordered contents, closed form. H is the default hasher, but a generic
 /// implementation may ignore this type parameter and use other hashers.
-pub fn child_trie_root<H: Hasher, I, A, B>(_storage_key: &[u8], input: I) -> Vec<u8> where
+pub fn child_trie_root<H: Hasher, I, A, B>(_subtrie: &SubTrie, input: I) -> Vec<u8> where
 	I: IntoIterator<Item = (A, B)>,
 	A: AsRef<[u8]> + Ord,
 	B: AsRef<[u8]>,
@@ -156,9 +156,8 @@ pub fn child_trie_root<H: Hasher, I, A, B>(_storage_key: &[u8], input: I) -> Vec
 
 /// Determine a child trie root given a hash DB and delta values. H is the default hasher, but a generic implementation may ignore this type parameter and use other hashers.
 pub fn child_delta_trie_root<H: Hasher, I, A, B, DB>(
-	_storage_key: &[u8],
-	db: &mut DB,
 	subtrie: &SubTrie,
+	db: &mut DB,
 	delta: I
 ) -> Result<Vec<u8>, Box<TrieError<H::Out>>> where
 	I: IntoIterator<Item = (A, Option<B>)>,
@@ -186,9 +185,8 @@ pub fn child_delta_trie_root<H: Hasher, I, A, B, DB>(
 
 /// Call `f` for all keys in a child trie.
 pub fn for_keys_in_child_trie<H: Hasher, F: FnMut(&[u8]), DB>(
-	_storage_key: &[u8],
-	db: &DB,
 	subtrie: &SubTrie,
+	db: &DB,
 	mut f: F
 ) -> Result<(), Box<TrieError<H::Out>>> where
 	DB: hash_db::HashDBRef<H, trie_db::DBValue> + hash_db::PlainDBRef<H::Out, trie_db::DBValue>,
@@ -233,9 +231,8 @@ pub fn record_all_keys<H: Hasher, DB>(
 
 /// Read a value from the child trie.
 pub fn read_child_trie_value<H: Hasher, DB>(
-	_storage_key: &[u8],
-	db: &DB,
 	subtrie: &SubTrie,
+	db: &DB,
 	key: &[u8]
 ) -> Result<Option<Vec<u8>>, Box<TrieError<H::Out>>> where
 	DB: hash_db::HashDBRef<H, trie_db::DBValue> + hash_db::PlainDBRef<H::Out, trie_db::DBValue>,
@@ -249,9 +246,8 @@ pub fn read_child_trie_value<H: Hasher, DB>(
 
 /// Read a value from the child trie with given query.
 pub fn read_child_trie_value_with<H: Hasher, Q: Query<H, Item=DBValue>, DB>(
-	_storage_key: &[u8],
-	db: &DB,
 	subtrie: &SubTrie,
+	db: &DB,
 	key: &[u8],
 	query: Q
 ) -> Result<Option<Vec<u8>>, Box<TrieError<H::Out>>> where
@@ -366,7 +362,7 @@ impl<'a, DB, H, T> hash_db::HashDB<H, T> for KeySpacedDBMut<'a, DB>
     // TODO avoid buff for every keyspace db (using internal vec as buf)
 	  let key = H::hash(value);
     let derived_key = substrate_primitives::keyspace_as_prefix_alloc(self.1, &key);
-		Self::emplace(self, key.clone(), value.into());
+		Self::emplace(self, derived_key, value.into());
     key
   }
 

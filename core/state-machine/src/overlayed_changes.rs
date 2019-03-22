@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 use parity_codec::Decode;
 use crate::changes_trie::{NO_EXTRINSIC_INDEX, Configuration as ChangesTrieConfig};
 use primitives::storage::well_known_keys::EXTRINSIC_INDEX;
+use primitives::SubTrie;
 
 /// The overlayed changes to state to be queried on top of the backend.
 ///
@@ -115,7 +116,7 @@ impl OverlayedChanges {
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be refered
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
-	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Option<Option<&[u8]>> {
+	pub fn child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> Option<Option<&[u8]>> {
 		if let Some(map) = self.prospective.children.get(storage_key) {
 			if let Some(val) = map.1.get(key) {
 				return Some(val.as_ref().map(AsRef::as_ref));
@@ -159,10 +160,17 @@ impl OverlayedChanges {
 		}
 	}
 
+  /// get subtrie infos
+	pub(crate) fn child_trie(&mut self, storage_key: &[u8]) -> Option<SubTrie> {
+    unimplemented!()
+    // TODO unimplemented EMCH
+// TODO overlayed thingy		self.prospective.top.get(storage_key).map(parity_codec::Decode::decode) 
+  }
+
 	/// Sync the child storage root.
-	pub(crate) fn sync_child_storage_root(&mut self, storage_key: &[u8], root: Option<Vec<u8>>) {
+	pub(crate) fn sync_child_storage_root(&mut self, storage_key: &[u8], subtrie: Option<SubTrie>) {
 		let entry = self.prospective.top.entry(storage_key.to_vec()).or_default();
-		entry.value = root;
+		entry.value = subtrie.as_ref().map(parity_codec::Encode::encode);
 
 		if let Some((Some(extrinsics), _)) = self.prospective.children.get(storage_key) {
 			for extrinsic in extrinsics {
