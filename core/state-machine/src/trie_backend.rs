@@ -159,11 +159,10 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		H::Out: Ord
 	{
-		let mut res = BTreeMap::new();
+		let default_root = default_child_trie_root::<H>(subtrie);
+		let mut root = default_root.clone();
 
 		let mut write_overlay = MemoryDB::default();
-		let default_root = default_child_trie_root::<H>(subtrie);
-		let is_default = subtrie.root == default_root;
 
 		{
 			let mut eph = Ephemeral::new(
@@ -171,15 +170,17 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				&mut write_overlay,
 			);
 
-			match child_delta_trie_root::<H, _, _, _, _>(&subtrie, &mut eph, delta) {
-				Ok(ret) => subtrie.root = ret,
+			match child_delta_trie_root::<H, _, _, _, _>(subtrie, &mut eph, delta) {
+				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
 		}
 
+		let is_default = root == default_root;
 
-		res.insert(subtrie.keyspace, write_overlay);
-		(subtrie.root, is_default, res)
+    let mut tx = BTreeMap::new();
+    tx.insert(subtrie.node.keyspace.clone(), write_overlay);
+		(root, is_default, tx)
 	}
 
 	fn try_into_trie_backend(self) -> Option<TrieBackend<Self::TrieBackendStorage, H>> {

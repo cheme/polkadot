@@ -17,6 +17,7 @@
 //! Rust implementation of Substrate contracts.
 
 use std::collections::HashMap;
+use std::boxed::Box;
 use tiny_keccak;
 use secp256k1;
 
@@ -31,11 +32,12 @@ use crate::wasm_utils::UserError;
 use primitives::{blake2_256, twox_128, twox_256, ed25519, sr25519, Pair};
 use primitives::hexdisplay::HexDisplay;
 use primitives::sandbox as sandbox_primitives;
-use primitives::{H256, Blake2Hasher};
+use primitives::{H256, Blake2Hasher, SubTrie};
 use trie::ordered_trie_root;
 use crate::sandbox;
 use crate::allocator;
 use log::trace;
+use runtime_io::SubTrieHandle;
 
 #[cfg(feature="wasm-extern-trace")]
 macro_rules! debug_trace {
@@ -142,25 +144,43 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		debug_trace!(target: "sr-io", "free {}", addr);
 		Ok(())
 	},
+	ext_create_subtrie_handle(storage_key: *const u8, storage_key_len: u32, keyspace: *const u8, keyspace_len: u32) -> *mut u8 => {
+		let storage_key = this.memory.get(storage_key, storage_key_len as usize).map_err(|_| UserError("Invalid attempt to determine storage key in ext_create_subtrie_handle"))?;
+		let keyspace = this.memory.get(keyspace, keyspace_len as usize).map_err(|_| UserError("Invalid attempt to determine storage key in ext_create_subtrie_handle"))?;
+		// TODO alloc??
+		let subtrie = Box::new(SubTrie::new(keyspace, storage_key.clone()));
+		this.ext.set_child_trie(&storage_key[..], &*subtrie);
+		// TODO check failure system of sandbox to audit need of a managed memory map (could easilly
+		// ddos by creating lot of handle on failing tx EMCH : todo ask on pr!!!
+		let ptr = Box::into_raw(subtrie);
+		std::mem::forget(ptr);
+		Ok(ptr as u32)
+	}, 
+	ext_drop_subtrie_handle(subtrie: *mut u8) => {
+		// TODO this definitely need a intermediatory store if callable from contract, do we consider
+		// runtime safe (if not it needs it )
+		std::mem::drop(unsafe { Box::from_raw(subtrie as *mut u8) }); // calling drop just in case
+		Ok(())
+	},
 	ext_set_storage(key_data: *const u8, key_len: u32, value_data: *const u8, value_len: u32) => {
 		let key = this.memory.get(key_data, key_len as usize).map_err(|_| UserError("Invalid attempt to determine key in ext_set_storage"))?;
 		let value = this.memory.get(value_data, value_len as usize).map_err(|_| UserError("Invalid attempt to determine value in ext_set_storage"))?;
 		if let Some(_preimage) = this.hash_lookup.get(&key) {
-			debug_trace!(target: "wasm-trace", "*** Setting storage: %{} -> {}   [k={}]", ::primitives::hexdisplay::ascii_format(&_preimage), HexDisplay::from(&value), HexDisplay::from(&key));
+			debug_trace!(target: "wasm-trace", "*** Setting storage: %{} -> {}	 [k={}]", ::primitives::hexdisplay::ascii_format(&_preimage), HexDisplay::from(&value), HexDisplay::from(&key));
 		} else {
-			debug_trace!(target: "wasm-trace", "*** Setting storage:  {} -> {}   [k={}]", ::primitives::hexdisplay::ascii_format(&key), HexDisplay::from(&value), HexDisplay::from(&key));
+			debug_trace!(target: "wasm-trace", "*** Setting storage:	{} -> {}	 [k={}]", ::primitives::hexdisplay::ascii_format(&key), HexDisplay::from(&value), HexDisplay::from(&key));
 		}
 		this.ext.set_storage(key, value);
 		Ok(())
 	},
-	ext_set_child_storage(storage_key_data: *const u8, storage_key_len: u32, key_data: *const u8, key_len: u32, value_data: *const u8, value_len: u32) => {
-		let storage_key = this.memory.get(storage_key_data, storage_key_len as usize).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_set_child_storage"))?;
+	ext_set_child_storage(subtrie: *mut u8, key_data: *const u8, key_len: u32, value_data: *const u8, value_len: u32) => {
+		let subtrie: Box<SubTrie> = unsafe { Box::from_raw(subtrie as *mut SubTrie) };
 		let key = this.memory.get(key_data, key_len as usize).map_err(|_| UserError("Invalid attempt to determine key in ext_set_child_storage"))?;
 		let value = this.memory.get(value_data, value_len as usize).map_err(|_| UserError("Invalid attempt to determine value in ext_set_child_storage"))?;
 		if let Some(_preimage) = this.hash_lookup.get(&key) {
 			debug_trace!(
 				target: "wasm-trace", "*** Setting child storage: {} -> %{} -> {}   [k={}]",
-				::primitives::hexdisplay::ascii_format(&storage_key),
+				::primitives::hexdisplay::ascii_format(&subtrie.parent),
 				::primitives::hexdisplay::ascii_format(&_preimage),
 				HexDisplay::from(&value),
 				HexDisplay::from(&key)
@@ -168,29 +188,30 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		} else {
 			debug_trace!(
 				target: "wasm-trace", "*** Setting child storage: {} ->  {} -> {}   [k={}]",
-				::primitives::hexdisplay::ascii_format(&storage_key),
+				::primitives::hexdisplay::ascii_format(&subtrie.parent),
 				::primitives::hexdisplay::ascii_format(&key),
 				HexDisplay::from(&value),
 				HexDisplay::from(&key)
 			);
 		}
-		this.ext.set_child_storage(storage_key, key, value);
+		this.ext.set_child_storage(&subtrie, key, value);
+		let ptr = Box::into_raw(subtrie);
+		std::mem::forget(ptr);
 		Ok(())
 	},
-	ext_clear_child_storage(storage_key_data: *const u8, storage_key_len: u32, key_data: *const u8, key_len: u32) => {
-		let storage_key = this.memory.get(
-			storage_key_data,
-			storage_key_len as usize
-		).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_clear_child_storage"))?;
+	ext_clear_child_storage(subtrie: *mut u8, key_data: *const u8, key_len: u32) => {
+		let subtrie: Box<SubTrie> = unsafe { Box::from_raw(subtrie as *mut SubTrie) };
 		let key = this.memory.get(key_data, key_len as usize).map_err(|_| UserError("Invalid attempt to determine key in ext_clear_child_storage"))?;
 		debug_trace!(target: "wasm-trace", "*** Clearing child storage: {} -> {}   [k={}]",
-			::primitives::hexdisplay::ascii_format(&storage_key),
+			::primitives::hexdisplay::ascii_format(&subtrie.parent),
 			if let Some(_preimage) = this.hash_lookup.get(&key) {
 				format!("%{}", ::primitives::hexdisplay::ascii_format(&_preimage))
 			} else {
 				format!(" {}", ::primitives::hexdisplay::ascii_format(&key))
 			}, HexDisplay::from(&key));
-		this.ext.clear_child_storage(&storage_key, &key);
+		this.ext.clear_child_storage(&subtrie, &key);
+		let ptr = Box::into_raw(subtrie);
+		std::mem::forget(ptr);
 		Ok(())
 	},
 	ext_clear_storage(key_data: *const u8, key_len: u32) => {
@@ -208,25 +229,22 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		let key = this.memory.get(key_data, key_len as usize).map_err(|_| UserError("Invalid attempt to determine key in ext_exists_storage"))?;
 		Ok(if this.ext.exists_storage(&key) { 1 } else { 0 })
 	},
-	ext_exists_child_storage(storage_key_data: *const u8, storage_key_len: u32, key_data: *const u8, key_len: u32) -> u32 => {
-		let storage_key = this.memory.get(
-			storage_key_data,
-			storage_key_len as usize
-		).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_exists_child_storage"))?;
+	ext_exists_child_storage(subtrie: *mut u8, key_data: *const u8, key_len: u32) -> u32 => {
+		let subtrie: Box<SubTrie> = unsafe { Box::from_raw(subtrie as *mut SubTrie) };
 		let key = this.memory.get(key_data, key_len as usize).map_err(|_| UserError("Invalid attempt to determine key in ext_exists_child_storage"))?;
-		Ok(if this.ext.exists_child_storage(&storage_key, &key) { 1 } else { 0 })
+		let res = if this.ext.exists_child_storage(&subtrie, &key) { 1 } else { 0 };
+		let ptr = Box::into_raw(subtrie);
+		std::mem::forget(ptr);
+    Ok(res)
 	},
 	ext_clear_prefix(prefix_data: *const u8, prefix_len: u32) => {
 		let prefix = this.memory.get(prefix_data, prefix_len as usize).map_err(|_| UserError("Invalid attempt to determine prefix in ext_clear_prefix"))?;
 		this.ext.clear_prefix(&prefix);
 		Ok(())
 	},
-	ext_kill_child_storage(storage_key_data: *const u8, storage_key_len: u32) => {
-		let storage_key = this.memory.get(
-			storage_key_data,
-			storage_key_len as usize
-		).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_kill_child_storage"))?;
-		this.ext.kill_child_storage(&storage_key);
+	ext_kill_child_storage(subtrie: *mut u8) => {
+		let subtrie: Box<SubTrie> = unsafe { Box::from_raw(subtrie as *mut SubTrie) };
+		this.ext.kill_child_storage(&subtrie);
 		Ok(())
 	},
 	// return 0 and place u32::max_value() into written_out if no value exists for the key.
@@ -264,19 +282,16 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		}
 	},
 	// return 0 and place u32::max_value() into written_out if no value exists for the key.
-	ext_get_allocated_child_storage(storage_key_data: *const u8, storage_key_len: u32, key_data: *const u8, key_len: u32, written_out: *mut u32) -> *mut u8 => {
-		let storage_key = this.memory.get(
-			storage_key_data,
-			storage_key_len as usize
-		).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_get_allocated_child_storage"))?;
+	ext_get_allocated_child_storage(subtrie: *mut u8, key_data: *const u8, key_len: u32, written_out: *mut u32) -> *mut u8 => {
+		let subtrie: Box<SubTrie> = unsafe { Box::from_raw(subtrie as *mut SubTrie) };
 		let key = this.memory.get(
 			key_data,
 			key_len as usize
 		).map_err(|_| UserError("Invalid attempt to determine key in ext_get_allocated_child_storage"))?;
-		let maybe_value = this.ext.child_storage(&storage_key, &key);
+		let maybe_value = this.ext.child_storage(&subtrie, &key);
 
 		debug_trace!(target: "wasm-trace", "*** Getting child storage: {} -> {} == {}   [k={}]",
-			::primitives::hexdisplay::ascii_format(&storage_key),
+			::primitives::hexdisplay::ascii_format(&subtrie.parent),
 			if let Some(_preimage) = this.hash_lookup.get(&key) {
 				format!("%{}", ::primitives::hexdisplay::ascii_format(&_preimage))
 			} else {
@@ -290,6 +305,8 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 			HexDisplay::from(&key)
 		);
 
+		let ptr = Box::into_raw(subtrie);
+		std::mem::forget(ptr);
 		if let Some(value) = maybe_value {
 			let offset = this.heap.allocate(value.len() as u32)? as u32;
 			this.memory.set(offset, &value).map_err(|_| UserError("Invalid attempt to set memory in ext_get_allocated_child_storage"))?;
@@ -330,18 +347,15 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		}
 	},
 	// return u32::max_value() if no value exists for the key.
-	ext_get_child_storage_into(storage_key_data: *const u8, storage_key_len: u32, key_data: *const u8, key_len: u32, value_data: *mut u8, value_len: u32, value_offset: u32) -> u32 => {
-		let storage_key = this.memory.get(
-			storage_key_data,
-			storage_key_len as usize
-		).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_get_child_storage_into"))?;
+	ext_get_child_storage_into(subtrie: *mut u8, key_data: *const u8, key_len: u32, value_data: *mut u8, value_len: u32, value_offset: u32) -> u32 => {
+		let subtrie: Box<SubTrie> = unsafe { Box::from_raw(subtrie as *mut SubTrie) };
 		let key = this.memory.get(
 			key_data,
 			key_len as usize
 		).map_err(|_| UserError("Invalid attempt to get key in ext_get_child_storage_into"))?;
-		let maybe_value = this.ext.child_storage(&storage_key, &key);
+		let maybe_value = this.ext.child_storage(&subtrie, &key);
 		debug_trace!(target: "wasm-trace", "*** Getting storage: {} -> {} == {}   [k={}]",
-			::primitives::hexdisplay::ascii_format(&storage_key),
+			::primitives::hexdisplay::ascii_format(&subtrie),
 			if let Some(_preimage) = this.hash_lookup.get(&key) {
 				format!("%{}", ::primitives::hexdisplay::ascii_format(&_preimage))
 			} else {
@@ -355,6 +369,8 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 			HexDisplay::from(&key)
 		);
 
+		let ptr = Box::into_raw(subtrie);
+		std::mem::forget(ptr);
 		if let Some(value) = maybe_value {
 			let value = &value[value_offset as usize..];
 			let written = ::std::cmp::min(value_len as usize, value.len());
@@ -369,9 +385,12 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		this.memory.set(result, r.as_ref()).map_err(|_| UserError("Invalid attempt to set memory in ext_storage_root"))?;
 		Ok(())
 	},
-	ext_child_storage_root(storage_key_data: *const u8, storage_key_len: u32, written_out: *mut u32) -> *mut u8 => {
-		let storage_key = this.memory.get(storage_key_data, storage_key_len as usize).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_child_storage_root"))?;
-		let r = this.ext.child_storage_root(&storage_key);
+	ext_child_storage_root(subtrie: *mut u8, written_out: *mut u32) -> *mut u8 => {
+		let subtrie: Box<SubTrie> = unsafe { Box::from_raw(subtrie as *mut SubTrie) };
+		let r = this.ext.child_storage_root(&subtrie);
+
+		let ptr = Box::into_raw(subtrie);
+		std::mem::forget(ptr);
 		if let Some(value) = r {
 			let offset = this.heap.allocate(value.len() as u32)? as u32;
 			this.memory.set(offset, &value).map_err(|_| UserError("Invalid attempt to set memory in ext_child_storage_root"))?;

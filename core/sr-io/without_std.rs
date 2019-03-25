@@ -23,7 +23,7 @@ pub use rstd::{mem, slice};
 use core::{intrinsics, panic::PanicInfo};
 use rstd::{vec::Vec, cell::Cell};
 use hash_db::Hasher;
-use primitives::Blake2Hasher;
+use primitives::{Blake2Hasher, SubTrie};
 
 #[panic_handler]
 #[no_mangle]
@@ -468,7 +468,7 @@ pub fn storage_root() -> [u8; 32] {
 }
 
 /// "Commit" all existing operations and compute the resultant child storage root.
-pub fn child_storage_root(storage_key: &[u8]) -> Option<Vec<u8>> {
+pub fn child_storage_root(subtrie: &SubTrie) -> Option<Vec<u8>> {
 	let mut length: u32 = 0;
 	unsafe {
 		let ptr = ext_child_storage_root.get()(storage_key.as_ptr(), storage_key.len() as u32, &mut length);
@@ -624,4 +624,26 @@ impl Printable for u64 {
 /// Print a printable value.
 pub fn print<T: Printable + Sized>(value: T) {
 	value.print();
+}
+
+/// opaque subtrie pointer
+pub struct SubTrieHandle(*mut u8);
+
+impl SubTrieHandle {
+	pub fn new(inner: *mut u8) -> Self { SubTrieHandle(inner) }
+	pub fn ptr() -> *mut u8 { self.0 }
+}
+
+impl Drop for SubTrieHandle {
+	fn drop(&mut self) {
+		drop_subtrie(self);
+	}
+}
+
+
+/// Drop subtrie handler
+pub fn drop_subtrie(subtrie: &mut SubTrieHandle) {
+	unsafe {
+	  ext_drop_subtrie_handle(subtrie.0);
+	}
 }

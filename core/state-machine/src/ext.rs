@@ -127,28 +127,26 @@ where
 	}
 
 	/// Fetch child storage root together with its transaction.
-	fn child_storage_root_transaction(&mut self, storage_key: &[u8], subtrie: &SubTrie) -> (Vec<u8>, B::Transaction) {
+	fn child_storage_root_transaction(&mut self, subtrie: &SubTrie) -> (Vec<u8>, B::Transaction) {
 		self.mark_dirty();
 
-		let (root, is_default, transaction) = {
-			let delta = self.overlay.committed.children.get(storage_key)
+    let mut res_subtrie = subtrie.clone();
+    // TODO use of is_default???
+		let (root, _is_default, transaction) = {
+			let delta = self.overlay.committed.children.get(&subtrie.node.keyspace)
 				.into_iter()
 				.flat_map(|map| map.1.iter().map(|(k, v)| (k.clone(), v.clone())))
-				.chain(self.overlay.prospective.children.get(storage_key)
+				.chain(self.overlay.prospective.children.get(&subtrie.node.keyspace)
 						.into_iter()
 						.flat_map(|map| map.1.iter().map(|(k, v)| (k.clone(), v.clone()))));
 
 			self.backend.child_storage_root(subtrie, delta)
 		};
 
-		let root_val = if is_default {
-			None
-		} else {
-			Some(SubTrie {root: root.clone(), keyspace: subtrie.keyspace.clone()})
-		};
-		self.overlay.sync_child_storage_root(storage_key, root_val);
+    res_subtrie.node.root = root;
+		self.overlay.sync_child_storage_root(&res_subtrie);
 
-		(root, transaction)
+		(res_subtrie.node.root, transaction)
 	}
 }
 
@@ -207,11 +205,11 @@ where
 		}
 	}
 
-	fn exists_child_storage(&self, storage_key: &[u8], key: &[u8]) -> bool {
+	fn exists_child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> bool {
 		let _guard = panic_handler::AbortGuard::new(true);
-		match self.overlay.child_storage(storage_key, key) {
+		match self.overlay.child_storage(subtrie, key) {
 			Some(x) => x.is_some(),
-			_ => self.backend.exists_child_storage(storage_key, key).expect(EXT_NOT_ALLOWED_TO_FAIL),
+			_ => self.backend.exists_child_storage(subtrie, key).expect(EXT_NOT_ALLOWED_TO_FAIL),
 		}
 	}
 
@@ -226,28 +224,23 @@ where
 		self.overlay.set_storage(key, value);
 	}
 
-	fn place_child_storage(&mut self, storage_key: Vec<u8>, key: Vec<u8>, value: Option<Vec<u8>>) -> bool {
+	fn place_child_storage(&mut self, subtrie: &SubTrie, key: Vec<u8>, value: Option<Vec<u8>>) -> bool {
 		let _guard = panic_handler::AbortGuard::new(true);
-		if !is_child_storage_key(&storage_key) || !is_child_trie_key_valid::<H>(&storage_key) {
-			return false;
-		}
 
 		self.mark_dirty();
-		self.overlay.set_child_storage(storage_key, key, value);
+		self.overlay.set_child_storage(&subtrie, key, value);
 
 		true
 	}
 
-	fn kill_child_storage(&mut self, storage_key: &[u8]) {
+	fn kill_child_storage(&mut self, subtrie: &SubTrie) {
 		let _guard = panic_handler::AbortGuard::new(true);
-		if !is_child_storage_key(storage_key) || !is_child_trie_key_valid::<H>(storage_key) {
-			return;
-		}
 
 		self.mark_dirty();
-		self.overlay.clear_child_storage(storage_key);
-		self.backend.for_keys_in_child_storage(storage_key, |key| {
-			self.overlay.set_child_storage(storage_key.to_vec(), key.to_vec(), None);
+		self.overlay.clear_child_storage(&subtrie);
+    // TODO EMCH link backend kill child storage by keyspace!!!!!!
+		self.backend.for_keys_in_child_storage(subtrie, |key| {
+			self.overlay.set_child_storage(&subtrie, key.to_vec(), None);
 		});
 	}
 
@@ -276,10 +269,11 @@ where
 		}
 
 		let mut transaction = B::Transaction::default();
-		let child_storage_keys: Vec<_> = self.overlay.prospective.children.keys().cloned().collect();
+    // TODO avoid this buffer !!!! EMCH
+		let child_storage_keys: Vec<_> = self.overlay.prospective.children.iter().map(|(k,v)|(k.clone(), v.2.clone())).collect();
 
-		for key in child_storage_keys {
-			let (_, t) = self.child_storage_root_transaction(&key);
+		for (_key, subtrie) in child_storage_keys {
+			let (_, t) = self.child_storage_root_transaction(&subtrie);
 			transaction.consolidate(t);
 		}
 
@@ -293,17 +287,14 @@ where
 		root
 	}
 
-	fn child_storage_root(&mut self, storage_key: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage_root(&mut self, subtrie: &SubTrie) -> Option<Vec<u8>> {
 		let _guard = panic_handler::AbortGuard::new(true);
-		if !is_child_storage_key(storage_key) || !is_child_trie_key_valid::<H>(storage_key) {
-			return None;
-		}
 
 		if self.storage_transaction.is_some() {
-			return Some(self.storage(storage_key).unwrap_or(default_child_trie_root::<H>(storage_key)));
+      return Some(default_child_trie_root::<H>(subtrie))
 		}
 
-		Some(self.child_storage_root_transaction(storage_key).0)
+		Some(self.child_storage_root_transaction(subtrie).0)
 	}
 
 	fn storage_changes_root(&mut self, parent: H::Out, parent_num: u64) -> Option<H::Out> {

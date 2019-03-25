@@ -499,6 +499,7 @@ where
 
 		let mut transaction: Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)> = Default::default();
 
+    /* TODO EMCH unclear semantic of reset storage
 		for (child_key, child_map) in children {
 			let (root, is_default, update) = self.old_state.child_storage_root(&child_key, child_map.into_iter().map(|(k, v)| (k, Some(v))));
 			transaction.consolidate(update);
@@ -512,7 +513,8 @@ where
 		transaction.consolidate(update);
 
 		self.new_state = Some(InMemory::from(transaction));
-		Ok(root)
+		Ok(root)*/
+    unimplemented!()
 	}
 
 	fn insert_aux<I>(&mut self, ops: I) -> error::Result<()>

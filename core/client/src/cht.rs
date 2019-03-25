@@ -94,7 +94,8 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 {
 	let transaction = build_pairs::<Header, _>(cht_size, cht_num, hashes)?
 		.into_iter()
-		.map(|(k, v)| (None, k, Some(v)))
+    // not in subtrie
+		.map(|(k, v)| (Vec::new(), k, Some(v)))
 		.collect::<Vec<_>>();
 	let storage = InMemoryState::<Hasher>::default().update(transaction);
 	let trie_storage = storage.try_into_trie_backend()

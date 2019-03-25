@@ -146,7 +146,7 @@ pub fn default_child_trie_root<H: Hasher>(_subtrie: &SubTrie) -> Vec<u8> {
 
 /// Determine a child trie root given its ordered contents, closed form. H is the default hasher, but a generic
 /// implementation may ignore this type parameter and use other hashers.
-pub fn child_trie_root<H: Hasher, I, A, B>(_subtrie: &SubTrie, input: I) -> Vec<u8> where
+pub fn child_trie_root<H: Hasher, I, A, B>(input: I) -> Vec<u8> where
 	I: IntoIterator<Item = (A, B)>,
 	A: AsRef<[u8]> + Ord,
 	B: AsRef<[u8]>,
@@ -166,10 +166,10 @@ pub fn child_delta_trie_root<H: Hasher, I, A, B, DB>(
 	DB: hash_db::HashDB<H, trie_db::DBValue> + hash_db::PlainDB<H::Out, trie_db::DBValue>,
 {
 	let mut root = H::Out::default();
-	root.as_mut().copy_from_slice(&subtrie.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
+	root.as_mut().copy_from_slice(&subtrie.node.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
 
 	{
-	  let mut db = KeySpacedDBMut(&mut *db, &subtrie.keyspace);
+	  let mut db = KeySpacedDBMut(&mut *db, &subtrie.node.keyspace);
 		let mut trie = TrieDBMut::<H>::from_existing(&mut db, &mut root)?;
 
 		for (key, change) in delta {
@@ -192,8 +192,8 @@ pub fn for_keys_in_child_trie<H: Hasher, F: FnMut(&[u8]), DB>(
 	DB: hash_db::HashDBRef<H, trie_db::DBValue> + hash_db::PlainDBRef<H::Out, trie_db::DBValue>,
 {
 	let mut root = H::Out::default();
-	root.as_mut().copy_from_slice(&subtrie.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
-  let db = KeySpacedDB(&*db, &subtrie.keyspace);
+	root.as_mut().copy_from_slice(&subtrie.node.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
+  let db = KeySpacedDB(&*db, &subtrie.node.keyspace);
 
 	let trie = TrieDB::<H>::new(&db, &root)?;
 	let iter = trie.iter()?;
@@ -238,9 +238,9 @@ pub fn read_child_trie_value<H: Hasher, DB>(
 	DB: hash_db::HashDBRef<H, trie_db::DBValue> + hash_db::PlainDBRef<H::Out, trie_db::DBValue>,
 {
 	let mut root = H::Out::default();
-	root.as_mut().copy_from_slice(&subtrie.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
+	root.as_mut().copy_from_slice(&subtrie.node.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
 
-	let db = KeySpacedDB(&*db, &subtrie.keyspace);
+	let db = KeySpacedDB(&*db, &subtrie.node.keyspace);
 	Ok(TrieDB::<H>::new(&db, &root)?.get(key).map(|x| x.map(|val| val.to_vec()))?)
 }
 
@@ -254,9 +254,9 @@ pub fn read_child_trie_value_with<H: Hasher, Q: Query<H, Item=DBValue>, DB>(
 	DB: hash_db::HashDBRef<H, trie_db::DBValue> + hash_db::PlainDBRef<H::Out, trie_db::DBValue>,
 {
 	let mut root = H::Out::default();
-	root.as_mut().copy_from_slice(&subtrie.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
+	root.as_mut().copy_from_slice(&subtrie.node.root[..]); // root is fetched from DB, not writable by runtime, so it's always valid.
 
-	let db = KeySpacedDB(&*db, &subtrie.keyspace);
+	let db = KeySpacedDB(&*db, &subtrie.node.keyspace);
 	Ok(TrieDB::<H>::new(&db, &root)?.get_with(key, query).map(|x| x.map(|val| val.to_vec()))?)
 }
 

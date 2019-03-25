@@ -318,13 +318,14 @@ where Block: BlockT<Hash=H256>,
 	}
 
 	fn reset_storage(&mut self, mut top: StorageOverlay, children: ChildrenStorageOverlay) -> Result<H256, client::error::Error> {
-
+/* TODO EMCH unclear reset semantic
 		if top.iter().any(|(k, _)| well_known_keys::is_child_storage_key(k)) {
 			return Err(client::error::ErrorKind::GenesisInvalid.into());
 		}
 
 		let mut transaction: BTreeMap<KeySpace, MemoryDB<Blake2Hasher>> = Default::default();
 
+    // TODO EMCH broken logic here, why the prefix thing??
 		for (child_key, child_map) in children {
 			if !well_known_keys::is_child_storage_key(&child_key) {
 				return Err(client::error::ErrorKind::GenesisInvalid.into());
@@ -343,6 +344,7 @@ where Block: BlockT<Hash=H256>,
 
 		self.db_updates = transaction;
 		Ok(root)
+    */ unimplemented!()
 	}
 
 	fn update_changes_trie(&mut self, update: MemoryDB<Blake2Hasher>) -> Result<(), client::error::Error> {
@@ -625,7 +627,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			};
 			let mut op = inmem.begin_operation().unwrap();
 			op.set_block_data(header, body, justification, new_block_state).unwrap();
-			op.update_db_storage(state.into_iter().map(|(k, v)| (None, k, Some(v))).collect()).unwrap();
+			op.update_db_storage(state.into_iter().map(|(k, v)| (Vec::new(), k, Some(v))).collect()).unwrap();
 			inmem.commit_operation(op).unwrap();
 		}
 

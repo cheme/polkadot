@@ -27,7 +27,7 @@ pub use tiny_keccak::keccak256 as keccak_256;
 pub use substrate_state_machine::{Externalities, BasicExternalities, TestExternalities};
 
 use environmental::environmental;
-use primitives::{hexdisplay::HexDisplay, H256};
+use primitives::{hexdisplay::HexDisplay, H256, SubTrie};
 use hash_db::Hasher;
 
 #[cfg(feature = "std")]
@@ -48,8 +48,8 @@ pub fn storage(key: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// Get `key` from child storage and return a `Vec`, empty if there's a problem.
-pub fn child_storage(storage_key: &[u8], key: &[u8]) -> Option<Vec<u8>> {
-	ext::with(|ext| ext.child_storage(storage_key, key).map(|s| s.to_vec()))
+pub fn child_storage(subtrie: &SubTrie, key: &[u8]) -> Option<Vec<u8>> {
+	ext::with(|ext| ext.child_storage(subtrie, key).map(|s| s.to_vec()))
 		.expect("storage cannot be called outside of an Externalities-provided environment.")
 }
 
@@ -70,8 +70,8 @@ pub fn read_storage(key: &[u8], value_out: &mut [u8], value_offset: usize) -> Op
 /// the number of bytes that the entry in storage had beyond the offset or None if the storage entry
 /// doesn't exist at all. Note that if the buffer is smaller than the storage entry length, the returned
 /// number of bytes is not equal to the number of bytes written to the `value_out`.
-pub fn read_child_storage(storage_key: &[u8], key: &[u8], value_out: &mut [u8], value_offset: usize) -> Option<usize> {
-	ext::with(|ext| ext.child_storage(storage_key, key).map(|value| {
+pub fn read_child_storage(subtrie: &SubTrie, key: &[u8], value_out: &mut [u8], value_offset: usize) -> Option<usize> {
+	ext::with(|ext| ext.child_storage(subtrie, key).map(|value| {
 		let value = &value[value_offset..];
 		let written = ::std::cmp::min(value.len(), value_out.len());
 		value_out[..written].copy_from_slice(&value[..written]);
@@ -87,9 +87,9 @@ pub fn set_storage(key: &[u8], value: &[u8]) {
 }
 
 /// Set the child storage of a key to some value.
-pub fn set_child_storage(storage_key: &[u8], key: &[u8], value: &[u8]) {
+pub fn set_child_storage(subtrie: &SubTrie, key: &[u8], value: &[u8]) {
 	ext::with(|ext|
-		ext.set_child_storage(storage_key.to_vec(), key.to_vec(), value.to_vec())
+		ext.set_child_storage(subtrie, key.to_vec(), value.to_vec())
 	);
 }
 
@@ -101,9 +101,9 @@ pub fn clear_storage(key: &[u8]) {
 }
 
 /// Clear the storage of a key.
-pub fn clear_child_storage(storage_key: &[u8], key: &[u8]) {
+pub fn clear_child_storage(subtrie: &SubTrie, key: &[u8]) {
 	ext::with(|ext|
-		ext.clear_child_storage(storage_key, key)
+		ext.clear_child_storage(subtrie, key)
 	);
 }
 
@@ -115,9 +115,9 @@ pub fn exists_storage(key: &[u8]) -> bool {
 }
 
 /// Check whether a given `key` exists in storage.
-pub fn exists_child_storage(storage_key: &[u8], key: &[u8]) -> bool {
+pub fn exists_child_storage(subtrie: &SubTrie, key: &[u8]) -> bool {
 	ext::with(|ext|
-		ext.exists_child_storage(storage_key, key)
+		ext.exists_child_storage(subtrie, key)
 	).unwrap_or(false)
 }
 
@@ -129,9 +129,9 @@ pub fn clear_prefix(prefix: &[u8]) {
 }
 
 /// Clear an entire child storage.
-pub fn kill_child_storage(storage_key: &[u8]) {
+pub fn kill_child_storage(subtrie: &SubTrie) {
 	ext::with(|ext|
-		ext.kill_child_storage(storage_key)
+		ext.kill_child_storage(subtrie)
 	);
 }
 
@@ -150,9 +150,9 @@ pub fn storage_root() -> H256 {
 }
 
 /// "Commit" all existing operations and compute the resultant child storage root.
-pub fn child_storage_root(storage_key: &[u8]) -> Option<Vec<u8>> {
+pub fn child_storage_root(subtrie: &SubTrie) -> Option<Vec<u8>> {
 	ext::with(|ext|
-		ext.child_storage_root(storage_key)
+		ext.child_storage_root(subtrie)
 	).unwrap_or(None)
 }
 
@@ -262,6 +262,29 @@ impl Printable for u64 {
 /// Print a printable value.
 pub fn print<T: Printable + Sized>(value: T) {
 	value.print();
+}
+
+/// opaque subtrie pointer
+pub struct SubTrieHandle(*mut u8);
+
+impl SubTrieHandle {
+	pub fn new(inner: *mut u8) -> Self { SubTrieHandle(inner) }
+	pub fn ptr(&self) -> *mut u8 { self.0 }
+}
+
+impl Drop for SubTrieHandle {
+	fn drop(&mut self) {
+		drop_subtrie(self);
+	}
+}
+
+
+/// Drop subtrie handler
+pub fn drop_subtrie(subtrie: &mut SubTrieHandle) {
+	// TODO switch to unreachable ?? (subtriehandle is for wasm side)
+	unsafe {
+		std::mem::drop(unsafe { Box::from_raw(subtrie) }); // calling drop just in case
+	}
 }
 
 #[cfg(test)]

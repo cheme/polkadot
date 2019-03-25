@@ -21,7 +21,7 @@ use log::debug;
 use hash_db::Hasher;
 use heapsize::HeapSizeOf;
 use hash_db::HashDB;
-use trie::{Recorder, MemoryDB, TrieError, default_child_trie_root, read_trie_value_with, read_child_trie_value_with, read_child_trie_value, record_all_keys};
+use trie::{Recorder, MemoryDB, TrieError, read_child_trie_value, record_all_keys, read_trie_value_with};
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::{Error, ExecutionError, Backend};
@@ -68,7 +68,7 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 
       let map_e = |e| format!("Trie lookup error: {}", e);
 
-      read_child_trie_value(subtrie, &eph, subtrie, key).map_err(map_e)
+      read_child_trie_value(subtrie, &eph, key).map_err(map_e)
 /*    } else {
       // No subtrie same as no value
       Ok(None)
@@ -263,7 +263,7 @@ mod tests {
 
 	#[test]
 	fn proof_recorded_and_checked() {
-		let contents = (0..64).map(|i| (None, vec![i], Some(vec![i]))).collect::<Vec<_>>();
+		let contents = (0..64).map(|i| (Vec::new(), vec![i], Some(vec![i]))).collect::<Vec<_>>();
 		let in_memory = InMemory::<Blake2Hasher>::default();
 		let in_memory = in_memory.update(contents);
 		let in_memory_root = in_memory.storage_root(::std::iter::empty()).0;

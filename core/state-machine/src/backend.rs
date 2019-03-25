@@ -50,12 +50,13 @@ pub trait Backend<H: Hasher> {
 		self.storage(key).map(|v| v.map(|v| H::hash(&v)))
 	}
 
-  /// get SubTrie information
+	/// get SubTrie information
 	fn child_trie(&self, storage_key: &[u8]) -> Result<Option<SubTrie>, Self::Error> {
-  	Ok(self.storage(storage_key)?
+		Ok(self.storage(storage_key)?
 			.map(std::io::Cursor::new).as_mut()
-			.and_then(parity_codec::Decode::decode))
-  }
+			.and_then(parity_codec::Decode::decode)
+			.map(|node| SubTrie{ node, parent: storage_key.to_vec()}))
+	}
 
 	/// Get keyed child storage or None if there is nothing associated.
 	fn child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
@@ -240,7 +241,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: HeapSizeOf {
 	}
 
 	fn child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-		Ok(self.inner.get(&subtrie.keyspace).and_then(|map| map.get(key).map(Clone::clone)))
+		Ok(self.inner.get(&subtrie.node.keyspace).and_then(|map| map.get(key).map(Clone::clone)))
 	}
 
 	fn exists_storage(&self, key: &[u8]) -> Result<bool, Self::Error> {
@@ -252,7 +253,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: HeapSizeOf {
 	}
 
 	fn for_keys_in_child_storage<F: FnMut(&[u8])>(&self, subtrie: &SubTrie, mut f: F) {
-		self.inner.get(&subtrie.keyspace).map(|map| map.keys().for_each(|k| f(&k)));
+		self.inner.get(&subtrie.node.keyspace).map(|map| map.keys().for_each(|k| f(&k)));
 	}
 
 	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
@@ -280,18 +281,17 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: HeapSizeOf {
 		H::Out: Ord
 	{
 
-		let existing_pairs = self.inner.get(&subtrie.keyspace).into_iter().flat_map(|map| map.iter().map(|(k, v)| (k.clone(), Some(v.clone()))));
+		let existing_pairs = self.inner.get(&subtrie.node.keyspace).into_iter().flat_map(|map| map.iter().map(|(k, v)| (k.clone(), Some(v.clone()))));
 
 		let transaction: Vec<_> = delta.into_iter().collect();
 		let root = child_trie_root::<H, _, _, _>(
-			subtrie,
 			existing_pairs.chain(transaction.iter().cloned())
 				.collect::<HashMap<_, _>>()
 				.into_iter()
 				.filter_map(|(k, maybe_val)| maybe_val.map(|val| (k, val)))
 		);
 
-		let full_transaction = transaction.into_iter().map(|(k, v)| (subtrie.keyspace.clone(), k, v)).collect();
+		let full_transaction = transaction.into_iter().map(|(k, v)| (subtrie.node.keyspace.clone(), k, v)).collect();
 
 		let is_default = root == default_child_trie_root::<H>(subtrie);
 
@@ -310,7 +310,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: HeapSizeOf {
 		let mut mdb = MemoryDB::default();
 		let mut root = None;
 		for (keyspace, map) in self.inner {
-      // !TODO EMCH this does not make sense!! seen next comment
+			// !TODO EMCH this does not make sense!! seen next comment
 			if keyspace.len() > 0 {
 				let _ = insert_into_memory_db::<H, _>(&mut mdb, map.into_iter())?;
 			} else {
@@ -334,8 +334,8 @@ pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut MemoryDB<H>, input: I) -> Op
 {
 	let mut root = <H as Hasher>::Out::default();
 	{
-    // TODO EMCH KeyedMutDB!!!!!!!!!!!!!!!!!!!! (maybe from call instead??) -> or BTreeMap of
-    // MemoryDB (seems better!!!
+		// TODO EMCH KeyedMutDB!!!!!!!!!!!!!!!!!!!! (maybe from call instead??) -> or BTreeMap of
+		// MemoryDB (seems better!!!
 		let mut trie = TrieDBMut::<H>::new(mdb, &mut root);
 		for (key, value) in input {
 			if let Err(e) = trie.insert(&key, &value) {

@@ -22,6 +22,7 @@ use std::sync::{Arc, Weak};
 use futures::{Future, IntoFuture};
 use parking_lot::RwLock;
 
+use primitives::SubTrie;
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::{Backend as StateBackend, TrieBackend, backend::InMemory as InMemoryState};
 use runtime_primitives::traits::{Block as BlockT, NumberFor, AuthorityIdFor, Zero, Header};
@@ -270,7 +271,7 @@ where
 
 	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> ClientResult<H::Out> {
 		check_genesis_storage(&top, &children)?;
-
+/* TODO EMCH unclear semantic of reset_storage 
 		// this is only called when genesis block is imported => shouldn't be performance bottleneck
 		let mut storage: HashMap<Option<Vec<u8>>, StorageOverlay> = HashMap::new();
 		storage.insert(None, top);
@@ -282,6 +283,7 @@ where
 		self.storage_update = Some(storage_update);
 
 		Ok(storage_root)
+    */ unimplemented!()
 	}
 
 	fn insert_aux<I>(&mut self, ops: I) -> ClientResult<()>
@@ -338,7 +340,7 @@ where
 			.into_future().wait()
 	}
 
-	fn child_storage(&self, _storage_key: &[u8], _key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
+	fn child_storage(&self, _subtrie: &SubTrie, _key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
 		Err(ClientErrorKind::NotAvailableOnLightClient.into())
 	}
 
@@ -346,7 +348,7 @@ where
 		// whole state is not available on light node
 	}
 
-	fn for_keys_in_child_storage<A: FnMut(&[u8])>(&self, _storage_key: &[u8], _action: A) {
+	fn for_keys_in_child_storage<A: FnMut(&[u8])>(&self, _subtrie: &SubTrie, _action: A) {
 		// whole state is not available on light node
 	}
 
@@ -357,7 +359,7 @@ where
 		(H::Out::default(), ())
 	}
 
-	fn child_storage_root<I>(&self, _key: &[u8], _delta: I) -> (Vec<u8>, bool, Self::Transaction)
+	fn child_storage_root<I>(&self, _subtrie: &SubTrie, _delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
@@ -400,12 +402,12 @@ where
 		}
 	}
 
-	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
+	fn child_storage(&self, subtrie: &SubTrie, key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::child_storage(state, storage_key, key),
+				StateBackend::<H>::child_storage(state, subtrie, key),
 			OnDemandOrGenesisState::Genesis(ref state) =>
-				Ok(state.child_storage(storage_key, key).expect(IN_MEMORY_EXPECT_PROOF)),
+				Ok(state.child_storage(subtrie, key).expect(IN_MEMORY_EXPECT_PROOF)),
 		}
 	}
 
@@ -417,11 +419,11 @@ where
 		}
 	}
 
-	fn for_keys_in_child_storage<A: FnMut(&[u8])>(&self, storage_key: &[u8], action: A) {
+	fn for_keys_in_child_storage<A: FnMut(&[u8])>(&self, subtrie: &SubTrie, action: A) {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::for_keys_in_child_storage(state, storage_key, action),
-			OnDemandOrGenesisState::Genesis(ref state) => state.for_keys_in_child_storage(storage_key, action),
+				StateBackend::<H>::for_keys_in_child_storage(state, subtrie, action),
+			OnDemandOrGenesisState::Genesis(ref state) => state.for_keys_in_child_storage(subtrie, action),
 		}
 	}
 
@@ -439,15 +441,15 @@ where
 		}
 	}
 
-	fn child_storage_root<I>(&self, key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
+	fn child_storage_root<I>(&self, subtrie: &SubTrie, delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::child_storage_root(state, key, delta),
+				StateBackend::<H>::child_storage_root(state, subtrie, delta),
 			OnDemandOrGenesisState::Genesis(ref state) => {
-				let (root, is_equal, _) = state.child_storage_root(key, delta);
+				let (root, is_equal, _) = state.child_storage_root(subtrie, delta);
 				(root, is_equal, ())
 			},
 		}

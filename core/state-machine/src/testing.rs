@@ -24,6 +24,7 @@ use trie::trie_root;
 use crate::backend::InMemory;
 use crate::changes_trie::{compute_changes_trie_root, InMemoryStorage as ChangesTrieInMemoryStorage, AnchorBlockId};
 use primitives::storage::well_known_keys::{CHANGES_TRIE_CONFIG, CODE, HEAP_PAGES};
+use primitives::SubTrie;
 use parity_codec::Encode;
 use super::{Externalities, OverlayedChanges};
 
@@ -115,8 +116,8 @@ impl<H: Hasher> Externalities<H> for TestExternalities<H> where H::Out: Ord + He
 		}
 	}
 
-	fn child_storage(&self, _storage_key: &[u8], _key: &[u8]) -> Option<Vec<u8>> {
-		None
+	fn child_storage(&self, _subtrie: &SubTrie, _key: &[u8]) -> Option<Vec<u8>> {
+		unimplemented!("child trie not implemented in test externalities");
 	}
 
 	fn place_storage(&mut self, key: Vec<u8>, maybe_value: Option<Vec<u8>>) {
@@ -132,11 +133,13 @@ impl<H: Hasher> Externalities<H> for TestExternalities<H> where H::Out: Ord + He
 		}
 	}
 
-	fn place_child_storage(&mut self, _storage_key: Vec<u8>, _key: Vec<u8>, _value: Option<Vec<u8>>) -> bool {
-		false
+	fn place_child_storage(&mut self, _subtrie: &SubTrie, _key: Vec<u8>, _value: Option<Vec<u8>>) -> bool {
+		unimplemented!("child trie not implemented in test externalities");
 	}
 
-	fn kill_child_storage(&mut self, _storage_key: &[u8]) { }
+	fn kill_child_storage(&mut self, _subtrie: &SubTrie) {
+		unimplemented!("child trie not implemented in test externalities");
+	}
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {
 		self.changes.clear_prefix(prefix);
@@ -149,8 +152,8 @@ impl<H: Hasher> Externalities<H> for TestExternalities<H> where H::Out: Ord + He
 		trie_root::<H, _, _, _>(self.inner.clone())
 	}
 
-	fn child_storage_root(&mut self, _storage_key: &[u8]) -> Option<Vec<u8>> {
-		None
+	fn child_storage_root(&mut self, _subtrie: &SubTrie) -> Option<Vec<u8>> {
+		unimplemented!("child trie not implemented in test externalities");
 	}
 
 	fn storage_changes_root(&mut self, parent: H::Out, parent_num: u64) -> Option<H::Out> {
