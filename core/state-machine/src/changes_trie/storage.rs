@@ -74,25 +74,6 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 	}
 
 	#[cfg(test)]
-	pub fn with_inputs(inputs: Vec<(Number, Vec<InputPair<Number>>)>) -> Self {
-		let mut mdb = MemoryDB::default();
-		let mut roots = BTreeMap::new();
-		for (block, pairs) in inputs {
-			let root = insert_into_memory_db::<H, _>(&mut mdb, pairs.into_iter().map(Into::into));
-			if let Some(root) = root {
-				roots.insert(block, root);
-			}
-		}
-
-		InMemoryStorage {
-			data: RwLock::new(InMemoryStorageData {
-				roots,
-				mdb,
-			}),
-		}
-	}
-
-	#[cfg(test)]
 	pub fn clear_storage(&self) {
 		self.data.write().mdb = MemoryDB::default();	// use new to be more correct
 	}
@@ -117,6 +98,28 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 		data.mdb.consolidate(trie);
 	}
 }
+
+#[cfg(test)]
+pub fn with_inputs<T: trie::TrieOps, Number: BlockNumber>(
+	inputs: Vec<(Number, Vec<InputPair<Number>>)>
+) -> InMemoryStorage<T::H, Number> {
+	let mut mdb = MemoryDB::default();
+	let mut roots = BTreeMap::new();
+	for (block, pairs) in inputs {
+		let root = insert_into_memory_db::<T, _>(&mut mdb, pairs.into_iter().map(Into::into));
+		if let Some(root) = root {
+			roots.insert(block, root);
+		}
+	}
+
+	InMemoryStorage {
+		data: RwLock::new(InMemoryStorageData {
+			roots,
+			mdb,
+		}),
+	}
+}
+
 
 impl<H: Hasher, Number: BlockNumber> RootsStorage<H, Number> for InMemoryStorage<H, Number> {
 	fn build_anchor(&self, parent_hash: H::Out) -> Result<AnchorBlockId<H::Out, Number>, String> {

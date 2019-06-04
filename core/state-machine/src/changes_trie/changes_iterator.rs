@@ -20,9 +20,10 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use parity_codec::{Decode, Encode};
-use hash_db::{HashDB, Hasher, EMPTY_PREFIX};
+use hash_db::{HashDB, EMPTY_PREFIX};
 use num_traits::One;
 use trie::{Recorder, MemoryDB};
+use trie::{TrieOps, TrieHash};
 use crate::changes_trie::{AnchorBlockId, Configuration, RootsStorage, Storage, BlockNumber};
 use crate::changes_trie::input::{DigestIndex, ExtrinsicIndex, DigestIndexValue, ExtrinsicIndexValue};
 use crate::changes_trie::storage::{TrieBackendAdapter, InMemoryStorage};
@@ -32,14 +33,14 @@ use crate::trie_backend_essence::{TrieBackendEssence};
 /// Return changes of given key at given blocks range.
 /// `max` is the number of best known block.
 /// Changes are returned in descending order (i.e. last block comes first).
-pub fn key_changes<'a, S: Storage<H, Number>, H: Hasher, Number: BlockNumber>(
+pub fn key_changes<'a, S: Storage<T::H, Number>, T: TrieOps, Number: BlockNumber>(
 	config: &'a Configuration,
 	storage: &'a S,
 	begin: Number,
-	end: &'a AnchorBlockId<H::Out, Number>,
+	end: &'a AnchorBlockId<TrieHash<T>, Number>,
 	max: Number,
 	key: &'a [u8],
-) -> Result<DrilldownIterator<'a, S, S, H, Number>, String> {
+) -> Result<DrilldownIterator<'a, S, S, T, Number>, String> {
 	// we can't query any roots before root
 	let max = ::std::cmp::min(max.clone(), end.number.clone());
 
@@ -55,18 +56,18 @@ pub fn key_changes<'a, S: Storage<H, Number>, H: Hasher, Number: BlockNumber>(
 			extrinsics: Default::default(),
 			blocks: Default::default(),
 
-			_hasher: ::std::marker::PhantomData::<H>::default(),
+			_hasher: ::std::marker::PhantomData::<T>::default(),
 		},
 	})
 }
 
 /// Returns proof of changes of given key at given blocks range.
 /// `max` is the number of best known block.
-pub fn key_changes_proof<S: Storage<H, Number>, H: Hasher, Number: BlockNumber>(
+pub fn key_changes_proof<S: Storage<T::H, Number>, T: TrieOps, Number: BlockNumber>(
 	config: &Configuration,
 	storage: &S,
 	begin: Number,
-	end: &AnchorBlockId<H::Out, Number>,
+	end: &AnchorBlockId<TrieHash<T>, Number>,
 	max: Number,
 	key: &[u8],
 ) -> Result<Vec<Vec<u8>>, String> {
@@ -85,7 +86,7 @@ pub fn key_changes_proof<S: Storage<H, Number>, H: Hasher, Number: BlockNumber>(
 			extrinsics: Default::default(),
 			blocks: Default::default(),
 
-			_hasher: ::std::marker::PhantomData::<H>::default(),
+			_hasher: ::std::marker::PhantomData::<T>::default(),
 		},
 		proof_recorder: Default::default(),
 	};
@@ -101,19 +102,19 @@ pub fn key_changes_proof<S: Storage<H, Number>, H: Hasher, Number: BlockNumber>(
 /// Check key changes proog and return changes of the key at given blocks range.
 /// `max` is the number of best known block.
 /// Changes are returned in descending order (i.e. last block comes first).
-pub fn key_changes_proof_check<S: RootsStorage<H, Number>, H: Hasher, Number: BlockNumber>(
+pub fn key_changes_proof_check<S: RootsStorage<T::H, Number>, T: TrieOps, Number: BlockNumber>(
 	config: &Configuration,
 	roots_storage: &S,
 	proof: Vec<Vec<u8>>,
 	begin: Number,
-	end: &AnchorBlockId<H::Out, Number>,
+	end: &AnchorBlockId<TrieHash<T>, Number>,
 	max: Number,
 	key: &[u8]
 ) -> Result<Vec<(Number, u32)>, String> {
 	// we can't query any roots before root
 	let max = ::std::cmp::min(max.clone(), end.number.clone());
 
-	let mut proof_db = MemoryDB::<H>::default();
+	let mut proof_db = MemoryDB::<T::H>::default();
 	for item in proof {
 		proof_db.insert(EMPTY_PREFIX, &item);
 	}
@@ -131,7 +132,7 @@ pub fn key_changes_proof_check<S: RootsStorage<H, Number>, H: Hasher, Number: Bl
 			extrinsics: Default::default(),
 			blocks: Default::default(),
 
-			_hasher: ::std::marker::PhantomData::<H>::default(),
+			_hasher: ::std::marker::PhantomData::<T>::default(),
 		},
 	}.collect()
 }
@@ -185,38 +186,38 @@ impl<'a, Number: BlockNumber> Iterator for SurfaceIterator<'a, Number> {
 
 /// Drilldown iterator - receives 'digest points' from surface iterator and explores
 /// every point until extrinsic is found.
-pub struct DrilldownIteratorEssence<'a, RS, S, H, Number>
+pub struct DrilldownIteratorEssence<'a, RS, S, T, Number>
 	where
-		RS: 'a + RootsStorage<H, Number>,
-		S: 'a + Storage<H, Number>,
-		H: Hasher,
+		RS: 'a + RootsStorage<T::H, Number>,
+		S: 'a + Storage<T::H, Number>,
+		T: TrieOps,
 		Number: BlockNumber,
-		H::Out: 'a,
+		TrieHash<T>: 'a,
 {
 	key: &'a [u8],
 	roots_storage: &'a RS,
 	storage: &'a S,
 	begin: Number,
-	end: &'a AnchorBlockId<H::Out, Number>,
+	end: &'a AnchorBlockId<TrieHash<T>, Number>,
 	surface: SurfaceIterator<'a, Number>,
 
 	extrinsics: VecDeque<(Number, u32)>,
 	blocks: VecDeque<(Number, u32)>,
 
-	_hasher: ::std::marker::PhantomData<H>,
+	_hasher: ::std::marker::PhantomData<T>,
 }
 
-impl<'a, RS, S, H, Number> DrilldownIteratorEssence<'a, RS, S, H, Number>
+impl<'a, RS, S, T, Number> DrilldownIteratorEssence<'a, RS, S, T, Number>
 	where
-		RS: 'a + RootsStorage<H, Number>,
-		S: 'a + Storage<H, Number>,
-		H: Hasher,
+		RS: 'a + RootsStorage<T::H, Number>,
+		S: 'a + Storage<T::H, Number>,
+		T: TrieOps,
 		Number: BlockNumber,
-		H::Out: 'a,
+		TrieHash<T>: 'a,
 {
 	pub fn next<F>(&mut self, trie_reader: F) -> Option<Result<(Number, u32), String>>
 		where
-			F: FnMut(&S, H::Out, &[u8]) -> Result<Option<Vec<u8>>, String>,
+			F: FnMut(&S, TrieHash<T>, &[u8]) -> Result<Option<Vec<u8>>, String>,
 	{
 		match self.do_next(trie_reader) {
 			Ok(Some(res)) => Some(Ok(res)),
@@ -227,7 +228,7 @@ impl<'a, RS, S, H, Number> DrilldownIteratorEssence<'a, RS, S, H, Number>
 
 	fn do_next<F>(&mut self, mut trie_reader: F) -> Result<Option<(Number, u32)>, String>
 		where
-			F: FnMut(&S, H::Out, &[u8]) -> Result<Option<Vec<u8>>, String>,
+			F: FnMut(&S, TrieHash<T>, &[u8]) -> Result<Option<Vec<u8>>, String>,
 	{
 		loop {
 			if let Some((block, extrinsic)) = self.extrinsics.pop_front() {
@@ -286,48 +287,48 @@ impl<'a, RS, S, H, Number> DrilldownIteratorEssence<'a, RS, S, H, Number>
 }
 
 /// Exploring drilldown operator.
-pub struct DrilldownIterator<'a, RS, S, H, Number>
+pub struct DrilldownIterator<'a, RS, S, T, Number>
 	where
 		Number: BlockNumber,
-		H: Hasher,
-		S: 'a + Storage<H, Number>,
-		RS: 'a + RootsStorage<H, Number>,
-		H::Out: 'a,
+		T: TrieOps,
+		S: 'a + Storage<T::H, Number>,
+		RS: 'a + RootsStorage<T::H, Number>,
+		TrieHash<T>: 'a,
 {
-	essence: DrilldownIteratorEssence<'a, RS, S, H, Number>,
+	essence: DrilldownIteratorEssence<'a, RS, S, T, Number>,
 }
 
-impl<'a, RS: 'a + RootsStorage<H, Number>, S: Storage<H, Number>, H: Hasher, Number: BlockNumber> Iterator
-	for DrilldownIterator<'a, RS, S, H, Number>
+impl<'a, RS: 'a + RootsStorage<T::H, Number>, S: Storage<T::H, Number>, T: TrieOps, Number: BlockNumber> Iterator
+	for DrilldownIterator<'a, RS, S, T, Number>
 {
 	type Item = Result<(Number, u32), String>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.essence.next(|storage, root, key|
-			TrieBackendEssence::<_, H>::new(TrieBackendAdapter::new(storage), root).storage(key))
+			TrieBackendEssence::<_, T>::new(TrieBackendAdapter::new(storage), root).storage(key))
 	}
 }
 
 /// Proving drilldown iterator.
-struct ProvingDrilldownIterator<'a, RS, S, H, Number>
+struct ProvingDrilldownIterator<'a, RS, S, T, Number>
 	where
 		Number: BlockNumber,
-		H: Hasher,
-		S: 'a + Storage<H, Number>,
-		RS: 'a + RootsStorage<H, Number>,
-		H::Out: 'a,
+		T: TrieOps,
+		S: 'a + Storage<T::H, Number>,
+		RS: 'a + RootsStorage<T::H, Number>,
+		TrieHash<T>: 'a,
 {
-	essence: DrilldownIteratorEssence<'a, RS, S, H, Number>,
-	proof_recorder: RefCell<Recorder<H::Out>>,
+	essence: DrilldownIteratorEssence<'a, RS, S, T, Number>,
+	proof_recorder: RefCell<Recorder<TrieHash<T>>>,
 }
 
-impl<'a, RS, S, H, Number> ProvingDrilldownIterator<'a, RS, S, H, Number>
+impl<'a, RS, S, T, Number> ProvingDrilldownIterator<'a, RS, S, T, Number>
 	where
 		Number: BlockNumber,
-		H: Hasher,
-		S: 'a + Storage<H, Number>,
-		RS: 'a + RootsStorage<H, Number>,
-		H::Out: 'a,
+		T: TrieOps,
+		S: 'a + Storage<T::H, Number>,
+		RS: 'a + RootsStorage<T::H, Number>,
+		TrieHash<T>: 'a,
 {
 	/// Consume the iterator, extracting the gathered proof in lexicographical order
 	/// by value.
@@ -339,13 +340,13 @@ impl<'a, RS, S, H, Number> ProvingDrilldownIterator<'a, RS, S, H, Number>
 	}
 }
 
-impl<'a, RS, S, H, Number> Iterator for ProvingDrilldownIterator<'a, RS, S, H, Number>
+impl<'a, RS, S, T, Number> Iterator for ProvingDrilldownIterator<'a, RS, S, T, Number>
 	where
 		Number: BlockNumber,
-		H: Hasher,
-		S: 'a + Storage<H, Number>,
-		RS: 'a + RootsStorage<H, Number>,
-		H::Out: 'a,
+		T: TrieOps,
+		S: 'a + Storage<T::H, Number>,
+		RS: 'a + RootsStorage<T::H, Number>,
+		TrieHash<T>: 'a,
 {
 	type Item = Result<(Number, u32), String>;
 
@@ -353,7 +354,7 @@ impl<'a, RS, S, H, Number> Iterator for ProvingDrilldownIterator<'a, RS, S, H, N
 		let proof_recorder = &mut *self.proof_recorder.try_borrow_mut()
 			.expect("only fails when already borrowed; storage() is non-reentrant; qed");
 		self.essence.next(|storage, root, key|
-			ProvingBackendEssence::<_, H> {
+			ProvingBackendEssence::<_, T> {
 				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
 				proof_recorder,
 			}.storage(key))
@@ -445,12 +446,14 @@ mod tests {
 	use std::iter::FromIterator;
 	use primitives::Blake2Hasher;
 	use crate::changes_trie::input::InputPair;
-	use crate::changes_trie::storage::InMemoryStorage;
+	use crate::changes_trie::storage::{InMemoryStorage, with_inputs};
 	use super::*;
+
+	type Layout = trie::Layout<Blake2Hasher>;
 
 	fn prepare_for_drilldown() -> (Configuration, InMemoryStorage<Blake2Hasher, u64>) {
 		let config = Configuration { digest_interval: 4, digest_levels: 2 };
-		let backend = InMemoryStorage::with_inputs(vec![
+		let backend = with_inputs::<Layout, _>(vec![
 			// digest: 1..4 => [(3, 0)]
 			(1, vec![]),
 			(2, vec![]),
@@ -490,27 +493,27 @@ mod tests {
 	#[test]
 	fn drilldown_iterator_works() {
 		let (config, storage) = prepare_for_drilldown();
-		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 0, &AnchorBlockId { hash: Default::default(), number: 16 }, 16, &[42])
 			.and_then(Result::from_iter);
 		assert_eq!(drilldown_result, Ok(vec![(8, 2), (8, 1), (6, 3), (3, 0)]));
 
-		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 0, &AnchorBlockId { hash: Default::default(), number: 2 }, 4, &[42])
 			.and_then(Result::from_iter);
 		assert_eq!(drilldown_result, Ok(vec![]));
 
-		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 0, &AnchorBlockId { hash: Default::default(), number: 3 }, 4, &[42])
 			.and_then(Result::from_iter);
 		assert_eq!(drilldown_result, Ok(vec![(3, 0)]));
 
-		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 7, &AnchorBlockId { hash: Default::default(), number: 8 }, 8, &[42])
 			.and_then(Result::from_iter);
 		assert_eq!(drilldown_result, Ok(vec![(8, 2), (8, 1)]));
 
-		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		let drilldown_result = key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 5, &AnchorBlockId { hash: Default::default(), number: 7 }, 8, &[42])
 			.and_then(Result::from_iter);
 		assert_eq!(drilldown_result, Ok(vec![(6, 3)]));
@@ -521,7 +524,7 @@ mod tests {
 		let (config, storage) = prepare_for_drilldown();
 		storage.clear_storage();
 
-		assert!(key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		assert!(key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 0, &AnchorBlockId { hash: Default::default(), number: 100 }, 1000, &[42])
 			.and_then(|i| i.collect::<Result<Vec<_>, _>>()).is_err());
 	}
@@ -529,9 +532,9 @@ mod tests {
 	#[test]
 	fn drilldown_iterator_fails_when_range_is_invalid() {
 		let (config, storage) = prepare_for_drilldown();
-		assert!(key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		assert!(key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 0, &AnchorBlockId { hash: Default::default(), number: 100 }, 50, &[42]).is_err());
-		assert!(key_changes::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		assert!(key_changes::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&config, &storage, 20, &AnchorBlockId { hash: Default::default(), number: 10 }, 100, &[42]).is_err());
 	}
 
@@ -542,7 +545,7 @@ mod tests {
 
 		// create drilldown iterator that records all trie nodes during drilldown
 		let (remote_config, remote_storage) = prepare_for_drilldown();
-		let remote_proof = key_changes_proof::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		let remote_proof = key_changes_proof::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&remote_config, &remote_storage,
 			0, &AnchorBlockId { hash: Default::default(), number: 16 }, 16, &[42]).unwrap();
 
@@ -551,7 +554,7 @@ mod tests {
 		// create drilldown iterator that works the same, but only depends on trie
 		let (local_config, local_storage) = prepare_for_drilldown();
 		local_storage.clear_storage();
-		let local_result = key_changes_proof_check::<InMemoryStorage<Blake2Hasher, u64>, Blake2Hasher, u64>(
+		let local_result = key_changes_proof_check::<InMemoryStorage<Blake2Hasher, u64>, Layout, u64>(
 			&local_config, &local_storage, remote_proof,
 			0, &AnchorBlockId { hash: Default::default(), number: 16 }, 16, &[42]);
 

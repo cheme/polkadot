@@ -22,6 +22,7 @@ use crate::backend::Backend;
 use crate::changes_trie::{Storage as ChangesTrieStorage, compute_changes_trie_root};
 use crate::{Externalities, OverlayedChanges, OffchainExt, ChildStorageKey};
 use hash_db::Hasher;
+use trie::{TrieOps, TrieHash};
 use primitives::storage::well_known_keys::is_child_storage_key;
 use trie::{MemoryDB, TrieDBMut, TrieMut, default_child_trie_root};
 
@@ -57,10 +58,10 @@ impl<B: error::Error, E: error::Error> error::Error for Error<B, E> {
 }
 
 /// Wraps a read-only backend, call executor, and current overlayed changes.
-pub struct Ext<'a, H, N, B, T, O>
+pub struct Ext<'a, T, N, B, CT, O>
 where
-	H: Hasher,
-	B: 'a + Backend<H>,
+	T: TrieOps,
+	B: 'a + Backend<T>,
 {
 	/// The overlayed changes to write to.
 	overlay: &'a mut OverlayedChanges,
@@ -68,16 +69,16 @@ where
 	backend: &'a B,
 	/// The storage transaction necessary to commit to the backend. Is cached when
 	/// `storage_root` is called and the cache is cleared on every subsequent change.
-	storage_transaction: Option<(B::Transaction, H::Out)>,
+	storage_transaction: Option<(B::Transaction, TrieHash<T>)>,
 	/// Changes trie storage to read from.
-	changes_trie_storage: Option<&'a T>,
+	changes_trie_storage: Option<&'a CT>,
 	/// The changes trie transaction necessary to commit to the changes trie backend.
 	/// Set to Some when `storage_changes_root` is called. Could be replaced later
 	/// by calling `storage_changes_root` again => never used as cache.
 	/// This differs from `storage_transaction` behavior, because the moment when
 	/// `storage_changes_root` is called matters + we need to remember additional
 	/// data at this moment (block number).
-	changes_trie_transaction: Option<(MemoryDB<H>, H::Out)>,
+	changes_trie_transaction: Option<(MemoryDB<T::H>, TrieHash<T>)>,
 	/// Additional externalities for offchain workers.
 	///
 	/// If None, some methods from the trait might not supported.
@@ -86,20 +87,20 @@ where
 	_phantom: ::std::marker::PhantomData<N>,
 }
 
-impl<'a, H, N, B, T, O> Ext<'a, H, N, B, T, O>
+impl<'a, T, N, B, CT, O> Ext<'a, T, N, B, CT, O>
 where
-	H: Hasher,
-	B: 'a + Backend<H>,
-	T: 'a + ChangesTrieStorage<H, N>,
+	T: TrieOps,
+	B: 'a + Backend<T>,
+	CT: 'a + ChangesTrieStorage<T::H, N>,
 	O: 'a + OffchainExt,
-	H::Out: Ord + 'static,
+	TrieHash<T>: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
 	/// Create a new `Ext` from overlayed changes and read-only backend
 	pub fn new(
 		overlay: &'a mut OverlayedChanges,
 		backend: &'a B,
-		changes_trie_storage: Option<&'a T>,
+		changes_trie_storage: Option<&'a CT>,
 		offchain_externalities: Option<&'a mut O>,
 	) -> Self {
 		Ext {
@@ -114,7 +115,7 @@ where
 	}
 
 	/// Get the transaction necessary to update the backend.
-	pub fn transaction(mut self) -> (B::Transaction, Option<MemoryDB<H>>) {
+	pub fn transaction(mut self) -> (B::Transaction, Option<MemoryDB<T::H>>) {
 		let _ = self.storage_root();
 
 		let (storage_transaction, changes_trie_transaction) = (
@@ -140,11 +141,11 @@ where
 }
 
 #[cfg(test)]
-impl<'a, H, N, B, T, O> Ext<'a, H, N, B, T, O>
+impl<'a, T, N, B, CT, O> Ext<'a, T, N, B, CT, O>
 where
-	H: Hasher,
-	B: 'a + Backend<H>,
-	T: 'a + ChangesTrieStorage<H, N>,
+	T: TrieOps,
+	B: 'a + Backend<T>,
+	CT: 'a + ChangesTrieStorage<T::H, N>,
 	O: 'a + OffchainExt,
 	N: crate::changes_trie::BlockNumber,
 {
@@ -162,13 +163,13 @@ where
 	}
 }
 
-impl<'a, B, T, H, N, O> Externalities<H> for Ext<'a, H, N, B, T, O>
+impl<'a, B, CT, T, N, O> Externalities<T> for Ext<'a, T, N, B, CT, O>
 where
-	H: Hasher,
-	B: 'a + Backend<H>,
-	T: 'a + ChangesTrieStorage<H, N>,
+	T: TrieOps,
+	B: 'a + Backend<T>,
+	CT: 'a + ChangesTrieStorage<T::H, N>,
 	O: 'a + OffchainExt,
-	H::Out: Ord + 'static,
+	TrieHash<T>: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
 	fn storage(&self, key: &[u8]) -> Option<Vec<u8>> {
@@ -177,9 +178,9 @@ where
 			self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL))
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Option<H::Out> {
+	fn storage_hash(&self, key: &[u8]) -> Option<TrieHash<T>> {
 		let _guard = panic_handler::AbortGuard::new(true);
-		self.overlay.storage(key).map(|x| x.map(|x| H::hash(x))).unwrap_or_else(||
+		self.overlay.storage(key).map(|x| x.map(|x| T::H::hash(x))).unwrap_or_else(||
 			self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL))
 	}
 
@@ -188,12 +189,12 @@ where
 		self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
 	}
 
-	fn original_storage_hash(&self, key: &[u8]) -> Option<H::Out> {
+	fn original_storage_hash(&self, key: &[u8]) -> Option<TrieHash<T>> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
 	}
 
-	fn child_storage(&self, storage_key: ChildStorageKey<H>, key: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage(&self, storage_key: ChildStorageKey<T::H>, key: &[u8]) -> Option<Vec<u8>> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		self.overlay.child_storage(storage_key.as_ref(), key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
 			self.backend.child_storage(storage_key.as_ref(), key).expect(EXT_NOT_ALLOWED_TO_FAIL))
@@ -207,7 +208,7 @@ where
 		}
 	}
 
-	fn exists_child_storage(&self, storage_key: ChildStorageKey<H>, key: &[u8]) -> bool {
+	fn exists_child_storage(&self, storage_key: ChildStorageKey<T::H>, key: &[u8]) -> bool {
 		let _guard = panic_handler::AbortGuard::new(true);
 
 		match self.overlay.child_storage(storage_key.as_ref(), key) {
@@ -227,14 +228,14 @@ where
 		self.overlay.set_storage(key, value);
 	}
 
-	fn place_child_storage(&mut self, storage_key: ChildStorageKey<H>, key: Vec<u8>, value: Option<Vec<u8>>) {
+	fn place_child_storage(&mut self, storage_key: ChildStorageKey<T::H>, key: Vec<u8>, value: Option<Vec<u8>>) {
 		let _guard = panic_handler::AbortGuard::new(true);
 
 		self.mark_dirty();
 		self.overlay.set_child_storage(storage_key.into_owned(), key, value);
 	}
 
-	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<H>) {
+	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<T::H>) {
 		let _guard = panic_handler::AbortGuard::new(true);
 
 		self.mark_dirty();
@@ -262,7 +263,7 @@ where
 		42
 	}
 
-	fn storage_root(&mut self) -> H::Out {
+	fn storage_root(&mut self) -> TrieHash<T> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		if let Some((_, ref root)) = self.storage_transaction {
 			return root.clone();
@@ -290,13 +291,13 @@ where
 		root
 	}
 
-	fn child_storage_root(&mut self, storage_key: ChildStorageKey<H>) -> Vec<u8> {
+	fn child_storage_root(&mut self, storage_key: ChildStorageKey<T::H>) -> Vec<u8> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		if self.storage_transaction.is_some() {
 			self
 				.storage(storage_key.as_ref())
 				.unwrap_or(
-					default_child_trie_root::<H>(storage_key.as_ref())
+					default_child_trie_root::<T>(storage_key.as_ref())
 				)
 		} else {
 			let storage_key = storage_key.as_ref();
@@ -317,9 +318,9 @@ where
 		}
 	}
 
-	fn storage_changes_root(&mut self, parent_hash: H::Out) -> Result<Option<H::Out>, ()> {
+	fn storage_changes_root(&mut self, parent_hash: TrieHash<T>) -> Result<Option<TrieHash<T>>, ()> {
 		let _guard = panic_handler::AbortGuard::new(true);
-		let root_and_tx = compute_changes_trie_root::<_, T, H, N>(
+		let root_and_tx = compute_changes_trie_root::<_, CT, T, N>(
 			self.backend,
 			self.changes_trie_storage.clone(),
 			self.overlay,
@@ -329,7 +330,7 @@ where
 			let mut calculated_root = Default::default();
 			let mut mdb = MemoryDB::default();
 			{
-				let mut trie = TrieDBMut::<H>::new(&mut mdb, &mut calculated_root);
+				let mut trie = TrieDBMut::<T>::new(&mut mdb, &mut calculated_root);
 				for (key, value) in changes {
 					trie.insert(&key, &value).expect(EXT_NOT_ALLOWED_TO_FAIL);
 				}
@@ -366,9 +367,10 @@ mod tests {
 	use crate::overlayed_changes::OverlayedValue;
 	use super::*;
 
-	type TestBackend = InMemory<Blake2Hasher>;
 	type TestChangesTrieStorage = InMemoryChangesTrieStorage<Blake2Hasher, u64>;
-	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend, TestChangesTrieStorage, crate::NeverOffchainExt>;
+	type Layout = trie::Layout<Blake2Hasher>;
+	type TestBackend = InMemory<Layout>;
+	type TestExt<'a> = Ext<'a, Layout, u64, TestBackend, TestChangesTrieStorage, crate::NeverOffchainExt>;
 
 	fn prepare_overlay_with_changes() -> OverlayedChanges {
 		OverlayedChanges {

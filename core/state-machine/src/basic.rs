@@ -18,8 +18,7 @@
 
 use std::collections::HashMap;
 use std::iter::FromIterator;
-use hash_db::Hasher;
-use trie::trie_root;
+use trie::{TrieOps, TrieHash};
 use primitives::storage::well_known_keys::{CHANGES_TRIE_CONFIG, CODE, HEAP_PAGES};
 use parity_codec::Encode;
 use super::{ChildStorageKey, Externalities, OverlayedChanges};
@@ -102,7 +101,7 @@ impl From< HashMap<Vec<u8>, Vec<u8>> > for BasicExternalities {
 	}
 }
 
-impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
+impl<T: TrieOps> Externalities<T> for BasicExternalities where TrieHash<T>: Ord {
 	fn storage(&self, key: &[u8]) -> Option<Vec<u8>> {
 		match key {
 			CODE => self.code.clone(),
@@ -111,10 +110,10 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 	}
 
 	fn original_storage(&self, key: &[u8]) -> Option<Vec<u8>> {
-		Externalities::<H>::storage(self, key)
+		Externalities::<T>::storage(self, key)
 	}
 
-	fn child_storage(&self, _storage_key: ChildStorageKey<H>, _key: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage(&self, _storage_key: ChildStorageKey<T::H>, _key: &[u8]) -> Option<Vec<u8>> {
 		None
 	}
 
@@ -131,10 +130,14 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 		}
 	}
 
-	fn place_child_storage(&mut self, _storage_key: ChildStorageKey<H>, _key: Vec<u8>, _value: Option<Vec<u8>>) {
-	}
+	fn place_child_storage(
+		&mut self,
+		_storage_key: ChildStorageKey<T::H>,
+		_key: Vec<u8>,
+		_value: Option<Vec<u8>>
+	) { }
 
-	fn kill_child_storage(&mut self, _storage_key: ChildStorageKey<H>) { }
+	fn kill_child_storage(&mut self, _storage_key: ChildStorageKey<T::H>) { }
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {
 		self.changes.clear_prefix(prefix);
@@ -143,15 +146,15 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 
 	fn chain_id(&self) -> u64 { 42 }
 
-	fn storage_root(&mut self) -> H::Out {
-		trie_root::<H, _, _, _>(self.inner.clone())
+	fn storage_root(&mut self) -> TrieHash<T> {
+		T::trie_root(self.inner.clone())
 	}
 
-	fn child_storage_root(&mut self, _storage_key: ChildStorageKey<H>) -> Vec<u8> {
+	fn child_storage_root(&mut self, _storage_key: ChildStorageKey<T::H>) -> Vec<u8> {
 		vec![42]
 	}
 
-	fn storage_changes_root(&mut self, _parent: H::Out) -> Result<Option<H::Out>, ()> {
+	fn storage_changes_root(&mut self, _parent: TrieHash<T>) -> Result<Option<TrieHash<T>>, ()> {
 		Ok(None)
 	}
 
@@ -167,10 +170,12 @@ mod tests {
 	use primitives::{Blake2Hasher, H256};
 	use hex_literal::hex;
 
+	type Layout = trie::Layout<Blake2Hasher>;
+
 	#[test]
 	fn commit_should_work() {
 		let mut ext = BasicExternalities::default();
-		let ext = &mut ext as &mut Externalities<Blake2Hasher>;
+		let ext = &mut ext as &mut Externalities<Layout>;
 		ext.set_storage(b"doe".to_vec(), b"reindeer".to_vec());
 		ext.set_storage(b"dog".to_vec(), b"puppy".to_vec());
 		ext.set_storage(b"dogglesworth".to_vec(), b"cat".to_vec());
@@ -182,7 +187,7 @@ mod tests {
 	#[test]
 	fn set_and_retrieve_code() {
 		let mut ext = BasicExternalities::default();
-		let ext = &mut ext as &mut Externalities<Blake2Hasher>;
+		let ext = &mut ext as &mut Externalities<Layout>;
 
 		let code = vec![1, 2, 3];
 		ext.set_storage(CODE.to_vec(), code.clone());

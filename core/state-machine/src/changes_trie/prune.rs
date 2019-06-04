@@ -16,8 +16,8 @@
 
 //! Changes trie pruning-related functions.
 
-use hash_db::Hasher;
 use trie::Recorder;
+use trie::{TrieOps, TrieHash};
 use log::warn;
 use num_traits::One;
 use crate::proving_backend::ProvingBackendEssence;
@@ -47,11 +47,11 @@ pub fn oldest_non_pruned_trie<Number: BlockNumber>(
 /// `min_blocks_to_keep` blocks. We only prune changes tries at `max_digest_interval`
 /// ranges.
 /// Returns MemoryDB that contains all deleted changes tries nodes.
-pub fn prune<S: Storage<H, Number>, H: Hasher, Number: BlockNumber, F: FnMut(H::Out)>(
+pub fn prune<S: Storage<T::H, Number>, T: TrieOps, Number: BlockNumber, F: FnMut(TrieHash<T>)>(
 	config: &Configuration,
 	storage: &S,
 	min_blocks_to_keep: Number,
-	current_block: &AnchorBlockId<H::Out, Number>,
+	current_block: &AnchorBlockId<TrieHash<T>, Number>,
 	mut remove_trie_node: F,
 ) {
 	// select range for pruning
@@ -84,9 +84,9 @@ pub fn prune<S: Storage<H, Number>, H: Hasher, Number: BlockNumber, F: FnMut(H::
 
 		// enumerate all changes trie' keys, recording all nodes that have been 'touched'
 		// (effectively - all changes trie nodes)
-		let mut proof_recorder: Recorder<H::Out> = Default::default();
+		let mut proof_recorder: Recorder<TrieHash<T>> = Default::default();
 		{
-			let mut trie = ProvingBackendEssence::<_, H> {
+			let mut trie = ProvingBackendEssence::<_, T> {
 				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
 				proof_recorder: &mut proof_recorder,
 			};
@@ -165,11 +165,13 @@ fn max_digest_intervals_to_keep<Number: BlockNumber>(
 #[cfg(test)]
 mod tests {
 	use std::collections::HashSet;
-	use trie::MemoryDB;
+	use trie::{MemoryDB, TrieHash};
 	use primitives::Blake2Hasher;
 	use crate::backend::insert_into_memory_db;
 	use crate::changes_trie::storage::InMemoryStorage;
 	use super::*;
+
+	type Layout = trie::Layout<Blake2Hasher>;
 
 	fn config(interval: u32, levels: u32) -> Configuration {
 		Configuration {
@@ -178,15 +180,17 @@ mod tests {
 		}
 	}
 
-	fn prune_by_collect<S: Storage<H, u64>, H: Hasher>(
+	fn prune_by_collect<S: Storage<T::H, u64>, T: TrieOps>(
 		config: &Configuration,
 		storage: &S,
 		min_blocks_to_keep: u64,
 		current_block: u64,
-	) -> HashSet<H::Out> {
+	) -> HashSet<TrieHash<T>> {
 		let mut pruned_trie_nodes = HashSet::new();
-		prune(config, storage, min_blocks_to_keep, &AnchorBlockId { hash: Default::default(), number: current_block },
-			|node| { pruned_trie_nodes.insert(node); });
+		prune::<_, T, _, _>(config, storage, min_blocks_to_keep, &AnchorBlockId {
+			hash: Default::default(),
+			number: current_block
+		}, |node| { pruned_trie_nodes.insert(node); });
 		pruned_trie_nodes
 	}
 
@@ -194,13 +198,13 @@ mod tests {
 	fn prune_works() {
 		fn prepare_storage() -> InMemoryStorage<Blake2Hasher, u64> {
 			let mut mdb1 = MemoryDB::<Blake2Hasher>::default();
-			let root1 = insert_into_memory_db::<Blake2Hasher, _>(&mut mdb1, vec![(vec![10], vec![20])]).unwrap();
+			let root1 = insert_into_memory_db::<Layout, _>(&mut mdb1, vec![(vec![10], vec![20])]).unwrap();
 			let mut mdb2 = MemoryDB::<Blake2Hasher>::default();
-			let root2 = insert_into_memory_db::<Blake2Hasher, _>(&mut mdb2, vec![(vec![11], vec![21]), (vec![12], vec![22])]).unwrap();
+			let root2 = insert_into_memory_db::<Layout, _>(&mut mdb2, vec![(vec![11], vec![21]), (vec![12], vec![22])]).unwrap();
 			let mut mdb3 = MemoryDB::<Blake2Hasher>::default();
-			let root3 = insert_into_memory_db::<Blake2Hasher, _>(&mut mdb3, vec![(vec![13], vec![23]), (vec![14], vec![24])]).unwrap();
+			let root3 = insert_into_memory_db::<Layout, _>(&mut mdb3, vec![(vec![13], vec![23]), (vec![14], vec![24])]).unwrap();
 			let mut mdb4 = MemoryDB::<Blake2Hasher>::default();
-			let root4 = insert_into_memory_db::<Blake2Hasher, _>(&mut mdb4, vec![(vec![15], vec![25])]).unwrap();
+			let root4 = insert_into_memory_db::<Layout, _>(&mut mdb4, vec![(vec![15], vec![25])]).unwrap();
 			let storage = InMemoryStorage::new();
 			storage.insert(65, root1, mdb1);
 			storage.insert(66, root2, mdb2);
@@ -216,10 +220,10 @@ mod tests {
 		// => only one l2-digest is saved AND it is pruned once next is created
 		let config = Configuration { digest_interval: 2, digest_levels: 2 };
 		let storage = prepare_storage();
-		assert!(prune_by_collect(&config, &storage, 0, 69).is_empty());
-		assert!(prune_by_collect(&config, &storage, 0, 70).is_empty());
-		assert!(prune_by_collect(&config, &storage, 0, 71).is_empty());
-		let non_empty = prune_by_collect(&config, &storage, 0, 72);
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 0, 69).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 0, 70).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 0, 71).is_empty());
+		let non_empty = prune_by_collect::<_, Layout>(&config, &storage, 0, 72);
 		assert!(!non_empty.is_empty());
 		storage.remove_from_storage(&non_empty);
 		assert!(storage.into_mdb().drain().is_empty());
@@ -229,14 +233,14 @@ mod tests {
 		// we want keep 1 additional changes tries
 		let config = Configuration { digest_interval: 2, digest_levels: 2 };
 		let storage = prepare_storage();
-		assert!(prune_by_collect(&config, &storage, 8, 69).is_empty());
-		assert!(prune_by_collect(&config, &storage, 8, 70).is_empty());
-		assert!(prune_by_collect(&config, &storage, 8, 71).is_empty());
-		assert!(prune_by_collect(&config, &storage, 8, 72).is_empty());
-		assert!(prune_by_collect(&config, &storage, 8, 73).is_empty());
-		assert!(prune_by_collect(&config, &storage, 8, 74).is_empty());
-		assert!(prune_by_collect(&config, &storage, 8, 75).is_empty());
-		let non_empty = prune_by_collect(&config, &storage, 8, 76);
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 8, 69).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 8, 70).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 8, 71).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 8, 72).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 8, 73).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 8, 74).is_empty());
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 8, 75).is_empty());
+		let non_empty = prune_by_collect::<_, Layout>(&config, &storage, 8, 76);
 		assert!(!non_empty.is_empty());
 		storage.remove_from_storage(&non_empty);
 		assert!(storage.into_mdb().drain().is_empty());
@@ -245,12 +249,12 @@ mod tests {
 		// we want keep 2 additional changes tries
 		let config = Configuration { digest_interval: 2, digest_levels: 1 };
 		let storage = prepare_storage();
-		assert!(prune_by_collect(&config, &storage, 4, 69).is_empty());
-		let non_empty = prune_by_collect(&config, &storage, 4, 70);
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 4, 69).is_empty());
+		let non_empty = prune_by_collect::<_, Layout>(&config, &storage, 4, 70);
 		assert!(!non_empty.is_empty());
 		storage.remove_from_storage(&non_empty);
-		assert!(prune_by_collect(&config, &storage, 4, 71).is_empty());
-		let non_empty = prune_by_collect(&config, &storage, 4, 72);
+		assert!(prune_by_collect::<_, Layout>(&config, &storage, 4, 71).is_empty());
+		let non_empty = prune_by_collect::<_, Layout>(&config, &storage, 4, 72);
 		assert!(!non_empty.is_empty());
 		storage.remove_from_storage(&non_empty);
 		assert!(storage.into_mdb().drain().is_empty());

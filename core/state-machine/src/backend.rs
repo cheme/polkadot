@@ -24,13 +24,13 @@ use log::warn;
 use hash_db::Hasher;
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::TrieBackendStorage;
-use trie::{TrieDBMut, TrieMut, MemoryDB, trie_root, child_trie_root, default_child_trie_root};
+use trie::{TrieDBMut, TrieMut, MemoryDB, TrieOps, child_trie_root, default_child_trie_root, TrieHash};
 
 /// A state backend is used to read state data and can have changes committed
 /// to it.
 ///
 /// The clone operation (if implemented) should be cheap.
-pub trait Backend<H: Hasher> {
+pub trait Backend<T: TrieOps> {
 	/// An error type when fetching data is not possible.
 	type Error: super::Error;
 
@@ -38,14 +38,14 @@ pub trait Backend<H: Hasher> {
 	type Transaction: Consolidate + Default;
 
 	/// Type of trie backend storage.
-	type TrieBackendStorage: TrieBackendStorage<H>;
+	type TrieBackendStorage: TrieBackendStorage<T::H>;
 
 	/// Get keyed storage or None if there is nothing associated.
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
 
 	/// Get keyed storage value hash or None if there is nothing associated.
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
-		self.storage(key).map(|v| v.map(|v| H::hash(&v)))
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<TrieHash<T>>, Self::Error> {
+		self.storage(key).map(|v| v.map(|v| T::H::hash(&v)))
 	}
 
 	/// Get keyed child storage or None if there is nothing associated.
@@ -71,10 +71,10 @@ pub trait Backend<H: Hasher> {
 	/// Calculate the storage root, with given delta over what is already stored in
 	/// the backend, and produce a "transaction" that can be used to commit.
 	/// Does not include child storage updates.
-	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
+	fn storage_root<I>(&self, delta: I) -> (TrieHash<T>, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		H::Out: Ord;
+		TrieHash<T>: Ord;
 
 	/// Calculate the child storage root, with given delta over what is already stored in
 	/// the backend, and produce a "transaction" that can be used to commit. The second argument
@@ -82,7 +82,7 @@ pub trait Backend<H: Hasher> {
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		H::Out: Ord;
+		TrieHash<T>: Ord;
 
 	/// Get all key/value pairs into a Vec.
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)>;
@@ -106,7 +106,7 @@ pub trait Backend<H: Hasher> {
 	}
 
 	/// Try convert into trie backend.
-	fn try_into_trie_backend(self) -> Option<TrieBackend<Self::TrieBackendStorage, H>>;
+	fn try_into_trie_backend(self) -> Option<TrieBackend<Self::TrieBackendStorage, T>>;
 
 	/// Calculate the storage root, with given delta over what is already stored
 	/// in the backend, and produce a "transaction" that can be used to commit.
@@ -115,12 +115,12 @@ pub trait Backend<H: Hasher> {
 		&self,
 		delta: I1,
 		child_deltas: I2)
-	-> (H::Out, Self::Transaction)
+	-> (TrieHash<T>, Self::Transaction)
 	where
 		I1: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		I2i: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		I2: IntoIterator<Item=(Vec<u8>, I2i)>,
-		<H as Hasher>::Out: Ord,
+		TrieHash<T>: Ord,
 	{
 		let mut txs: Self::Transaction = Default::default();
 		let mut child_roots: Vec<_> = Default::default();
@@ -186,12 +186,12 @@ impl error::Error for Void {
 /// In-memory backend. Fully recomputes tries on each commit but useful for
 /// tests.
 #[derive(Eq)]
-pub struct InMemory<H> {
+pub struct InMemory<T> {
 	inner: HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>,
-	_hasher: PhantomData<H>,
+	_hasher: PhantomData<T>,
 }
 
-impl<H> Default for InMemory<H> {
+impl<T> Default for InMemory<T> {
 	fn default() -> Self {
 		InMemory {
 			inner: Default::default(),
@@ -200,7 +200,7 @@ impl<H> Default for InMemory<H> {
 	}
 }
 
-impl<H> Clone for InMemory<H> {
+impl<T> Clone for InMemory<T> {
 	fn clone(&self) -> Self {
 		InMemory {
 			inner: self.inner.clone(),
@@ -209,15 +209,15 @@ impl<H> Clone for InMemory<H> {
 	}
 }
 
-impl<H> PartialEq for InMemory<H> {
+impl<T> PartialEq for InMemory<T> {
 	fn eq(&self, other: &Self) -> bool {
 		self.inner.eq(&other.inner)
 	}
 }
 
-impl<H: Hasher> InMemory<H> {
+impl<T: TrieOps> InMemory<T> {
 	/// Copy the state, with applied updates
-	pub fn update(&self, changes: <Self as Backend<H>>::Transaction) -> Self {
+	pub fn update(&self, changes: <Self as Backend<T>>::Transaction) -> Self {
 		let mut inner: HashMap<_, _> = self.inner.clone();
 		for (storage_key, key, val) in changes {
 			match val {
@@ -230,7 +230,7 @@ impl<H: Hasher> InMemory<H> {
 	}
 }
 
-impl<H> From<HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>> for InMemory<H> {
+impl<T> From<HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>> for InMemory<T> {
 	fn from(inner: HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>) -> Self {
 		InMemory {
 			inner: inner,
@@ -239,7 +239,7 @@ impl<H> From<HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>> for InMemory<H
 	}
 }
 
-impl<H> From<HashMap<Vec<u8>, Vec<u8>>> for InMemory<H> {
+impl<T> From<HashMap<Vec<u8>, Vec<u8>>> for InMemory<T> {
 	fn from(inner: HashMap<Vec<u8>, Vec<u8>>) -> Self {
 		let mut expanded = HashMap::new();
 		expanded.insert(None, inner);
@@ -250,7 +250,7 @@ impl<H> From<HashMap<Vec<u8>, Vec<u8>>> for InMemory<H> {
 	}
 }
 
-impl<H> From<Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>> for InMemory<H> {
+impl<T> From<Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>> for InMemory<T> {
 	fn from(inner: Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>) -> Self {
 		let mut expanded: HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>> = HashMap::new();
 		for (child_key, key, value) in inner {
@@ -264,17 +264,17 @@ impl<H> From<Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>> for InMemory<H> {
 
 impl super::Error for Void {}
 
-impl<H: Hasher> InMemory<H> {
+impl<T: TrieOps> InMemory<T> {
 	/// child storage key iterator
 	pub fn child_storage_keys(&self) -> impl Iterator<Item=&[u8]> {
 		self.inner.iter().filter_map(|item| item.0.as_ref().map(|v|&v[..]))
 	}
 }
 
-impl<H: Hasher> Backend<H> for InMemory<H> {
+impl<T: TrieOps> Backend<T> for InMemory<T> {
 	type Error = Void;
 	type Transaction = Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>;
-	type TrieBackendStorage = MemoryDB<H>;
+	type TrieBackendStorage = MemoryDB<T::H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		Ok(self.inner.get(&None).and_then(|map| map.get(key).map(Clone::clone)))
@@ -296,17 +296,17 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 		self.inner.get(&Some(storage_key.to_vec())).map(|map| map.keys().for_each(|k| f(&k)));
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
+	fn storage_root<I>(&self, delta: I) -> (TrieHash<T>, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		<H as Hasher>::Out: Ord,
+		TrieHash<T>: Ord,
 	{
 		let existing_pairs = self.inner.get(&None)
 			.into_iter()
 			.flat_map(|map| map.iter().map(|(k, v)| (k.clone(), Some(v.clone()))));
 
 		let transaction: Vec<_> = delta.into_iter().collect();
-		let root = trie_root::<H, _, _, _>(existing_pairs.chain(transaction.iter().cloned())
+		let root = T::trie_root(existing_pairs.chain(transaction.iter().cloned())
 			.collect::<HashMap<_, _>>()
 			.into_iter()
 			.filter_map(|(k, maybe_val)| maybe_val.map(|val| (k, val)))
@@ -320,7 +320,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		H::Out: Ord
+		TrieHash<T>: Ord
 	{
 		let storage_key = storage_key.to_vec();
 
@@ -329,7 +329,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 			.flat_map(|map| map.iter().map(|(k, v)| (k.clone(), Some(v.clone()))));
 
 		let transaction: Vec<_> = delta.into_iter().collect();
-		let root = child_trie_root::<H, _, _, _>(
+		let root = child_trie_root::<T, _, _, _>(
 			&storage_key,
 			existing_pairs.chain(transaction.iter().cloned())
 				.collect::<HashMap<_, _>>()
@@ -339,7 +339,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 
 		let full_transaction = transaction.into_iter().map(|(k, v)| (Some(storage_key.clone()), k, v)).collect();
 
-		let is_default = root == default_child_trie_root::<H>(&storage_key);
+		let is_default = root == default_child_trie_root::<T>(&storage_key);
 
 		(root, is_default, full_transaction)
 	}
@@ -367,14 +367,14 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 
 	fn try_into_trie_backend(
 		self
-	)-> Option<TrieBackend<Self::TrieBackendStorage, H>> {
+	)-> Option<TrieBackend<Self::TrieBackendStorage, T>> {
 		let mut mdb = MemoryDB::default();
 		let mut root = None;
 		let mut new_child_roots = Vec::new();
 		let mut root_map = None;
 		for (storage_key, map) in self.inner {
 			if let Some(storage_key) = storage_key.as_ref() {
-				let ch = insert_into_memory_db::<H, _>(&mut mdb, map.into_iter())?;
+				let ch = insert_into_memory_db::<T, _>(&mut mdb, map.into_iter())?;
 				new_child_roots.push((storage_key.clone(), ch.as_ref().into()));
 			} else {
 				root_map = Some(map);
@@ -382,28 +382,27 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 		}
 		// root handling
 		if let Some(map) = root_map.take() {
-			root = Some(insert_into_memory_db::<H, _>(
+			root = Some(insert_into_memory_db::<T, _>(
 				&mut mdb,
 				map.into_iter().chain(new_child_roots.into_iter())
 			)?);
 		}
 		let root = match root {
 			Some(root) => root,
-			None => insert_into_memory_db::<H, _>(&mut mdb, ::std::iter::empty())?,
+			None => insert_into_memory_db::<T, _>(&mut mdb, ::std::iter::empty())?,
 		};
 		Some(TrieBackend::new(mdb, root))
 	}
 }
 
 /// Insert input pairs into memory db.
-pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut MemoryDB<H>, input: I) -> Option<H::Out>
+pub(crate) fn insert_into_memory_db<T: TrieOps, I>(mdb: &mut MemoryDB<T::H>, input: I) -> Option<TrieHash<T>>
 	where
-		H: Hasher,
 		I: IntoIterator<Item=(Vec<u8>, Vec<u8>)>,
 {
-	let mut root = <H as Hasher>::Out::default();
+	let mut root = TrieHash::<T>::default();
 	{
-		let mut trie = TrieDBMut::<H>::new(mdb, &mut root);
+		let mut trie = TrieDBMut::<T>::new(mdb, &mut root);
 		for (key, value) in input {
 			if let Err(e) = trie.insert(&key, &value) {
 				warn!(target: "trie", "Failed to write to trie: {}", e);

@@ -38,7 +38,7 @@ mod trie_backend;
 mod trie_backend_essence;
 
 use overlayed_changes::OverlayedChangeSet;
-pub use trie::{TrieMut, TrieDBMut, DBValue, MemoryDB};
+pub use trie::{TrieMut, TrieDBMut, DBValue, MemoryDB, TrieOps, TrieHash};
 pub use testing::TestExternalities;
 pub use basic::BasicExternalities;
 pub use ext::Ext;
@@ -143,13 +143,13 @@ impl fmt::Display for ExecutionError {
 type CallResult<R, E> = Result<NativeOrEncoded<R>, E>;
 
 /// Externalities: pinned to specific active address.
-pub trait Externalities<H: Hasher> {
+pub trait Externalities<T: TrieOps> {
 	/// Read runtime storage.
 	fn storage(&self, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Get storage value hash. This may be optimized for large values.
-	fn storage_hash(&self, key: &[u8]) -> Option<H::Out> {
-		self.storage(key).map(|v| H::hash(&v))
+	fn storage_hash(&self, key: &[u8]) -> Option<TrieHash<T>> {
+		self.storage(key).map(|v| T::H::hash(&v))
 	}
 
 	/// Read original runtime storage, ignoring any overlayed changes.
@@ -157,12 +157,12 @@ pub trait Externalities<H: Hasher> {
 
 	/// Get original storage value hash, ignoring any overlayed changes.
 	/// This may be optimized for large values.
-	fn original_storage_hash(&self, key: &[u8]) -> Option<H::Out> {
-		self.original_storage(key).map(|v| H::hash(&v))
+	fn original_storage_hash(&self, key: &[u8]) -> Option<TrieHash<T>> {
+		self.original_storage(key).map(|v| T::H::hash(&v))
 	}
 
 	/// Read child runtime storage.
-	fn child_storage(&self, storage_key: ChildStorageKey<H>, key: &[u8]) -> Option<Vec<u8>>;
+	fn child_storage(&self, storage_key: ChildStorageKey<T::H>, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Set storage entry `key` of current contract being called (effective immediately).
 	fn set_storage(&mut self, key: Vec<u8>, value: Vec<u8>) {
@@ -170,7 +170,7 @@ pub trait Externalities<H: Hasher> {
 	}
 
 	/// Set child storage entry `key` of current contract being called (effective immediately).
-	fn set_child_storage(&mut self, storage_key: ChildStorageKey<H>, key: Vec<u8>, value: Vec<u8>) {
+	fn set_child_storage(&mut self, storage_key: ChildStorageKey<T::H>, key: Vec<u8>, value: Vec<u8>) {
 		self.place_child_storage(storage_key, key, Some(value))
 	}
 
@@ -180,7 +180,7 @@ pub trait Externalities<H: Hasher> {
 	}
 
 	/// Clear a child storage entry (`key`) of current contract being called (effective immediately).
-	fn clear_child_storage(&mut self, storage_key: ChildStorageKey<H>, key: &[u8]) {
+	fn clear_child_storage(&mut self, storage_key: ChildStorageKey<T::H>, key: &[u8]) {
 		self.place_child_storage(storage_key, key.to_vec(), None)
 	}
 
@@ -190,12 +190,12 @@ pub trait Externalities<H: Hasher> {
 	}
 
 	/// Whether a child storage entry exists.
-	fn exists_child_storage(&self, storage_key: ChildStorageKey<H>, key: &[u8]) -> bool {
+	fn exists_child_storage(&self, storage_key: ChildStorageKey<T::H>, key: &[u8]) -> bool {
 		self.child_storage(storage_key, key).is_some()
 	}
 
 	/// Clear an entire child storage.
-	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<H>);
+	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<T::H>);
 
 	/// Clear storage entries which keys are start with the given prefix.
 	fn clear_prefix(&mut self, prefix: &[u8]);
@@ -204,22 +204,22 @@ pub trait Externalities<H: Hasher> {
 	fn place_storage(&mut self, key: Vec<u8>, value: Option<Vec<u8>>);
 
 	/// Set or clear a child storage entry. Return whether the operation succeeds.
-	fn place_child_storage(&mut self, storage_key: ChildStorageKey<H>, key: Vec<u8>, value: Option<Vec<u8>>);
+	fn place_child_storage(&mut self, storage_key: ChildStorageKey<T::H>, key: Vec<u8>, value: Option<Vec<u8>>);
 
 	/// Get the identity of the chain.
 	fn chain_id(&self) -> u64;
 
 	/// Get the trie root of the current storage map. This will also update all child storage keys in the top-level storage map.
-	fn storage_root(&mut self) -> H::Out where H::Out: Ord;
+	fn storage_root(&mut self) -> TrieHash<T> where TrieHash<T>: Ord;
 
 	/// Get the trie root of a child storage map. This will also update the value of the child
 	/// storage keys in the top-level storage map.
 	/// If the storage root equals the default hash as defined by the trie, the key in the top-level
 	/// storage map will be removed.
-	fn child_storage_root(&mut self, storage_key: ChildStorageKey<H>) -> Vec<u8>;
+	fn child_storage_root(&mut self, storage_key: ChildStorageKey<T::H>) -> Vec<u8>;
 
 	/// Get the change trie root of the current storage overlay at a block with given parent.
-	fn storage_changes_root(&mut self, parent: H::Out) -> Result<Option<H::Out>, ()> where H::Out: Ord;
+	fn storage_changes_root(&mut self, parent: TrieHash<T>) -> Result<Option<TrieHash<T>>, ()> where TrieHash<T>: Ord;
 
 	/// Submit extrinsic.
 	///
@@ -242,14 +242,14 @@ impl OffchainExt for NeverOffchainExt {
 }
 
 /// Code execution engine.
-pub trait CodeExecutor<H: Hasher>: Sized + Send + Sync {
+pub trait CodeExecutor<T: TrieOps>: Sized + Send + Sync {
 	/// Externalities error type.
 	type Error: Error;
 
 	/// Call a given method in the runtime. Returns a tuple of the result (either the output data
 	/// or an execution error) together with a `bool`, which is true if native execution was used.
 	fn call<
-		E: Externalities<H>, R: Encode + Decode + PartialEq, NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe
+		E: Externalities<T>, R: Encode + Decode + PartialEq, NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe
 	>(
 		&self,
 		ext: &mut E,
@@ -371,13 +371,13 @@ pub struct StateMachine<'a, H, N, B, T, O, Exec> {
 	_hasher: PhantomData<(H, N)>,
 }
 
-impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
-	H: Hasher,
-	Exec: CodeExecutor<H>,
-	B: Backend<H>,
-	T: ChangesTrieStorage<H, N>,
+impl<'a, T, N, B, CT, O, Exec> StateMachine<'a, T, N, B, CT, O, Exec> where
+	T: TrieOps,
+	Exec: CodeExecutor<T>,
+	B: Backend<T>,
+	CT: ChangesTrieStorage<T::H, N>,
 	O: OffchainExt,
-	H::Out: Ord + 'static,
+	TrieHash<T>: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
 	/// Execute a call using the given state backend, overlayed changes, and call executor.
@@ -391,7 +391,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 	pub fn execute(
 		&mut self,
 		strategy: ExecutionStrategy,
-	) -> Result<(Vec<u8>, B::Transaction, Option<MemoryDB<H>>), Box<Error>> {
+	) -> Result<(Vec<u8>, B::Transaction, Option<MemoryDB<T::H>>), Box<Error>> {
 		// We are not giving a native call and thus we are sure that the result can never be a native
 		// value.
 		self.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
@@ -411,7 +411,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		compute_tx: bool,
 		use_native: bool,
 		native_call: Option<NC>,
-	) -> (CallResult<R, Exec::Error>, bool, Option<B::Transaction>, Option<MemoryDB<H>>) where
+	) -> (CallResult<R, Exec::Error>, bool, Option<B::Transaction>, Option<MemoryDB<T::H>>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	{
@@ -444,7 +444,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		mut native_call: Option<NC>,
 		orig_prospective: OverlayedChangeSet,
 		on_consensus_failure: Handler,
-	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>) where
+	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<T::H>>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 		Handler: FnOnce(
@@ -475,7 +475,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		compute_tx: bool,
 		mut native_call: Option<NC>,
 		orig_prospective: OverlayedChangeSet,
-	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>) where
+	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<T::H>>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	{
@@ -503,7 +503,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		manager: ExecutionManager<Handler>,
 		compute_tx: bool,
 		mut native_call: Option<NC>,
-	) -> Result<(NativeOrEncoded<R>, Option<B::Transaction>, Option<MemoryDB<H>>), Box<Error>> where
+	) -> Result<(NativeOrEncoded<R>, Option<B::Transaction>, Option<MemoryDB<T::H>>), Box<Error>> where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 		Handler: FnOnce(
@@ -558,7 +558,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 }
 
 /// Prove execution using the given state backend, overlayed changes, and call executor.
-pub fn prove_execution<B, H, Exec>(
+pub fn prove_execution<B, T, Exec>(
 	backend: B,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
@@ -566,10 +566,10 @@ pub fn prove_execution<B, H, Exec>(
 	call_data: &[u8],
 ) -> Result<(Vec<u8>, Vec<Vec<u8>>), Box<Error>>
 where
-	B: Backend<H>,
-	H: Hasher,
-	Exec: CodeExecutor<H>,
-	H::Out: Ord + 'static,
+	B: Backend<T>,
+	T: TrieOps,
+	Exec: CodeExecutor<T>,
+	TrieHash<T>: Ord + 'static,
 {
 	let trie_backend = backend.try_into_trie_backend()
 		.ok_or_else(|| Box::new(ExecutionError::UnableToGenerateProof) as Box<Error>)?;
@@ -585,23 +585,23 @@ where
 ///
 /// Note: changes to code will be in place if this call is made again. For running partial
 /// blocks (e.g. a transaction at a time), ensure a different method is used.
-pub fn prove_execution_on_trie_backend<S, H, Exec>(
-	trie_backend: &TrieBackend<S, H>,
+pub fn prove_execution_on_trie_backend<S, T, Exec>(
+	trie_backend: &TrieBackend<S, T>,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
 	method: &str,
 	call_data: &[u8],
 ) -> Result<(Vec<u8>, Vec<Vec<u8>>), Box<Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<H>,
-	H: Hasher,
-	Exec: CodeExecutor<H>,
-	H::Out: Ord + 'static,
+	S: trie_backend_essence::TrieBackendStorage<T::H>,
+	T: TrieOps,
+	Exec: CodeExecutor<T>,
+	TrieHash<T>: Ord + 'static,
 {
 	let proving_backend = proving_backend::ProvingBackend::new(trie_backend);
 	let mut sm = StateMachine {
 		backend: &proving_backend,
-		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<H, u64>>,
+		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<T::H, u64>>,
 		offchain_ext: NeverOffchainExt::new(),
 		overlay,
 		exec,
@@ -619,8 +619,8 @@ where
 }
 
 /// Check execution proof, generated by `prove_execution` call.
-pub fn execution_proof_check<H, Exec>(
-	root: H::Out,
+pub fn execution_proof_check<T, Exec>(
+	root: TrieHash<T>,
 	proof: Vec<Vec<u8>>,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
@@ -628,30 +628,30 @@ pub fn execution_proof_check<H, Exec>(
 	call_data: &[u8],
 ) -> Result<Vec<u8>, Box<Error>>
 where
-	H: Hasher,
-	Exec: CodeExecutor<H>,
-	H::Out: Ord + 'static,
+	T: TrieOps,
+	Exec: CodeExecutor<T>,
+	TrieHash<T>: Ord + 'static,
 {
-	let trie_backend = create_proof_check_backend::<H>(root.into(), proof)?;
+	let trie_backend = create_proof_check_backend::<T>(root.into(), proof)?;
 	execution_proof_check_on_trie_backend(&trie_backend, overlay, exec, method, call_data)
 }
 
 /// Check execution proof on proving backend, generated by `prove_execution` call.
-pub fn execution_proof_check_on_trie_backend<H, Exec>(
-	trie_backend: &TrieBackend<MemoryDB<H>, H>,
+pub fn execution_proof_check_on_trie_backend<T, Exec>(
+	trie_backend: &TrieBackend<MemoryDB<T::H>, T>,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
 	method: &str,
 	call_data: &[u8],
 ) -> Result<Vec<u8>, Box<Error>>
 where
-	H: Hasher,
-	Exec: CodeExecutor<H>,
-	H::Out: Ord + 'static,
+	T: TrieOps,
+	Exec: CodeExecutor<T>,
+	TrieHash<T>: Ord + 'static,
 {
 	let mut sm = StateMachine {
 		backend: trie_backend,
-		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<H, u64>>,
+		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<T::H, u64>>,
 		offchain_ext: NeverOffchainExt::new(),
 		overlay,
 		exec,
@@ -667,14 +667,14 @@ where
 }
 
 /// Generate storage read proof.
-pub fn prove_read<B, H>(
+pub fn prove_read<B, T>(
 	backend: B,
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<Error>>
 where
-	B: Backend<H>,
-	H: Hasher,
-	H::Out: Ord
+	B: Backend<T>,
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
 	let trie_backend = backend.try_into_trie_backend()
 		.ok_or_else(
@@ -684,15 +684,15 @@ where
 }
 
 /// Generate child storage read proof.
-pub fn prove_child_read<B, H>(
+pub fn prove_child_read<B, T>(
 	backend: B,
 	storage_key: &[u8],
 	key: &[u8],
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<Error>>
 where
-	B: Backend<H>,
-	H: Hasher,
-	H::Out: Ord
+	B: Backend<T>,
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
 	let trie_backend = backend.try_into_trie_backend()
 		.ok_or_else(|| Box::new(ExecutionError::UnableToGenerateProof) as Box<Error>)?;
@@ -701,88 +701,88 @@ where
 
 
 /// Generate storage read proof on pre-created trie backend.
-pub fn prove_read_on_trie_backend<S, H>(
-	trie_backend: &TrieBackend<S, H>,
+pub fn prove_read_on_trie_backend<S, T>(
+	trie_backend: &TrieBackend<S, T>,
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<H>,
-	H: Hasher,
-	H::Out: Ord
+	S: trie_backend_essence::TrieBackendStorage<T::H>,
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
-	let proving_backend = proving_backend::ProvingBackend::<_, H>::new(trie_backend);
+	let proving_backend = proving_backend::ProvingBackend::<_, T>::new(trie_backend);
 	let result = proving_backend.storage(key).map_err(|e| Box::new(e) as Box<Error>)?;
 	Ok((result, proving_backend.extract_proof()))
 }
 
 /// Generate storage read proof on pre-created trie backend.
-pub fn prove_child_read_on_trie_backend<S, H>(
-	trie_backend: &TrieBackend<S, H>,
+pub fn prove_child_read_on_trie_backend<S, T>(
+	trie_backend: &TrieBackend<S, T>,
 	storage_key: &[u8],
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<H>,
-	H: Hasher,
-	H::Out: Ord
+	S: trie_backend_essence::TrieBackendStorage<T::H>,
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
-	let proving_backend = proving_backend::ProvingBackend::<_, H>::new(trie_backend);
+	let proving_backend = proving_backend::ProvingBackend::<_, T>::new(trie_backend);
 	let result = proving_backend.child_storage(storage_key, key)
 		.map_err(|e| Box::new(e) as Box<Error>)?;
 	Ok((result, proving_backend.extract_proof()))
 }
 
 /// Check storage read proof, generated by `prove_read` call.
-pub fn read_proof_check<H>(
-	root: H::Out,
+pub fn read_proof_check<T>(
+	root: TrieHash<T>,
 	proof: Vec<Vec<u8>>,
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<Error>>
 where
-	H: Hasher,
-	H::Out: Ord
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
-	let proving_backend = create_proof_check_backend::<H>(root, proof)?;
+	let proving_backend = create_proof_check_backend::<T>(root, proof)?;
 	read_proof_check_on_proving_backend(&proving_backend, key)
 }
 
 /// Check child storage read proof, generated by `prove_child_read` call.
-pub fn read_child_proof_check<H>(
-	root: H::Out,
+pub fn read_child_proof_check<T>(
+	root: TrieHash<T>,
 	proof: Vec<Vec<u8>>,
 	storage_key: &[u8],
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<Error>>
 where
-	H: Hasher,
-	H::Out: Ord
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
-	let proving_backend = create_proof_check_backend::<H>(root, proof)?;
+	let proving_backend = create_proof_check_backend::<T>(root, proof)?;
 	read_child_proof_check_on_proving_backend(&proving_backend, storage_key, key)
 }
 
 
 /// Check storage read proof on pre-created proving backend.
-pub fn read_proof_check_on_proving_backend<H>(
-	proving_backend: &TrieBackend<MemoryDB<H>, H>,
+pub fn read_proof_check_on_proving_backend<T>(
+	proving_backend: &TrieBackend<MemoryDB<T::H>, T>,
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<Error>>
 where
-	H: Hasher,
-	H::Out: Ord
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
 	proving_backend.storage(key).map_err(|e| Box::new(e) as Box<Error>)
 }
 
 /// Check child storage read proof on pre-created proving backend.
-pub fn read_child_proof_check_on_proving_backend<H>(
-	proving_backend: &TrieBackend<MemoryDB<H>, H>,
+pub fn read_child_proof_check_on_proving_backend<T>(
+	proving_backend: &TrieBackend<MemoryDB<T::H>, T>,
 	storage_key: &[u8],
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<Error>>
 where
-	H: Hasher,
-	H::Out: Ord
+	T: TrieOps,
+	TrieHash<T>: Ord
 {
 	proving_backend.child_storage(storage_key, key).map_err(|e| Box::new(e) as Box<Error>)
 }
@@ -809,12 +809,11 @@ pub(crate) fn set_changes_trie_config(overlay: &mut OverlayedChanges, config: Op
 }
 
 /// Reads storage value from overlay or from the backend.
-fn try_read_overlay_value<H, B>(overlay: &OverlayedChanges, backend: &B, key: &[u8])
+fn try_read_overlay_value<T, B>(overlay: &OverlayedChanges, backend: &B, key: &[u8])
 	-> Result<Option<Vec<u8>>, Box<Error>>
 where
-	H: Hasher,
-
-	B: Backend<H>,
+	T: TrieOps,
+	B: Backend<T>,
 {
 	match overlay.storage(key).map(|x| x.map(|x| x.to_vec())) {
 		Some(value) => Ok(value),
@@ -837,6 +836,7 @@ mod tests {
 	};
 	use primitives::{Blake2Hasher, map};
 
+	type Layout = trie::Layout<Blake2Hasher>;
 	struct DummyCodeExecutor {
 		change_changes_trie_config: bool,
 		native_available: bool,
@@ -844,10 +844,10 @@ mod tests {
 		fallback_succeeds: bool,
 	}
 
-	impl<H: Hasher> CodeExecutor<H> for DummyCodeExecutor {
+	impl<T: TrieOps> CodeExecutor<T> for DummyCodeExecutor {
 		type Error = u8;
 
-		fn call<E: Externalities<H>, R: Encode + Decode + PartialEq, NC: FnOnce() -> result::Result<R, &'static str>>(
+		fn call<E: Externalities<T>, R: Encode + Decode + PartialEq, NC: FnOnce() -> result::Result<R, &'static str>>(
 			&self,
 			ext: &mut E,
 			_method: &str,
@@ -974,7 +974,7 @@ mod tests {
 			&mut Default::default(), &executor, "test", &[]).unwrap();
 
 		// check proof locally
-		let local_result = execution_proof_check::<Blake2Hasher, _>(remote_root, remote_proof,
+		let local_result = execution_proof_check::<Layout, _>(remote_root, remote_proof,
 			&mut Default::default(), &executor, "test", &[]).unwrap();
 
 		// check that both results are correct
@@ -990,7 +990,7 @@ mod tests {
 			b"abc".to_vec() => b"2".to_vec(),
 			b"bbb".to_vec() => b"3".to_vec()
 		];
-		let backend = InMemory::<Blake2Hasher>::from(initial).try_into_trie_backend().unwrap();
+		let backend = InMemory::<Layout>::from(initial).try_into_trie_backend().unwrap();
 		let mut overlay = OverlayedChanges {
 			committed: map![
 				b"aba".to_vec() => OverlayedValue::from(Some(b"1312".to_vec())),
@@ -1026,7 +1026,7 @@ mod tests {
 
 	#[test]
 	fn set_child_storage_works() {
-		let backend = InMemory::<Blake2Hasher>::default().try_into_trie_backend().unwrap();
+		let backend = InMemory::<Layout>::default().try_into_trie_backend().unwrap();
 		let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
 		let mut overlay = OverlayedChanges::default();
 		let mut ext = Ext::new(
@@ -1067,12 +1067,12 @@ mod tests {
 		let remote_root = remote_backend.storage_root(::std::iter::empty()).0;
 		let remote_proof = prove_read(remote_backend, b"value2").unwrap().1;
  		// check proof locally
-		let local_result1 = read_proof_check::<Blake2Hasher>(
+		let local_result1 = read_proof_check::<Layout>(
 			remote_root,
 			remote_proof.clone(),
 			b"value2"
 		).unwrap();
-		let local_result2 = read_proof_check::<Blake2Hasher>(
+		let local_result2 = read_proof_check::<Layout>(
 			remote_root,
 			remote_proof.clone(),
 			&[0xff]
@@ -1088,12 +1088,12 @@ mod tests {
 			b":child_storage:default:sub1",
 			b"value3"
 		).unwrap().1;
-		let local_result1 = read_child_proof_check::<Blake2Hasher>(
+		let local_result1 = read_child_proof_check::<Layout>(
 			remote_root,
 			remote_proof.clone(),
 			b":child_storage:default:sub1",b"value3"
 		).unwrap();
-		let local_result2 = read_child_proof_check::<Blake2Hasher>(
+		let local_result2 = read_child_proof_check::<Layout>(
 			remote_root,
 			remote_proof.clone(),
 			b":child_storage:default:sub1",

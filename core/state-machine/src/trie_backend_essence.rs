@@ -23,7 +23,7 @@ use log::{debug, warn};
 use hash_db::{self, Hasher, EMPTY_PREFIX, Prefix};
 use trie::{TrieDB, Trie, MemoryDB, PrefixedMemoryDB, DBValue, TrieError,
 	default_child_trie_root, read_trie_value, read_child_trie_value,
-	for_keys_in_child_trie};
+	for_keys_in_child_trie, TrieHash, TrieOps};
 use crate::backend::Consolidate;
 
 /// Patricia trie-based storage trait.
@@ -33,14 +33,14 @@ pub trait Storage<H: Hasher>: Send + Sync {
 }
 
 /// Patricia trie-based pairs storage essence.
-pub struct TrieBackendEssence<S: TrieBackendStorage<H>, H: Hasher> {
+pub struct TrieBackendEssence<S: TrieBackendStorage<T::H>, T: TrieOps> {
 	storage: S,
-	root: H::Out,
+	root: TrieHash<T>,
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
+impl<S: TrieBackendStorage<T::H>, T: TrieOps> TrieBackendEssence<S, T> {
 	/// Create new trie-based backend.
-	pub fn new(storage: S, root: H::Out) -> Self {
+	pub fn new(storage: S, root: TrieHash<T>) -> Self {
 		TrieBackendEssence {
 			storage,
 			root,
@@ -53,7 +53,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 	}
 
 	/// Get trie root.
-	pub fn root(&self) -> &H::Out {
+	pub fn root(&self) -> &TrieHash<T> {
 		&self.root
 	}
 
@@ -72,12 +72,12 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_trie_value(&eph, &self.root, key).map_err(map_e)
+		read_trie_value::<T, _>(&eph, &self.root, key).map_err(map_e)
 	}
 
 	/// Get the value of child storage at given key.
 	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		let root = self.storage(storage_key)?.unwrap_or(default_child_trie_root::<H>(storage_key));
+		let root = self.storage(storage_key)?.unwrap_or(default_child_trie_root::<T>(storage_key));
 
 		let mut read_overlay = S::Overlay::default();
 		let eph = Ephemeral {
@@ -87,13 +87,13 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_child_trie_value(storage_key, &eph, &root, key).map_err(map_e)
+		read_child_trie_value::<T, _>(storage_key, &eph, &root, key).map_err(map_e)
 	}
 
 	/// Retrieve all entries keys of child storage and call `f` for each of those keys.
 	pub fn for_keys_in_child_storage<F: FnMut(&[u8])>(&self, storage_key: &[u8], f: F) {
 		let root = match self.storage(storage_key) {
-			Ok(v) => v.unwrap_or(default_child_trie_root::<H>(storage_key)),
+			Ok(v) => v.unwrap_or(default_child_trie_root::<T>(storage_key)),
 			Err(e) => {
 				debug!(target: "trie", "Error while iterating child storage: {}", e);
 				return;
@@ -106,7 +106,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 			overlay: &mut read_overlay,
 		};
 
-		if let Err(e) = for_keys_in_child_trie::<H, _, Ephemeral<S, H>>(storage_key, &eph, &root, f) {
+		if let Err(e) = for_keys_in_child_trie::<T, _, Ephemeral<S, T::H>>(storage_key, &eph, &root, f) {
 			debug!(target: "trie", "Error while iterating child storage: {}", e);
 		}
 	}
@@ -119,8 +119,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 			overlay: &mut read_overlay,
 		};
 
-		let mut iter = move || -> Result<(), Box<TrieError<H::Out>>> {
-			let trie = TrieDB::<H>::new(&eph, &self.root)?;
+		let mut iter = move || -> Result<(), Box<TrieError<T>>> {
+			let trie = TrieDB::<T>::new(&eph, &self.root)?;
 			let mut iter = trie.iter()?;
 
 			iter.seek(prefix)?;
