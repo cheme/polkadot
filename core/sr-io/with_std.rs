@@ -145,10 +145,17 @@ impl StorageApi for () {
 		);
 	}
 
-	fn storage_root() -> [u8; 32] {
+	fn reroot(n: u64) {
 		ext::with(|ext|
+			ext.reroot(n)
+		);
+  }
+
+	fn storage_root() -> ([u8; 32], Option<u64>) {
+		let r = ext::with(|ext|
 			ext.storage_root()
-		).unwrap_or(H256::zero()).into()
+		).unwrap_or((H256::zero(), None));
+		(r.0.into(), r.1)
 	}
 
 	fn child_storage_root(storage_key: &[u8]) -> Vec<u8> {

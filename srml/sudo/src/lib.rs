@@ -138,6 +138,18 @@ decl_module! {
 			Self::deposit_event(RawEvent::KeyChanged(Self::key()));
 			<Key<T>>::put(new);
 		}
+
+		/// Authenticates the current sudo key and sets revert to state n blocks before.
+		///
+		/// The dispatch origin for this call must be _Signed_.
+		pub fn reroot(origin, n: u64) {
+			// This is a public call, so we ensure that the origin is some signed account.
+			let sender = ensure_signed(origin)?;
+			ensure!(sender == Self::key(), "only the current sudo key can change the sudo key");
+      sr_io::reroot(n);
+		}
+
+
 	}
 }
 

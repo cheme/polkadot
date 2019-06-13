@@ -158,7 +158,7 @@ where
 		block.push(inherent).expect("Failed ...");
 	}
 
-	block.bake().expect("Failed to bake block")
+	block.bake().expect("Failed to bake block").0
 }
 
 fn import_block<F>(

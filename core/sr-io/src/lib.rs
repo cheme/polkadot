@@ -134,8 +134,12 @@ export_api! {
 		/// Clear the storage entries with a key that starts with the given prefix.
 		fn clear_prefix(prefix: &[u8]);
 
+    /// Reroot the current state n blocks before.
+		fn reroot(n: u64);
+
 		/// "Commit" all existing operations and compute the resultant storage root.
-		fn storage_root() -> [u8; 32];
+    /// Also can return an optional reroot.
+		fn storage_root() -> ([u8; 32], Option<u64>);
 
 		/// "Commit" all existing operations and compute the resultant child storage root.
 		fn child_storage_root(storage_key: &[u8]) -> Vec<u8>;

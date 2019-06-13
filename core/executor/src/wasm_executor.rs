@@ -163,6 +163,11 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		debug_trace!(target: "sr-io", "free {}", addr);
 		Ok(())
 	},
+	ext_reroot(number: u64) => {
+		debug_trace!(target: "wasm-trace", "*** Reroot to {}", number);
+		this.ext.reroot(number);
+		Ok(())
+	},
 	ext_set_storage(key_data: *const u8, key_len: u32, value_data: *const u8, value_len: u32) => {
 		let key = this.memory.get(key_data, key_len as usize).map_err(|_| UserError("Invalid attempt to determine key in ext_set_storage"))?;
 		let value = this.memory.get(value_data, value_len as usize).map_err(|_| UserError("Invalid attempt to determine value in ext_set_storage"))?;
@@ -416,10 +421,10 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 			Ok(u32::max_value())
 		}
 	},
-	ext_storage_root(result: *mut u8) => {
+	ext_storage_root(result: *mut u8) -> u64 => {
 		let r = this.ext.storage_root();
-		this.memory.set(result, r.as_ref()).map_err(|_| UserError("Invalid attempt to set memory in ext_storage_root"))?;
-		Ok(())
+		this.memory.set(result, r.0.as_ref()).map_err(|_| UserError("Invalid attempt to set memory in ext_storage_root"))?;
+		Ok(r.1.unwrap_or(0))
 	},
 	ext_child_storage_root(storage_key_data: *const u8, storage_key_len: u32, written_out: *mut u32) -> *mut u8 => {
 		let storage_key = this.memory.get(storage_key_data, storage_key_len as usize).map_err(|_| UserError("Invalid attempt to determine storage_key in ext_child_storage_root"))?;

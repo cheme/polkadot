@@ -561,7 +561,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Remove temporary "environment" entries in storage.
-	pub fn finalize() -> T::Header {
+	pub fn finalize() -> (T::Header, Option<u64>) {
 		<ExtrinsicCount<T>>::kill();
 		<AllExtrinsicsLen<T>>::kill();
 
@@ -569,7 +569,7 @@ impl<T: Trait> Module<T> {
 		let parent_hash = <ParentHash<T>>::take();
 		let mut digest = <Digest<T>>::take();
 		let extrinsics_root = <ExtrinsicsRoot<T>>::take();
-		let storage_root = T::Hashing::storage_root();
+		let (storage_root, o_reroot) = T::Hashing::storage_root();
 		let storage_changes_root = T::Hashing::storage_changes_root(parent_hash);
 
 		// we can't compute changes trie root earlier && put it to the Digest
@@ -588,7 +588,8 @@ impl<T: Trait> Module<T> {
 		//
 		// stay to be inspected by the client and will be cleared by `Self::initialize`.
 
-		<T::Header as traits::Header>::new(number, extrinsics_root, storage_root, parent_hash, digest)
+		(<T::Header as traits::Header>::new(number, extrinsics_root, storage_root, parent_hash, digest),
+			o_reroot)
 	}
 
 	/// Deposits a log and ensures it matches the block's log data.

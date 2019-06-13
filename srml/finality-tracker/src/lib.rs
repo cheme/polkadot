@@ -346,7 +346,7 @@ mod tests {
 			for i in 2..106 {
 				System::initialize(&i, &parent_hash, &Default::default(), &Default::default());
 				FinalityTracker::on_finalize(i);
-				let hdr = System::finalize();
+				let hdr = System::finalize().0;
 				parent_hash = hdr.hash();
 			}
 
@@ -375,7 +375,7 @@ mod tests {
 					Origin::NONE,
 				));
 				FinalityTracker::on_finalize(i);
-				let hdr = System::finalize();
+				let hdr = System::finalize().0;
 				parent_hash = hdr.hash();
 			}
 

@@ -210,7 +210,12 @@ pub trait Externalities<H: Hasher> {
 	fn chain_id(&self) -> u64;
 
 	/// Get the trie root of the current storage map. This will also update all child storage keys in the top-level storage map.
-	fn storage_root(&mut self) -> H::Out where H::Out: Ord;
+  /// Also return an optional number of block to rollback (see `reroot`).
+	fn storage_root(&mut self) -> (H::Out, Option<u64>) where H::Out: Ord;
+
+	/// Request a state rollback by a certain amount of blocks.
+	/// This invalidate current changes.
+	fn reroot(&mut self, nb_backward: u64);
 
 	/// Get the trie root of a child storage map. This will also update the value of the child
 	/// storage keys in the top-level storage map.
@@ -502,7 +507,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 	pub fn execute(
 		&mut self,
 		strategy: ExecutionStrategy,
-	) -> Result<(Vec<u8>, B::Transaction, Option<MemoryDB<H>>), Box<dyn Error>> {
+	) -> Result<(Vec<u8>, B::Transaction, Option<MemoryDB<H>>, Option<u64>), Box<dyn Error>> {
 		// We are not giving a native call and thus we are sure that the result can never be a native
 		// value.
 		self.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
@@ -510,10 +515,11 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 			true,
 			None,
 		)
-		.map(|(result, storage_tx, changes_tx)| (
+		.map(|(result, storage_tx, changes_tx, o_reroot)| (
 			result.into_encoded(),
 			storage_tx.expect("storage_tx is always computed when compute_tx is true; qed"),
 			changes_tx,
+      o_reroot,
 		))
 	}
 
@@ -522,7 +528,13 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		compute_tx: bool,
 		use_native: bool,
 		native_call: Option<NC>,
-	) -> (CallResult<R, Exec::Error>, bool, Option<B::Transaction>, Option<MemoryDB<H>>) where
+	) -> (
+		CallResult<R, Exec::Error>,
+		bool,
+		Option<B::Transaction>,
+		Option<MemoryDB<H>>,
+		Option<u64>,
+	) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	{
@@ -539,13 +551,13 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 			use_native,
 			native_call,
 		);
-		let (storage_delta, changes_delta) = if compute_tx {
-			let (storage_delta, changes_delta) = externalities.transaction();
-			(Some(storage_delta), changes_delta)
+		let (storage_delta, changes_delta, o_reroot) = if compute_tx {
+			let (storage_delta, changes_delta, o_reroot) = externalities.transaction();
+			(Some(storage_delta), changes_delta, o_reroot)
 		} else {
-			(None, None)
+			(None, None, None)
 		};
-		(result, was_native, storage_delta, changes_delta)
+		(result, was_native, storage_delta, changes_delta, o_reroot)
 	}
 
 	fn execute_call_with_both_strategy<Handler, R, NC>(
@@ -554,7 +566,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		mut native_call: Option<NC>,
 		orig_prospective: OverlayedChangeSet,
 		on_consensus_failure: Handler,
-	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>) where
+	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>, Option<u64>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 		Handler: FnOnce(
@@ -562,21 +574,23 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 			CallResult<R, Exec::Error>
 		) -> CallResult<R, Exec::Error>
 	{
-		let (result, was_native, storage_delta, changes_delta) = self.execute_aux(compute_tx, true, native_call.take());
+		let (result, was_native, storage_delta, changes_delta, o_reroot)
+      = self.execute_aux(compute_tx, true, native_call.take());
 
 		if was_native {
 			self.overlay.prospective = orig_prospective.clone();
-			let (wasm_result, _, wasm_storage_delta, wasm_changes_delta) = self.execute_aux(compute_tx, false, native_call);
+			let (wasm_result, _, wasm_storage_delta, wasm_changes_delta, wasm_o_reroot)
+        = self.execute_aux(compute_tx, false, native_call);
 
 			if (result.is_ok() && wasm_result.is_ok()
 				&& result.as_ref().ok() == wasm_result.as_ref().ok())
 				|| result.is_err() && wasm_result.is_err() {
-				(result, storage_delta, changes_delta)
+				(result, storage_delta, changes_delta, o_reroot)
 			} else {
-				(on_consensus_failure(wasm_result, result), wasm_storage_delta, wasm_changes_delta)
+				(on_consensus_failure(wasm_result, result), wasm_storage_delta, wasm_changes_delta, wasm_o_reroot)
 			}
 		} else {
-			(result, storage_delta, changes_delta)
+			(result, storage_delta, changes_delta, o_reroot)
 		}
 	}
 
@@ -585,18 +599,20 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		compute_tx: bool,
 		mut native_call: Option<NC>,
 		orig_prospective: OverlayedChangeSet,
-	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>) where
+	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>, Option<u64>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	{
-		let (result, was_native, storage_delta, changes_delta) = self.execute_aux(compute_tx, true, native_call.take());
+		let (result, was_native, storage_delta, changes_delta, o_reroot)
+      = self.execute_aux(compute_tx, true, native_call.take());
 
 		if !was_native || result.is_ok() {
-			(result, storage_delta, changes_delta)
+			(result, storage_delta, changes_delta, o_reroot)
 		} else {
 			self.overlay.prospective = orig_prospective.clone();
-			let (wasm_result, _, wasm_storage_delta, wasm_changes_delta) = self.execute_aux(compute_tx, false, native_call);
-			(wasm_result, wasm_storage_delta, wasm_changes_delta)
+			let (wasm_result, _, wasm_storage_delta, wasm_changes_delta, wasm_o_reroot)
+        = self.execute_aux(compute_tx, false, native_call);
+			(wasm_result, wasm_storage_delta, wasm_changes_delta, wasm_o_reroot)
 		}
 	}
 
@@ -613,7 +629,12 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		manager: ExecutionManager<Handler>,
 		compute_tx: bool,
 		mut native_call: Option<NC>,
-	) -> Result<(NativeOrEncoded<R>, Option<B::Transaction>, Option<MemoryDB<H>>), Box<dyn Error>> where
+	) -> Result<(
+    NativeOrEncoded<R>,
+    Option<B::Transaction>,
+    Option<MemoryDB<H>>,
+    Option<u64>,
+  ), Box<dyn Error>> where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 		Handler: FnOnce(
@@ -640,7 +661,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		let result = {
 			let orig_prospective = self.overlay.prospective.clone();
 
-			let (result, storage_delta, changes_delta) = match manager {
+			let (result, storage_delta, changes_delta, o_reroot) = match manager {
 				ExecutionManager::Both(on_consensus_failure) => {
 					self.execute_call_with_both_strategy(compute_tx, native_call.take(), orig_prospective, on_consensus_failure)
 				},
@@ -648,15 +669,17 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 					self.execute_call_with_native_else_wasm_strategy(compute_tx, native_call.take(), orig_prospective)
 				},
 				ExecutionManager::AlwaysWasm => {
-					let (result, _, storage_delta, changes_delta) = self.execute_aux(compute_tx, false, native_call);
-					(result, storage_delta, changes_delta)
+					let (result, _, storage_delta, changes_delta, o_reroot)
+            = self.execute_aux(compute_tx, false, native_call);
+					(result, storage_delta, changes_delta, o_reroot)
 				},
 				ExecutionManager::NativeWhenPossible => {
-					let (result, _was_native, storage_delta, changes_delta) = self.execute_aux(compute_tx, true, native_call);
-					(result, storage_delta, changes_delta)
+					let (result, _was_native, storage_delta, changes_delta, o_reroot)
+            = self.execute_aux(compute_tx, true, native_call);
+					(result, storage_delta, changes_delta, o_reroot)
 				},
 			};
-			result.map(move |out| (out, storage_delta, changes_delta))
+			result.map(move |out| (out, storage_delta, changes_delta, o_reroot))
 		};
 
 		if result.is_ok() {
@@ -719,7 +742,7 @@ where
 		call_data,
 		_hasher: PhantomData,
 	};
-	let (result, _, _) = sm.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
+	let (result, _, _, _) = sm.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
 		native_else_wasm(),
 		false,
 		None,
@@ -773,7 +796,7 @@ where
 		native_else_wasm(),
 		false,
 		None,
-	).map(|(result, _, _)| result.into_encoded())
+	).map(|(result, _, _, _)| result.into_encoded())
 }
 
 /// Generate storage read proof.

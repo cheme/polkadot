@@ -37,6 +37,7 @@ pub struct TestExternalities<H: Hasher, N: ChangesTrieBlockNumber> {
 	overlay: OverlayedChanges,
 	backend: InMemory<H>,
 	changes_trie_storage: ChangesTrieInMemoryStorage<H, N>,
+	reroot: Option<u64>,
 	offchain: Option<Box<dyn offchain::Externalities>>,
 }
 
@@ -63,6 +64,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 			overlay,
 			changes_trie_storage: ChangesTrieInMemoryStorage::new(),
 			backend: inner.into(),
+			reroot: None,
 			offchain: None,
 		}
 	}
@@ -158,6 +160,10 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 	}
 
 	fn place_storage(&mut self, key: Vec<u8>, maybe_value: Option<Vec<u8>>) {
+		if self.reroot.is_some() {
+			return;
+		}
+ 
 		if is_child_storage_key(&key) {
 			panic!("Refuse to directly set child storage key");
 		}
@@ -171,10 +177,18 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 		key: Vec<u8>,
 		value: Option<Vec<u8>>
 	) {
+		if self.reroot.is_some() {
+			return;
+		}
+ 
 		self.overlay.set_child_storage(storage_key.into_owned(), key, value);
 	}
 
 	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<H>) {
+		if self.reroot.is_some() {
+			return;
+		}
+ 
 		let backend = &self.backend;
 		let overlay = &mut self.overlay;
 
@@ -185,6 +199,10 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 	}
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {
+		if self.reroot.is_some() {
+			return;
+		}
+ 
 		if is_child_storage_key(prefix) {
 			panic!("Refuse to directly clear prefix that is part of child storage key");
 		}
@@ -200,15 +218,32 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 
 	fn chain_id(&self) -> u64 { 42 }
 
-	fn storage_root(&mut self) -> H::Out {
+	fn reroot(&mut self, nb_block: u64) {
+		let _guard = panic_handler::AbortGuard::new(true);
+		self.overlay.clear();
+		self.reroot = Some(nb_block);
+		// TODO EMCH change trie storage?
+		// TODO EMCH change offline externalities?
+	}
+
+	fn storage_root(&mut self) -> (H::Out, Option<u64>) {
+		if self.reroot.is_some() {
+			return (self.backend.storage_root(None).0, self.reroot.clone());
+		}
+
 		// compute and memoize
 		let delta = self.overlay.committed.top.iter().map(|(k, v)| (k.clone(), v.value.clone()))
 			.chain(self.overlay.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())));
 
-		self.backend.storage_root(delta).0
+		(self.backend.storage_root(delta).0, None)
 	}
 
 	fn child_storage_root(&mut self, storage_key: ChildStorageKey<H>) -> Vec<u8> {
+		if self.reroot.is_some() {
+			return self.backend.child_storage_root(storage_key.as_ref(), None).0;
+		}
+
+
 		let storage_key = storage_key.as_ref();
 
 		let (root, _, _) = {
@@ -254,7 +289,7 @@ mod tests {
 		ext.set_storage(b"dog".to_vec(), b"puppy".to_vec());
 		ext.set_storage(b"dogglesworth".to_vec(), b"cat".to_vec());
 		const ROOT: [u8; 32] = hex!("cc65c26c37ebd4abcdeb3f1ecd727527051620779a2f6c809bac0f8a87dbb816");
-		assert_eq!(ext.storage_root(), H256::from(ROOT));
+		assert_eq!(ext.storage_root(), (H256::from(ROOT), None));
 	}
 
 	#[test]

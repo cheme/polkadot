@@ -110,7 +110,12 @@ where
 		manager: ExecutionManager<F>,
 		native_call: Option<NC>,
 		side_effects_handler: Option<&mut O>,
-	) -> Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<H>>), error::Error>;
+	) -> Result<(
+    NativeOrEncoded<R>,
+    S::Transaction,
+    Option<MemoryDB<H>>,
+    Option<u64>,
+  ), error::Error>;
 
 	/// Execute a call to a contract on top of given state, gathering execution proof.
 	///
@@ -202,7 +207,7 @@ where
 			false,
 			None,
 		)
-		.map(|(result, _, _)| result)?;
+		.map(|(result, _, _, _)| result)?;
 		self.backend.destroy_state(state)?;
 		Ok(return_data.into_encoded())
 	}
@@ -268,7 +273,7 @@ where
 					false,
 					native_call,
 				)
-				.map(|(result, _, _)| result)
+				.map(|(result, _, _, _)| result)
 				.map_err(Into::into)
 			}
 			None => state_machine::new(
@@ -285,7 +290,7 @@ where
 				false,
 				native_call,
 			)
-			.map(|(result, _, _)| result)
+			.map(|(result, _, _, _)| result)
 			.map_err(Into::into)
 		}
 	}
@@ -314,7 +319,12 @@ where
 		manager: ExecutionManager<F>,
 		native_call: Option<NC>,
 		side_effects_handler: Option<&mut O>,
-	) -> error::Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<Blake2Hasher>>)> {
+	) -> error::Result<(
+    NativeOrEncoded<R>,
+    S::Transaction,
+    Option<MemoryDB<Blake2Hasher>>,
+    Option<u64>,
+  )> {
 		state_machine::new(
 			state,
 			self.backend.changes_trie_storage(),
@@ -328,10 +338,11 @@ where
 			true,
 			native_call,
 		)
-		.map(|(result, storage_tx, changes_tx)| (
+		.map(|(result, storage_tx, changes_tx, o_reroot)| (
 			result,
 			storage_tx.expect("storage_tx is always computed when compute_tx is true; qed"),
 			changes_tx,
+      o_reroot,
 		))
 		.map_err(Into::into)
 	}

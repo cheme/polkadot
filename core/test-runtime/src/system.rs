@@ -98,7 +98,8 @@ pub fn polish_block(block: &mut Block) {
 		storage::unhashed::kill(well_known_keys::EXTRINSIC_INDEX);
 	});
 
-	header.state_root = storage_root().into();
+  // TODO EMCH no handle of reroot
+	header.state_root = storage_root().0.into();
 
 	// check digest
 	let digest = &mut header.digest;
@@ -128,7 +129,8 @@ pub fn execute_block(mut block: Block) {
 	});
 
 	// check storage root.
-	let storage_root = storage_root().into();
+  // TODO EMCH no handle of reroot
+	let storage_root = storage_root().0.into();
 	info_expect_equal_hash(&storage_root, &header.state_root);
 	assert!(storage_root == header.state_root, "Storage root must match that calculated.");
 
@@ -205,7 +207,7 @@ pub fn execute_transaction(utx: Extrinsic) -> ApplyResult {
 }
 
 /// Finalize the block.
-pub fn finalize_block() -> Header {
+pub fn finalize_block() -> (Header, Option<u64>) {
 	let extrinsic_index: u32 = storage::unhashed::take(well_known_keys::EXTRINSIC_INDEX).unwrap();
 	let txs: Vec<_> = (0..extrinsic_index).map(ExtrinsicData::take).collect();
 	let txs = txs.iter().map(Vec::as_slice).collect::<Vec<_>>();
@@ -217,7 +219,7 @@ pub fn finalize_block() -> Header {
 
 	// This MUST come after all changes to storage are done.  Otherwise we will fail the
 	// “Storage root does not match that calculated” assertion.
-	let storage_root = BlakeTwo256::storage_root();
+	let (storage_root, o_reroot) = BlakeTwo256::storage_root();
 	let storage_changes_root = BlakeTwo256::storage_changes_root(parent_hash);
 
 	if let Some(storage_changes_root) = storage_changes_root {
@@ -227,13 +229,13 @@ pub fn finalize_block() -> Header {
 		digest.push(generic::DigestItem::AuthoritiesChange(new_authorities));
 	}
 
-	Header {
+	(Header {
 		number,
 		extrinsics_root,
 		state_root: storage_root,
 		parent_hash,
 		digest: digest,
-	}
+	}, o_reroot)
 }
 
 #[inline(always)]

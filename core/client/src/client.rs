@@ -885,7 +885,8 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		}
 
 		// FIXME #1232: correct path logic for when to execute this function
-		let (storage_update,changes_update,storage_changes) = self.block_execution(&operation.op, &import_headers, origin, hash, body.clone())?;
+		let (storage_update,changes_update,storage_changes) =
+			self.block_execution(&operation.op, &import_headers, origin, hash, body.clone())?;
 
 		let is_new_best = finalized || match fork_choice {
 			ForkChoiceStrategy::LongestChain => import_headers.post().number() > &last_best_number,
@@ -970,7 +971,8 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 						}),
 					}
 				};
-				let (_, storage_update, changes_update) = self.executor.call_at_state::<_, _, _, NeverNativeValue, fn() -> _>(
+				let (_, storage_update, changes_update, o_reroot) =
+					self.executor.call_at_state::<_, _, _, NeverNativeValue, fn() -> _>(
 					transaction_state,
 					&mut overlay,
 					"Core_execute_block",
@@ -982,14 +984,101 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 					None,
 					NeverOffchainExt::new(),
 				)?;
-
+        if let Some(nb) = o_reroot {
+          let n_header = self.rollback_blocks(nb)?;
+          // TODO EMCH proper error (same for return none
+          assert!(n_header == Some(import_headers.post().state_root().clone()));
+          // TODO add changes update & third result ??
+          Ok((None, None, None))
+        } else {
 				overlay.commit_prospective();
-
-				Ok((Some(storage_update), Some(changes_update), Some(overlay.into_committed().collect())))
+  			  Ok((Some(storage_update), Some(changes_update), Some(overlay.into_committed().collect())))
+        }
 			},
 			None => Ok((None, None, None))
 		}
 	}
+
+  // TODO EMCH switch return old root and do invalidate operation if possible
+  // TODO may not need to be pub if passed in blockbuilder new method
+	pub fn rollback_blocks(
+		&self,
+    nb: u64,
+	) -> error::Result<Option<Block::Hash>> {
+    // TODO EMCH
+    // self.backend.revert
+    let mut best = self.current_height();
+
+		let (config, storage) = match self.require_changes_trie().ok() {
+			Some((config, storage)) => (config, storage),
+			None => return Err(Error::ChangesTriesNotSupported),
+		};
+	
+
+    let mut dest = self.current_height();
+    let mut nb_sat = 0u64;
+		for _c in 0 .. nb {
+			if dest.is_zero() {
+        break;
+      }
+      dest -= One::one();  // prev block
+      nb_sat += 1;
+    }
+    // check block status
+    if BlockStatus::InChainWithState != self.block_status(&BlockId::Number(dest))? {
+        // this is bad: the chain is not usable anymore, will need a resynch
+        // TODO switch to Error
+        panic!("Chain need resynch");
+    }
+
+    // rebase to dest state hash
+    let hash = self.backend.blockchain().hash(dest)?;
+    // remove to be pruned contents
+ 
+    // TODO also remove values from change trie!! -> put all in prunning of this block
+		let finalized_number = self.backend.blockchain().info().finalized_number;
+		let oldest = storage.oldest_changes_trie_block(&config, finalized_number);
+    if dest < oldest {
+    }
+		for _c in 0 .. nb_sat {
+
+	    let state = self.backend.state_at(BlockId::Number(best))?;
+
+    // TODO saturating stop on 0
+			best -= One::one();  // prev block
+    }
+    Ok(hash)
+/*			let mut transaction = DBTransaction::new();
+			match self.storage.state_db.revert_one() {
+				Some(commit) => {
+					apply_state_commit(&mut transaction, commit);
+					let removed = self.blockchain.header(BlockId::Number(best))?.ok_or_else(
+						|| client::error::Error::UnknownBlock(
+							format!("Error reverting to {}. Block hash not found.", best)))?;
+
+					let hash = self.blockchain.hash(best)?.ok_or_else(
+						|| client::error::Error::UnknownBlock(
+							format!("Error reverting to {}. Block hash not found.", best)))?;
+					let key = utils::number_and_hash_to_lookup_key(best.clone(), &hash);
+					self.storage.db.write(transaction).map_err(db_err)?;
+				}
+				None => return Ok(c.saturated_into::<NumberFor<Block>>())
+			}
+		}
+		Ok(n)
+*/	
+    //self.backend.revert(nb);
+
+	//fn revert(&self, n: NumberFor<Block>) -> error::Result<NumberFor<Block>>;
+  //
+  //	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
+/*		self.state_at(BlockId::Hash(hash.clone())).is_ok()
+	}
+	/// Returns state backend with post-state of given block.
+	fn state_at(&self, block: BlockId<Block>) -> error::Result<Self::State>;
+*/	
+    // do not put content (straight to the hash)
+  }
 
 	fn apply_finality_with_block_hash(
 		&self,
@@ -1744,7 +1833,7 @@ pub(crate) mod tests {
 					nonce: *nonces.entry(from).and_modify(|n| { *n = *n + 1 }).or_default(),
 				}).unwrap();
 			}
-			remote_client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap();
+			remote_client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap().0;
 
 			let header = remote_client.header(&BlockId::Number(i as u64 + 1)).unwrap().unwrap();
 			let trie_root = header.digest().log(DigestItem::as_changes_trie_root)
@@ -1812,7 +1901,7 @@ pub(crate) mod tests {
 
 		let builder = client.new_block(Default::default()).unwrap();
 
-		client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap();
+		client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap().0;
 
 		assert_eq!(client.info().chain.best_number, 1);
 	}
@@ -1830,7 +1919,7 @@ pub(crate) mod tests {
 			nonce: 0,
 		}).unwrap();
 
-		client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap();
+		client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap().0;
 
 		assert_eq!(client.info().chain.best_number, 1);
 		assert_ne!(
@@ -1873,7 +1962,7 @@ pub(crate) mod tests {
 			nonce: 0,
 		}).is_err());
 
-		client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap();
+		client.import(BlockOrigin::Own, builder.bake().unwrap()).unwrap().0;
 
 		assert_eq!(client.info().chain.best_number, 1);
 		assert_ne!(
@@ -1905,7 +1994,7 @@ pub(crate) mod tests {
 
 		let (client, longest_chain_select) = TestClientBuilder::new().build_with_longest_chain();
 
-		let uninserted_block = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let uninserted_block = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 
 		assert_eq!(
 			None,
@@ -1920,11 +2009,11 @@ pub(crate) mod tests {
 		let client = test_client::new();
 
 		// G -> A1
-		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a1.clone()).unwrap();
 
 		// A1 -> A2
-		let a2 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a2 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a2.clone()).unwrap();
 		let v: Vec<H256> = Vec::new();
 		assert_eq!(v, client.uncles(a2.hash(), 3).unwrap());
@@ -1940,23 +2029,23 @@ pub(crate) mod tests {
 		let client = test_client::new();
 
 		// G -> A1
-		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a1.clone()).unwrap();
 
 		// A1 -> A2
-		let a2 = client.new_block_at(&BlockId::Hash(a1.hash()), Default::default()).unwrap().bake().unwrap();
+		let a2 = client.new_block_at(&BlockId::Hash(a1.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a2.clone()).unwrap();
 
 		// A2 -> A3
-		let a3 = client.new_block_at(&BlockId::Hash(a2.hash()), Default::default()).unwrap().bake().unwrap();
+		let a3 = client.new_block_at(&BlockId::Hash(a2.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a3.clone()).unwrap();
 
 		// A3 -> A4
-		let a4 = client.new_block_at(&BlockId::Hash(a3.hash()), Default::default()).unwrap().bake().unwrap();
+		let a4 = client.new_block_at(&BlockId::Hash(a3.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a4.clone()).unwrap();
 
 		// A4 -> A5
-		let a5 = client.new_block_at(&BlockId::Hash(a4.hash()), Default::default()).unwrap().bake().unwrap();
+		let a5 = client.new_block_at(&BlockId::Hash(a4.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a5.clone()).unwrap();
 
 		// A1 -> B2
@@ -1968,15 +2057,15 @@ pub(crate) mod tests {
 			amount: 41,
 			nonce: 0,
 		}).unwrap();
-		let b2 = builder.bake().unwrap();
+		let b2 = builder.bake().unwrap().0;
 		client.import(BlockOrigin::Own, b2.clone()).unwrap();
 
 		// B2 -> B3
-		let b3 = client.new_block_at(&BlockId::Hash(b2.hash()), Default::default()).unwrap().bake().unwrap();
+		let b3 = client.new_block_at(&BlockId::Hash(b2.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, b3.clone()).unwrap();
 
 		// B3 -> B4
-		let b4 = client.new_block_at(&BlockId::Hash(b3.hash()), Default::default()).unwrap().bake().unwrap();
+		let b4 = client.new_block_at(&BlockId::Hash(b3.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, b4.clone()).unwrap();
 
 		// // B2 -> C3
@@ -1988,7 +2077,7 @@ pub(crate) mod tests {
 			amount: 1,
 			nonce: 1,
 		}).unwrap();
-		let c3 = builder.bake().unwrap();
+		let c3 = builder.bake().unwrap().0;
 		client.import(BlockOrigin::Own, c3.clone()).unwrap();
 
 		// A1 -> D2
@@ -2000,7 +2089,7 @@ pub(crate) mod tests {
 			amount: 1,
 			nonce: 0,
 		}).unwrap();
-		let d2 = builder.bake().unwrap();
+		let d2 = builder.bake().unwrap().0;
 		client.import(BlockOrigin::Own, d2.clone()).unwrap();
 
 		let genesis_hash = client.info().chain.genesis_hash;
@@ -2032,11 +2121,11 @@ pub(crate) mod tests {
 		let (client, longest_chain_select) = TestClientBuilder::new().build_with_longest_chain();
 
 		// G -> A1
-		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a1.clone()).unwrap();
 
 		// A1 -> A2
-		let a2 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a2 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a2.clone()).unwrap();
 
 		let genesis_hash = client.info().chain.genesis_hash;
@@ -2056,23 +2145,23 @@ pub(crate) mod tests {
 		let (client, longest_chain_select) = TestClientBuilder::new().build_with_longest_chain();
 
 		// G -> A1
-		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a1.clone()).unwrap();
 
 		// A1 -> A2
-		let a2 = client.new_block_at(&BlockId::Hash(a1.hash()), Default::default()).unwrap().bake().unwrap();
+		let a2 = client.new_block_at(&BlockId::Hash(a1.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a2.clone()).unwrap();
 
 		// A2 -> A3
-		let a3 = client.new_block_at(&BlockId::Hash(a2.hash()), Default::default()).unwrap().bake().unwrap();
+		let a3 = client.new_block_at(&BlockId::Hash(a2.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a3.clone()).unwrap();
 
 		// A3 -> A4
-		let a4 = client.new_block_at(&BlockId::Hash(a3.hash()), Default::default()).unwrap().bake().unwrap();
+		let a4 = client.new_block_at(&BlockId::Hash(a3.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a4.clone()).unwrap();
 
 		// A4 -> A5
-		let a5 = client.new_block_at(&BlockId::Hash(a4.hash()), Default::default()).unwrap().bake().unwrap();
+		let a5 = client.new_block_at(&BlockId::Hash(a4.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a5.clone()).unwrap();
 
 		// A1 -> B2
@@ -2084,15 +2173,15 @@ pub(crate) mod tests {
 			amount: 41,
 			nonce: 0,
 		}).unwrap();
-		let b2 = builder.bake().unwrap();
+		let b2 = builder.bake().unwrap().0;
 		client.import(BlockOrigin::Own, b2.clone()).unwrap();
 
 		// B2 -> B3
-		let b3 = client.new_block_at(&BlockId::Hash(b2.hash()), Default::default()).unwrap().bake().unwrap();
+		let b3 = client.new_block_at(&BlockId::Hash(b2.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, b3.clone()).unwrap();
 
 		// B3 -> B4
-		let b4 = client.new_block_at(&BlockId::Hash(b3.hash()), Default::default()).unwrap().bake().unwrap();
+		let b4 = client.new_block_at(&BlockId::Hash(b3.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, b4.clone()).unwrap();
 
 		// // B2 -> C3
@@ -2104,7 +2193,7 @@ pub(crate) mod tests {
 			amount: 1,
 			nonce: 1,
 		}).unwrap();
-		let c3 = builder.bake().unwrap();
+		let c3 = builder.bake().unwrap().0;
 		client.import(BlockOrigin::Own, c3.clone()).unwrap();
 
 		// A1 -> D2
@@ -2116,7 +2205,7 @@ pub(crate) mod tests {
 			amount: 1,
 			nonce: 0,
 		}).unwrap();
-		let d2 = builder.bake().unwrap();
+		let d2 = builder.bake().unwrap().0;
 		client.import(BlockOrigin::Own, d2.clone()).unwrap();
 
 		assert_eq!(client.info().chain.best_hash, a5.hash());
@@ -2340,11 +2429,11 @@ pub(crate) mod tests {
 		let (client, longest_chain_select) = TestClientBuilder::new().build_with_longest_chain();
 
 		// G -> A1
-		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a1.clone()).unwrap();
 
 		// A1 -> A2
-		let a2 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a2 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a2.clone()).unwrap();
 
 		let genesis_hash = client.info().chain.genesis_hash;
@@ -2374,16 +2463,16 @@ pub(crate) mod tests {
 		let client = test_client::new();
 
 		// G -> A1
-		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap();
+		let a1 = client.new_block(Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a1.clone()).unwrap();
 
 		// A1 -> A2
-		let a2 = client.new_block_at(&BlockId::Hash(a1.hash()), Default::default()).unwrap().bake().unwrap();
+		let a2 = client.new_block_at(&BlockId::Hash(a1.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import(BlockOrigin::Own, a2.clone()).unwrap();
 
 		// A2 -> A3
 		let justification = vec![1, 2, 3];
-		let a3 = client.new_block_at(&BlockId::Hash(a2.hash()), Default::default()).unwrap().bake().unwrap();
+		let a3 = client.new_block_at(&BlockId::Hash(a2.hash()), Default::default()).unwrap().bake().unwrap().0;
 		client.import_justified(BlockOrigin::Own, a3.clone(), justification.clone()).unwrap();
 
 		#[allow(deprecated)]

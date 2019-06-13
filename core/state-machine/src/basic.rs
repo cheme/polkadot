@@ -144,9 +144,11 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 
 	fn chain_id(&self) -> u64 { 42 }
 
-	fn storage_root(&mut self) -> H::Out {
-		trie_root::<H, _, _, _>(self.inner.clone())
+	fn storage_root(&mut self) -> (H::Out, Option<u64>) {
+		(trie_root::<H, _, _, _>(self.inner.clone()), None)
 	}
+
+	fn reroot(&mut self, _block_nb: u64) { }
 
 	fn child_storage_root(&mut self, _storage_key: ChildStorageKey<H>) -> Vec<u8> {
 		vec![42]
@@ -176,7 +178,7 @@ mod tests {
 		ext.set_storage(b"dog".to_vec(), b"puppy".to_vec());
 		ext.set_storage(b"dogglesworth".to_vec(), b"cat".to_vec());
 		const ROOT: [u8; 32] = hex!("0b33ed94e74e0f8e92a55923bece1ed02d16cf424e124613ddebc53ac3eeeabe");
-		assert_eq!(ext.storage_root(), H256::from(ROOT));
+		assert_eq!(ext.storage_root(), (H256::from(ROOT), None));
 	}
 
 	#[test]

@@ -83,6 +83,8 @@ where
 	///
 	/// If None, some methods from the trait might not supported.
 	offchain_externalities: Option<&'a mut O>,
+	/// Number of block to reroot in case `reroot` got called.
+	reroot: Option<u64>,
 	/// Dummy usage of N arg.
 	_phantom: ::std::marker::PhantomData<N>,
 }
@@ -110,12 +112,13 @@ where
 			changes_trie_storage,
 			changes_trie_transaction: None,
 			offchain_externalities,
+			reroot: None,
 			_phantom: Default::default(),
 		}
 	}
 
 	/// Get the transaction necessary to update the backend.
-	pub fn transaction(mut self) -> (B::Transaction, Option<MemoryDB<H>>) {
+	pub fn transaction(mut self) -> (B::Transaction, Option<MemoryDB<H>>, Option<u64>) {
 		let _ = self.storage_root();
 
 		let (storage_transaction, changes_trie_transaction) = (
@@ -128,6 +131,7 @@ where
 		(
 			storage_transaction.0,
 			changes_trie_transaction,
+      self.reroot.clone(),
 		)
 	}
 
@@ -137,7 +141,6 @@ where
 	fn mark_dirty(&mut self) {
 		self.storage_transaction = None;
 	}
-
 }
 
 #[cfg(test)]
@@ -218,6 +221,10 @@ where
 	}
 
 	fn place_storage(&mut self, key: Vec<u8>, value: Option<Vec<u8>>) {
+		if self.reroot.is_some() {
+			return;
+		}
+
 		let _guard = panic_handler::AbortGuard::new(true);
 		if is_child_storage_key(&key) {
 			warn!(target: "trie", "Refuse to directly set child storage key");
@@ -229,6 +236,10 @@ where
 	}
 
 	fn place_child_storage(&mut self, storage_key: ChildStorageKey<H>, key: Vec<u8>, value: Option<Vec<u8>>) {
+		if self.reroot.is_some() {
+			return;
+		}
+
 		let _guard = panic_handler::AbortGuard::new(true);
 
 		self.mark_dirty();
@@ -236,6 +247,10 @@ where
 	}
 
 	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<H>) {
+		if self.reroot.is_some() {
+			return;
+		}
+
 		let _guard = panic_handler::AbortGuard::new(true);
 
 		self.mark_dirty();
@@ -246,6 +261,10 @@ where
 	}
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {
+		if self.reroot.is_some() {
+			return;
+		}
+
 		let _guard = panic_handler::AbortGuard::new(true);
 		if is_child_storage_key(prefix) {
 			warn!(target: "trie", "Refuse to directly clear prefix that is part of child storage key");
@@ -263,10 +282,24 @@ where
 		42
 	}
 
-	fn storage_root(&mut self) -> H::Out {
+	fn reroot(&mut self, nb_block: u64) {
 		let _guard = panic_handler::AbortGuard::new(true);
+		self.mark_dirty();
+		self.overlay.clear();
+		self.reroot = Some(nb_block);
+		// TODO EMCH change trie storage?
+		// TODO EMCH change offline externalities?
+	}
+
+	fn storage_root(&mut self) -> (H::Out, Option<u64>) {
+		let _guard = panic_handler::AbortGuard::new(true);
+
+		if self.reroot.is_some() {
+			return (self.backend.storage_root(None).0, self.reroot.clone());
+		}
+
 		if let Some((_, ref root)) = self.storage_transaction {
-			return root.clone();
+			return (root.clone(), None);
 		}
 
 		let child_storage_keys =
@@ -288,11 +321,16 @@ where
 
 		let (root, transaction) = self.backend.full_storage_root(delta, child_delta_iter);
 		self.storage_transaction = Some((transaction, root));
-		root
+		(root, None)
 	}
 
 	fn child_storage_root(&mut self, storage_key: ChildStorageKey<H>) -> Vec<u8> {
 		let _guard = panic_handler::AbortGuard::new(true);
+
+		if self.reroot.is_some() {
+			return self.backend.child_storage_root(storage_key.as_ref(), None).0;
+		}
+
 		if self.storage_transaction.is_some() {
 			self
 				.storage(storage_key.as_ref())

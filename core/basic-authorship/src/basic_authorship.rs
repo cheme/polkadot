@@ -109,7 +109,14 @@ impl<B, E, Block, RA> AuthoringApi for SubstrateClient<B, E, Block, RA> where
 
 		build_ctx(&mut block_builder);
 
-		block_builder.bake().map_err(Into::into)
+		block_builder.bake().map(|(mut result, o_reroot)| {
+    if let Some(r) = o_reroot {
+      let r_o_hash = self.rollback_blocks(r);
+      // TODO EMCH new header, set header in block -> maybe put closure (or reroot test) in bake parameter 
+
+    }
+    result
+    }).map_err(Into::into)
 	}
 }
 

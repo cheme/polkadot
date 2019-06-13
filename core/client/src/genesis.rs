@@ -108,7 +108,7 @@ mod tests {
 			).unwrap();
 		}
 
-		let (ret_data, _, _) = state_machine::new(
+		let (ret_data, _, _, _) = state_machine::new(
 			backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
 			state_machine::NeverOffchainExt::new(),

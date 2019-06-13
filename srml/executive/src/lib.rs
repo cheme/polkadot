@@ -204,7 +204,7 @@ where
 
 	/// Finalize the block - it is up the caller to ensure that all header fields are valid
 	/// except state-root.
-	pub fn finalize_block() -> System::Header {
+	pub fn finalize_block() -> (System::Header, Option<u64>) {
 		<system::Module<System>>::note_finished_extrinsics();
 		<AllModules as OnFinalize<System::BlockNumber>>::on_finalize(<system::Module<System>>::block_number());
 
@@ -287,10 +287,9 @@ where
 		})
 	}
 
-	fn final_checks(header: &System::Header) {
+	fn final_checks(header: &System::Header) -> Option<u64> {
 		// remove temporaries
-		let new_header = <system::Module<System>>::finalize();
-
+		let (new_header, o_reroot) = <system::Module<System>>::finalize();
 		// check digest
 		assert_eq!(
 			header.digest().logs().len(),
@@ -303,10 +302,15 @@ where
 			assert!(header_item == computed_item, "Digest item must match that calculated.");
 		}
 
+    if o_reroot.is_some() {
+      return o_reroot;
+    }
+
 		// check storage root.
 		let storage_root = new_header.state_root();
 		header.state_root().check_equal(&storage_root);
 		assert!(header.state_root() == storage_root, "Storage root must match that calculated.");
+    None
 	}
 
 	/// Check a given signed transaction for validity. This doesn't execute any

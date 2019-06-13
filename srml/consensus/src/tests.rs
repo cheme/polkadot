@@ -29,7 +29,7 @@ fn authorities_change_logged() {
 		System::initialize(&1, &Default::default(), &Default::default(), &Default::default());
 		Consensus::set_authorities(&[UintAuthorityId(4), UintAuthorityId(5), UintAuthorityId(6)]);
 		Consensus::on_finalize(1);
-		let header = System::finalize();
+		let header = System::finalize().0;
 		assert_eq!(header.digest, testing::Digest {
 			logs: vec![
 				generic::DigestItem::AuthoritiesChange(
@@ -50,7 +50,7 @@ fn partial_authorities_change_logged() {
 		System::initialize(&2, &Default::default(), &Default::default(), &Default::default());
 		Consensus::set_authorities(&[UintAuthorityId(2), UintAuthorityId(4), UintAuthorityId(5)]);
 		Consensus::on_finalize(2);
-		let header = System::finalize();
+		let header = System::finalize().0;
 		assert_eq!(header.digest, testing::Digest {
 			logs: vec![
 				generic::DigestItem::AuthoritiesChange(
@@ -70,7 +70,7 @@ fn authorities_change_is_not_logged_when_not_changed() {
 	with_externalities(&mut new_test_ext(vec![1, 2, 3]), || {
 		System::initialize(&1, &Default::default(), &Default::default(), &Default::default());
 		Consensus::on_finalize(1);
-		let header = System::finalize();
+		let header = System::finalize().0;
 		assert_eq!(header.digest, testing::Digest {
 			logs: vec![],
 		});
@@ -84,7 +84,7 @@ fn authorities_change_is_not_logged_when_changed_back_to_original() {
 		Consensus::set_authorities(&[UintAuthorityId(4), UintAuthorityId(5), UintAuthorityId(6)]);
 		Consensus::set_authorities(&[UintAuthorityId(1), UintAuthorityId(2), UintAuthorityId(3)]);
 		Consensus::on_finalize(1);
-		let header = System::finalize();
+		let header = System::finalize().0;
 		assert_eq!(header.digest, testing::Digest {
 			logs: vec![],
 		});

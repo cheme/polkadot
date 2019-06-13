@@ -234,7 +234,10 @@ pub mod ext {
 		/// - Otherwise, the number of bytes written for value.
 		fn ext_get_storage_into(key_data: *const u8, key_len: u32, value_data: *mut u8, value_len: u32, value_offset: u32) -> u32;
 		/// Gets the trie root of the storage.
-		fn ext_storage_root(result: *mut u8);
+		/// Return 0 or number of block to reroot.
+		fn ext_storage_root(result: *mut u8) -> u64;
+    /// Force reroot n blocks before.
+		fn ext_reroot(reroot: u64);
 		/// Get the change trie root of the current storage overlay at a block with given parent.
 		///
 		/// # Returns
@@ -658,12 +661,21 @@ impl StorageApi for () {
 		}
 	}
 
-	fn storage_root() -> [u8; 32] {
-		let mut result: [u8; 32] = Default::default();
+	fn reroot(n: u64) {
 		unsafe {
-			ext_storage_root.get()(result.as_mut_ptr());
+			ext_reroot.get()(n);
 		}
-		result
+	}
+
+	fn storage_root() -> ([u8; 32], Option<u64>) {
+		let mut result: [u8; 32] = Default::default();
+		let reroot = unsafe {
+			ext_storage_root.get()(result.as_mut_ptr())
+		};
+		let reroot = if reroot == 0 {
+			None
+		} else { Some(reroot) };
+		(result, reroot)
 	}
 
 	fn child_storage_root(storage_key: &[u8]) -> Vec<u8> {

@@ -253,7 +253,7 @@ impl_runtime_apis! {
 			Executive::apply_extrinsic(extrinsic)
 		}
 
-		fn finalize_block() -> <Block as BlockT>::Header {
+		fn finalize_block() -> (<Block as BlockT>::Header, Option<u64>) {
 			Executive::finalize_block()
 		}
 

@@ -77,7 +77,7 @@ fn aura_reports_offline() {
 		let slot_duration = Aura::slot_duration();
 
 		Aura::on_timestamp_set::<HandleTestReport>(5 * slot_duration, slot_duration);
-		let header = System::finalize();
+		let header = System::finalize().0;
 
 		// no slashing when last step was 0.
 		assert_eq!(SLASH_COUNTS.lock().as_slice(), &[0, 0, 0, 0]);

@@ -285,6 +285,13 @@ impl OverlayedChanges {
 			false => None,
 		}
 	}
+
+	/// Clear the overlay, drop all current state.
+	pub fn clear(&mut self) {
+		self.prospective.clear();
+		self.committed.clear();
+	}
+
 }
 
 #[cfg(test)]
@@ -369,7 +376,7 @@ mod tests {
 			crate::NeverOffchainExt::new(),
 		);
 		const ROOT: [u8; 32] = hex!("0b41e488cccbd67d1f1089592c2c235f5c5399b053f7fe9152dd4b5f279914cd");
-		assert_eq!(ext.storage_root(), H256::from(ROOT));
+		assert_eq!(ext.storage_root(), (H256::from(ROOT), None));
 	}
 
 	#[test]

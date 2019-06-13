@@ -116,16 +116,23 @@ where
 	}
 
 	/// Consume the builder to return a valid `Block` containing all pushed extrinsics.
-	pub fn bake(mut self) -> error::Result<Block> {
-		self.bake_impl()?;
-		Ok(<Block as BlockT>::new(self.header, self.extrinsics))
+	pub fn bake(mut self) -> error::Result<(Block, Option<u64>)> {
+		let or = self.bake_impl()?;
+		Ok((<Block as BlockT>::new(self.header, self.extrinsics), or))
 	}
 
-	fn bake_impl(&mut self) -> error::Result<()> {
-		self.header = self.api.finalize_block_with_context(
+	fn bake_impl(&mut self) -> error::Result<Option<u64>> {
+		let (mut header, o_reroot) = self.api.finalize_block_with_context(
 			&self.block_id, ExecutionContext::BlockConstruction
 		)?;
+/*
+    // TODO EMCH rollback here ??
 
+    if let Some(nb) = o_reroot {
+      self.api.rollback_blocks(None, nb);
+      // TODO set new storage root
+    }*/
+    self.header = header;
 		debug_assert_eq!(
 			self.header.extrinsics_root().clone(),
 			HashFor::<Block>::ordered_trie_root(
@@ -133,7 +140,7 @@ where
 			),
 		);
 
-		Ok(())
+		Ok(o_reroot)
 	}
 
 	/// Consume the builder to return a valid `Block` containing all pushed extrinsics
@@ -141,10 +148,10 @@ where
 	///
 	/// The proof will be `Some(_)`, if proof recording was enabled while creating
 	/// the block builder.
-	pub fn bake_and_extract_proof(mut self) -> error::Result<(Block, Option<Vec<Vec<u8>>>)> {
-		self.bake_impl()?;
+	pub fn bake_and_extract_proof(mut self) -> error::Result<(Block, Option<Vec<Vec<u8>>>, Option<u64>)> {
+		let or = self.bake_impl()?;
 
 		let proof = self.api.extract_proof();
-		Ok((<Block as BlockT>::new(self.header, self.extrinsics), proof))
+		Ok((<Block as BlockT>::new(self.header, self.extrinsics), proof, or))
 	}
 }

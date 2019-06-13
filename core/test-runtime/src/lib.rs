@@ -381,7 +381,7 @@ cfg_if! {
 					system::execute_transaction(extrinsic)
 				}
 
-				fn finalize_block() -> <Block as BlockT>::Header {
+				fn finalize_block() -> (<Block as BlockT>::Header, Option<u64>) {
 					system::finalize_block()
 				}
 
@@ -525,7 +525,7 @@ cfg_if! {
 					system::execute_transaction(extrinsic)
 				}
 
-				fn finalize_block() -> <Block as BlockT>::Header {
+				fn finalize_block() -> (<Block as BlockT>::Header, Option<u64>) {
 					system::finalize_block()
 				}
 
