@@ -1031,6 +1031,93 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		}
 	}
 
+  // TODO EMCH switch return old root and do invalidate operation if possible
+  // TODO change logic: 
+  // - use block number
+  // - first check execute block on consecutive payload, and keep
+  // tx for first correct one: if no fine do not apply reroot.
+  // -> checking it is questionable but can be ok.
+  // - add payload as first extrinsic of block, on calculate and a check to.
+  // - make this first instruction run in special mode??
+	pub fn rollback_blocks(
+		&self,
+    block_number: u64,
+	) -> error::Result<Option<Block::Hash>> {
+    // TODO EMCH
+    // self.backend.revert
+    let mut best = self.current_height();
+
+		let (config, storage) = match self.require_changes_trie().ok() {
+			Some((config, storage)) => (config, storage),
+			None => return Err(Error::ChangesTriesNotSupported),
+		};
+
+
+    let mut dest = self.current_height();
+    let mut nb_sat = 0u64;
+		for _c in 0 .. block_number {
+			if dest.is_zero() {
+        break;
+      }
+      dest -= One::one();  // prev block
+      nb_sat += 1;
+    }
+    // check block status
+    if BlockStatus::InChainWithState != self.block_status(&BlockId::Number(dest))? {
+        // this is bad: the chain is not usable anymore, will need a resynch
+        // TODO switch to Error
+        panic!("Chain need resynch");
+    }
+
+    // rebase to dest state hash
+    let hash = self.backend.blockchain().hash(dest)?;
+    // remove to be pruned contents
+
+    // TODO also remove values from change trie!! -> put all in prunning of this block
+		let finalized_number = self.backend.blockchain().info().finalized_number;
+		let oldest = storage.oldest_changes_trie_block(&config, finalized_number);
+    if dest < oldest {
+    }
+		for _c in 0 .. nb_sat {
+
+	    let state = self.backend.state_at(BlockId::Number(best))?;
+
+    // TODO saturating stop on 0
+			best -= One::one();  // prev block
+    }
+    Ok(hash)
+/*			let mut transaction = DBTransaction::new();
+			match self.storage.state_db.revert_one() {
+				Some(commit) => {
+					apply_state_commit(&mut transaction, commit);
+					let removed = self.blockchain.header(BlockId::Number(best))?.ok_or_else(
+						|| client::error::Error::UnknownBlock(
+							format!("Error reverting to {}. Block hash not found.", best)))?;
+
+					let hash = self.blockchain.hash(best)?.ok_or_else(
+						|| client::error::Error::UnknownBlock(
+							format!("Error reverting to {}. Block hash not found.", best)))?;
+					let key = utils::number_and_hash_to_lookup_key(best.clone(), &hash);
+					self.storage.db.write(transaction).map_err(db_err)?;
+				}
+				None => return Ok(c.saturated_into::<NumberFor<Block>>())
+			}
+		}
+		Ok(n)
+*/
+    //self.backend.revert(nb);
+
+	//fn revert(&self, n: NumberFor<Block>) -> error::Result<NumberFor<Block>>;
+  //
+  //	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
+/*		self.state_at(BlockId::Hash(hash.clone())).is_ok()
+	}
+	/// Returns state backend with post-state of given block.
+	fn state_at(&self, block: BlockId<Block>) -> error::Result<Self::State>;
+*/
+    // do not put content (straight to the hash)
+  }
+
 	fn apply_finality_with_block_hash(
 		&self,
 		operation: &mut ClientImportOperation<Block, Blake2Hasher, B>,

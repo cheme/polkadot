@@ -263,6 +263,11 @@ where
 		42
 	}
 
+	fn reroot(&mut self, block_number: u64) {
+		let _guard = panic_handler::AbortGuard::new(true);
+		// TODO EMCH write storage
+	}
+
 	fn storage_root(&mut self) -> H::Out {
 		let _guard = panic_handler::AbortGuard::new(true);
 		if let Some((_, ref root)) = self.storage_transaction {

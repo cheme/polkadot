@@ -241,6 +241,9 @@ pub mod ext {
 		) -> u32;
 		/// Gets the trie root of the storage.
 		fn ext_storage_root(result: *mut u8);
+
+    /// Force reroot to  block n.
+		fn ext_reroot(n: u64);
 		/// Get the change trie root of the current storage overlay at a block with given parent.
 		///
 		/// # Returns
@@ -702,6 +705,12 @@ impl StorageApi for () {
 				storage_key.as_ptr(),
 				storage_key.len() as u32
 			);
+		}
+	}
+
+	fn reroot(n: u64) {
+		unsafe {
+			ext_reroot.get()(n);
 		}
 	}
 

@@ -165,6 +165,11 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		debug_trace!(target: "sr-io", "free {}", addr);
 		Ok(())
 	},
+	ext_reroot(number: u64) => {
+		debug_trace!(target: "wasm-trace", "*** Reroot to {}", number);
+		this.ext.reroot(number);
+		Ok(())
+	},
 	ext_set_storage(key_data: *const u8, key_len: u32, value_data: *const u8, value_len: u32) => {
 		let key = this.memory.get(key_data, key_len as usize)
 			.map_err(|_| UserError("Invalid attempt to determine key in ext_set_storage"))?;

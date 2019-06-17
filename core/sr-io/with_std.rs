@@ -145,6 +145,12 @@ impl StorageApi for () {
 		);
 	}
 
+	fn reroot(n: u64) {
+		ext::with(|ext|
+			ext.reroot(n)
+		);
+  }
+
 	fn storage_root() -> [u8; 32] {
 		ext::with(|ext|
 			ext.storage_root()

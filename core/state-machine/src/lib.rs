@@ -212,6 +212,9 @@ pub trait Externalities<H: Hasher> {
 	/// Get the trie root of the current storage map. This will also update all child storage keys in the top-level storage map.
 	fn storage_root(&mut self) -> H::Out where H::Out: Ord;
 
+	/// Request a state rollback to a given block number.
+	fn reroot(&mut self, block_nb: u64);
+
 	/// Get the trie root of a child storage map. This will also update the value of the child
 	/// storage keys in the top-level storage map.
 	/// If the storage root equals the default hash as defined by the trie, the key in the top-level
