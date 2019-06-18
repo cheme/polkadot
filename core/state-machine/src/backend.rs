@@ -147,6 +147,17 @@ pub trait Backend<H: Hasher> {
 		(root, txs)
 	}
 
+	/// TODO EMCH document, this does not look good (mut on this
+	/// trait is awkward at best).
+  /// TODO EMCH this requires inner mutablility (change to &mut
+  /// was a bit painfull) -> this fn really does not fit.
+	fn reroot(&self, hash: H::Out)
+ { unimplemented!() }
+	/// retrun the rerooted hash if the backend has been rerooted,
+	/// this is dangerous as if this api is not checked things will
+	/// break.
+	fn rerooted(&self) -> Option<H::Out>
+ { unimplemented!() }
 }
 
 /// Trait that allows consolidate two transactions together.
