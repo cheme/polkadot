@@ -20,8 +20,7 @@ use std::collections::{HashMap, BTreeMap};
 use std::iter::FromIterator;
 use hash_db::Hasher;
 use crate::backend::{InMemory, Backend};
-use primitives::storage::well_known_keys::{is_child_storage_key, NEXT_STATE};
-use primitives::storage::{NextState, Reroot};
+use primitives::storage::well_known_keys::is_child_storage_key;
 use crate::changes_trie::{
 	compute_changes_trie_root, InMemoryStorage as ChangesTrieInMemoryStorage,
 	BlockNumber as ChangesTrieBlockNumber,
@@ -38,6 +37,7 @@ pub struct TestExternalities<H: Hasher, N: ChangesTrieBlockNumber> {
 	overlay: OverlayedChanges,
 	backend: InMemory<H>,
 	changes_trie_storage: ChangesTrieInMemoryStorage<H, N>,
+	reroot: Option<u64>,
 	offchain: Option<Box<dyn offchain::Externalities>>,
 }
 
@@ -64,6 +64,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 			overlay,
 			changes_trie_storage: ChangesTrieInMemoryStorage::new(),
 			backend: inner.into(),
+			reroot: None,
 			offchain: None,
 		}
 	}
@@ -203,21 +204,10 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 
 	fn reroot(&mut self, block_number: u64) {
 		let _guard = panic_handler::AbortGuard::new(true);
-		let next_state: NextState = self.storage(NEXT_STATE)
-			.and_then(|b| parity_codec::Decode::decode(&mut &b[..]))
-			.unwrap_or(Default::default());
-		let payload = Vec::new();
-		let reroot = Reroot { block_number, payload };
-		let next_state = match next_state {
-			NextState::Continue => {
-				NextState::TryReroot(vec![reroot])
-			},
-			NextState::TryReroot(mut prev) => {
-				prev.push(reroot);
-				NextState::TryReroot(prev)
-			},
-		};
-		self.set_storage(NEXT_STATE.to_vec(), next_state.encode());
+		self.overlay.clear();
+		self.reroot = Some(block_number);
+		// TODO EMCH change trie storage?
+		// TODO EMCH change offline externalities?
 	}
 
 	fn storage_root(&mut self) -> H::Out {

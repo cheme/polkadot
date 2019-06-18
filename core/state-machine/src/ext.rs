@@ -23,8 +23,7 @@ use crate::changes_trie::{Storage as ChangesTrieStorage, compute_changes_trie_ro
 use crate::{Externalities, OverlayedChanges, ChildStorageKey};
 use hash_db::Hasher;
 use primitives::offchain;
-use primitives::storage::well_known_keys::{is_child_storage_key, NEXT_STATE};
-use primitives::storage::{NextState, Reroot};
+use primitives::storage::well_known_keys::is_child_storage_key;
 use trie::{MemoryDB, TrieDBMut, TrieMut, default_child_trie_root};
 
 const EXT_NOT_ALLOWED_TO_FAIL: &str = "Externalities not allowed to fail within runtime";
@@ -59,15 +58,18 @@ impl<B: error::Error, E: error::Error> error::Error for Error<B, E> {
 }
 
 /// Wraps a read-only backend, call executor, and current overlayed changes.
-pub struct Ext<'a, H, N, B, T, O>
+pub struct Ext<'a, H, N, B, T, O, C, BB>
 where
 	H: Hasher,
 	B: 'a + Backend<H>,
+	C: 'a + crate::client::Externalities<H>,
+	BB: 'a + FnMut(H::Out) -> B,
 {
 	/// The overlayed changes to write to.
 	overlay: &'a mut OverlayedChanges,
 	/// The storage backend to read from.
-	backend: &'a B,
+	old_backend: &'a B,
+	new_backend: Option<B>,
 	/// The storage transaction necessary to commit to the backend. Is cached when
 	/// `storage_root` is called and the cache is cleared on every subsequent change.
 	storage_transaction: Option<(B::Transaction, H::Out)>,
@@ -84,33 +86,58 @@ where
 	///
 	/// If None, some methods from the trait might not supported.
 	offchain_externalities: Option<&'a mut O>,
+	/// TODO EMCH
+	client: &'a C,
+	build_backend: &'a mut BB,
+	/// Indicate if a reroot aoccured with the given block number.
+	reroot: Option<u64>,
 	/// Dummy usage of N arg.
 	_phantom: ::std::marker::PhantomData<N>,
 }
 
-impl<'a, H, N, B, T, O> Ext<'a, H, N, B, T, O>
+impl<'a, H, N, B, T, O, C, BB> Ext<'a, H, N, B, T, O, C, BB>
 where
 	H: Hasher,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
 	O: 'a + offchain::Externalities,
+	C: 'a + crate::client::Externalities<H>,
+	BB: 'a + FnMut(H::Out) -> B,
 	H::Out: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
+	/// TODO EMCH doc
+	pub fn backend(&self) -> &B {
+		self.new_backend.as_ref().unwrap_or(self.old_backend)
+	}
+	/// When droping ext their may be some needed update.
+	/// Currently
+	/// TODO EMCH very error prone api: fuse new and this,
+	/// executing over a closure??
+	pub fn needed_updates(self) -> Option<B> {
+		self.new_backend
+	}
+
 	/// Create a new `Ext` from overlayed changes and read-only backend
 	pub fn new(
+		client: &'a C,
+		build_backend: &'a mut BB,
 		overlay: &'a mut OverlayedChanges,
 		backend: &'a B,
 		changes_trie_storage: Option<&'a T>,
 		offchain_externalities: Option<&'a mut O>,
 	) -> Self {
 		Ext {
+			client,
+			build_backend,
 			overlay,
-			backend,
+			old_backend: backend,
+			new_backend: None,
 			storage_transaction: None,
 			changes_trie_storage,
 			changes_trie_transaction: None,
 			offchain_externalities,
+			reroot: None,
 			_phantom: Default::default(),
 		}
 	}
@@ -142,12 +169,13 @@ where
 }
 
 #[cfg(test)]
-impl<'a, H, N, B, T, O> Ext<'a, H, N, B, T, O>
+impl<'a, H, N, B, T, O, C> Ext<'a, H, N, B, T, O, C>
 where
 	H: Hasher,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
 	O: 'a + offchain::Externalities,
+	C: 'a + crate::client::Externalities<H>,
 	N: crate::changes_trie::BlockNumber,
 {
 	pub fn storage_pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -164,48 +192,50 @@ where
 	}
 }
 
-impl<'a, B, T, H, N, O> Externalities<H> for Ext<'a, H, N, B, T, O>
+impl<'a, B, T, H, N, O, C, BB> Externalities<H> for Ext<'a, H, N, B, T, O, C, BB>
 where
 	H: Hasher,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
 	O: 'a + offchain::Externalities,
+	C: 'a + crate::client::Externalities<H>,
+	BB: 'a + FnMut(H::Out) -> B,
 	H::Out: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
 	fn storage(&self, key: &[u8]) -> Option<Vec<u8>> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		self.overlay.storage(key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
-			self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL))
+			self.backend().storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL))
 	}
 
 	fn storage_hash(&self, key: &[u8]) -> Option<H::Out> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		self.overlay.storage(key).map(|x| x.map(|x| H::hash(x))).unwrap_or_else(||
-			self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL))
+			self.backend().storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL))
 	}
 
 	fn original_storage(&self, key: &[u8]) -> Option<Vec<u8>> {
 		let _guard = panic_handler::AbortGuard::new(true);
-		self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
+		self.backend().storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
 	}
 
 	fn original_storage_hash(&self, key: &[u8]) -> Option<H::Out> {
 		let _guard = panic_handler::AbortGuard::new(true);
-		self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
+		self.backend().storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
 	}
 
 	fn child_storage(&self, storage_key: ChildStorageKey<H>, key: &[u8]) -> Option<Vec<u8>> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		self.overlay.child_storage(storage_key.as_ref(), key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
-			self.backend.child_storage(storage_key.as_ref(), key).expect(EXT_NOT_ALLOWED_TO_FAIL))
+			self.backend().child_storage(storage_key.as_ref(), key).expect(EXT_NOT_ALLOWED_TO_FAIL))
 	}
 
 	fn exists_storage(&self, key: &[u8]) -> bool {
 		let _guard = panic_handler::AbortGuard::new(true);
 		match self.overlay.storage(key) {
 			Some(x) => x.is_some(),
-			_ => self.backend.exists_storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
+			_ => self.backend().exists_storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
 		}
 	}
 
@@ -214,7 +244,7 @@ where
 
 		match self.overlay.child_storage(storage_key.as_ref(), key) {
 			Some(x) => x.is_some(),
-			_ => self.backend.exists_child_storage(storage_key.as_ref(), key).expect(EXT_NOT_ALLOWED_TO_FAIL),
+			_ => self.backend().exists_child_storage(storage_key.as_ref(), key).expect(EXT_NOT_ALLOWED_TO_FAIL),
 		}
 	}
 
@@ -241,7 +271,7 @@ where
 
 		self.mark_dirty();
 		self.overlay.clear_child_storage(storage_key.as_ref());
-		self.backend.for_keys_in_child_storage(storage_key.as_ref(), |key| {
+		self.backend().for_keys_in_child_storage(storage_key.as_ref(), |key| {
 			self.overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
 		});
 	}
@@ -255,7 +285,7 @@ where
 
 		self.mark_dirty();
 		self.overlay.clear_prefix(prefix);
-		self.backend.for_keys_with_prefix(prefix, |key| {
+		self.backend().for_keys_with_prefix(prefix, |key| {
 			self.overlay.set_storage(key.to_vec(), None);
 		});
 	}
@@ -265,23 +295,23 @@ where
 	}
 
 	fn reroot(&mut self, block_number: u64) {
-		use parity_codec::Encode;
 		let _guard = panic_handler::AbortGuard::new(true);
-		let next_state: NextState = self.storage(NEXT_STATE)
-			.and_then(|b| parity_codec::Decode::decode(&mut &b[..]))
-			.unwrap_or(Default::default());
-		let payload = Vec::new();
-		let reroot = Reroot { block_number, payload };
-		let next_state = match next_state {
-			NextState::Continue => {
-				NextState::TryReroot(vec![reroot])
-			},
-			NextState::TryReroot(mut prev) => {
-				prev.push(reroot);
-				NextState::TryReroot(prev)
-			},
-		};
-		self.set_storage(NEXT_STATE.to_vec(), next_state.encode());
+		self.mark_dirty();
+		self.overlay.clear();
+		self.reroot = Some(block_number);
+		// TODO EMCH change trie storage?
+		if let Some(backend) = self.client.backend_at(block_number, self.build_backend) {
+			self.new_backend = Some(backend);
+		} else {
+			// case where you need to resync chain state
+			// TODO EMCH this need test : if client panic but this panic is handled
+			// as an execution failure, this is incorrect: we need to shutdown here
+			// and not act as if sometihng is invalid -> need a test
+			panic!("Your client need to be resynch, access to block {} state impossible.", block_number);
+		}
+		// TODO make prune and all durable change out of this extrinsic call (needs to return the info
+		// somehow).
+		// TODO EMCH change offline externalities?
 	}
 
 	fn storage_root(&mut self) -> H::Out {
@@ -307,7 +337,7 @@ where
 		let delta = self.overlay.committed.top.iter().map(|(k, v)| (k.clone(), v.value.clone()))
 			.chain(self.overlay.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())));
 
-		let (root, transaction) = self.backend.full_storage_root(delta, child_delta_iter);
+		let (root, transaction) = self.backend().full_storage_root(delta, child_delta_iter);
 		self.storage_transaction = Some((transaction, root));
 		root
 	}
@@ -330,7 +360,7 @@ where
 						.into_iter()
 						.flat_map(|map| map.1.clone().into_iter()));
 
-			let root = self.backend.child_storage_root(storage_key, delta).0;
+			let root = self.backend().child_storage_root(storage_key, delta).0;
 
 			self.overlay.set_storage(storage_key.to_vec(), Some(root.to_vec()));
 
@@ -342,7 +372,7 @@ where
 	fn storage_changes_root(&mut self, parent_hash: H::Out) -> Result<Option<H::Out>, ()> {
 		let _guard = panic_handler::AbortGuard::new(true);
 		let root_and_tx = compute_changes_trie_root::<_, T, H, N>(
-			self.backend,
+			self.backend(),
 			self.changes_trie_storage.clone(),
 			self.overlay,
 			parent_hash,

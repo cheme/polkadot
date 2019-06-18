@@ -289,6 +289,13 @@ impl OverlayedChanges {
 			false => None,
 		}
 	}
+
+	/// Clear the overlay, drop all current state.
+	pub fn clear(&mut self) {
+		self.prospective.clear();
+		self.committed.clear();
+	}
+
 }
 
 #[cfg(test)]
