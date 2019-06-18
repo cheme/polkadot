@@ -21,6 +21,7 @@ use serde::{Serialize, Deserialize};
 #[cfg(feature = "std")]
 use crate::bytes;
 use rstd::vec::Vec;
+use parity_codec::{Encode, Decode};
 
 /// Contract storage key.
 #[derive(PartialEq, Eq)]
@@ -45,6 +46,48 @@ pub struct StorageChangeSet<Hash> {
 	)>,
 }
 
+/// Client next state behavior.
+#[derive(Encode, Decode)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize, Debug, PartialEq, Eq))]
+#[cfg_attr(feature = "std", serde(rename_all = "camelCase"))]
+pub enum NextState {
+	/// Do not reroot.
+	Continue,
+
+	/// A list of ordered reroot calls (first one takes it all).
+	TryReroot(Vec<Reroot>),
+}
+
+impl Default for NextState {
+	fn default() -> Self {
+		NextState::Continue
+	}
+}
+
+/// Reroot configuration.
+#[derive(Encode, Decode)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize, Debug, PartialEq, Eq))]
+#[cfg_attr(feature = "std", serde(rename_all = "camelCase"))]
+pub struct Reroot {
+	/// Target state root to use (block number).
+	pub block_number: u64,
+	/// Calls to make on initialized reroot before
+	/// committing to it (switch next state value and
+	/// applying revert block on pruning.
+	pub payload: Vec<RerootPayLoad>,
+}
+
+/// Reroot payload to call on rerooted block.
+#[derive(Encode, Decode)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize, Debug, PartialEq, Eq))]
+#[cfg_attr(feature = "std", serde(rename_all = "camelCase"))]
+pub struct RerootPayLoad {
+	/// Method to call.
+	pub method: String,
+	/// Data payload for this call.
+	pub data: Vec<u8>,
+}
+
 /// List of all well known keys and prefixes in storage.
 pub mod well_known_keys {
 
@@ -60,6 +103,11 @@ pub mod well_known_keys {
 
 	/// Current extrinsic index (u32) is stored under this key.
 	pub const EXTRINSIC_INDEX: &'static [u8] = b":extrinsic_index";
+
+	/// Next block state evaluation behavior.
+	///
+	/// Stored as a SCALED encoded `NextState`. Required by substrate.
+	pub const NEXT_STATE: &'static [u8] = b":next_state";
 
 	/// Changes trie configuration is stored under this key.
 	pub const CHANGES_TRIE_CONFIG: &'static [u8] = b":changes_trie";

@@ -23,7 +23,8 @@ use crate::changes_trie::{Storage as ChangesTrieStorage, compute_changes_trie_ro
 use crate::{Externalities, OverlayedChanges, ChildStorageKey};
 use hash_db::Hasher;
 use primitives::offchain;
-use primitives::storage::well_known_keys::is_child_storage_key;
+use primitives::storage::well_known_keys::{is_child_storage_key, NEXT_STATE};
+use primitives::storage::{NextState, Reroot};
 use trie::{MemoryDB, TrieDBMut, TrieMut, default_child_trie_root};
 
 const EXT_NOT_ALLOWED_TO_FAIL: &str = "Externalities not allowed to fail within runtime";
@@ -264,8 +265,23 @@ where
 	}
 
 	fn reroot(&mut self, block_number: u64) {
+		use parity_codec::Encode;
 		let _guard = panic_handler::AbortGuard::new(true);
-		// TODO EMCH write storage
+		let next_state: NextState = self.storage(NEXT_STATE)
+			.and_then(|b| parity_codec::Decode::decode(&mut &b[..]))
+			.unwrap_or(Default::default());
+		let payload = Vec::new();
+		let reroot = Reroot { block_number, payload };
+		let next_state = match next_state {
+			NextState::Continue => {
+				NextState::TryReroot(vec![reroot])
+			},
+			NextState::TryReroot(mut prev) => {
+				prev.push(reroot);
+				NextState::TryReroot(prev)
+			},
+		};
+		self.set_storage(NEXT_STATE.to_vec(), next_state.encode());
 	}
 
 	fn storage_root(&mut self) -> H::Out {

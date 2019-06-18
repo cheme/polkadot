@@ -82,7 +82,7 @@ use primitives::{generic, traits::{self, CheckEqual, SimpleArithmetic,
 }};
 #[cfg(any(feature = "std", test))]
 use primitives::traits::Zero;
-use substrate_primitives::storage::well_known_keys;
+use substrate_primitives::storage::{well_known_keys, NextState};
 use srml_support::{
 	storage, decl_module, decl_event, decl_storage, StorageDoubleMap, StorageValue,
 	StorageMap, Parameter, for_each_tuple, traits::Contains
@@ -361,6 +361,7 @@ decl_storage! {
 			use parity_codec::Encode;
 
 			storage.insert(well_known_keys::CODE.to_vec(), config.code.clone());
+			storage.insert(well_known_keys::NEXT_STATE.to_vec(), NextState::Continue.encode());
 			storage.insert(well_known_keys::EXTRINSIC_INDEX.to_vec(), 0u32.encode());
 
 			if let Some(ref changes_trie_config) = config.changes_trie_config {
