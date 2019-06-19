@@ -49,7 +49,7 @@ use primitives::{
 	Blake2Hasher, H256, ChangesTrieConfiguration, convert_hash,
 	NeverNativeValue, ExecutionContext
 };
-use primitives::storage::{StorageKey, StorageData};
+use primitives::storage::{StorageKey, StorageData, NextState, Reroot};
 use primitives::storage::well_known_keys;
 use parity_codec::{Encode, Decode};
 use state_machine::{
@@ -420,6 +420,13 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 				':code' key is always defined; qed").0)
 	}
 
+	/// Get the NextState info at a given block.
+	pub fn next_state(&self, id: &BlockId<Block>) -> error::Result<NextState> {
+		Ok(self.storage(id, &StorageKey(well_known_keys::NEXT_STATE.to_vec()))?
+			.and_then(|c| Decode::decode(&mut &c.0[..]))
+			.unwrap_or(NextState::Continue))
+	}
+
 	/// Get the RuntimeVersion at a given block.
 	pub fn runtime_version_at(&self, id: &BlockId<Block>) -> error::Result<RuntimeVersion> {
 		self.executor.runtime_version(id)
@@ -727,6 +734,12 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	}
 
 	/// Create a new block, built on top of `parent`.
+  /// TODO EMCH seems super unsafe: dispatch on srml module get
+  /// done upon call to `with_externalities` of `native_executor`.
+  /// ?? excepti if executor is call after that. -> that is the
+  /// case (executor call set that depending on its param so just
+  /// need to change its param.
+  /// But BlockBuilder `push` method remains a mistery to me.
 	pub fn new_block_at(
 		&self,
 		parent: &BlockId<Block>,
@@ -1021,7 +1034,21 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 					NeverOffchainExt::new(),
 				)?;
 
-				overlay.commit_prospective();
+        match overlay.storage(well_known_keys::NEXT_STATE)
+          .and_then(|c| c)
+          .and_then(|c| Decode::decode(&mut &c[..]))
+          .unwrap_or(NextState::Continue) {
+          NextState::Continue => (),
+          NextState::TryReroot(v) => {
+            println!("try reroot!!!");
+            overlay.clear();
+            // TODO EMCH actual reroot by rerun previous process over it tx (variant of
+            // call_at_state probably
+            // Funny how this clear does not break anything-> a root check is missing
+          },
+        }
+
+        overlay.commit_prospective();
 
 				let (top, children) = overlay.into_committed();
 				let children = children.map(|(sk, it)| (sk, it.collect())).collect();

@@ -46,6 +46,7 @@ use trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
 use parking_lot::{Mutex, RwLock};
 use primitives::{H256, Blake2Hasher, ChangesTrieConfiguration, convert_hash};
 use primitives::storage::well_known_keys;
+use primitives::storage::{StorageKey, StorageData, NextState, Reroot};
 use runtime_primitives::{
 	generic::{BlockId, DigestItem}, Justification, StorageOverlay, ChildrenStorageOverlay,
 	BuildStorage
@@ -1371,6 +1372,22 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 				if !self.storage.state_db.is_pruned(&hash, (*hdr.number()).saturated_into::<u64>()) {
 					let root = H256::from_slice(hdr.state_root().as_ref());
 					let db_state = DbState::new(self.storage.clone(), root);
+          // TODO cache it ??  TODO EMCH switch at load of block is a wrong approach: need to
+          // switch on finalize (on new block it expose to questions like (reroot to a tryreroot
+          // block)...
+/*          match db_state.storage(&StorageKey(well_known_keys::NEXT_STATE.to_vec()))?
+      			.and_then(|c| Decode::decode(&mut &c.0[..]))
+			      .unwrap_or(NextState::Continue)) {
+              NextState::Continue => db_state,
+              NextState::TryReroot(v) => {
+                // TODO EMCH logic with prune and all -> here reroot to first
+                // This currently only allow rerooting -> need some initial execution -> do
+                // it by setting thing back in db_state : cannot.... -> need optional payload
+
+              },
+          }
+*/
+	
 					let state = RefTrackingState::new(db_state, self.storage.clone(), Some(hash.clone()));
 					Ok(CachingState::new(state, self.shared_cache.clone(), Some(hash)))
 				} else {

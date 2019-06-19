@@ -242,7 +242,7 @@ pub mod ext {
 		/// Gets the trie root of the storage.
 		fn ext_storage_root(result: *mut u8);
 
-    /// Force reroot to  block n.
+		/// Force reroot to block n.
 		fn ext_reroot(n: u64);
 		/// Get the change trie root of the current storage overlay at a block with given parent.
 		///

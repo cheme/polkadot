@@ -205,7 +205,7 @@ impl OverlayedChanges {
 			}
 		}
 
-		// Then do the same with keys from commited changes.
+		// Then do the same with keys from committed changes.
 		// NOTE that we are making changes in the prospective change set.
 		for key in self.committed.top.keys() {
 			if key.starts_with(prefix) {
@@ -289,6 +289,12 @@ impl OverlayedChanges {
 			false => None,
 		}
 	}
+	/// Clear the change set.
+	pub fn clear(&mut self) {
+		self.prospective.clear();
+		self.committed.clear();
+	}
+
 }
 
 #[cfg(test)]
