@@ -734,12 +734,12 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	}
 
 	/// Create a new block, built on top of `parent`.
-  /// TODO EMCH seems super unsafe: dispatch on srml module get
-  /// done upon call to `with_externalities` of `native_executor`.
-  /// ?? excepti if executor is call after that. -> that is the
-  /// case (executor call set that depending on its param so just
-  /// need to change its param.
-  /// But BlockBuilder `push` method remains a mistery to me.
+	/// TODO EMCH seems super unsafe: dispatch on srml module get
+	/// done upon call to `with_externalities` of `native_executor`.
+	/// ?? excepti if executor is call after that. -> that is the
+	/// case (executor call set that depending on its param so just
+	/// need to change its param.
+	/// But BlockBuilder `push` method remains a mistery to me.
 	pub fn new_block_at(
 		&self,
 		parent: &BlockId<Block>,
@@ -1034,45 +1034,50 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 					NeverOffchainExt::new(),
 				)?;
 
-        match overlay.storage(well_known_keys::NEXT_STATE)
-          .and_then(|c| c)
-          .and_then(|c| Decode::decode(&mut &c[..]))
-          .unwrap_or(NextState::Continue) {
-          NextState::Continue => (),
-          NextState::TryReroot(v) => {
-            println!("try reroot!!!");
-            overlay.clear();
-            // TODO EMCH actual reroot by rerun previous process over it tx (variant of
-            // call_at_state probably
-            // Funny how this clear does not break anything-> a root check is missing
-          },
-        }
+				match overlay.storage(well_known_keys::NEXT_STATE)
+					.and_then(|c| c)
+					.and_then(|c| Decode::decode(&mut &c[..]))
+					.unwrap_or(NextState::Continue) {
+					NextState::Continue => (),
+					NextState::TryReroot(v) => {
+						println!("try reroot!!!");
+						overlay.clear();
+						// TODO EMCH actual reroot by rerun previous process over it tx (variant of
+						// call_at_state probably
+						// Funny how this clear does not break anything-> a root check is missing
+            // TODO EMCH this absolutely need a call to recalculate storage update and all.
+					},
+				}
 
-        overlay.commit_prospective();
+				overlay.commit_prospective();
 
 				let (top, children) = overlay.into_committed();
 				let children = children.map(|(sk, it)| (sk, it.collect())).collect();
-				Ok((Some(storage_update), Some(changes_update), Some((top.collect(), children))))
+				if import_headers.post().state_root() != &storage_update.1 {
+					return Err(error::Error::InvalidStateRoot);
+				}
+
+				Ok((Some(storage_update.0), Some(changes_update), Some((top.collect(), children))))
 			},
 			None => Ok((None, None, None))
 		}
 	}
 
-  // TODO EMCH switch return old root and do invalidate operation if possible
-  // TODO change logic: 
-  // - use block number
-  // - first check execute block on consecutive payload, and keep
-  // tx for first correct one: if no fine do not apply reroot.
-  // -> checking it is questionable but can be ok.
-  // - add payload as first extrinsic of block, on calculate and a check to.
-  // - make this first instruction run in special mode??
+	// TODO EMCH switch return old root and do invalidate operation if possible
+	// TODO change logic: 
+	// - use block number
+	// - first check execute block on consecutive payload, and keep
+	// tx for first correct one: if no fine do not apply reroot.
+	// -> checking it is questionable but can be ok.
+	// - add payload as first extrinsic of block, on calculate and a check to.
+	// - make this first instruction run in special mode??
 	pub fn rollback_blocks(
 		&self,
-    block_number: u64,
+		block_number: u64,
 	) -> error::Result<Option<Block::Hash>> {
-    // TODO EMCH
-    // self.backend.revert
-    let mut best = self.current_height();
+		// TODO EMCH
+		// self.backend.revert
+		let mut best = self.current_height();
 
 		let (config, storage) = match self.require_changes_trie().ok() {
 			Some((config, storage)) => (config, storage),
@@ -1080,39 +1085,39 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		};
 
 
-    let mut dest = self.current_height();
-    let mut nb_sat = 0u64;
+		let mut dest = self.current_height();
+		let mut nb_sat = 0u64;
 		for _c in 0 .. block_number {
 			if dest.is_zero() {
-        break;
-      }
-      dest -= One::one();  // prev block
-      nb_sat += 1;
-    }
-    // check block status
-    if BlockStatus::InChainWithState != self.block_status(&BlockId::Number(dest))? {
-        // this is bad: the chain is not usable anymore, will need a resynch
-        // TODO switch to Error
-        panic!("Chain need resynch");
-    }
+				break;
+			}
+			dest -= One::one();	// prev block
+			nb_sat += 1;
+		}
+		// check block status
+		if BlockStatus::InChainWithState != self.block_status(&BlockId::Number(dest))? {
+				// this is bad: the chain is not usable anymore, will need a resynch
+				// TODO switch to Error
+				panic!("Chain need resynch");
+		}
 
-    // rebase to dest state hash
-    let hash = self.backend.blockchain().hash(dest)?;
-    // remove to be pruned contents
+		// rebase to dest state hash
+		let hash = self.backend.blockchain().hash(dest)?;
+		// remove to be pruned contents
 
-    // TODO also remove values from change trie!! -> put all in prunning of this block
+		// TODO also remove values from change trie!! -> put all in prunning of this block
 		let finalized_number = self.backend.blockchain().info().finalized_number;
 		let oldest = storage.oldest_changes_trie_block(&config, finalized_number);
-    if dest < oldest {
-    }
+		if dest < oldest {
+		}
 		for _c in 0 .. nb_sat {
 
-	    let state = self.backend.state_at(BlockId::Number(best))?;
+			let state = self.backend.state_at(BlockId::Number(best))?;
 
-    // TODO saturating stop on 0
-			best -= One::one();  // prev block
-    }
-    Ok(hash)
+		// TODO saturating stop on 0
+			best -= One::one();	// prev block
+		}
+		Ok(hash)
 /*			let mut transaction = DBTransaction::new();
 			match self.storage.state_db.revert_one() {
 				Some(commit) => {
@@ -1132,18 +1137,18 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		}
 		Ok(n)
 */
-    //self.backend.revert(nb);
+		//self.backend.revert(nb);
 
 	//fn revert(&self, n: NumberFor<Block>) -> error::Result<NumberFor<Block>>;
-  //
-  //	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
+	//
+	//	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
 /*		self.state_at(BlockId::Hash(hash.clone())).is_ok()
 	}
 	/// Returns state backend with post-state of given block.
 	fn state_at(&self, block: BlockId<Block>) -> error::Result<Self::State>;
 */
-    // do not put content (straight to the hash)
-  }
+		// do not put content (straight to the hash)
+	}
 
 	fn apply_finality_with_block_hash(
 		&self,
