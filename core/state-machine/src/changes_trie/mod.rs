@@ -54,6 +54,8 @@ use primitives;
 use crate::changes_trie::build::prepare_input;
 use crate::overlayed_changes::OverlayedChanges;
 use trie::{DBValue, trie_root};
+use crate::client::Externalities as ClientExternalities;
+use crate::client::CHOut;
 
 /// Changes that are made outside of extrinsics are marked with this index;
 pub const NO_EXTRINSIC_INDEX: u32 = 0xffffffff;
@@ -129,14 +131,20 @@ pub type Configuration = primitives::ChangesTrieConfiguration;
 /// Returns Err(()) if unknown `parent_hash` has been passed.
 /// Returns Ok(None) if there's no data to perform computation.
 /// Panics if background storage returns an error.
-pub fn compute_changes_trie_root<'a, B: Backend<H>, S: Storage<H, Number>, H: Hasher, Number: BlockNumber>(
+pub fn compute_changes_trie_root<
+  'a,
+  B: Backend<C>,
+  S: Storage<C::H, Number>,
+  Number: BlockNumber,
+  C: ClientExternalities,
+>(
 	backend: &B,
 	storage: Option<&'a S>,
 	changes: &OverlayedChanges,
-	parent_hash: H::Out,
-) -> Result<Option<(H::Out, Vec<(Vec<u8>, Vec<u8>)>)>, ()>
+	parent_hash: CHOut<C>,
+) -> Result<Option<(CHOut<C>, Vec<(Vec<u8>, Vec<u8>)>)>, ()>
 	where
-		H::Out: Ord + 'static,
+		CHOut<C>: Ord + 'static,
 {
 	let (storage, config) = match (storage, changes.changes_trie_config.as_ref()) {
 		(Some(storage), Some(config)) => (storage, config),
@@ -147,14 +155,14 @@ pub fn compute_changes_trie_root<'a, B: Backend<H>, S: Storage<H, Number>, H: Ha
 	let parent = storage.build_anchor(parent_hash).map_err(|_| ())?;
 
 	// storage errors are considered fatal (similar to situations when runtime fetches values from storage)
-	let input_pairs = prepare_input::<B, S, H, Number>(backend, storage, config, changes, &parent)
+	let input_pairs = prepare_input::<B, S, Number, C>(backend, storage, config, changes, &parent)
 		.expect("storage is not allowed to fail within runtime");
 	match input_pairs {
 		Some(input_pairs) => {
 			let transaction = input_pairs.into_iter()
 				.map(Into::into)
 				.collect::<Vec<_>>();
-			let root = trie_root::<H, _, _, _>(transaction.iter().map(|(k, v)| (&*k, &*v)));
+			let root = trie_root::<C::H, _, _, _>(transaction.iter().map(|(k, v)| (&*k, &*v)));
 
 			Ok(Some((root, transaction)))
 		},

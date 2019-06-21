@@ -28,6 +28,8 @@ pub use trie::Recorder;
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::{Error, ExecutionError, Backend};
+use crate::client::Externalities as ClientExternalities;
+use crate::client::CHOut;
 
 /// Patricia trie-based backend essence which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
@@ -87,14 +89,14 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
-pub struct ProvingBackend<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
-	backend: &'a TrieBackend<S, H>,
-	proof_recorder: Rc<RefCell<Recorder<H::Out>>>,
+pub struct ProvingBackend<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> {
+	backend: &'a TrieBackend<S, C>,
+	proof_recorder: Rc<RefCell<Recorder<CHOut<C>>>>,
 }
 
-impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H> {
+impl<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> ProvingBackend<'a, S, C> {
 	/// Create new proving backend.
-	pub fn new(backend: &'a TrieBackend<S, H>) -> Self {
+	pub fn new(backend: &'a TrieBackend<S, C>) -> Self {
 		ProvingBackend {
 			backend,
 			proof_recorder: Rc::new(RefCell::new(Recorder::new())),
@@ -103,8 +105,8 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 
 	/// Create new proving backend with the given recorder.
 	pub fn new_with_recorder(
-		backend: &'a TrieBackend<S, H>,
-		proof_recorder: Rc<RefCell<Recorder<H::Out>>>,
+		backend: &'a TrieBackend<S, C>,
+		proof_recorder: Rc<RefCell<Recorder<CHOut<C>>>>,
 	) -> Self {
 		ProvingBackend {
 			backend,
@@ -124,15 +126,15 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 	}
 }
 
-impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
+impl<'a, S, C> Backend<C> for ProvingBackend<'a, S, C>
 	where
-		S: 'a + TrieBackendStorage<H>,
-		H: 'a + Hasher,
-		H::Out: Ord,
+		S: 'a + TrieBackendStorage<C::H>,
+		C: 'a + ClientExternalities,
+		CHOut<C>: Ord,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
-	type TrieBackendStorage = PrefixedMemoryDB<H>;
+	type TrieBackendStorage = PrefixedMemoryDB<C::H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		ProvingBackendEssence {
@@ -170,7 +172,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		self.backend.child_keys(child_storage_key, prefix)
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
+	fn storage_root<I>(&self, delta: I) -> (CHOut<C>, Self::Transaction)
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		self.backend.storage_root(delta)
@@ -179,23 +181,33 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		H::Out: Ord
+		CHOut<C>: Ord
 	{
 		self.backend.child_storage_root(storage_key, delta)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, C>> {
 		None
 	}
+
+	fn reroot(&self, hash: u64) -> bool {
+		// do not reinint proof
+		self.backend.reroot(hash)
+	}
+
+	fn rerooted(&self) -> Option<u64> {
+		self.backend.rerooted()
+	}
+
 }
 
 /// Create proof check backend.
-pub fn create_proof_check_backend<H>(
-	root: H::Out,
+pub fn create_proof_check_backend<C>(
+	root: CHOut<C>,
 	proof: Vec<Vec<u8>>
-) -> Result<TrieBackend<MemoryDB<H>, H>, Box<dyn Error>>
+) -> Result<TrieBackend<MemoryDB<C::H>, C>, Box<dyn Error>>
 where
-	H: Hasher,
+	C: ClientExternalities,
 {
 	let db = create_proof_check_backend_storage(proof);
 
@@ -307,7 +319,7 @@ mod tests {
 		let mut in_memory = in_memory.update(contents);
 		let in_memory_root = in_memory.full_storage_root::<_, Vec<_>, _>(
 			::std::iter::empty(),
-      in_memory.child_storage_keys().map(|k|(k.to_vec(), Vec::new()))
+			in_memory.child_storage_keys().map(|k|(k.to_vec(), Vec::new()))
 		).0;
 		(0..64).for_each(|i| assert_eq!(
 			in_memory.storage(&[i]).unwrap().unwrap(),

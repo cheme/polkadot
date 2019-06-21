@@ -26,6 +26,8 @@ use crate::trie_backend_essence::TrieBackendEssence;
 use crate::changes_trie::build_iterator::digest_build_iterator;
 use crate::changes_trie::input::{InputKey, InputPair, DigestIndex, ExtrinsicIndex};
 use crate::changes_trie::{AnchorBlockId, Configuration, Storage, BlockNumber};
+use crate::client::Externalities as ClientExternalities;
+use crate::client::CHOut;
 
 /// Prepare input pairs for building a changes trie of given block.
 ///
@@ -33,17 +35,17 @@ use crate::changes_trie::{AnchorBlockId, Configuration, Storage, BlockNumber};
 /// required data.
 /// Returns Ok(None) data required to prepare input pairs is not collected
 /// or storage is not provided.
-pub fn prepare_input<'a, B, S, H, Number>(
+pub fn prepare_input<'a, B, S, Number, C>(
 	backend: &B,
 	storage: &'a S,
 	config: &'a Configuration,
 	changes: &OverlayedChanges,
-	parent: &'a AnchorBlockId<H::Out, Number>,
+	parent: &'a AnchorBlockId<CHOut<C>, Number>,
 ) -> Result<Option<Vec<InputPair<Number>>>, String>
 	where
-		B: Backend<H>,
-		S: Storage<H, Number>,
-		H: Hasher,
+		B: Backend<C>,
+		S: Storage<C::H, Number>,
+		C: ClientExternalities,
 		Number: BlockNumber,
 {
 	let mut input = Vec::new();
@@ -51,7 +53,7 @@ pub fn prepare_input<'a, B, S, H, Number>(
 		backend,
 		parent.number.clone() + 1.into(),
 		changes)?);
-	input.extend(prepare_digest_input::<_, H, Number>(
+	input.extend(prepare_digest_input::<_, C::H, Number>(
 		parent,
 		config,
 		storage)?);
@@ -60,15 +62,15 @@ pub fn prepare_input<'a, B, S, H, Number>(
 }
 
 /// Prepare ExtrinsicIndex input pairs.
-fn prepare_extrinsics_input<B, H, Number>(
+fn prepare_extrinsics_input<B, Number, C>(
 	backend: &B,
 	block: Number,
 	changes: &OverlayedChanges,
 ) -> Result<impl Iterator<Item=InputPair<Number>>, String>
 	where
-		B: Backend<H>,
-		H: Hasher,
+		B: Backend<C>,
 		Number: BlockNumber,
+		C: ClientExternalities,
 {
 	let mut extrinsic_map = BTreeMap::<Vec<u8>, BTreeSet<u32>>::new();
 	for (key, val) in changes.prospective.top.iter().chain(changes.committed.top.iter()) {
