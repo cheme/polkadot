@@ -58,6 +58,11 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 		&self.root
 	}
 
+	/// Reroot.
+	pub fn reroot(&mut self, new_root: H::Out) {
+		self.root = new_root;
+	}
+
 	/// Consumes self and returns underlying storage.
 	pub fn into_storage(self) -> S {
 		self.storage

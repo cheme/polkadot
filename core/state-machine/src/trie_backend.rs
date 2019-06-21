@@ -188,18 +188,18 @@ impl<
 		(root, is_default, write_overlay)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, C>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
 		Some(self)
 	}
 
-	fn reroot(&self, block_nb: u64) -> bool {
-    if let Some(hash) = self.client.as_ref().and_then(|c|c.state_root_at(block_nb)) {
-      self.essence = TrieBackendEssence::new(self.essence.into_storage(), hash);
-      self.rerooted = Some(block_nb);
-      true
-    } else {
-      false
-    }
+	fn reroot(&mut self, block_nb: u64) -> bool {
+		if let Some(hash) = self.client.as_ref().and_then(|c|c.state_root_at(block_nb)) {
+			self.essence.reroot(hash);
+			self.rerooted = Some(block_nb);
+			true
+		} else {
+			false
+		}
 	}
 
 	fn rerooted(&self) -> Option<u64> {

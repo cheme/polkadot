@@ -24,7 +24,7 @@ use std::{
 use futures::{IntoFuture, Future};
 
 use parity_codec::{Encode, Decode};
-use primitives::{offchain, H256, Blake2Hasher, convert_hash, NativeOrEncoded};
+use primitives::{offchain, H256, Blake2Hasher as Blake2HasherHasher, convert_hash, NativeOrEncoded};
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::traits::{One, Block as BlockT, Header as HeaderT};
 use state_machine::{
@@ -42,6 +42,10 @@ use crate::error::{Error as ClientError, Result as ClientResult};
 use crate::light::fetcher::{Fetcher, RemoteCallRequest};
 use executor::{RuntimeVersion, NativeVersion};
 use trie::MemoryDB;
+
+use state_machine::client::NoClient;
+// TODO EMCH use an actual impl
+type Blake2Hasher = NoClient<Blake2HasherHasher>;
 
 /// Call executor that executes methods on remote node, querying execution proof
 /// and checking proof by re-executing locally.
@@ -174,7 +178,7 @@ where
 		Err(ClientError::NotAvailableOnLightClient.into())
 	}
 
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2HasherHasher>>(
 		&self,
 		_state: &state_machine::TrieBackend<S, Blake2Hasher>,
 		_changes: &mut OverlayedChanges,
@@ -368,7 +372,7 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 			).map_err(|e| ClientError::Execution(Box::new(e.to_string())))
 	}
 
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2HasherHasher>>(
 		&self,
 		state: &state_machine::TrieBackend<S, Blake2Hasher>,
 		changes: &mut OverlayedChanges,

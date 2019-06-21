@@ -90,13 +90,13 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
 pub struct ProvingBackend<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> {
-	backend: &'a TrieBackend<S, C>,
+	backend: &'a mut TrieBackend<S, C>,
 	proof_recorder: Rc<RefCell<Recorder<CHOut<C>>>>,
 }
 
 impl<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> ProvingBackend<'a, S, C> {
 	/// Create new proving backend.
-	pub fn new(backend: &'a TrieBackend<S, C>) -> Self {
+	pub fn new(backend: &'a mut TrieBackend<S, C>) -> Self {
 		ProvingBackend {
 			backend,
 			proof_recorder: Rc::new(RefCell::new(Recorder::new())),
@@ -105,7 +105,7 @@ impl<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> ProvingB
 
 	/// Create new proving backend with the given recorder.
 	pub fn new_with_recorder(
-		backend: &'a TrieBackend<S, C>,
+		backend: &'a mut TrieBackend<S, C>,
 		proof_recorder: Rc<RefCell<Recorder<CHOut<C>>>>,
 	) -> Self {
 		ProvingBackend {
@@ -186,11 +186,11 @@ impl<'a, S, C> Backend<C> for ProvingBackend<'a, S, C>
 		self.backend.child_storage_root(storage_key, delta)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, C>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
 		None
 	}
 
-	fn reroot(&self, hash: u64) -> bool {
+	fn reroot(&mut self, hash: u64) -> bool {
 		// do not reinint proof
 		self.backend.reroot(hash)
 	}

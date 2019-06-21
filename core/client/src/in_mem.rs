@@ -24,6 +24,7 @@ use runtime_primitives::generic::{BlockId, DigestItem};
 use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor};
 use runtime_primitives::{Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::backend::{Backend as StateBackend, InMemory};
+use state_machine::client::{Externalities as ClientExternalities, CHOut};
 use state_machine::{self, InMemoryChangesTrieStorage, ChangesTrieAnchorBlockId};
 use hash_db::Hasher;
 use trie::MemoryDB;
@@ -436,25 +437,25 @@ impl<Block: BlockT> light::blockchain::Storage<Block> for Blockchain<Block>
 }
 
 /// In-memory operation.
-pub struct BlockImportOperation<Block: BlockT, H: Hasher> {
+pub struct BlockImportOperation<Block: BlockT, C: ClientExternalities> {
 	pending_block: Option<PendingBlock<Block>>,
 	pending_cache: HashMap<CacheKeyId, Vec<u8>>,
-	old_state: InMemory<H>,
-	new_state: Option<InMemory<H>>,
-	changes_trie_update: Option<MemoryDB<H>>,
+	old_state: InMemory<C>,
+	new_state: Option<InMemory<C>>,
+	changes_trie_update: Option<MemoryDB<C::H>>,
 	aux: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	finalized_blocks: Vec<(BlockId<Block>, Option<Justification>)>,
 	set_head: Option<BlockId<Block>>,
 }
 
-impl<Block, H> backend::BlockImportOperation<Block, H> for BlockImportOperation<Block, H>
+impl<Block, C> backend::BlockImportOperation<Block, C> for BlockImportOperation<Block, C>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=Block::Hash>,
+	CHOut<C>: Ord,
 {
-	type State = InMemory<H>;
+	type State = InMemory<C>;
 
 	fn state(&self) -> error::Result<Option<&Self::State>> {
 		Ok(Some(&self.old_state))
@@ -479,17 +480,17 @@ where
 		self.pending_cache = cache;
 	}
 
-	fn update_db_storage(&mut self, update: <InMemory<H> as StateBackend<H>>::Transaction) -> error::Result<()> {
+	fn update_db_storage(&mut self, update: <InMemory<C> as StateBackend<C>>::Transaction) -> error::Result<()> {
 		self.new_state = Some(self.old_state.update(update));
 		Ok(())
 	}
 
-	fn update_changes_trie(&mut self, update: MemoryDB<H>) -> error::Result<()> {
+	fn update_changes_trie(&mut self, update: MemoryDB<C::H>) -> error::Result<()> {
 		self.changes_trie_update = Some(update);
 		Ok(())
 	}
 
-	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> error::Result<H::Out> {
+	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> error::Result<CHOut<C>> {
 		check_genesis_storage(&top, &children)?;
 
 		let child_delta = children.into_iter()
@@ -533,26 +534,28 @@ where
 }
 
 /// In-memory backend. Keeps all states and blocks in memory. Useful for testing.
-pub struct Backend<Block, H>
+pub struct Backend<Block, C>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=Block::Hash>,
+	CHOut<C>: Ord,
 {
-	states: RwLock<HashMap<Block::Hash, InMemory<H>>>,
-	changes_trie_storage: ChangesTrieStorage<Block, H>,
+	states: RwLock<HashMap<Block::Hash, InMemory<C>>>,
+	changes_trie_storage: ChangesTrieStorage<Block, C::H>,
 	blockchain: Blockchain<Block>,
 	import_lock: Mutex<()>,
 }
 
-impl<Block, H> Backend<Block, H>
+impl<Block, C> Backend<Block, C>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=Block::Hash>,
+	CHOut<C>: Ord,
 {
 	/// Create a new instance of in-mem backend.
-	pub fn new() -> Backend<Block, H> {
+	pub fn new() -> Backend<Block, C> {
 		Backend {
 			states: RwLock::new(HashMap::new()),
 			changes_trie_storage: ChangesTrieStorage(InMemoryChangesTrieStorage::new()),
@@ -562,11 +565,12 @@ where
 	}
 }
 
-impl<Block, H> backend::AuxStore for Backend<Block, H>
+impl<Block, C> backend::AuxStore for Backend<Block, C>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=Block::Hash>,
+	CHOut<C>: Ord,
 {
 	fn insert_aux<
 		'a,
@@ -583,16 +587,17 @@ where
 	}
 }
 
-impl<Block, H> backend::Backend<Block, H> for Backend<Block, H>
+impl<Block, C> backend::Backend<Block, C> for Backend<Block, C>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=Block::Hash>,
+	CHOut<C>: Ord,
 {
-	type BlockImportOperation = BlockImportOperation<Block, H>;
+	type BlockImportOperation = BlockImportOperation<Block, C>;
 	type Blockchain = Blockchain<Block>;
-	type State = InMemory<H>;
-	type ChangesTrieStorage = ChangesTrieStorage<Block, H>;
+	type State = InMemory<C>;
+	type ChangesTrieStorage = ChangesTrieStorage<Block, C::H>;
 
 	fn begin_operation(&self) -> error::Result<Self::BlockImportOperation> {
 		let old_state = self.state_at(BlockId::Hash(Default::default()))?;
@@ -692,18 +697,20 @@ where
 	}
 }
 
-impl<Block, H> backend::LocalBackend<Block, H> for Backend<Block, H>
+impl<Block, C> backend::LocalBackend<Block, C> for Backend<Block, C>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=Block::Hash>,
+	CHOut<C>: Ord,
 {}
 
-impl<Block, H> backend::RemoteBackend<Block, H> for Backend<Block, H>
+impl<Block, C> backend::RemoteBackend<Block, C> for Backend<Block, C>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=Block::Hash>,
+	CHOut<C>: Ord,
 {
 	fn is_local_state_available(&self, block: &BlockId<Block>) -> bool {
 		self.blockchain.expect_block_number_from_id(block)

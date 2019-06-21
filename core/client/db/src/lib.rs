@@ -68,6 +68,11 @@ pub use state_db::PruningMode;
 #[cfg(feature = "test-helpers")]
 use client::in_mem::Backend as InMemoryBackend;
 
+use state_machine::client::NoClient;
+// TODO EMCH use an actual impl
+type NCBlake2Hasher = NoClient<Blake2HasherHasher>;
+
+
 const CANONICALIZATION_DELAY: u64 = 4096;
 const MIN_BLOCKS_TO_KEEP_CHANGES_TRIES_FOR: u32 = 32768;
 
@@ -75,7 +80,7 @@ const MIN_BLOCKS_TO_KEEP_CHANGES_TRIES_FOR: u32 = 32768;
 const DEFAULT_CHILD_RATIO: (usize, usize) = (1, 10);
 
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
-pub type DbState = state_machine::TrieBackend<Arc<dyn state_machine::Storage<Blake2Hasher>>, Blake2Hasher>;
+pub type DbState = state_machine::TrieBackend<Arc<dyn state_machine::Storage<Blake2Hasher>>, NCBlake2Hasher>;
 
 pub struct RefTrackingState<Block: BlockT> {
 	state: DbState,
@@ -104,10 +109,10 @@ impl<B: BlockT> Drop for RefTrackingState<B> {
 	}
 }
 
-impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
-	type Error =  <DbState as StateBackend<Blake2Hasher>>::Error;
-	type Transaction = <DbState as StateBackend<Blake2Hasher>>::Transaction;
-	type TrieBackendStorage = <DbState as StateBackend<Blake2Hasher>>::TrieBackendStorage;
+impl<B: BlockT> StateBackend<NCBlake2Hasher> for RefTrackingState<B> {
+	type Error =  <DbState as StateBackend<NCBlake2Hasher>>::Error;
+	type Transaction = <DbState as StateBackend<NCBlake2Hasher>>::Transaction;
+	type TrieBackendStorage = <DbState as StateBackend<NCBlake2Hasher>>::TrieBackendStorage;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.state.storage(key)
@@ -163,7 +168,7 @@ impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
 		self.state.child_keys(child_key, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&state_machine::TrieBackend<Self::TrieBackendStorage, Blake2Hasher>> {
+	fn as_trie_backend(&mut self) -> Option<&state_machine::TrieBackend<Self::TrieBackendStorage, NCBlake2Hasher>> {
 		self.state.as_trie_backend()
 	}
 }
@@ -194,7 +199,7 @@ pub fn new_client<E, S, Block, RA>(
 >
 	where
 		Block: BlockT<Hash=H256>,
-		E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
+		E: CodeExecutor<Blake2HasherHasher> + RuntimeInfo,
 		S: BuildStorage,
 {
 	let backend = Arc::new(Backend::new(settings, CANONICALIZATION_DELAY)?);
@@ -393,8 +398,8 @@ impl<Block: BlockT, H: Hasher> BlockImportOperation<Block, H> {
 	}
 }
 
-impl<Block> client::backend::BlockImportOperation<Block, Blake2Hasher>
-for BlockImportOperation<Block, Blake2Hasher>
+impl<Block> client::backend::BlockImportOperation<Block, NCBlake2Hasher>
+for BlockImportOperation<Block, NCBlake2Hasher>
 where Block: BlockT<Hash=H256>,
 {
 	type State = CachingState<Blake2Hasher, RefTrackingState<Block>, Block>;
@@ -572,7 +577,7 @@ impl<Block: BlockT<Hash=H256>> DbChangesTrieStorage<Block> {
 	}
 }
 
-impl<Block> client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>
+impl<Block> client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -593,7 +598,7 @@ where
 	}
 }
 
-impl<Block> state_machine::ChangesTrieRootsStorage<Blake2Hasher, NumberFor<Block>>
+impl<Block> state_machine::ChangesTrieRootsStorage<Blake2HasherHasher, NumberFor<Block>>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -660,7 +665,7 @@ where
 	}
 }
 
-impl<Block> state_machine::ChangesTrieStorage<Blake2Hasher, NumberFor<Block>>
+impl<Block> state_machine::ChangesTrieStorage<Blake2HasherHasher, NumberFor<Block>>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -976,7 +981,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		Ok(())
 	}
 
-	fn try_commit_operation(&self, mut operation: BlockImportOperation<Block, Blake2Hasher>)
+	fn try_commit_operation(&self, mut operation: BlockImportOperation<Block, NCBlake2Hasher>)
 		-> Result<(), client::error::Error>
 	{
 		let mut transaction = DBTransaction::new();
@@ -1227,8 +1232,8 @@ impl<Block> client::backend::AuxStore for Backend<Block> where Block: BlockT<Has
 	}
 }
 
-impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> where Block: BlockT<Hash=H256> {
-	type BlockImportOperation = BlockImportOperation<Block, Blake2Hasher>;
+impl<Block> client::backend::Backend<Block, NCBlake2Hasher> for Backend<Block> where Block: BlockT<Hash=H256> {
+	type BlockImportOperation = BlockImportOperation<Block, NCBlake2Hasher>;
 	type Blockchain = BlockchainDb<Block>;
 	type State = CachingState<Blake2Hasher, RefTrackingState<Block>, Block>;
 	type ChangesTrieStorage = DbChangesTrieStorage<Block>;
@@ -1399,7 +1404,7 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 	}
 }
 
-impl<Block> client::backend::LocalBackend<Block, Blake2Hasher> for Backend<Block>
+impl<Block> client::backend::LocalBackend<Block, NCBlake2Hasher> for Backend<Block>
 where Block: BlockT<Hash=H256> {}
 
 #[cfg(test)]

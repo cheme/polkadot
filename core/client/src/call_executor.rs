@@ -26,18 +26,24 @@ use state_machine::{
 use executor::{RuntimeVersion, RuntimeInfo, NativeVersion};
 use hash_db::Hasher;
 use trie::MemoryDB;
-use primitives::{offchain, H256, Blake2Hasher, NativeOrEncoded, NeverNativeValue};
+use primitives::{offchain, H256, Blake2Hasher as Blake2HasherHasher, NativeOrEncoded, NeverNativeValue};
+use state_machine::client::{Externalities as ClientExternalities, CHOut};
 
 use crate::runtime_api::{ProofRecorder, InitializeBlock};
 use crate::backend;
 use crate::error;
 
+use state_machine::client::NoClient;
+// TODO EMCH use an actual impl
+type Blake2Hasher = NoClient<Blake2HasherHasher>;
+
 /// Method call executor.
-pub trait CallExecutor<B, H>
+pub trait CallExecutor<B, C>
 where
 	B: BlockT,
-	H: Hasher<Out=B::Hash>,
-	H::Out: Ord,
+	C: ClientExternalities,
+	C::H: Hasher<Out=B::Hash>,
+	CHOut<C>: Ord,
 {
 	/// Externalities error type.
 	type Error: state_machine::Error;
@@ -95,7 +101,7 @@ where
 	/// No changes are made.
 	fn call_at_state<
 		O: offchain::Externalities,
-		S: state_machine::Backend<H>,
+		S: state_machine::Backend<C>,
 		F: FnOnce(
 			Result<NativeOrEncoded<R>, Self::Error>,
 			Result<NativeOrEncoded<R>, Self::Error>
@@ -110,12 +116,12 @@ where
 		manager: ExecutionManager<F>,
 		native_call: Option<NC>,
 		side_effects_handler: Option<&mut O>,
-	) -> Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<H>>), error::Error>;
+	) -> Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<C::H>>), error::Error>;
 
 	/// Execute a call to a contract on top of given state, gathering execution proof.
 	///
 	/// No changes are made.
-	fn prove_at_state<S: state_machine::Backend<H>>(
+	fn prove_at_state<S: state_machine::Backend<C>>(
 		&self,
 		mut state: S,
 		overlay: &mut OverlayedChanges,
@@ -133,9 +139,9 @@ where
 	/// Execute a call to a contract on top of given trie state, gathering execution proof.
 	///
 	/// No changes are made.
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<H>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<C::H>>(
 		&self,
-		trie_state: &state_machine::TrieBackend<S, H>,
+		trie_state: &state_machine::TrieBackend<S, C>,
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
@@ -174,7 +180,7 @@ impl<B, E> Clone for LocalCallExecutor<B, E> where E: Clone {
 impl<B, E, Block> CallExecutor<Block, Blake2Hasher> for LocalCallExecutor<B, E>
 where
 	B: backend::Backend<Block, Blake2Hasher>,
-	E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
+	E: CodeExecutor<Blake2HasherHasher> + RuntimeInfo,
 	Block: BlockT<Hash=H256>,
 {
 	type Error = E::Error;
@@ -336,7 +342,7 @@ where
 		.map_err(Into::into)
 	}
 
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2HasherHasher>>(
 		&self,
 		trie_state: &state_machine::TrieBackend<S, Blake2Hasher>,
 		overlay: &mut OverlayedChanges,

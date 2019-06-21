@@ -68,7 +68,7 @@ where
 	/// The overlayed changes to write to.
 	overlay: &'a mut OverlayedChanges,
 	/// The storage backend to read from.
-	backend: &'a B,
+	backend: &'a mut B,
 	/// The storage transaction necessary to commit to the backend. Is cached when
 	/// `storage_root` is called and the cache is cleared on every subsequent change.
 	storage_transaction: Option<(B::Transaction, CHOut<C>)>,
@@ -101,7 +101,7 @@ where
 	/// Create a new `Ext` from overlayed changes and read-only backend
 	pub fn new(
 		overlay: &'a mut OverlayedChanges,
-		backend: &'a B,
+		backend: &'a mut B,
 		changes_trie_storage: Option<&'a T>,
 		offchain_externalities: Option<&'a mut O>,
 	) -> Self {
@@ -242,8 +242,10 @@ where
 
 		self.mark_dirty();
 		self.overlay.clear_child_storage(storage_key.as_ref());
-		self.backend.for_keys_in_child_storage(storage_key.as_ref(), |key| {
-			self.overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
+		let overlay = &mut self.overlay;
+		let backend = &self.backend;
+		backend.for_keys_in_child_storage(storage_key.as_ref(), |key| {
+			overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
 		});
 	}
 
@@ -256,8 +258,10 @@ where
 
 		self.mark_dirty();
 		self.overlay.clear_prefix(prefix);
-		self.backend.for_keys_with_prefix(prefix, |key| {
-			self.overlay.set_storage(key.to_vec(), None);
+		let overlay = &mut self.overlay;
+		let backend = &self.backend;
+		backend.for_keys_with_prefix(prefix, |key| {
+			overlay.set_storage(key.to_vec(), None);
 		});
 	}
 
@@ -270,7 +274,7 @@ where
 		self.mark_dirty();
 		self.overlay.clear();
 		// TODO EMCH change trie storage?
-    if self.backend.reroot(block_number) {
+		if self.backend.reroot(block_number) {
 //		if let Some(root) = self.client.state_root_at(block_number) {
 //			self.backend.reroot(root);
 		} else {

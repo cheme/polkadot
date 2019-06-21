@@ -46,7 +46,7 @@ use crate::runtime_api::{
 	InitializeBlock,
 };
 use primitives::{
-	Blake2Hasher, H256, ChangesTrieConfiguration, convert_hash,
+	Blake2Hasher as Blake2HasherHasher, H256, ChangesTrieConfiguration, convert_hash,
 	NeverNativeValue, ExecutionContext
 };
 use primitives::storage::{StorageKey, StorageData};
@@ -58,6 +58,7 @@ use state_machine::{
 	ChangesTrieRootsStorage, ChangesTrieStorage,
 	key_changes, key_changes_proof, OverlayedChanges, NeverOffchainExt,
 };
+use state_machine::client::{Externalities as ClientExternalities, CHOut};
 use hash_db::Hasher;
 
 use crate::backend::{
@@ -81,6 +82,9 @@ use substrate_telemetry::{telemetry, SUBSTRATE_INFO};
 
 use log::{info, trace, warn};
 
+use state_machine::client::NoClient;
+// TODO EMCH put an actual implementation here
+type Blake2Hasher = NoClient<Blake2HasherHasher>;
 
 /// Type that implements `futures::Stream` of block import events.
 pub type ImportNotifications<Block> = mpsc::UnboundedReceiver<BlockImportNotification<Block>>;
@@ -136,7 +140,13 @@ pub struct Client<B, E, Block, RA> where Block: BlockT {
 }
 
 /// Client import operation, a wrapper for the backend.
-pub struct ClientImportOperation<Block: BlockT, H: Hasher<Out=Block::Hash>, B: backend::Backend<Block, H>> {
+pub struct ClientImportOperation<Block, C, B> 
+	where
+		Block: BlockT,
+		C: ClientExternalities,
+		C::H: Hasher<Out=Block::Hash>,
+		B: backend::Backend<Block, C>,
+{
 	op: B::BlockImportOperation,
 	notify_imported: Option<(
 		Block::Hash,
@@ -267,7 +277,7 @@ pub fn new_in_mem<E, Block, S, RA>(
 	Block,
 	RA
 >> where
-	E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
+	E: CodeExecutor<Blake2HasherHasher> + RuntimeInfo,
 	S: BuildStorage,
 	Block: BlockT<Hash=H256>,
 {
@@ -282,7 +292,7 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 	build_genesis_storage: S,
 ) -> error::Result<Client<B, LocalCallExecutor<B, E>, Block, RA>>
 	where
-		E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
+		E: CodeExecutor<Blake2HasherHasher> + RuntimeInfo,
 		S: BuildStorage,
 		Block: BlockT<Hash=H256>,
 		B: backend::LocalBackend<Block, Blake2Hasher>
@@ -586,12 +596,12 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		cht_size: NumberFor<Block>,
 	) -> error::Result<ChangesProof<Block::Header>> {
 		struct AccessedRootsRecorder<'a, Block: BlockT> {
-			storage: &'a dyn ChangesTrieStorage<Blake2Hasher, NumberFor<Block>>,
+			storage: &'a dyn ChangesTrieStorage<Blake2HasherHasher, NumberFor<Block>>,
 			min: NumberFor<Block>,
 			required_roots_proofs: Mutex<BTreeMap<NumberFor<Block>, H256>>,
 		};
 
-		impl<'a, Block: BlockT> ChangesTrieRootsStorage<Blake2Hasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
+		impl<'a, Block: BlockT> ChangesTrieRootsStorage<Blake2HasherHasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
 			fn build_anchor(&self, hash: H256) -> Result<ChangesTrieAnchorBlockId<H256, NumberFor<Block>>, String> {
 				self.storage.build_anchor(hash)
 			}
@@ -614,7 +624,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			}
 		}
 
-		impl<'a, Block: BlockT> ChangesTrieStorage<Blake2Hasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
+		impl<'a, Block: BlockT> ChangesTrieStorage<Blake2HasherHasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
 			fn get(&self, key: &H256, prefix: &[u8]) -> Result<Option<DBValue>, String> {
 				self.storage.get(key, prefix)
 			}

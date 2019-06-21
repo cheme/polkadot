@@ -16,11 +16,12 @@
 
 //! Client related externalities. TODO EMCH more comment
 use hash_db::Hasher;
+pub use crate::testing::NoClient;
 
 pub type CHOut<C> = <<C as Externalities>::H as Hasher>::Out;
 
 /// TODO EMCH doc
-pub trait Externalities {
+pub trait Externalities: Send + Sync {
   type H: Hasher;
 
 	/// TODO EMCH doc

@@ -32,6 +32,7 @@ use trie;
 use primitives::{H256, convert_hash};
 use runtime_primitives::traits::{Header as HeaderT, SimpleArithmetic, Zero, One};
 use state_machine::backend::InMemory as InMemoryState;
+use state_machine::client::{Externalities as ClientExternalities, CHOut};
 use state_machine::{MemoryDB, TrieBackend, Backend as StateBackend,
 	prove_read_on_trie_backend, read_proof_check, read_proof_check_on_proving_backend};
 
@@ -133,19 +134,19 @@ pub fn check_proof<Header, Hasher>(
 }
 
 /// Check CHT-based header proof on pre-created proving backend.
-pub fn check_proof_on_proving_backend<Header, Hasher>(
+pub fn check_proof_on_proving_backend<Header, C>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	proving_backend: &TrieBackend<MemoryDB<Hasher>, Hasher>,
+	proving_backend: &TrieBackend<MemoryDB<C::H>, C>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
-		Hasher: hash_db::Hasher,
-		Hasher::Out: Ord,
+		C: ClientExternalities,
+		CHOut<C>: Ord,
 {
-	do_check_proof::<Header, Hasher, _>(local_root, local_number, remote_hash, |_, local_cht_key|
-		read_proof_check_on_proving_backend::<Hasher>(
+	do_check_proof::<Header, C::H, _>(local_root, local_number, remote_hash, |_, local_cht_key|
+		read_proof_check_on_proving_backend::<C::H>(
 			proving_backend, local_cht_key).map_err(|e| ClientError::from(e)))
 }
 

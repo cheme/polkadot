@@ -112,7 +112,7 @@ pub trait Backend<C: ClientExternalities> {
 	}
 
 	/// Try convert into trie backend.
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, C>>;
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>>;
 
 	/// Calculate the storage root, with given delta over what is already stored
 	/// in the backend, and produce a "transaction" that can be used to commit.
@@ -154,7 +154,7 @@ pub trait Backend<C: ClientExternalities> {
 	/// was a bit painfull) -> this fn really does not fit.
 	/// Return false if state does not allow rerooting (block missing
 	/// or pruned).
-	fn reroot(&self, hash: u64) -> bool;
+	fn reroot(&mut self, hash: u64) -> bool;
 	/// retrun the rerooted hash if the backend has been rerooted,
 	/// this is dangerous as if this api is not checked things will
 	/// break.
@@ -391,7 +391,7 @@ impl<C: ClientExternalities> Backend<C> for InMemory<C> {
 			.collect()
 	}
 
-	fn as_trie_backend(&mut self)-> Option<&TrieBackend<Self::TrieBackendStorage, C>> {
+	fn as_trie_backend(&mut self)-> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
 		let mut mdb = MemoryDB::default();
 		let mut root = None;
 		let mut new_child_roots = Vec::new();
@@ -416,10 +416,10 @@ impl<C: ClientExternalities> Backend<C> for InMemory<C> {
 			None => insert_into_memory_db::<C::H, _>(&mut mdb, ::std::iter::empty())?,
 		};
 		self.trie = Some(TrieBackend::new(mdb, root));
-		self.trie.as_ref()
+		self.trie.as_mut()
 	}
 
-	fn reroot(&self, hash: u64) -> bool {
+	fn reroot(&mut self, hash: u64) -> bool {
 		// fetch trie backend then get all kv into this memory
     // TODO probably sure it is a bad idea to implement
     // TODO InMemory should be only for building new block
