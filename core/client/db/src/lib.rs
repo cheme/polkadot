@@ -70,7 +70,7 @@ use client::in_mem::Backend as InMemoryBackend;
 
 use state_machine::client::NoClient;
 // TODO EMCH use an actual impl
-type NCBlake2Hasher = NoClient<Blake2HasherHasher>;
+type NCBlake2Hasher = NoClient<Blake2Hasher>;
 
 
 const CANONICALIZATION_DELAY: u64 = 4096;
@@ -168,7 +168,15 @@ impl<B: BlockT> StateBackend<NCBlake2Hasher> for RefTrackingState<B> {
 		self.state.child_keys(child_key, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&state_machine::TrieBackend<Self::TrieBackendStorage, NCBlake2Hasher>> {
+	fn reroot(&mut self, b: u64) -> bool {
+		self.state.reroot(b)
+	}
+
+  fn rerooted(&self) -> Option<u64> {
+		self.state.rerooted()
+	}
+
+	fn as_trie_backend(&mut self) -> Option<&mut state_machine::TrieBackend<Self::TrieBackendStorage, NCBlake2Hasher>> {
 		self.state.as_trie_backend()
 	}
 }
@@ -199,7 +207,7 @@ pub fn new_client<E, S, Block, RA>(
 >
 	where
 		Block: BlockT<Hash=H256>,
-		E: CodeExecutor<Blake2HasherHasher> + RuntimeInfo,
+		E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
 		S: BuildStorage,
 {
 	let backend = Arc::new(Backend::new(settings, CANONICALIZATION_DELAY)?);
@@ -376,7 +384,7 @@ impl<Block: BlockT> client::blockchain::ProvideCache<Block> for BlockchainDb<Blo
 
 /// Database transaction
 pub struct BlockImportOperation<Block: BlockT, H: Hasher> {
-	old_state: CachingState<Blake2Hasher, RefTrackingState<Block>, Block>,
+	old_state: CachingState<NCBlake2Hasher, RefTrackingState<Block>, Block>,
 	db_updates: PrefixedMemoryDB<H>,
 	storage_updates: StorageCollection,
 	child_storage_updates: ChildStorageCollection,
@@ -399,13 +407,17 @@ impl<Block: BlockT, H: Hasher> BlockImportOperation<Block, H> {
 }
 
 impl<Block> client::backend::BlockImportOperation<Block, NCBlake2Hasher>
-for BlockImportOperation<Block, NCBlake2Hasher>
+for BlockImportOperation<Block, Blake2Hasher>
 where Block: BlockT<Hash=H256>,
 {
-	type State = CachingState<Blake2Hasher, RefTrackingState<Block>, Block>;
+	type State = CachingState<NCBlake2Hasher, RefTrackingState<Block>, Block>;
 
 	fn state(&self) -> Result<Option<&Self::State>, client::error::Error> {
 		Ok(Some(&self.old_state))
+	}
+
+	fn state_mut(&mut self) -> Result<Option<&mut Self::State>, client::error::Error> {
+		Ok(Some(&mut self.old_state))
 	}
 
 	fn set_block_data(
@@ -577,7 +589,7 @@ impl<Block: BlockT<Hash=H256>> DbChangesTrieStorage<Block> {
 	}
 }
 
-impl<Block> client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>
+impl<Block> client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -598,7 +610,7 @@ where
 	}
 }
 
-impl<Block> state_machine::ChangesTrieRootsStorage<Blake2HasherHasher, NumberFor<Block>>
+impl<Block> state_machine::ChangesTrieRootsStorage<Blake2Hasher, NumberFor<Block>>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -665,7 +677,7 @@ where
 	}
 }
 
-impl<Block> state_machine::ChangesTrieStorage<Blake2HasherHasher, NumberFor<Block>>
+impl<Block> state_machine::ChangesTrieStorage<Blake2Hasher, NumberFor<Block>>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -773,11 +785,11 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 	/// Returns in-memory blockchain that contains the same set of blocks that the self.
 	#[cfg(feature = "test-helpers")]
-	pub fn as_in_memory(&self) -> InMemoryBackend<Block, Blake2Hasher> {
+	pub fn as_in_memory(&self) -> InMemoryBackend<Block, NCBlake2Hasher> {
 		use client::backend::{Backend as ClientBackend, BlockImportOperation};
 		use client::blockchain::Backend as BlockchainBackend;
 
-		let inmem = InMemoryBackend::<Block, Blake2Hasher>::new();
+		let inmem = InMemoryBackend::<Block, NCBlake2Hasher>::new();
 
 		// get all headers hashes && sort them by number (could be duplicate)
 		let mut headers: Vec<(NumberFor<Block>, Block::Hash, Block::Header)> = Vec::new();
@@ -981,7 +993,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		Ok(())
 	}
 
-	fn try_commit_operation(&self, mut operation: BlockImportOperation<Block, NCBlake2Hasher>)
+	fn try_commit_operation(&self, mut operation: BlockImportOperation<Block, Blake2Hasher>)
 		-> Result<(), client::error::Error>
 	{
 		let mut transaction = DBTransaction::new();
@@ -1233,9 +1245,9 @@ impl<Block> client::backend::AuxStore for Backend<Block> where Block: BlockT<Has
 }
 
 impl<Block> client::backend::Backend<Block, NCBlake2Hasher> for Backend<Block> where Block: BlockT<Hash=H256> {
-	type BlockImportOperation = BlockImportOperation<Block, NCBlake2Hasher>;
+	type BlockImportOperation = BlockImportOperation<Block, Blake2Hasher>;
 	type Blockchain = BlockchainDb<Block>;
-	type State = CachingState<Blake2Hasher, RefTrackingState<Block>, Block>;
+	type State = CachingState<NCBlake2Hasher, RefTrackingState<Block>, Block>;
 	type ChangesTrieStorage = DbChangesTrieStorage<Block>;
 
 	fn begin_operation(&self) -> Result<Self::BlockImportOperation, client::error::Error> {

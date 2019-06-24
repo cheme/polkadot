@@ -24,7 +24,8 @@ pub use substrate_state_machine::{
 	Externalities,
 	BasicExternalities,
 	TestExternalities,
-	ChildStorageKey
+	ChildStorageKey,
+	client::NoClient,
 };
 
 use environmental::environmental;

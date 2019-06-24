@@ -271,10 +271,14 @@ mod tests {
 	use super::*;
 	use primitives::{Blake2Hasher, H256};
 	use hex_literal::hex;
+	use crate::client::NoClient;
+
+	type ClientExt = NoClient<Blake2Hasher>;
+
 
 	#[test]
 	fn commit_should_work() {
-		let mut ext = TestExternalities::<Blake2Hasher, u64>::default();
+		let mut ext = TestExternalities::<u64, ClientExt>::default();
 		ext.set_storage(b"doe".to_vec(), b"reindeer".to_vec());
 		ext.set_storage(b"dog".to_vec(), b"puppy".to_vec());
 		ext.set_storage(b"dogglesworth".to_vec(), b"cat".to_vec());
@@ -284,7 +288,7 @@ mod tests {
 
 	#[test]
 	fn set_and_retrieve_code() {
-		let mut ext = TestExternalities::<Blake2Hasher, u64>::default();
+		let mut ext = TestExternalities::<u64, ClientExt>::default();
 
 		let code = vec![1, 2, 3];
 		ext.set_storage(CODE.to_vec(), code.clone());

@@ -259,6 +259,11 @@ where
 		Ok(None)
 	}
 
+	fn state_mut(&mut self) -> ClientResult<Option<&mut Self::State>> {
+		// None means 'locally-stateless' backend
+		Ok(None)
+	}
+
 	fn set_block_data(
 		&mut self,
 		header: Block::Header,
@@ -405,7 +410,13 @@ where
 		Vec::new()
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, C>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
+		None
+	}
+
+	fn reroot(&mut self, _: u64) -> bool { false }
+
+	fn rerooted(&self) -> Option<u64> {
 		None
 	}
 }
@@ -501,12 +512,29 @@ where
 		}
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, C>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
 		match self {
 			OnDemandOrGenesisState::OnDemand(ref mut state) => state.as_trie_backend(),
 			OnDemandOrGenesisState::Genesis(ref mut state) => state.as_trie_backend(),
 		}
 	}
+
+	fn reroot(&mut self, r: u64) -> bool {
+		match *self {
+			OnDemandOrGenesisState::OnDemand(ref mut state) =>
+				StateBackend::<C>::reroot(state, r),
+			OnDemandOrGenesisState::Genesis(ref mut state) => state.reroot(r),
+		}
+	}
+
+	fn rerooted(&self) -> Option<u64> {
+			match *self {
+			OnDemandOrGenesisState::OnDemand(ref state) =>
+				StateBackend::<C>::rerooted(state),
+			OnDemandOrGenesisState::Genesis(ref state) => state.rerooted(),
+		}
+	}
+
 }
 
 #[cfg(test)]
@@ -516,13 +544,15 @@ mod tests {
 	use crate::backend::NewBlockState;
 	use crate::light::blockchain::tests::{DummyBlockchain, DummyStorage};
 	use super::*;
+	use state_machine::client::NoClient;
+	type CliExt = NoClient<Blake2Hasher>;
 
 	#[test]
 	fn local_state_is_created_when_genesis_state_is_available() {
 		let def = Default::default();
 		let header0 = test_client::runtime::Header::new(0, def, def, def, Default::default());
 
-		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
+		let backend: Backend<_, _, CliExt> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 		let mut op = backend.begin_operation().unwrap();
 		op.set_block_data(header0, None, None, NewBlockState::Final).unwrap();
 		op.reset_storage(Default::default(), Default::default()).unwrap();
@@ -536,7 +566,7 @@ mod tests {
 
 	#[test]
 	fn remote_state_is_created_when_genesis_state_is_inavailable() {
-		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
+		let backend: Backend<_, _, CliExt> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 
 		match backend.state_at(BlockId::Number(0)).unwrap() {
 			OnDemandOrGenesisState::OnDemand(_) => (),
@@ -547,9 +577,9 @@ mod tests {
 	#[test]
 	fn light_aux_store_is_updated_via_non_importing_op() {
 		let backend = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
-		let mut op = ClientBackend::<Block, Blake2Hasher>::begin_operation(&backend).unwrap();
-		BlockImportOperation::<Block, Blake2Hasher>::insert_aux(&mut op, vec![(vec![1], Some(vec![2]))]).unwrap();
-		ClientBackend::<Block, Blake2Hasher>::commit_operation(&backend, op).unwrap();
+		let mut op = ClientBackend::<Block, CliExt>::begin_operation(&backend).unwrap();
+		BlockImportOperation::<Block, CliExt>::insert_aux(&mut op, vec![(vec![1], Some(vec![2]))]).unwrap();
+		ClientBackend::<Block, CliExt>::commit_operation(&backend, op).unwrap();
 
 		assert_eq!(AuxStore::get_aux(&backend, &[1]).unwrap(), Some(vec![2]));
 	}

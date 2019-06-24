@@ -385,10 +385,14 @@ mod tests {
 		InMemoryStorage as InMemoryChangesTrieStorage};
 	use crate::overlayed_changes::OverlayedValue;
 	use super::*;
+	use crate::client::NoClient;
 
-	type TestBackend = InMemory<Blake2Hasher>;
+	type ClientExt = NoClient<Blake2Hasher>;
+
+
+	type TestBackend = InMemory<ClientExt>;
 	type TestChangesTrieStorage = InMemoryChangesTrieStorage<Blake2Hasher, u64>;
-	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend, TestChangesTrieStorage, crate::NeverOffchainExt>;
+	type TestExt<'a> = Ext<'a, u64, TestBackend, TestChangesTrieStorage, crate::NeverOffchainExt, ClientExt>;
 
 	fn prepare_overlay_with_changes() -> OverlayedChanges {
 		OverlayedChanges {
@@ -413,8 +417,8 @@ mod tests {
 	#[test]
 	fn storage_changes_root_is_none_when_storage_is_not_provided() {
 		let mut overlay = prepare_overlay_with_changes();
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, None, None);
+		let mut backend = TestBackend::default();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, None, None);
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(), None);
 	}
 
@@ -423,8 +427,8 @@ mod tests {
 		let mut overlay = prepare_overlay_with_changes();
 		overlay.changes_trie_config = None;
 		let storage = TestChangesTrieStorage::with_blocks(vec![(100, Default::default())]);
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut backend = TestBackend::default();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, Some(&storage), None);
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(), None);
 	}
 
@@ -432,8 +436,8 @@ mod tests {
 	fn storage_changes_root_is_some_when_extrinsic_changes_are_non_empty() {
 		let mut overlay = prepare_overlay_with_changes();
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut backend = TestBackend::default();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, Some(&storage), None);
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(),
 			Some(hex!("5b829920b9c8d554a19ee2a1ba593c4f2ee6fc32822d083e04236d693e8358d5").into()));
 	}
@@ -443,8 +447,8 @@ mod tests {
 		let mut overlay = prepare_overlay_with_changes();
 		overlay.prospective.top.get_mut(&vec![1]).unwrap().value = None;
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut backend = TestBackend::default();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, Some(&storage), None);
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(),
 			Some(hex!("bcf494e41e29a15c9ae5caa053fe3cb8b446ee3e02a254efbdec7a19235b76e4").into()));
 	}

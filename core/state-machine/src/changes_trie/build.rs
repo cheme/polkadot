@@ -150,8 +150,16 @@ mod test {
 	use crate::changes_trie::storage::InMemoryStorage;
 	use crate::overlayed_changes::OverlayedValue;
 	use super::*;
+	use crate::client::NoClient;
 
-	fn prepare_for_build() -> (InMemory<Blake2Hasher>, InMemoryStorage<Blake2Hasher, u64>, OverlayedChanges) {
+	type ClientExt = NoClient<Blake2Hasher>;
+
+
+	fn prepare_for_build() -> (
+		InMemory<ClientExt>,
+		InMemoryStorage<Blake2Hasher, u64>,
+		OverlayedChanges,
+	) {
 		let backend: InMemory<_> = vec![
 			(vec![100], vec![255]),
 			(vec![101], vec![255]),

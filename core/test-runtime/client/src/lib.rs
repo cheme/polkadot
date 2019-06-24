@@ -85,7 +85,7 @@ pub type LightExecutor = client::light::call_executor::RemoteOrLocalCallExecutor
 		client::light::backend::Backend<
 			client_db::light::LightStorage<runtime::Block>,
 			LightFetcher,
-			Blake2Hasher
+			CliExt,
 		>,
 		NativeExecutor<LocalExecutor>
 	>
@@ -158,7 +158,11 @@ impl<B> TestClientBuilderExt<B> for TestClientBuilder<
 	client::LocalCallExecutor<B, executor::NativeExecutor<LocalExecutor>>,
 	B
 > where
-	B: client::backend::Backend<runtime::Block, Blake2Hasher>,
+	B: client::backend::Backend<runtime::Block, CliExt>,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
+	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	fn set_support_changes_trie(mut self, support_changes_trie: bool) -> Self {
 		self.genesis_init_mut().support_changes_trie = support_changes_trie;

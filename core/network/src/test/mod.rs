@@ -223,7 +223,7 @@ impl PeersClient {
 		}
 	}
 
-	pub fn as_in_memory_backend(&self) -> InMemoryBackend<Block, Blake2Hasher> {
+	pub fn as_in_memory_backend(&self) -> InMemoryBackend<Block, client::NoClient<Blake2Hasher>> {
 		#[allow(deprecated)]
 		match *self {
 			PeersClient::Full(ref client) => client.backend().as_in_memory(),

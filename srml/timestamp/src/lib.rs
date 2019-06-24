@@ -331,11 +331,13 @@ mod tests {
 	use super::*;
 
 	use srml_support::{impl_outer_origin, assert_ok};
-	use runtime_io::{with_externalities, TestExternalities};
-	use substrate_primitives::H256;
+	use runtime_io::{with_externalities, TestExternalities as TE};
+	use substrate_primitives::{H256, Blake2Hasher};
 	use runtime_primitives::BuildStorage;
 	use runtime_primitives::traits::{BlakeTwo256, IdentityLookup};
 	use runtime_primitives::testing::Header;
+
+	type TestExternalities = TE<runtime_io::NoClient<Blake2Hasher>>;
 
 	impl_outer_origin! {
 		pub enum Origin for Test {}

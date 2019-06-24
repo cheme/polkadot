@@ -82,7 +82,7 @@ use substrate_telemetry::{telemetry, SUBSTRATE_INFO};
 
 use log::{info, trace, warn};
 
-use state_machine::client::NoClient;
+use crate::NoClient;
 // TODO EMCH put an actual implementation here
 type Blake2Hasher = NoClient<Blake2HasherHasher>;
 
@@ -97,7 +97,7 @@ type StorageUpdate<B, Block> = <
 		<B as backend::Backend<Block, Blake2Hasher>>::BlockImportOperation
 			as BlockImportOperation<Block, Blake2Hasher>
 	>::State as state_machine::Backend<Blake2Hasher>>::Transaction;
-type ChangesUpdate = trie::MemoryDB<Blake2Hasher>;
+type ChangesUpdate = trie::MemoryDB<Blake2HasherHasher>;
 
 /// Execution strategies settings.
 #[derive(Debug, Clone)]
@@ -295,7 +295,10 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 		E: CodeExecutor<Blake2HasherHasher> + RuntimeInfo,
 		S: BuildStorage,
 		Block: BlockT<Hash=H256>,
-		B: backend::LocalBackend<Block, Blake2Hasher>
+		B: backend::LocalBackend<Block, Blake2Hasher>,
+		B::ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+		<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+			state_machine::TrieBackendStorage<Blake2HasherHasher>,
 {
 	let call_executor = LocalCallExecutor::new(backend.clone(), executor);
 	Client::new(backend, call_executor, build_genesis_storage, Default::default())
@@ -303,6 +306,10 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 
 impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+	// TODO EMCH two bad backend constraint (no relation of constraint of inner types)
+	B::ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -547,7 +554,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		let last_number = self.backend.blockchain().expect_block_number_from_id(&last)?;
 		let last_hash = self.backend.blockchain().expect_block_hash_from_id(&last)?;
 
-		key_changes::<_, Blake2Hasher, _>(
+		key_changes::<_, Blake2HasherHasher, _>(
 			&config,
 			&*storage,
 			first,
@@ -649,7 +656,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			.expect_block_number_from_id(&BlockId::Hash(first))?;
 		let last_number = self.backend.blockchain()
 			.expect_block_number_from_id(&BlockId::Hash(last))?;
-		let key_changes_proof = key_changes_proof::<_, Blake2Hasher, _>(
+		let key_changes_proof = key_changes_proof::<_, Blake2HasherHasher, _>(
 			&config,
 			&recording_storage,
 			first_number,
@@ -932,7 +939,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		}
 
 		// FIXME #1232: correct path logic for when to execute this function
-		let (storage_update,changes_update,storage_changes) = self.block_execution(&operation.op, &import_headers, origin, hash, body.clone())?;
+		let (storage_update,changes_update,storage_changes) = self.block_execution(&mut operation.op, &import_headers, origin, hash, body.clone())?;
 
 		let is_new_best = finalized || match fork_choice {
 			ForkChoiceStrategy::LongestChain => import_headers.post().number() > &last_best_number,
@@ -981,7 +988,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 	fn block_execution(
 		&self,
-		transaction: &B::BlockImportOperation,
+		transaction: &mut B::BlockImportOperation,
 		import_headers: &PrePostHeader<Block::Header>,
 		origin: BlockOrigin,
 		hash: Block::Hash,
@@ -997,7 +1004,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		where
 			E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone,
 	{
-		match transaction.state()? {
+		match transaction.state_mut()? {
 			Some(transaction_state) => {
 				let mut overlay = Default::default();
 				let get_execution_manager = |execution_strategy: ExecutionStrategy| {
@@ -1043,21 +1050,21 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		}
 	}
 
-  // TODO EMCH switch return old root and do invalidate operation if possible
-  // TODO change logic: 
-  // - use block number
-  // - first check execute block on consecutive payload, and keep
-  // tx for first correct one: if no fine do not apply reroot.
-  // -> checking it is questionable but can be ok.
-  // - add payload as first extrinsic of block, on calculate and a check to.
-  // - make this first instruction run in special mode??
+	// TODO EMCH switch return old root and do invalidate operation if possible
+	// TODO change logic: 
+	// - use block number
+	// - first check execute block on consecutive payload, and keep
+	// tx for first correct one: if no fine do not apply reroot.
+	// -> checking it is questionable but can be ok.
+	// - add payload as first extrinsic of block, on calculate and a check to.
+	// - make this first instruction run in special mode??
 	pub fn rollback_blocks(
 		&self,
-    block_number: u64,
+		block_number: u64,
 	) -> error::Result<Option<Block::Hash>> {
-    // TODO EMCH
-    // self.backend.revert
-    let mut best = self.current_height();
+		// TODO EMCH
+		// self.backend.revert
+		let mut best = self.current_height();
 
 		let (config, storage) = match self.require_changes_trie().ok() {
 			Some((config, storage)) => (config, storage),
@@ -1065,39 +1072,39 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		};
 
 
-    let mut dest = self.current_height();
-    let mut nb_sat = 0u64;
+		let mut dest = self.current_height();
+		let mut nb_sat = 0u64;
 		for _c in 0 .. block_number {
 			if dest.is_zero() {
-        break;
-      }
-      dest -= One::one();  // prev block
-      nb_sat += 1;
-    }
-    // check block status
-    if BlockStatus::InChainWithState != self.block_status(&BlockId::Number(dest))? {
-        // this is bad: the chain is not usable anymore, will need a resynch
-        // TODO switch to Error
-        panic!("Chain need resynch");
-    }
+				break;
+			}
+			dest -= One::one();	// prev block
+			nb_sat += 1;
+		}
+		// check block status
+		if BlockStatus::InChainWithState != self.block_status(&BlockId::Number(dest))? {
+				// this is bad: the chain is not usable anymore, will need a resynch
+				// TODO switch to Error
+				panic!("Chain need resynch");
+		}
 
-    // rebase to dest state hash
-    let hash = self.backend.blockchain().hash(dest)?;
-    // remove to be pruned contents
+		// rebase to dest state hash
+		let hash = self.backend.blockchain().hash(dest)?;
+		// remove to be pruned contents
 
-    // TODO also remove values from change trie!! -> put all in prunning of this block
+		// TODO also remove values from change trie!! -> put all in prunning of this block
 		let finalized_number = self.backend.blockchain().info().finalized_number;
 		let oldest = storage.oldest_changes_trie_block(&config, finalized_number);
-    if dest < oldest {
-    }
+		if dest < oldest {
+		}
 		for _c in 0 .. nb_sat {
 
-	    let state = self.backend.state_at(BlockId::Number(best))?;
+			let state = self.backend.state_at(BlockId::Number(best))?;
 
-    // TODO saturating stop on 0
-			best -= One::one();  // prev block
-    }
-    Ok(hash)
+		// TODO saturating stop on 0
+			best -= One::one();	// prev block
+		}
+		Ok(hash)
 /*			let mut transaction = DBTransaction::new();
 			match self.storage.state_db.revert_one() {
 				Some(commit) => {
@@ -1117,18 +1124,18 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		}
 		Ok(n)
 */
-    //self.backend.revert(nb);
+		//self.backend.revert(nb);
 
 	//fn revert(&self, n: NumberFor<Block>) -> error::Result<NumberFor<Block>>;
-  //
-  //	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
+	//
+	//	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
 /*		self.state_at(BlockId::Hash(hash.clone())).is_ok()
 	}
 	/// Returns state backend with post-state of given block.
 	fn state_at(&self, block: BlockId<Block>) -> error::Result<Self::State>;
 */
-    // do not put content (straight to the hash)
-  }
+		// do not put content (straight to the hash)
+	}
 
 	fn apply_finality_with_block_hash(
 		&self,
@@ -1424,6 +1431,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync
@@ -1451,6 +1459,7 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> wher
 
 impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	Block: BlockT<Hash=H256>,
 {
 	fn cache(&self) -> Option<Arc<dyn Cache<Block>>> {
@@ -1460,6 +1469,9 @@ impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 	RA: ConstructRuntimeApi<Block, Self>
@@ -1473,6 +1485,9 @@ impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 {
@@ -1532,6 +1547,9 @@ impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 {
@@ -1577,6 +1595,7 @@ impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> 
 
 impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -1588,6 +1607,10 @@ impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> BlockNumberToHash for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
+  // TODO EMCH those backend constraint (a similaro other one): find a way to skip tem.
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -1647,6 +1670,7 @@ impl<B, Block> Clone for LongestChain<B, Block> {
 impl<B, Block> LongestChain<B, Block>
 where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	Block: BlockT<Hash=H256>,
 {
 	/// Instantiate a new LongestChain for Backend B
@@ -1792,6 +1816,7 @@ where
 impl<B, Block> SelectChain<Block> for LongestChain<B, Block>
 where
 	B: backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	Block: BlockT<Hash=H256>,
 {
 
@@ -1820,6 +1845,9 @@ where
 impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 	where
 		B: backend::Backend<Block, Blake2Hasher>,
+		B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+		<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+			state_machine::TrieBackendStorage<Blake2HasherHasher>,
 		E: CallExecutor<Block, Blake2Hasher>,
 		Block: BlockT<Hash=H256>,
 {
@@ -1831,6 +1859,9 @@ impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 impl<B, E, Block, RA> backend::AuxStore for Client<B, E, Block, RA>
 	where
 		B: backend::Backend<Block, Blake2Hasher>,
+		B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+		<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
+			state_machine::TrieBackendStorage<Blake2HasherHasher>,
 		E: CallExecutor<Block, Blake2Hasher>,
 		Block: BlockT<Hash=H256>,
 {

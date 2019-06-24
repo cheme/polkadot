@@ -215,6 +215,10 @@ pub mod tests {
 	use parity_codec::Encode;
 	use trie::{TrieMut, TrieDBMut, PrefixedMemoryDB};
 	use super::*;
+	use crate::client::NoClient;
+
+	type ClientExt = NoClient<Blake2Hasher>;
+
 
 	fn test_db() -> (PrefixedMemoryDB<Blake2Hasher>, H256) {
 		let mut root = H256::default();
@@ -241,7 +245,7 @@ pub mod tests {
 		(mdb, root)
 	}
 
-	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher> {
+	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<Blake2Hasher>, ClientExt> {
 		let (mdb, root) = test_db();
 		TrieBackend::new(mdb, root)
 	}
@@ -263,7 +267,7 @@ pub mod tests {
 
 	#[test]
 	fn pairs_are_empty_on_empty_storage() {
-		assert!(TrieBackend::<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher>::new(
+		assert!(TrieBackend::<PrefixedMemoryDB<Blake2Hasher>, ClientExt>::new(
 			PrefixedMemoryDB::default(),
 			Default::default(),
 		).pairs().is_empty());

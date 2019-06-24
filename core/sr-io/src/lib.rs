@@ -134,7 +134,7 @@ export_api! {
 		/// Clear the storage entries with a key that starts with the given prefix.
 		fn clear_prefix(prefix: &[u8]);
 
-    /// Reroot the current state n to block n.
+		/// Reroot the current state n to block n.
 		fn reroot(n: u64);
 
 		/// "Commit" all existing operations and compute the resultant storage root.
@@ -385,10 +385,11 @@ mod imp {
 }
 
 #[cfg(feature = "std")]
-pub use self::imp::{StorageOverlay, ChildrenStorageOverlay, with_storage, with_externalities};
+pub use self::imp::{StorageOverlay, ChildrenStorageOverlay, with_storage, with_externalities,
+	NoClient};
 #[cfg(not(feature = "std"))]
 pub use self::imp::ext::*;
 
 /// Type alias for Externalities implementation used in tests.
 #[cfg(feature = "std")]
-pub type TestExternalities<H> = self::imp::TestExternalities<H, u64>;
+pub type TestExternalities<H> = self::imp::TestExternalities<u64, H>;

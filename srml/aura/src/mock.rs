@@ -54,7 +54,7 @@ impl Trait for Test {
 	type AuthorityId = UintAuthorityId;
 }
 
-pub fn new_test_ext(authorities: Vec<u64>) -> runtime_io::TestExternalities<Blake2Hasher> {
+pub fn new_test_ext(authorities: Vec<u64>) -> runtime_io::TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
 	let mut t = system::GenesisConfig::<Test>::default().build_storage().unwrap().0;
 	t.extend(timestamp::GenesisConfig::<Test>{
 		minimum_period: 1,

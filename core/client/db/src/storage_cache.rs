@@ -23,6 +23,8 @@ use linked_hash_map::{LinkedHashMap, Entry};
 use hash_db::Hasher;
 use runtime_primitives::traits::{Block, Header};
 use state_machine::{backend::Backend as StateBackend, TrieBackend};
+use state_machine::client::Externalities as ClientExternalities;
+use state_machine::client::CHOut;
 use log::trace;
 use super::{StorageCollection, ChildStorageCollection};
 use std::hash::Hash as StdHash;
@@ -219,11 +221,11 @@ pub struct CacheChanges<H: Hasher, B: Block> {
 /// For canonical instances local cache is accumulated and applied
 /// in `sync_cache` along with the change overlay.
 /// For non-canonical clones local cache and changes are dropped.
-pub struct CachingState<H: Hasher, S: StateBackend<H>, B: Block> {
+pub struct CachingState<C: ClientExternalities, S: StateBackend<C>, B: Block> {
 	/// Backing state.
 	state: S,
 	/// Cache data.
-	pub cache: CacheChanges<H, B>
+	pub cache: CacheChanges<C::H, B>
 }
 
 impl<H: Hasher, B: Block> CacheChanges<H, B> {
@@ -374,9 +376,9 @@ impl<H: Hasher, B: Block> CacheChanges<H, B> {
 
 }
 
-impl<H: Hasher, S: StateBackend<H>, B: Block> CachingState<H, S, B> {
+impl<C: ClientExternalities, S: StateBackend<C>, B: Block> CachingState<C, S, B> {
 	/// Create a new instance wrapping generic State and shared cache.
-	pub fn new(state: S, shared_cache: SharedCache<B, H>, parent_hash: Option<B::Hash>) -> CachingState<H, S, B> {
+	pub fn new(state: S, shared_cache: SharedCache<B, C::H>, parent_hash: Option<B::Hash>) -> CachingState<C, S, B> {
 		CachingState {
 			state,
 			cache: CacheChanges {
@@ -442,12 +444,12 @@ impl<H: Hasher, S: StateBackend<H>, B: Block> CachingState<H, S, B> {
 	}
 
 	/// Dispose state and return cache data.
-	pub fn release(self) -> CacheChanges<H, B> {
+	pub fn release(self) -> CacheChanges<C::H, B> {
 		self.cache
 	}
 }
 
-impl<H: Hasher, S: StateBackend<H>, B:Block> StateBackend<H> for CachingState<H, S, B> {
+impl<C: ClientExternalities, S: StateBackend<C>, B:Block> StateBackend<C> for CachingState<C, S, B> {
 	type Error = S::Error;
 	type Transaction = S::Transaction;
 	type TrieBackendStorage = S::TrieBackendStorage;
@@ -472,7 +474,7 @@ impl<H: Hasher, S: StateBackend<H>, B:Block> StateBackend<H> for CachingState<H,
 		Ok(value)
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<CHOut<C>>, Self::Error> {
 		let local_cache = self.cache.local_cache.upgradable_read();
 		if let Some(entry) = local_cache.hashes.get(key).cloned() {
 			trace!("Found hash in local cache: {:?}", key);
@@ -527,10 +529,10 @@ impl<H: Hasher, S: StateBackend<H>, B:Block> StateBackend<H> for CachingState<H,
 		self.state.for_keys_in_child_storage(storage_key, f)
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
+	fn storage_root<I>(&self, delta: I) -> (CHOut<C>, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-			H::Out: Ord
+			CHOut<C>: Ord
 	{
 		self.state.storage_root(delta)
 	}
@@ -538,7 +540,7 @@ impl<H: Hasher, S: StateBackend<H>, B:Block> StateBackend<H> for CachingState<H,
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-			H::Out: Ord
+			CHOut<C>: Ord
 	{
 		self.state.child_storage_root(storage_key, delta)
 	}
@@ -555,7 +557,15 @@ impl<H: Hasher, S: StateBackend<H>, B:Block> StateBackend<H> for CachingState<H,
 		self.state.child_keys(child_key, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn reroot(&mut self, b: u64) -> bool {
+		self.state.reroot(b)
+	}
+
+	fn rerooted(&self) -> Option<u64> {
+		self.state.rerooted()
+	}
+
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
 		self.state.as_trie_backend()
 	}
 }

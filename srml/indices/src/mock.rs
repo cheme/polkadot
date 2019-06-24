@@ -83,7 +83,7 @@ impl Trait for Runtime {
 	type Event = ();
 }
 
-pub fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
+pub fn new_test_ext() -> runtime_io::TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
 	{
 		let mut h = ALIVE.borrow_mut();
 		h.clear();

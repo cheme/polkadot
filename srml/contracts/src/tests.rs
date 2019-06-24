@@ -183,7 +183,7 @@ impl ExtBuilder {
 		self.creation_fee = creation_fee;
 		self
 	}
-	pub fn build(self) -> runtime_io::TestExternalities<Blake2Hasher> {
+	pub fn build(self) -> runtime_io::TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
 		let mut t = system::GenesisConfig::<Test>::default()
 			.build_storage()
 			.unwrap()

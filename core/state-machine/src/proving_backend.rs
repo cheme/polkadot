@@ -239,23 +239,26 @@ mod tests {
 	use super::*;
 	use primitives::{Blake2Hasher};
 	use crate::ChildStorageKey;
+	use crate::client::NoClient;
+
+	type ClientExt = NoClient<Blake2Hasher>;
 
 	fn test_proving<'a>(
-		trie_backend: &'a TrieBackend<PrefixedMemoryDB<Blake2Hasher>,Blake2Hasher>,
-	) -> ProvingBackend<'a, PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher> {
+		trie_backend: &'a mut TrieBackend<PrefixedMemoryDB<Blake2Hasher>, ClientExt>,
+	) -> ProvingBackend<'a, PrefixedMemoryDB<Blake2Hasher>, ClientExt> {
 		ProvingBackend::new(trie_backend)
 	}
 
 	#[test]
 	fn proof_is_empty_until_value_is_read() {
-		let trie_backend = test_trie();
-		assert!(test_proving(&trie_backend).extract_proof().is_empty());
+		let mut trie_backend = test_trie();
+		assert!(test_proving(&mut trie_backend).extract_proof().is_empty());
 	}
 
 	#[test]
 	fn proof_is_non_empty_after_value_is_read() {
-		let trie_backend = test_trie();
-		let backend = test_proving(&trie_backend);
+		let mut trie_backend = test_trie();
+		let backend = test_proving(&mut trie_backend);
 		assert_eq!(backend.storage(b"key").unwrap(), Some(b"value".to_vec()));
 		assert!(!backend.extract_proof().is_empty());
 	}
@@ -263,17 +266,19 @@ mod tests {
 	#[test]
 	fn proof_is_invalid_when_does_not_contains_root() {
 		use primitives::H256;
-		assert!(create_proof_check_backend::<Blake2Hasher>(H256::from_low_u64_be(1), vec![]).is_err());
+		assert!(create_proof_check_backend::<ClientExt>(H256::from_low_u64_be(1), vec![]).is_err());
 	}
 
 	#[test]
 	fn passes_throgh_backend_calls() {
-		let trie_backend = test_trie();
-		let proving_backend = test_proving(&trie_backend);
-		assert_eq!(trie_backend.storage(b"key").unwrap(), proving_backend.storage(b"key").unwrap());
-		assert_eq!(trie_backend.pairs(), proving_backend.pairs());
-
+		let mut trie_backend = test_trie();
+		let key_ori = trie_backend.storage(b"key").unwrap();
+		let pairs_ori = trie_backend.pairs();
 		let (trie_root, mut trie_mdb) = trie_backend.storage_root(::std::iter::empty());
+		let proving_backend = test_proving(&mut trie_backend);
+		assert_eq!(key_ori, proving_backend.storage(b"key").unwrap());
+		assert_eq!(pairs_ori, proving_backend.pairs());
+
 		let (proving_root, mut proving_mdb) = proving_backend.storage_root(::std::iter::empty());
 		assert_eq!(trie_root, proving_root);
 		assert_eq!(trie_mdb.drain(), proving_mdb.drain());
@@ -282,7 +287,7 @@ mod tests {
 	#[test]
 	fn proof_recorded_and_checked() {
 		let contents = (0..64).map(|i| (None, vec![i], Some(vec![i]))).collect::<Vec<_>>();
-		let in_memory = InMemory::<Blake2Hasher>::default();
+		let in_memory = InMemory::<ClientExt>::default();
 		let mut in_memory = in_memory.update(contents);
 		let in_memory_root = in_memory.storage_root(::std::iter::empty()).0;
 		(0..64).for_each(|i| assert_eq!(in_memory.storage(&[i]).unwrap().unwrap(), vec![i]));
@@ -297,7 +302,7 @@ mod tests {
 
 		let proof = proving.extract_proof();
 
-		let proof_check = create_proof_check_backend::<Blake2Hasher>(in_memory_root.into(), proof).unwrap();
+		let proof_check = create_proof_check_backend::<ClientExt>(in_memory_root.into(), proof).unwrap();
 		assert_eq!(proof_check.storage(&[42]).unwrap().unwrap(), vec![42]);
 	}
 
@@ -315,7 +320,7 @@ mod tests {
 			.chain((28..65).map(|i| (Some(own1.clone()), vec![i], Some(vec![i]))))
 			.chain((10..15).map(|i| (Some(own2.clone()), vec![i], Some(vec![i]))))
 			.collect::<Vec<_>>();
-		let in_memory = InMemory::<Blake2Hasher>::default();
+		let in_memory = InMemory::<ClientExt>::default();
 		let mut in_memory = in_memory.update(contents);
 		let in_memory_root = in_memory.full_storage_root::<_, Vec<_>, _>(
 			::std::iter::empty(),
@@ -347,7 +352,7 @@ mod tests {
 
 		let proof = proving.extract_proof();
 
-		let proof_check = create_proof_check_backend::<Blake2Hasher>(
+		let proof_check = create_proof_check_backend::<ClientExt>(
 			in_memory_root.into(),
 			proof
 		).unwrap();
@@ -361,7 +366,7 @@ mod tests {
 		assert_eq!(proving.child_storage(&own1[..], &[64]), Ok(Some(vec![64])));
 
 		let proof = proving.extract_proof();
-		let proof_check = create_proof_check_backend::<Blake2Hasher>(
+		let proof_check = create_proof_check_backend::<ClientExt>(
 			in_memory_root.into(),
 			proof
 		).unwrap();

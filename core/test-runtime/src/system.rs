@@ -316,7 +316,7 @@ mod tests {
 	const WASM_CODE: &'static [u8] =
 			include_bytes!("../wasm/target/wasm32-unknown-unknown/release/substrate_test_runtime.compact.wasm");
 
-	fn new_test_ext() -> TestExternalities<Blake2Hasher> {
+	fn new_test_ext() -> TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
 		let authorities = vec![
 			AuthorityKeyring::Alice.to_raw_public(),
 			AuthorityKeyring::Bob.to_raw_public(),

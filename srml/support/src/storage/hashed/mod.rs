@@ -221,7 +221,8 @@ pub trait StorageVec {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use runtime_io::{twox_128, TestExternalities, with_externalities};
+	use runtime_io::{twox_128, TestExternalities as TE, with_externalities};
+	type TestExternalities<H> = TE<runtime_io::NoClient<H>>;
 
 	#[test]
 	fn integers_can_be_stored() {

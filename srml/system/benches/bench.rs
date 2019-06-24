@@ -72,7 +72,7 @@ impl module::Trait for Runtime {
 	type Event = Event;
 }
 
-fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
+fn new_test_ext() -> runtime_io::TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
 	system::GenesisConfig::<Runtime>::default().build_storage().unwrap().0.into()
 }
 

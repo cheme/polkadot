@@ -105,7 +105,7 @@ impl ExtBuilder {
 		self.vesting = vesting;
 		self
 	}
-	pub fn build(self) -> runtime_io::TestExternalities<Blake2Hasher> {
+	pub fn build(self) -> runtime_io::TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
 		let mut t = system::GenesisConfig::<Runtime>::default().build_storage().unwrap().0;
 		t.extend(GenesisConfig::<Runtime> {
 			transaction_base_fee: self.transaction_base_fee,

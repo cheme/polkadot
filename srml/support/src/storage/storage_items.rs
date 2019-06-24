@@ -817,9 +817,9 @@ mod test_map_vec_append {
 	#[test]
 	fn append_works() {
 		use crate::storage::{AppendableStorageMap, StorageMap, StorageValue};
-		use runtime_io::{with_externalities, TestExternalities};
+		use runtime_io::{with_externalities, TestExternalities, NoClient};
 
-		with_externalities(&mut TestExternalities::default(), || {
+		with_externalities(&mut TestExternalities::<NoClient<_>>::default(), || {
 			let _ = <MapVec<Test>>::append(1, &[1, 2, 3]);
 			let _ = <MapVec<Test>>::append(1, &[4, 5]);
 			assert_eq!(<MapVec<Test>>::get(1), vec![1, 2, 3, 4, 5]);

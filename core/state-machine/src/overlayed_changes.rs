@@ -315,6 +315,10 @@ mod tests {
 	use crate::ext::Ext;
 	use crate::Externalities;
 	use super::*;
+	use crate::client::NoClient;
+
+	type ClientExt = NoClient<Blake2Hasher>;
+
 
 	fn strip_extrinsic_index(map: &HashMap<Vec<u8>, OverlayedValue>) -> HashMap<Vec<u8>, OverlayedValue> {
 		let mut clone = map.clone();
@@ -358,7 +362,7 @@ mod tests {
 			(b"dogglesworth".to_vec(), b"catXXX".to_vec()),
 			(b"doug".to_vec(), b"notadog".to_vec()),
 		].into_iter().collect();
-		let backend = InMemory::<Blake2Hasher>::from(initial);
+		let mut backend = InMemory::<ClientExt>::from(initial);
 		let mut overlay = OverlayedChanges {
 			committed: vec![
 				(b"dog".to_vec(), Some(b"puppy".to_vec()).into()),
@@ -375,7 +379,7 @@ mod tests {
 		let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
 		let mut ext = Ext::new(
 			&mut overlay,
-			&backend,
+			&mut backend,
 			Some(&changes_trie_storage),
 			crate::NeverOffchainExt::new(),
 		);

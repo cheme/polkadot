@@ -9,6 +9,7 @@ generic-test-client = { package = "substrate-test-client", path = "../../test-cl
 primitives = { package = "substrate-primitives", path = "../../primitives" }
 runtime = { package = "substrate-test-runtime", path = "../../test-runtime", default-features = false }
 runtime_primitives = { package = "sr-primitives", path = "../../sr-primitives" }
+state_machine = { package = "substrate-state-machine", path = "../../state-machine" }
 
 [features]
 default = [

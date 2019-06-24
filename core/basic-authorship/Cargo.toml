@@ -15,6 +15,7 @@ primitives = { package = "substrate-primitives", path = "../../core/primitives" 
 inherents = { package = "substrate-inherents", path = "../inherents" }
 transaction_pool = { package = "substrate-transaction-pool", path = "../../core/transaction-pool" }
 substrate-telemetry = { path = "../telemetry" }
+state-machine = { package = "substrate-state-machine", path = "../state-machine" }
 
 [dev-dependencies]
 test-client = { package = "substrate-test-runtime-client", path = "../../core/test-runtime/client" }

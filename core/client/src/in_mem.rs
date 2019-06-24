@@ -461,6 +461,10 @@ where
 		Ok(Some(&self.old_state))
 	}
 
+	fn state_mut(&mut self) -> error::Result<Option<&mut Self::State>> {
+		Ok(Some(&mut self.old_state))
+	}
+
 	fn set_block_data(
 		&mut self,
 		header: <Block as BlockT>::Header,
@@ -780,8 +784,10 @@ mod tests {
 	use std::sync::Arc;
 	use test_client;
 	use primitives::Blake2Hasher;
+	use state_machine::client::NoClient;
+	type CliExt = NoClient<Blake2Hasher>;
 
-	type TestBackend = test_client::client::in_mem::Backend<test_client::runtime::Block, Blake2Hasher>;
+	type TestBackend = test_client::client::in_mem::Backend<test_client::runtime::Block, CliExt>;
 
 	#[test]
 	fn test_leaves_with_complex_block_tree() {

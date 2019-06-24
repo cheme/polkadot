@@ -85,7 +85,7 @@ pub fn compute_root<Header, Hasher, I>(
 }
 
 /// Build CHT-based header proof.
-pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
+pub fn build_proof<Header, Cli, BlocksI, HashesI>(
 	cht_size: Header::Number,
 	cht_num: Header::Number,
 	blocks: BlocksI,
@@ -93,8 +93,8 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 ) -> ClientResult<Vec<Vec<u8>>>
 	where
 		Header: HeaderT,
-		Hasher: hash_db::Hasher,
-		Hasher::Out: Ord,
+		Cli: ClientExternalities,
+		CHOut<Cli>: Ord,
 		BlocksI: IntoIterator<Item=Header::Number>,
 		HashesI: IntoIterator<Item=ClientResult<Option<Header::Hash>>>,
 {
@@ -102,7 +102,7 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 		.into_iter()
 		.map(|(k, v)| (None, k, Some(v)))
 		.collect::<Vec<_>>();
-	let mut storage = InMemoryState::<Hasher>::default().update(transaction);
+	let mut storage = InMemoryState::<Cli>::default().update(transaction);
 	let trie_storage = storage.as_trie_backend()
 		.expect("InMemoryState::as_trie_backend always returns Some; qed");
 	let mut total_proof = HashSet::new();
@@ -117,7 +117,7 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 }
 
 /// Check CHT-based header proof.
-pub fn check_proof<Header, Hasher>(
+pub fn check_proof<Header, Cli>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
@@ -125,11 +125,11 @@ pub fn check_proof<Header, Hasher>(
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
-		Hasher: hash_db::Hasher,
-		Hasher::Out: Ord,
+		Cli: ClientExternalities,
+		CHOut<Cli>: Ord,
 {
-	do_check_proof::<Header, Hasher, _>(local_root, local_number, remote_hash, move |local_root, local_cht_key|
-		read_proof_check::<Hasher>(local_root, remote_proof,
+	do_check_proof::<Header, Cli::H, _>(local_root, local_number, remote_hash, move |local_root, local_cht_key|
+		read_proof_check::<Cli>(local_root, remote_proof,
 			local_cht_key).map_err(|e| ClientError::from(e)))
 }
 
@@ -146,7 +146,7 @@ pub fn check_proof_on_proving_backend<Header, C>(
 		CHOut<C>: Ord,
 {
 	do_check_proof::<Header, C::H, _>(local_root, local_number, remote_hash, |_, local_cht_key|
-		read_proof_check_on_proving_backend::<C::H>(
+		read_proof_check_on_proving_backend::<C>(
 			proving_backend, local_cht_key).map_err(|e| ClientError::from(e)))
 }
 
@@ -307,7 +307,9 @@ pub fn decode_cht_value(value: &[u8]) -> Option<H256> {
 mod tests {
 	use primitives::{Blake2Hasher};
 	use test_client::runtime::Header;
+	use state_machine::client::NoClient;
 	use super::*;
+	type CliExt = NoClient<Blake2Hasher>;
 
 	#[test]
 	fn is_build_required_works() {
@@ -367,7 +369,7 @@ mod tests {
 	#[test]
 	#[should_panic]
 	fn build_proof_panics_when_querying_wrong_block() {
-		assert!(build_proof::<Header, Blake2Hasher, _, _>(
+		assert!(build_proof::<Header, CliExt, _, _>(
 			SIZE as _,
 			0,
 			vec![(SIZE * 1000) as u64],
@@ -378,7 +380,7 @@ mod tests {
 
 	#[test]
 	fn build_proof_works() {
-		assert!(build_proof::<Header, Blake2Hasher, _, _>(
+		assert!(build_proof::<Header, CliExt, _, _>(
 			SIZE as _,
 			0,
 			vec![(SIZE / 2) as u64],

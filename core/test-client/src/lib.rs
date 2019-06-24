@@ -29,6 +29,7 @@ pub use keyring::{sr25519::Keyring as AuthorityKeyring, AccountKeyring};
 pub use primitives::Blake2Hasher;
 pub use runtime_primitives::{StorageOverlay, ChildrenStorageOverlay};
 pub use state_machine::ExecutionStrategy;
+use state_machine::client::NoClient;
 
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -40,11 +41,16 @@ use runtime_primitives::traits::{
 };
 use client::LocalCallExecutor;
 
+/// Client externalities for testing.
+/// This does not support rerooting
+/// operation.
+pub type CliExt = NoClient<Blake2Hasher>;
+
 /// Test client light database backend.
 pub type LightBackend<Block> = client::light::backend::Backend<
 	client_db::light::LightStorage<Block>,
 	LightFetcher,
-	Blake2Hasher,
+	CliExt,
 >;
 
 /// Test client light fetcher.
@@ -157,8 +163,12 @@ impl<Executor, Backend, G: GenesisInit> TestClientBuilder<
 		>,
 		client::LongestChain<Backend, Block>,
 	) where
-		Executor: client::CallExecutor<Block, Blake2Hasher>,
-		Backend: client::backend::Backend<Block, Blake2Hasher>,
+		Executor: client::CallExecutor<Block, CliExt>,
+		Backend: client::backend::Backend<Block, CliExt>,
+		Backend::ChangesTrieStorage:
+			client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
+		<Backend::State as state_machine::Backend<CliExt>>::TrieBackendStorage:
+			state_machine::TrieBackendStorage<Blake2Hasher>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
 	{
 
@@ -209,7 +219,11 @@ impl<E, Backend, G: GenesisInit> TestClientBuilder<
 	) where
 		I: Into<Option<executor::NativeExecutor<E>>>,
 		E: executor::NativeExecutionDispatch,
-		Backend: client::backend::Backend<Block, Blake2Hasher>,
+		Backend: client::backend::Backend<Block, CliExt>,
+		Backend::ChangesTrieStorage:
+			client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
+		<Backend::State as state_machine::Backend<CliExt>>::TrieBackendStorage:
+			state_machine::TrieBackendStorage<Blake2Hasher>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
 	{
 		let executor = executor.into().unwrap_or_else(|| executor::NativeExecutor::new(None));

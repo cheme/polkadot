@@ -24,16 +24,21 @@ use std::sync::Arc;
 use crate::backend;
 use crate::block_builder_ext::BlockBuilderExt;
 use crate::blockchain::{Backend as BlockChainBackendT, HeaderBackend};
-use crate::{AccountKeyring, ClientExt, TestClientBuilder, TestClientBuilderExt};
+use crate::{AccountKeyring, ClientExt, TestClientBuilder, TestClientBuilderExt, CliExt};
 use generic_test_client::consensus::BlockOrigin;
 use primitives::Blake2Hasher;
 use runtime::{self, Transfer};
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::traits::Block as BlockT;
+use super::client;
 
 /// helper to test the `leaves` implementation for various backends
 pub fn test_leaves_for_backend<B: 'static>(backend: Arc<B>) where
-	B: backend::LocalBackend<runtime::Block, Blake2Hasher>,
+	B: backend::LocalBackend<runtime::Block, CliExt>,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
+	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	// block tree:
 	// G -> A1 -> A2 -> A3 -> A4 -> A5
@@ -149,7 +154,11 @@ pub fn test_leaves_for_backend<B: 'static>(backend: Arc<B>) where
 
 /// helper to test the `children` implementation for various backends
 pub fn test_children_for_backend<B: 'static>(backend: Arc<B>) where
-	B: backend::LocalBackend<runtime::Block, Blake2Hasher>,
+	B: backend::LocalBackend<runtime::Block, CliExt>,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
+	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	// block tree:
 	// G -> A1 -> A2 -> A3 -> A4 -> A5
@@ -240,7 +249,11 @@ pub fn test_children_for_backend<B: 'static>(backend: Arc<B>) where
 }
 
 pub fn test_blockchain_query_by_number_gets_canonical<B: 'static>(backend: Arc<B>) where
-	B: backend::LocalBackend<runtime::Block, Blake2Hasher>,
+	B: backend::LocalBackend<runtime::Block, CliExt>,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
+	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	// block tree:
 	// G -> A1 -> A2 -> A3 -> A4 -> A5

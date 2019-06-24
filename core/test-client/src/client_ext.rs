@@ -27,6 +27,7 @@ use runtime_primitives::traits::{Block as BlockT};
 use runtime_primitives::generic::BlockId;
 use primitives::Blake2Hasher;
 use parity_codec::alloc::collections::hash_map::HashMap;
+use crate::CliExt;
 
 /// Extension trait for a test client.
 pub trait ClientExt<Block: BlockT>: Sized {
@@ -55,8 +56,11 @@ pub trait ClientExt<Block: BlockT>: Sized {
 
 impl<B, E, RA, Block> ClientExt<Block> for Client<B, E, Block, RA>
 	where
-		B: client::backend::Backend<Block, Blake2Hasher>,
-		E: client::CallExecutor<Block, Blake2Hasher>,
+		B: client::backend::Backend<Block, CliExt>,
+		B::ChangesTrieStorage: client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
+		<B::State as state_machine::Backend<CliExt>>::TrieBackendStorage:
+			state_machine::TrieBackendStorage<Blake2Hasher>,
+		E: client::CallExecutor<Block, CliExt>,
 		Self: BlockImport<Block, Error=ConsensusError>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
 {

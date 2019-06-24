@@ -23,7 +23,9 @@ use consensus::{BlockImport, Error as ConsensusError};
 use runtime_primitives::traits::{Block as BlockT, Header as HeaderT};
 use runtime_primitives::generic::{BlockId};
 use runtime_primitives::Justification;
-use primitives::{H256, Blake2Hasher, storage::StorageKey};
+use primitives::{H256, Blake2Hasher as Blake2HasherHasher, storage::StorageKey};
+
+type Blake2Hasher = client::NoClient<Blake2HasherHasher>;
 
 /// Local client abstraction for the network.
 pub trait Client<Block: BlockT>: Send + Sync {
@@ -76,6 +78,8 @@ pub trait FinalityProofProvider<Block: BlockT>: Send + Sync {
 
 impl<B, E, Block, RA> Client<Block> for SubstrateClient<B, E, Block, RA> where
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	Self: BlockImport<Block, Error=ConsensusError>,
 	Block: BlockT<Hash=H256>,

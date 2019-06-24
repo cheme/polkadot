@@ -44,6 +44,7 @@ mod tests {
 	use executor::{NativeExecutionDispatch, native_executor_instance};
 	use state_machine::{self, OverlayedChanges, ExecutionStrategy, InMemoryChangesTrieStorage};
 	use state_machine::backend::InMemory;
+	use state_machine::client::NoClient;
 	use test_client::{
 		runtime::genesismap::{GenesisConfig, additional_storage_with_genesis},
 		runtime::{Hash, Transfer, Block, BlockNumber, Header, Digest},
@@ -52,6 +53,7 @@ mod tests {
 	use runtime_primitives::traits::BlakeTwo256;
 	use primitives::Blake2Hasher;
 	use hex::*;
+	type CliExt = NoClient<Blake2Hasher>;
 
 	native_executor_instance!(Executor, test_client::runtime::api::dispatch, test_client::runtime::native_version, include_bytes!("../../test-runtime/wasm/target/wasm32-unknown-unknown/release/substrate_test_runtime.compact.wasm"));
 
@@ -60,7 +62,7 @@ mod tests {
 	}
 
 	fn construct_block(
-		backend: &InMemory<Blake2Hasher>,
+		backend: &mut InMemory<CliExt>,
 		number: BlockNumber,
 		parent_hash: Hash,
 		state_root: Hash,
@@ -124,7 +126,7 @@ mod tests {
 		(vec![].and(&Block { header, extrinsics: transactions }), hash)
 	}
 
-	fn block1(genesis_hash: Hash, backend: &InMemory<Blake2Hasher>) -> (Vec<u8>, Hash) {
+	fn block1(genesis_hash: Hash, backend: &mut InMemory<CliExt>) -> (Vec<u8>, Hash) {
 		construct_block(
 			backend,
 			1,
@@ -151,12 +153,12 @@ mod tests {
 		let genesis_hash = block.header.hash();
 		storage.extend(additional_storage_with_genesis(&block).into_iter());
 
-		let backend = InMemory::from(storage);
-		let (b1data, _b1hash) = block1(genesis_hash, &backend);
+		let mut backend = InMemory::from(storage);
+		let (b1data, _b1hash) = block1(genesis_hash, &mut backend);
 
 		let mut overlay = OverlayedChanges::default();
 		let _ = state_machine::new(
-			&backend,
+			&mut backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
 			state_machine::NeverOffchainExt::new(),
 			&mut overlay,
@@ -180,12 +182,12 @@ mod tests {
 		let genesis_hash = block.header.hash();
 		storage.extend(additional_storage_with_genesis(&block).into_iter());
 
-		let backend = InMemory::from(storage);
-		let (b1data, _b1hash) = block1(genesis_hash, &backend);
+		let mut backend = InMemory::from(storage);
+		let (b1data, _b1hash) = block1(genesis_hash, &mut backend);
 
 		let mut overlay = OverlayedChanges::default();
 		let _ = state_machine::new(
-			&backend,
+			&mut backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
 			state_machine::NeverOffchainExt::new(),
 			&mut overlay,
@@ -209,12 +211,12 @@ mod tests {
 		let genesis_hash = block.header.hash();
 		storage.extend(additional_storage_with_genesis(&block).into_iter());
 
-		let backend = InMemory::from(storage);
-		let (b1data, _b1hash) = block1(genesis_hash, &backend);
+		let mut backend = InMemory::from(storage);
+		let (b1data, _b1hash) = block1(genesis_hash, &mut backend);
 
 		let mut overlay = OverlayedChanges::default();
 		let r = state_machine::new(
-			&backend,
+			&mut backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
 			state_machine::NeverOffchainExt::new(),
 			&mut overlay,

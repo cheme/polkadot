@@ -23,7 +23,7 @@ use std::{self, time, sync::Arc};
 use log::{info, debug, trace};
 
 use client::{
-	self, error, Client as SubstrateClient, CallExecutor,
+	self, error, Client as SubstrateClient, CallExecutor, NoClient,
 	block_builder::api::BlockBuilder as BlockBuilderApi, runtime_api::Core,
 };
 use codec::Decode;
@@ -38,6 +38,8 @@ use runtime_primitives::ApplyError;
 use transaction_pool::txpool::{self, Pool as TransactionPool};
 use inherents::InherentData;
 use substrate_telemetry::{telemetry, CONSENSUS_INFO};
+
+type CliExt = NoClient<Blake2Hasher>;
 
 /// Build new blocks.
 pub trait BlockBuilder<Block: BlockT> {
@@ -68,8 +70,10 @@ pub trait AuthoringApi: Send + Sync + ProvideRuntimeApi where
 impl<'a, B, E, Block, RA> BlockBuilder<Block>
 	for client::block_builder::BlockBuilder<'a, Block, SubstrateClient<B, E, Block, RA>>
 where
-	B: client::backend::Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone + 'static,
+	B: client::backend::Backend<Block, CliExt> + 'static,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
+	E: CallExecutor<Block, CliExt> + Send + Sync + Clone + 'static,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync + 'static,
 	SubstrateClient<B, E, Block, RA> : ProvideRuntimeApi,
@@ -81,8 +85,12 @@ where
 }
 
 impl<B, E, Block, RA> AuthoringApi for SubstrateClient<B, E, Block, RA> where
-	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone + 'static,
+	B: client::backend::Backend<Block, CliExt> + Send + Sync + 'static,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
+	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2Hasher>,
+	E: CallExecutor<Block, CliExt> + Send + Sync + Clone + 'static,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync + 'static,
 	SubstrateClient<B, E, Block, RA> : ProvideRuntimeApi,
