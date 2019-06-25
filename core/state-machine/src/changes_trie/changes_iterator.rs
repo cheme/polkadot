@@ -305,7 +305,7 @@ impl<'a, RS: 'a + RootsStorage<C, Number>, S: Storage<C, Number>, C: ClientExter
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.essence.next(|storage, root, key|
-			TrieBackendEssence::<_, C::H>::new(TrieBackendAdapter::new(storage), root).storage(key))
+			TrieBackendEssence::<_, C>::new(TrieBackendAdapter::new(storage), root).storage(key))
 	}
 }
 
@@ -354,7 +354,7 @@ impl<'a, RS, S, C, Number> Iterator for ProvingDrilldownIterator<'a, RS, S, C, N
 		let proof_recorder = &mut *self.proof_recorder.try_borrow_mut()
 			.expect("only fails when already borrowed; storage() is non-reentrant; qed");
 		self.essence.next(|storage, root, key|
-			ProvingBackendEssence::<_, C::H> {
+			ProvingBackendEssence::<_, C> {
 				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
 				proof_recorder,
 			}.storage(key))

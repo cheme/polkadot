@@ -708,7 +708,7 @@ pub fn prove_execution_on_trie_backend<S, Exec, C>(
 	call_data: &[u8],
 ) -> Result<(Vec<u8>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<C::H>,
+	S: trie_backend_essence::TrieBackendStorage<C>,
   C: ClientExternalities,
 	Exec: CodeExecutor<C::H>,
 	CHOut<C>: Ord + 'static,
@@ -824,7 +824,7 @@ pub fn prove_read_on_trie_backend<S, C>(
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<C::H>,
+	S: trie_backend_essence::TrieBackendStorage<C>,
 	C: ClientExternalities,
 	CHOut<C>: Ord
 {
@@ -840,7 +840,7 @@ pub fn prove_child_read_on_trie_backend<S, C>(
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<C::H>,
+	S: trie_backend_essence::TrieBackendStorage<C>,
 	C: ClientExternalities,
 	CHOut<C>: Ord
 {

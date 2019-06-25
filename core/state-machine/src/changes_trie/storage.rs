@@ -34,7 +34,7 @@ use crate::changes_trie::input::InputPair;
 
 /// In-memory implementation of changes trie storage.
 pub struct InMemoryStorage<C: ClientExternalities, Number: BlockNumber> {
-	data: RwLock<InMemoryStorageData<C::H, Number>>,
+	data: RwLock<InMemoryStorageData<C, Number>>,
 	_ph: ::std::marker::PhantomData<C>,
 }
 
@@ -44,9 +44,9 @@ pub struct TrieBackendAdapter<'a, C: ClientExternalities, Number: BlockNumber, S
 	_hasher: ::std::marker::PhantomData<(C, Number)>,
 }
 
-struct InMemoryStorageData<H: Hasher, Number: BlockNumber> {
-	roots: BTreeMap<Number, H::Out>,
-	mdb: MemoryDB<H>,
+struct InMemoryStorageData<C: ClientExternalities, Number: BlockNumber> {
+	roots: BTreeMap<Number, CHOut<C>>,
+	mdb: MemoryDB<C::H>,
 }
 
 impl<C: ClientExternalities, Number: BlockNumber> InMemoryStorage<C, Number> {
@@ -148,7 +148,7 @@ impl<'a, C: ClientExternalities, Number: BlockNumber, S: 'a + Storage<C, Number>
 	}
 }
 
-impl<'a, C, Number, S> TrieBackendStorage<C::H> for TrieBackendAdapter<'a, C, Number, S>
+impl<'a, C, Number, S> TrieBackendStorage<C> for TrieBackendAdapter<'a, C, Number, S>
 	where
 		S: 'a + Storage<C, Number>,
 		Number: BlockNumber,

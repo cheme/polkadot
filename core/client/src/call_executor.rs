@@ -116,9 +116,7 @@ where
 		manager: ExecutionManager<F>,
 		native_call: Option<NC>,
 		side_effects_handler: Option<&mut O>,
-	) -> Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<C::H>>), error::Error>
-		where
-			S::TrieBackendStorage: state_machine::TrieBackendStorage<Blake2HasherHasher>;
+	) -> Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<C::H>>), error::Error>;
 
 	/// Execute a call to a contract on top of given state, gathering execution proof.
 	///
@@ -141,7 +139,7 @@ where
 	/// Execute a call to a contract on top of given trie state, gathering execution proof.
 	///
 	/// No changes are made.
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<C::H>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<C>>(
 		&self,
 		trie_state: &mut state_machine::TrieBackend<S, C>,
 		overlay: &mut OverlayedChanges,
@@ -344,7 +342,7 @@ where
 		.map_err(Into::into)
 	}
 
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2HasherHasher>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
 		&self,
 		trie_state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
 		overlay: &mut OverlayedChanges,

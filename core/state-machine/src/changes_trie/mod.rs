@@ -116,7 +116,7 @@ pub trait Storage<C: ClientExternalities, Number: BlockNumber>: RootsStorage<C, 
 /// Changes trie storage -> trie backend essence adapter.
 pub struct TrieBackendStorageAdapter<'a, C: ClientExternalities, Number: BlockNumber>(pub &'a dyn Storage<C, Number>);
 
-impl<'a, C: ClientExternalities, N: BlockNumber> crate::TrieBackendStorage<C::H> for TrieBackendStorageAdapter<'a, C, N> {
+impl<'a, C: ClientExternalities, N: BlockNumber> crate::TrieBackendStorage<C> for TrieBackendStorageAdapter<'a, C, N> {
 	type Overlay = trie::MemoryDB<C::H>;
 
 	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String> {

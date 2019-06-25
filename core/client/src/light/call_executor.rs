@@ -180,7 +180,7 @@ where
 		Err(ClientError::NotAvailableOnLightClient.into())
 	}
 
-	fn prove_at_trie_state<S: TrieBackendStorage<Blake2HasherHasher>>(
+	fn prove_at_trie_state<S: TrieBackendStorage<Blake2Hasher>>(
 		&self,
 		_state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
 		_changes: &mut OverlayedChanges,
@@ -374,7 +374,7 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 			).map_err(|e| ClientError::Execution(Box::new(e.to_string())))
 	}
 
-	fn prove_at_trie_state<S: TrieBackendStorage<Blake2HasherHasher>>(
+	fn prove_at_trie_state<S: TrieBackendStorage<Blake2Hasher>>(
 		&self,
 		state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
 		changes: &mut OverlayedChanges,
@@ -404,7 +404,6 @@ pub fn prove_execution<Block, S, E>(
 		Block: BlockT<Hash=H256>,
 		S: StateBackend<Blake2Hasher>,
 		E: CallExecutor<Block, Blake2Hasher>,
-		S::TrieBackendStorage: TrieBackendStorage<Blake2HasherHasher>,
 {
 	let mut trie_state = state.as_trie_backend()
 		.ok_or_else(|| Box::new(state_machine::ExecutionError::UnableToGenerateProof) as Box<dyn state_machine::Error>)?;

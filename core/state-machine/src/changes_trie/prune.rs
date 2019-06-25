@@ -87,7 +87,7 @@ pub fn prune<S: Storage<C, Number>, C: ClientExternalities, Number: BlockNumber,
 		// (effectively - all changes trie nodes)
 		let mut proof_recorder: Recorder<CHOut<C>> = Default::default();
 		{
-			let mut trie = ProvingBackendEssence::<_, C::H> {
+			let mut trie = ProvingBackendEssence::<_, C> {
 				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
 				proof_recorder: &mut proof_recorder,
 			};

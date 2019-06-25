@@ -24,14 +24,14 @@ use crate::client::Externalities as ClientExternalities;
 use crate::client::CHOut;
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
-pub struct TrieBackend<S: TrieBackendStorage<C::H>, C: ClientExternalities> {
-	essence: TrieBackendEssence<S, C::H>,
+pub struct TrieBackend<S: TrieBackendStorage<C>, C: ClientExternalities> {
+	essence: TrieBackendEssence<S, C>,
 	rerooted: Option<u64>,
 	// TODO EMCH switch to non optional !!
 	client: Option<C>,
 }
 
-impl<S: TrieBackendStorage<C::H>, C: ClientExternalities> TrieBackend<S, C> {
+impl<S: TrieBackendStorage<C>, C: ClientExternalities> TrieBackend<S, C> {
 	/// Create new trie-based backend.
 	pub fn new(storage: S, root: CHOut<C>) -> Self {
 		TrieBackend {
@@ -42,7 +42,7 @@ impl<S: TrieBackendStorage<C::H>, C: ClientExternalities> TrieBackend<S, C> {
 	}
 
 	/// Get backend essence reference.
-	pub fn essence(&self) -> &TrieBackendEssence<S, C::H> {
+	pub fn essence(&self) -> &TrieBackendEssence<S, C> {
 		&self.essence
 	}
 
@@ -65,7 +65,7 @@ impl<S: TrieBackendStorage<C::H>, C: ClientExternalities> TrieBackend<S, C> {
 impl super::Error for String {}
 
 impl<
-	S: TrieBackendStorage<C::H>,
+	S: TrieBackendStorage<C>,
 	C: ClientExternalities,
 > Backend<C> for TrieBackend<S, C> where
 	CHOut<C>: Ord,

@@ -114,7 +114,7 @@ fn prepare_digest_input<'a, S, C, Number>(
 	for digest_build_block in digest_build_iterator(config, parent.number.clone() + One::one()) {
 		let trie_root = storage.root(parent, digest_build_block.clone())?;
 		let trie_root = trie_root.ok_or_else(|| format!("No changes trie root for block {}", digest_build_block.clone()))?;
-		let trie_storage = TrieBackendEssence::<_, C::H>::new(
+		let trie_storage = TrieBackendEssence::<_, C>::new(
 			crate::changes_trie::TrieBackendStorageAdapter(storage),
 			trie_root,
 		);

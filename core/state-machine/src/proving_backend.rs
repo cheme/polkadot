@@ -33,15 +33,15 @@ use crate::client::CHOut;
 
 /// Patricia trie-based backend essence which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
-pub struct ProvingBackendEssence<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
-	pub(crate) backend: &'a TrieBackendEssence<S, H>,
-	pub(crate) proof_recorder: &'a mut Recorder<H::Out>,
+pub struct ProvingBackendEssence<'a, S: 'a + TrieBackendStorage<C>, C: 'a + ClientExternalities> {
+	pub(crate) backend: &'a TrieBackendEssence<S, C>,
+	pub(crate) proof_recorder: &'a mut Recorder<CHOut<C>>,
 }
 
-impl<'a, S, H> ProvingBackendEssence<'a, S, H>
+impl<'a, S, C> ProvingBackendEssence<'a, S, C>
 	where
-		S: TrieBackendStorage<H>,
-		H: Hasher,
+		S: TrieBackendStorage<C>,
+		C: ClientExternalities,
 {
 	pub fn storage(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
 		let mut read_overlay = S::Overlay::default();
@@ -52,11 +52,11 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_trie_value_with::<H, _, Ephemeral<S, H>>(&eph, self.backend.root(), key, &mut *self.proof_recorder).map_err(map_e)
+		read_trie_value_with::<C::H, _, Ephemeral<S, C>>(&eph, self.backend.root(), key, &mut *self.proof_recorder).map_err(map_e)
 	}
 
 	pub fn child_storage(&mut self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		let root = self.storage(storage_key)?.unwrap_or(default_child_trie_root::<H>(storage_key));
+		let root = self.storage(storage_key)?.unwrap_or(default_child_trie_root::<C::H>(storage_key));
 
 		let mut read_overlay = S::Overlay::default();
 		let eph = Ephemeral::new(
@@ -76,9 +76,9 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 			&mut read_overlay,
 		);
 
-		let mut iter = move || -> Result<(), Box<TrieError<H::Out>>> {
+		let mut iter = move || -> Result<(), Box<TrieError<CHOut<C>>>> {
 			let root = self.backend.root();
-			record_all_keys::<H, _>(&eph, root, &mut *self.proof_recorder)
+			record_all_keys::<C::H, _>(&eph, root, &mut *self.proof_recorder)
 		};
 
 		if let Err(e) = iter() {
@@ -89,12 +89,12 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
-pub struct ProvingBackend<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> {
+pub struct ProvingBackend<'a, S: 'a + TrieBackendStorage<C>, C: 'a + ClientExternalities> {
 	backend: &'a mut TrieBackend<S, C>,
 	proof_recorder: Rc<RefCell<Recorder<CHOut<C>>>>,
 }
 
-impl<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> ProvingBackend<'a, S, C> {
+impl<'a, S: 'a + TrieBackendStorage<C>, C: 'a + ClientExternalities> ProvingBackend<'a, S, C> {
 	/// Create new proving backend.
 	pub fn new(backend: &'a mut TrieBackend<S, C>) -> Self {
 		ProvingBackend {
@@ -128,7 +128,7 @@ impl<'a, S: 'a + TrieBackendStorage<C::H>, C: 'a + ClientExternalities> ProvingB
 
 impl<'a, S, C> Backend<C> for ProvingBackend<'a, S, C>
 	where
-		S: 'a + TrieBackendStorage<C::H>,
+		S: 'a + TrieBackendStorage<C>,
 		C: 'a + ClientExternalities,
 		CHOut<C>: Ord,
 {

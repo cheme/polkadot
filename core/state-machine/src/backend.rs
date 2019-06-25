@@ -39,7 +39,7 @@ pub trait Backend<C: ClientExternalities> {
 	type Transaction: Consolidate + Default;
 
 	/// Type of trie backend storage.
-	type TrieBackendStorage: TrieBackendStorage<C::H>;
+	type TrieBackendStorage: TrieBackendStorage<C>;
 
 	/// Get keyed storage or None if there is nothing associated.
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
