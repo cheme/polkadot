@@ -44,6 +44,7 @@ use crate::authorities::{AuthoritySet, SharedAuthoritySet, DelayKind, PendingCha
 use crate::consensus_changes::SharedConsensusChanges;
 use crate::environment::{finalize_block, is_descendent_of};
 use crate::justification::GrandpaJustification;
+use crate::CliExt;
 
 /// A block-import handler for GRANDPA.
 ///
@@ -66,8 +67,8 @@ pub struct GrandpaBlockImport<B, E, Block: BlockT<Hash=H256>, RA, PRA, SC> {
 impl<B, E, Block: BlockT<Hash=H256>, RA, PRA, SC> JustificationImport<Block>
 	for GrandpaBlockImport<B, E, Block, RA, PRA, SC> where
 		NumberFor<Block>: grandpa::BlockNumberOps,
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		DigestFor<Block>: Encode,
 		RA: Send + Sync,
 		PRA: ProvideRuntimeApi,
@@ -159,8 +160,8 @@ impl<B, E, Block: BlockT<Hash=H256>, RA, PRA, SC>
 	GrandpaBlockImport<B, E, Block, RA, PRA, SC>
 where
 	NumberFor<Block>: grandpa::BlockNumberOps,
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 	DigestFor<Block>: Encode,
 	RA: Send + Sync,
 	PRA: ProvideRuntimeApi,
@@ -378,8 +379,8 @@ where
 impl<B, E, Block: BlockT<Hash=H256>, RA, PRA, SC> BlockImport<Block>
 	for GrandpaBlockImport<B, E, Block, RA, PRA, SC> where
 		NumberFor<Block>: grandpa::BlockNumberOps,
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		DigestFor<Block>: Encode,
 		RA: Send + Sync,
 		PRA: ProvideRuntimeApi,
@@ -535,8 +536,8 @@ impl<B, E, Block: BlockT<Hash=H256>, RA, PRA, SC>
 	GrandpaBlockImport<B, E, Block, RA, PRA, SC>
 where
 	NumberFor<Block>: grandpa::BlockNumberOps,
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 	RA: Send + Sync,
 {
 

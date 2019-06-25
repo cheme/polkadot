@@ -17,23 +17,23 @@
 //! Trie-based state machine backend.
 
 use log::{warn, debug};
+use hash_db::Hasher;
 use trie::{TrieDB, TrieError, Trie, delta_trie_root, default_child_trie_root, child_delta_trie_root};
 use crate::trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral};
 use crate::Backend;
 use crate::client::Externalities as ClientExternalities;
-use crate::client::CHOut;
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
-pub struct TrieBackend<S: TrieBackendStorage<C>, C: ClientExternalities> {
-	essence: TrieBackendEssence<S, C>,
+pub struct TrieBackend<S, H: Hasher, C> {
+	essence: TrieBackendEssence<S, H>,
 	rerooted: Option<u64>,
 	// TODO EMCH switch to non optional !!
 	client: Option<C>,
 }
 
-impl<S: TrieBackendStorage<C>, C: ClientExternalities> TrieBackend<S, C> {
+impl<H: Hasher, S: TrieBackendStorage<H>, C: ClientExternalities<H>> TrieBackend<S, H, C> {
 	/// Create new trie-based backend.
-	pub fn new(storage: S, root: CHOut<C>) -> Self {
+	pub fn new(storage: S, root: H::Out) -> Self {
 		TrieBackend {
 			essence: TrieBackendEssence::new(storage, root),
 			rerooted: None,
@@ -42,7 +42,7 @@ impl<S: TrieBackendStorage<C>, C: ClientExternalities> TrieBackend<S, C> {
 	}
 
 	/// Get backend essence reference.
-	pub fn essence(&self) -> &TrieBackendEssence<S, C> {
+	pub fn essence(&self) -> &TrieBackendEssence<S, H> {
 		&self.essence
 	}
 
@@ -52,7 +52,7 @@ impl<S: TrieBackendStorage<C>, C: ClientExternalities> TrieBackend<S, C> {
 	}
 
 	/// Get trie root.
-	pub fn root(&self) -> &CHOut<C> {
+	pub fn root(&self) -> &H::Out {
 		self.essence.root()
 	}
 
@@ -65,10 +65,11 @@ impl<S: TrieBackendStorage<C>, C: ClientExternalities> TrieBackend<S, C> {
 impl super::Error for String {}
 
 impl<
-	S: TrieBackendStorage<C>,
-	C: ClientExternalities,
-> Backend<C> for TrieBackend<S, C> where
-	CHOut<C>: Ord,
+	H: Hasher,
+	S: TrieBackendStorage<H>,
+	C: ClientExternalities<H>,
+> Backend<H, C> for TrieBackend<S, H, C> where
+	H::Out: Ord,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
@@ -94,8 +95,8 @@ impl<
 		let mut read_overlay = S::Overlay::default();
 		let eph = Ephemeral::new(self.essence.backend_storage(), &mut read_overlay);
 
-		let collect_all = || -> Result<_, Box<TrieError<CHOut<C>>>> {
-			let trie = TrieDB::<C::H>::new(&eph, self.essence.root())?;
+		let collect_all = || -> Result<_, Box<TrieError<H::Out>>> {
+			let trie = TrieDB::<H>::new(&eph, self.essence.root())?;
 			let mut v = Vec::new();
 			for x in trie.iter()? {
 				let (key, value) = x?;
@@ -118,8 +119,8 @@ impl<
 		let mut read_overlay = S::Overlay::default();
 		let eph = Ephemeral::new(self.essence.backend_storage(), &mut read_overlay);
 
-		let collect_all = || -> Result<_, Box<TrieError<CHOut<C>>>> {
-			let trie = TrieDB::<C::H>::new(&eph, self.essence.root())?;
+		let collect_all = || -> Result<_, Box<TrieError<H::Out>>> {
+			let trie = TrieDB::<H>::new(&eph, self.essence.root())?;
 			let mut v = Vec::new();
 			for x in trie.iter()? {
 				let (key, _) = x?;
@@ -134,7 +135,7 @@ impl<
 		collect_all().map_err(|e| debug!(target: "trie", "Error extracting trie keys: {}", e)).unwrap_or_default()
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (CHOut<C>, S::Overlay)
+	fn storage_root<I>(&self, delta: I) -> (H::Out, S::Overlay)
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		let mut write_overlay = S::Overlay::default();
@@ -146,7 +147,7 @@ impl<
 				&mut write_overlay,
 			);
 
-			match delta_trie_root::<C::H, _, _, _, _>(&mut eph, root, delta) {
+			match delta_trie_root::<H, _, _, _, _>(&mut eph, root, delta) {
 				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
@@ -158,13 +159,13 @@ impl<
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		CHOut<C>: Ord
+		H::Out: Ord
 	{
-		let default_root = default_child_trie_root::<C::H>(storage_key);
+		let default_root = default_child_trie_root::<H>(storage_key);
 
 		let mut write_overlay = S::Overlay::default();
 		let mut root = match self.storage(storage_key) {
-			Ok(value) => value.unwrap_or(default_child_trie_root::<C::H>(storage_key)),
+			Ok(value) => value.unwrap_or(default_child_trie_root::<H>(storage_key)),
 			Err(e) => {
 				warn!(target: "trie", "Failed to read child storage root: {}", e);
 				default_root.clone()
@@ -177,7 +178,7 @@ impl<
 				&mut write_overlay,
 			);
 
-			match child_delta_trie_root::<C::H, _, _, _, _>(storage_key, &mut eph, root.clone(), delta) {
+			match child_delta_trie_root::<H, _, _, _, _>(storage_key, &mut eph, root.clone(), delta) {
 				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
@@ -188,7 +189,7 @@ impl<
 		(root, is_default, write_overlay)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, H, C>> {
 		Some(self)
 	}
 
@@ -245,7 +246,7 @@ pub mod tests {
 		(mdb, root)
 	}
 
-	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<Blake2Hasher>, ClientExt> {
+	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher, ClientExt> {
 		let (mdb, root) = test_db();
 		TrieBackend::new(mdb, root)
 	}
@@ -267,7 +268,7 @@ pub mod tests {
 
 	#[test]
 	fn pairs_are_empty_on_empty_storage() {
-		assert!(TrieBackend::<PrefixedMemoryDB<Blake2Hasher>, ClientExt>::new(
+		assert!(TrieBackend::<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher, ClientExt>::new(
 			PrefixedMemoryDB::default(),
 			Default::default(),
 		).pairs().is_empty());

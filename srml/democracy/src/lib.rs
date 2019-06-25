@@ -998,7 +998,7 @@ mod tests {
 		type CooloffPeriod = CooloffPeriod;
 	}
 
-	fn new_test_ext() -> runtime_io::TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
+	fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
 		let mut t = system::GenesisConfig::<Test>::default().build_storage().unwrap().0;
 		t.extend(balances::GenesisConfig::<Test>{
 			transaction_base_fee: 0,

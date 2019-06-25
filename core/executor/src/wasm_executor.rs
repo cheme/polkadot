@@ -1367,14 +1367,11 @@ mod tests {
 
 	use parity_codec::Encode;
 
-	use state_machine::TestExternalities as CoreTestExternalities;
+	use state_machine::NCTestExternalities as CoreTestExternalities;
 	use hex_literal::hex;
 	use primitives::map;
-	use state_machine::client::NoClient;
 
-
-	type TestExternalities = CoreTestExternalities<u64, NoClient<Blake2Hasher>>;
-
+	type TestExternalities<H> = CoreTestExternalities<H, u64>;
 
 	#[test]
 	fn returning_should_work() {
@@ -1433,7 +1430,7 @@ mod tests {
 
 		assert_eq!(output, b"all ok!".to_vec());
 
-		let expected: TestExternalities = map![
+		let expected: TestExternalities<_> = map![
 			b"aaa".to_vec() => b"1".to_vec(),
 			b"aab".to_vec() => b"2".to_vec(),
 			b"bbb".to_vec() => b"5".to_vec()
@@ -1499,7 +1496,7 @@ mod tests {
 
 	#[test]
 	fn ed25519_verify_should_work() {
-		let mut ext = TestExternalities::default();
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
 		let key = ed25519::Pair::from_seed(&blake2_256(b"test"));
 		let sig = key.sign(b"all ok!");
@@ -1525,7 +1522,7 @@ mod tests {
 
 	#[test]
 	fn sr25519_verify_should_work() {
-		let mut ext = TestExternalities::default();
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
 		let key = sr25519::Pair::from_seed(&blake2_256(b"test"));
 		let sig = key.sign(b"all ok!");
@@ -1551,7 +1548,7 @@ mod tests {
 
 	#[test]
 	fn enumerated_trie_root_should_work() {
-		let mut ext = TestExternalities::default();
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
 		assert_eq!(
 			WasmExecutor::new().call(&mut ext, 8, &test_code[..], "test_enumerated_trie_root", &[]).unwrap(),

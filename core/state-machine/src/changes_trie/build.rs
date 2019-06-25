@@ -27,7 +27,6 @@ use crate::changes_trie::build_iterator::digest_build_iterator;
 use crate::changes_trie::input::{InputKey, InputPair, DigestIndex, ExtrinsicIndex};
 use crate::changes_trie::{AnchorBlockId, Configuration, Storage, BlockNumber};
 use crate::client::Externalities as ClientExternalities;
-use crate::client::CHOut;
 
 /// Prepare input pairs for building a changes trie of given block.
 ///
@@ -35,17 +34,18 @@ use crate::client::CHOut;
 /// required data.
 /// Returns Ok(None) data required to prepare input pairs is not collected
 /// or storage is not provided.
-pub fn prepare_input<'a, B, S, Number, C>(
+pub fn prepare_input<'a, B, S, H, Number, C>(
 	backend: &B,
 	storage: &'a S,
 	config: &'a Configuration,
 	changes: &OverlayedChanges,
-	parent: &'a AnchorBlockId<CHOut<C>, Number>,
+	parent: &'a AnchorBlockId<H::Out, Number>,
 ) -> Result<Option<Vec<InputPair<Number>>>, String>
 	where
-		B: Backend<C>,
-		S: Storage<C, Number>,
-		C: ClientExternalities,
+		B: Backend<H, C>,
+		S: Storage<H, Number>,
+		H: Hasher,
+		C: ClientExternalities<H>,
 		Number: BlockNumber,
 {
 	let mut input = Vec::new();
@@ -53,7 +53,7 @@ pub fn prepare_input<'a, B, S, Number, C>(
 		backend,
 		parent.number.clone() + 1.into(),
 		changes)?);
-	input.extend(prepare_digest_input::<_, C, Number>(
+	input.extend(prepare_digest_input::<_, H, Number, C>(
 		parent,
 		config,
 		storage)?);
@@ -62,15 +62,16 @@ pub fn prepare_input<'a, B, S, Number, C>(
 }
 
 /// Prepare ExtrinsicIndex input pairs.
-fn prepare_extrinsics_input<B, Number, C>(
+fn prepare_extrinsics_input<B, H, Number, C>(
 	backend: &B,
 	block: Number,
 	changes: &OverlayedChanges,
 ) -> Result<impl Iterator<Item=InputPair<Number>>, String>
 	where
-		B: Backend<C>,
+		B: Backend<H, C>,
 		Number: BlockNumber,
-		C: ClientExternalities,
+		H: Hasher,
+		C: ClientExternalities<H>,
 {
 	let mut extrinsic_map = BTreeMap::<Vec<u8>, BTreeSet<u32>>::new();
 	for (key, val) in changes.prospective.top.iter().chain(changes.committed.top.iter()) {
@@ -99,22 +100,23 @@ fn prepare_extrinsics_input<B, Number, C>(
 }
 
 /// Prepare DigestIndex input pairs.
-fn prepare_digest_input<'a, S, C, Number>(
-	parent: &'a AnchorBlockId<CHOut<C>, Number>,
+fn prepare_digest_input<'a, S, H, Number, C>(
+	parent: &'a AnchorBlockId<H::Out, Number>,
 	config: &Configuration,
 	storage: &'a S
 ) -> Result<impl Iterator<Item=InputPair<Number>> + 'a, String>
 	where
-		S: Storage<C, Number>,
-		C: ClientExternalities,
-		CHOut<C>: 'a,
+		S: Storage<H, Number>,
+		H: Hasher,
+		C: ClientExternalities<H>,
+		H::Out: 'a,
 		Number: BlockNumber,
 {
 	let mut digest_map = BTreeMap::<Vec<u8>, BTreeSet<Number>>::new();
 	for digest_build_block in digest_build_iterator(config, parent.number.clone() + One::one()) {
 		let trie_root = storage.root(parent, digest_build_block.clone())?;
 		let trie_root = trie_root.ok_or_else(|| format!("No changes trie root for block {}", digest_build_block.clone()))?;
-		let trie_storage = TrieBackendEssence::<_, C>::new(
+		let trie_storage = TrieBackendEssence::<_, H>::new(
 			crate::changes_trie::TrieBackendStorageAdapter(storage),
 			trie_root,
 		);
@@ -156,11 +158,11 @@ mod test {
 
 
 	fn prepare_for_build() -> (
-		InMemory<ClientExt>,
-		InMemoryStorage<ClientExt, u64>,
+		InMemory<Blake2Hasher, ClientExt>,
+		InMemoryStorage<Blake2Hasher, u64>,
 		OverlayedChanges,
 	) {
-		let backend: InMemory<_> = vec![
+		let backend: InMemory<_, _> = vec![
 			(vec![100], vec![255]),
 			(vec![101], vec![255]),
 			(vec![102], vec![255]),

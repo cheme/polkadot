@@ -48,6 +48,7 @@ mod client;
 #[cfg(feature = "std")]
 mod notifications;
 
+#[cfg(feature = "std")]
 pub use state_machine::client::NoClient;
 #[cfg(feature = "std")]
 pub use crate::blockchain::Info as ChainInfo;

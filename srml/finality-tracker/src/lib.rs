@@ -259,7 +259,7 @@ impl<T: Trait> ProvideInherent for Module<T> {
 mod tests {
 	use super::*;
 
-	use sr_io::{with_externalities, TestExternalities as TE, NoClient};
+	use sr_io::{with_externalities, TestExternalities};
 	use substrate_primitives::H256;
 	use primitives::BuildStorage;
 	use primitives::traits::{BlakeTwo256, IdentityLookup, OnFinalize, Header as HeaderT};
@@ -268,9 +268,6 @@ mod tests {
 	use srml_system as system;
 	use lazy_static::lazy_static;
 	use parking_lot::Mutex;
-
-	type TestExternalities<H> = TE<NoClient<H>>;
-
 
 	#[derive(Clone, PartialEq, Debug)]
 	pub struct StallEvent {

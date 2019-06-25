@@ -24,7 +24,6 @@ use hash_db::Hasher;
 use runtime_primitives::traits::{Block, Header};
 use state_machine::{backend::Backend as StateBackend, TrieBackend};
 use state_machine::client::Externalities as ClientExternalities;
-use state_machine::client::CHOut;
 use log::trace;
 use super::{StorageCollection, ChildStorageCollection};
 use std::hash::Hash as StdHash;
@@ -221,11 +220,12 @@ pub struct CacheChanges<H: Hasher, B: Block> {
 /// For canonical instances local cache is accumulated and applied
 /// in `sync_cache` along with the change overlay.
 /// For non-canonical clones local cache and changes are dropped.
-pub struct CachingState<C: ClientExternalities, S: StateBackend<C>, B: Block> {
+pub struct CachingState<H: Hasher, C: ClientExternalities<H>, S: StateBackend<H, C>, B: Block> {
 	/// Backing state.
 	state: S,
 	/// Cache data.
-	pub cache: CacheChanges<C::H, B>
+	pub cache: CacheChanges<H, B>,
+  _ph: std::marker::PhantomData<C>,
 }
 
 impl<H: Hasher, B: Block> CacheChanges<H, B> {
@@ -376,9 +376,9 @@ impl<H: Hasher, B: Block> CacheChanges<H, B> {
 
 }
 
-impl<C: ClientExternalities, S: StateBackend<C>, B: Block> CachingState<C, S, B> {
+impl<H: Hasher, C: ClientExternalities<H>, S: StateBackend<H, C>, B: Block> CachingState<H, C, S, B> {
 	/// Create a new instance wrapping generic State and shared cache.
-	pub fn new(state: S, shared_cache: SharedCache<B, C::H>, parent_hash: Option<B::Hash>) -> CachingState<C, S, B> {
+	pub fn new(state: S, shared_cache: SharedCache<B, H>, parent_hash: Option<B::Hash>) -> CachingState<H, C, S, B> {
 		CachingState {
 			state,
 			cache: CacheChanges {
@@ -390,6 +390,7 @@ impl<C: ClientExternalities, S: StateBackend<C>, B: Block> CachingState<C, S, B>
 				}),
 				parent_hash: parent_hash,
 			},
+			_ph: Default::default(),
 		}
 	}
 
@@ -444,12 +445,12 @@ impl<C: ClientExternalities, S: StateBackend<C>, B: Block> CachingState<C, S, B>
 	}
 
 	/// Dispose state and return cache data.
-	pub fn release(self) -> CacheChanges<C::H, B> {
+	pub fn release(self) -> CacheChanges<H, B> {
 		self.cache
 	}
 }
 
-impl<C: ClientExternalities, S: StateBackend<C>, B:Block> StateBackend<C> for CachingState<C, S, B> {
+impl<H: Hasher, C: ClientExternalities<H>, S: StateBackend<H, C>, B:Block> StateBackend<H, C> for CachingState<H, C, S, B> {
 	type Error = S::Error;
 	type Transaction = S::Transaction;
 	type TrieBackendStorage = S::TrieBackendStorage;
@@ -474,7 +475,7 @@ impl<C: ClientExternalities, S: StateBackend<C>, B:Block> StateBackend<C> for Ca
 		Ok(value)
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<CHOut<C>>, Self::Error> {
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
 		let local_cache = self.cache.local_cache.upgradable_read();
 		if let Some(entry) = local_cache.hashes.get(key).cloned() {
 			trace!("Found hash in local cache: {:?}", key);
@@ -529,10 +530,10 @@ impl<C: ClientExternalities, S: StateBackend<C>, B:Block> StateBackend<C> for Ca
 		self.state.for_keys_in_child_storage(storage_key, f)
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (CHOut<C>, Self::Transaction)
+	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-			CHOut<C>: Ord
+			H::Out: Ord
 	{
 		self.state.storage_root(delta)
 	}
@@ -540,7 +541,7 @@ impl<C: ClientExternalities, S: StateBackend<C>, B:Block> StateBackend<C> for Ca
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (Vec<u8>, bool, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-			CHOut<C>: Ord
+			H::Out: Ord
 	{
 		self.state.child_storage_root(storage_key, delta)
 	}
@@ -565,7 +566,7 @@ impl<C: ClientExternalities, S: StateBackend<C>, B:Block> StateBackend<C> for Ca
 		self.state.rerooted()
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, C>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, H, C>> {
 		self.state.as_trie_backend()
 	}
 }
@@ -575,8 +576,10 @@ mod tests {
 	use super::*;
 	use runtime_primitives::testing::{H256, Block as RawBlock, ExtrinsicWrapper};
 	use state_machine::backend::InMemory;
+	use state_machine::client::NoClient;
 	use primitives::Blake2Hasher;
-	type NCBlake2Hasher = client::NoClient<Blake2Hasher>;
+
+	type CliExt = NoClient<Blake2Hasher>;
 
 	type Block = RawBlock<ExtrinsicWrapper<u32>>;
 	#[test]
@@ -596,39 +599,39 @@ mod tests {
 
 		// blocks  [ 3a(c) 2a(c) 2b 1b 1a(c) 0 ]
 		// state   [ 5     5     4  3  2     2 ]
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(root_parent.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![2]))], vec![], Some(h0.clone()), Some(0), || true);
 
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h0.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h0.clone()));
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h1a.clone()), Some(1), || true);
 
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h0.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h0.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![3]))], vec![], Some(h1b.clone()), Some(1), || false);
 
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1b.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h1b.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![4]))], vec![], Some(h2b.clone()), Some(2), || false);
 
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1a.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h1a.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![5]))], vec![], Some(h2a.clone()), Some(2), || true);
 
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h2a.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h2a.clone()));
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h3a.clone()), Some(3), || true);
 
-		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h3a.clone()));
+		let s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h3a.clone()));
 		assert_eq!(s.storage(&key).unwrap().unwrap(), vec![5]);
 
-		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1a.clone()));
+		let s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h1a.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 
-		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h2b.clone()));
+		let s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h2b.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 
-		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1b.clone()));
+		let s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h1b.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 
 		// reorg to 3b
 		// blocks  [ 3b(c) 3a 2a 2b(c) 1b 1a 0 ]
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h2b.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h2b.clone()));
 		s.cache.sync_cache(
 			&[h1b.clone(), h2b.clone(), h3b.clone()],
 			&[h1a.clone(), h2a.clone(), h3a.clone()],
@@ -638,7 +641,7 @@ mod tests {
 			Some(3),
 			|| true,
 		);
-		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h3a.clone()));
+		let s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(h3a.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 	}
 
@@ -648,7 +651,7 @@ mod tests {
 		let shared = new_shared_cache::<Block, Blake2Hasher>(109, ((109-36), 109));
 		let h0 = H256::random();
 
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(root_parent.clone()));
 
 		let key = H256::random()[..].to_vec();
 		let s_key = H256::random()[..].to_vec();
@@ -684,7 +687,7 @@ mod tests {
 		let shared = new_shared_cache::<Block, Blake2Hasher>(36*3, (2,3));
 		let h0 = H256::random();
 
-		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
+		let mut s = CachingState::new(InMemory::<Blake2Hasher, CliExt>::default(), shared.clone(), Some(root_parent.clone()));
 
 		let key = H256::random()[..].to_vec();
 		s.cache.sync_cache(

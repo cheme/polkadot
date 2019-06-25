@@ -32,7 +32,7 @@ use trie;
 use primitives::{H256, convert_hash};
 use runtime_primitives::traits::{Header as HeaderT, SimpleArithmetic, Zero, One};
 use state_machine::backend::InMemory as InMemoryState;
-use state_machine::client::{Externalities as ClientExternalities, CHOut};
+use state_machine::client::{Externalities as ClientExternalities};
 use state_machine::{MemoryDB, TrieBackend, Backend as StateBackend,
 	prove_read_on_trie_backend, read_proof_check, read_proof_check_on_proving_backend};
 
@@ -85,7 +85,7 @@ pub fn compute_root<Header, Hasher, I>(
 }
 
 /// Build CHT-based header proof.
-pub fn build_proof<Header, Cli, BlocksI, HashesI>(
+pub fn build_proof<Header, Hasher, Cli, BlocksI, HashesI>(
 	cht_size: Header::Number,
 	cht_num: Header::Number,
 	blocks: BlocksI,
@@ -93,8 +93,9 @@ pub fn build_proof<Header, Cli, BlocksI, HashesI>(
 ) -> ClientResult<Vec<Vec<u8>>>
 	where
 		Header: HeaderT,
-		Cli: ClientExternalities,
-		CHOut<Cli>: Ord,
+		Cli: ClientExternalities<Hasher>,
+		Hasher: hash_db::Hasher,
+		Hasher::Out: Ord,
 		BlocksI: IntoIterator<Item=Header::Number>,
 		HashesI: IntoIterator<Item=ClientResult<Option<Header::Hash>>>,
 {
@@ -102,7 +103,7 @@ pub fn build_proof<Header, Cli, BlocksI, HashesI>(
 		.into_iter()
 		.map(|(k, v)| (None, k, Some(v)))
 		.collect::<Vec<_>>();
-	let mut storage = InMemoryState::<Cli>::default().update(transaction);
+	let mut storage = InMemoryState::<Hasher, Cli>::default().update(transaction);
 	let trie_storage = storage.as_trie_backend()
 		.expect("InMemoryState::as_trie_backend always returns Some; qed");
 	let mut total_proof = HashSet::new();
@@ -117,7 +118,7 @@ pub fn build_proof<Header, Cli, BlocksI, HashesI>(
 }
 
 /// Check CHT-based header proof.
-pub fn check_proof<Header, Cli>(
+pub fn check_proof<Header, Hasher, Cli>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
@@ -125,28 +126,30 @@ pub fn check_proof<Header, Cli>(
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
-		Cli: ClientExternalities,
-		CHOut<Cli>: Ord,
+		Hasher: hash_db::Hasher,
+		Cli: ClientExternalities<Hasher>,
+		Hasher::Out: Ord,
 {
-	do_check_proof::<Header, Cli::H, _>(local_root, local_number, remote_hash, move |local_root, local_cht_key|
-		read_proof_check::<Cli>(local_root, remote_proof,
+	do_check_proof::<Header, Hasher, _>(local_root, local_number, remote_hash, move |local_root, local_cht_key|
+		read_proof_check::<Hasher, Cli>(local_root, remote_proof,
 			local_cht_key).map_err(|e| ClientError::from(e)))
 }
 
 /// Check CHT-based header proof on pre-created proving backend.
-pub fn check_proof_on_proving_backend<Header, C>(
+pub fn check_proof_on_proving_backend<Header, H, C>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	proving_backend: &TrieBackend<MemoryDB<C::H>, C>,
+	proving_backend: &TrieBackend<MemoryDB<H>, H, C>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
-		C: ClientExternalities,
-		CHOut<C>: Ord,
+		H: hash_db::Hasher,
+		C: ClientExternalities<H>,
+		H::Out: Ord,
 {
-	do_check_proof::<Header, C::H, _>(local_root, local_number, remote_hash, |_, local_cht_key|
-		read_proof_check_on_proving_backend::<C>(
+	do_check_proof::<Header, H, _>(local_root, local_number, remote_hash, |_, local_cht_key|
+		read_proof_check_on_proving_backend::<H, C>(
 			proving_backend, local_cht_key).map_err(|e| ClientError::from(e)))
 }
 
@@ -369,7 +372,7 @@ mod tests {
 	#[test]
 	#[should_panic]
 	fn build_proof_panics_when_querying_wrong_block() {
-		assert!(build_proof::<Header, CliExt, _, _>(
+		assert!(build_proof::<Header, Blake2Hasher, CliExt, _, _>(
 			SIZE as _,
 			0,
 			vec![(SIZE * 1000) as u64],
@@ -380,7 +383,7 @@ mod tests {
 
 	#[test]
 	fn build_proof_works() {
-		assert!(build_proof::<Header, CliExt, _, _>(
+		assert!(build_proof::<Header, Blake2Hasher, CliExt, _, _>(
 			SIZE as _,
 			0,
 			vec![(SIZE / 2) as u64],

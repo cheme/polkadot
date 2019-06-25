@@ -237,7 +237,7 @@ macro_rules! for_each_tuple {
 mod tests {
 	use super::*;
 	use codec::Codec;
-	use runtime_io::{with_externalities, Blake2Hasher, NoClient};
+	use runtime_io::{with_externalities, Blake2Hasher};
 	use runtime_primitives::BuildStorage;
 	pub use srml_metadata::{
 		DecodeDifferent, StorageMetadata, StorageFunctionMetadata,
@@ -284,7 +284,7 @@ mod tests {
 		type Origin = u32;
 	}
 
-	fn new_test_ext() -> runtime_io::TestExternalities<NoClient<Blake2Hasher>> {
+	fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
 		GenesisConfig::<Test>::default().build_storage().unwrap().0.into()
 	}
 

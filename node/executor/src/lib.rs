@@ -43,7 +43,7 @@ mod tests {
 	use parity_codec::{Encode, Decode, Joiner};
 	use keyring::{AuthorityKeyring, AccountKeyring};
 	use runtime_support::{Hashable, StorageValue, StorageMap, traits::Currency};
-	use state_machine::{CodeExecutor, Externalities, TestExternalities as CoreTestExternalities};
+	use state_machine::{CodeExecutor, Externalities, NCTestExternalities as CoreTestExternalities};
 	use primitives::{twox_128, blake2_256, Blake2Hasher, ChangesTrieConfiguration, NeverNativeValue,
 		NativeOrEncoded};
 	use node_primitives::{Hash, BlockNumber, AccountId};
@@ -57,7 +57,6 @@ mod tests {
 		SystemConfig, GrandpaConfig, IndicesConfig, Event, SessionKeys};
 	use wabt;
 	use primitives::map;
-	use test_client::CliExt;
 
 	/// The wasm runtime code.
 	///
@@ -78,7 +77,7 @@ mod tests {
 
 	const GENESIS_HASH: [u8; 32] = [69u8; 32];
 
-	type TestExternalities<H> = CoreTestExternalities<u64, H>;
+	type TestExternalities<H> = CoreTestExternalities<H, u64>;
 
 	fn alice() -> AccountId {
 		AccountKeyring::Alice.into()
@@ -146,7 +145,7 @@ mod tests {
 
 	#[test]
 	fn panic_execution_with_foreign_code_gives_error() {
-		let mut t = TestExternalities::<CliExt>::new_with_code(BLOATY_CODE, map![
+		let mut t = TestExternalities::<Blake2Hasher>::new_with_code(BLOATY_CODE, map![
 			blake2_256(&<balances::FreeBalance<Runtime>>::key_for(alice())).to_vec() => {
 				vec![69u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 			},
@@ -197,7 +196,7 @@ mod tests {
 
 	#[test]
 	fn bad_extrinsic_with_native_equivalent_code_gives_error() {
-		let mut t = TestExternalities::<CliExt>::new_with_code(COMPACT_CODE, map![
+		let mut t = TestExternalities::<Blake2Hasher>::new_with_code(COMPACT_CODE, map![
 			blake2_256(&<balances::FreeBalance<Runtime>>::key_for(alice())).to_vec() => {
 				vec![69u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 			},
@@ -248,7 +247,7 @@ mod tests {
 
 	#[test]
 	fn successful_execution_with_native_equivalent_code_gives_ok() {
-		let mut t = TestExternalities::<CliExt>::new_with_code(COMPACT_CODE, map![
+		let mut t = TestExternalities::<Blake2Hasher>::new_with_code(COMPACT_CODE, map![
 			blake2_256(&<balances::FreeBalance<Runtime>>::key_for(alice())).to_vec() => {
 				vec![111u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 			},
@@ -289,7 +288,7 @@ mod tests {
 
 	#[test]
 	fn successful_execution_with_foreign_code_gives_ok() {
-		let mut t = TestExternalities::<CliExt>::new_with_code(BLOATY_CODE, map![
+		let mut t = TestExternalities::<Blake2Hasher>::new_with_code(BLOATY_CODE, map![
 			blake2_256(&<balances::FreeBalance<Runtime>>::key_for(alice())).to_vec() => {
 				vec![111u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 			},
@@ -332,7 +331,7 @@ mod tests {
 		SessionKeys(ring.to_owned().into(), ring.to_owned().into())
 	}
 
-	fn new_test_ext(code: &[u8], support_changes_trie: bool) -> TestExternalities<CliExt> {
+	fn new_test_ext(code: &[u8], support_changes_trie: bool) -> TestExternalities<Blake2Hasher> {
 		let three = AccountId::from_raw([3u8; 32]);
 		let mut ext = TestExternalities::new_with_code(code, GenesisConfig {
 			aura: Some(Default::default()),
@@ -401,7 +400,7 @@ mod tests {
 	}
 
 	fn construct_block(
-		env: &mut TestExternalities<CliExt>,
+		env: &mut TestExternalities<Blake2Hasher>,
 		number: BlockNumber,
 		parent_hash: Hash,
 		extrinsics: Vec<CheckedExtrinsic>,
@@ -900,7 +899,7 @@ mod tests {
 
 	#[test]
 	fn panic_execution_gives_error() {
-		let mut t = TestExternalities::<CliExt>::new_with_code(BLOATY_CODE, map![
+		let mut t = TestExternalities::<Blake2Hasher>::new_with_code(BLOATY_CODE, map![
 			blake2_256(&<balances::FreeBalance<Runtime>>::key_for(alice())).to_vec() => {
 				vec![69u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 			},
@@ -927,7 +926,7 @@ mod tests {
 
 	#[test]
 	fn successful_execution_gives_ok() {
-		let mut t = TestExternalities::<CliExt>::new_with_code(COMPACT_CODE, map![
+		let mut t = TestExternalities::<Blake2Hasher>::new_with_code(COMPACT_CODE, map![
 			blake2_256(&<balances::FreeBalance<Runtime>>::key_for(alice())).to_vec() => {
 				vec![111u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 			},

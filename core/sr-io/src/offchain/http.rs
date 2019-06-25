@@ -481,10 +481,8 @@ impl<'a> HeadersIterator<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{TestExternalities as TE, with_externalities};
+	use crate::{TestExternalities, with_externalities};
 	use substrate_offchain::testing;
-
-	type TestExternalities<H> = TE<crate::NoClient<H>>;
 
 	#[test]
 	fn should_send_a_basic_request_and_get_response() {

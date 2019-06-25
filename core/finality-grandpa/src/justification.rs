@@ -30,6 +30,7 @@ use fg_primitives::AuthorityId;
 
 use crate::{Commit, Error};
 use crate::communication;
+use crate::CliExt;
 
 /// A GRANDPA justification for block finality, it includes a commit message and
 /// an ancestry proof including all headers routing all precommit target blocks
@@ -54,8 +55,8 @@ impl<Block: BlockT<Hash=H256>> GrandpaJustification<Block> {
 		round: u64,
 		commit: Commit<Block>,
 	) -> Result<GrandpaJustification<Block>, Error> where
-		B: Backend<Block, Blake2Hasher>,
-		E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt>,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync,
 		RA: Send + Sync,
 	{
 		let mut votes_ancestries_hashes = HashSet::new();

@@ -50,6 +50,7 @@ pub type CliExt = NoClient<Blake2Hasher>;
 pub type LightBackend<Block> = client::light::backend::Backend<
 	client_db::light::LightStorage<Block>,
 	LightFetcher,
+	Blake2Hasher,
 	CliExt,
 >;
 
@@ -163,8 +164,8 @@ impl<Executor, Backend, G: GenesisInit> TestClientBuilder<
 		>,
 		client::LongestChain<Backend, Block>,
 	) where
-		Executor: client::CallExecutor<Block, CliExt>,
-		Backend: client::backend::Backend<Block, CliExt>,
+		Executor: client::CallExecutor<Block, Blake2Hasher, CliExt>,
+		Backend: client::backend::Backend<Block, Blake2Hasher, CliExt>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
 	{
 
@@ -215,7 +216,7 @@ impl<E, Backend, G: GenesisInit> TestClientBuilder<
 	) where
 		I: Into<Option<executor::NativeExecutor<E>>>,
 		E: executor::NativeExecutionDispatch,
-		Backend: client::backend::Backend<Block, CliExt>,
+		Backend: client::backend::Backend<Block, Blake2Hasher, CliExt>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
 	{
 		let executor = executor.into().unwrap_or_else(|| executor::NativeExecutor::new(None));

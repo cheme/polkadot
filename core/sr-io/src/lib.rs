@@ -392,4 +392,4 @@ pub use self::imp::ext::*;
 
 /// Type alias for Externalities implementation used in tests.
 #[cfg(feature = "std")]
-pub type TestExternalities<H> = self::imp::TestExternalities<u64, H>;
+pub type TestExternalities<H> = self::imp::TestExternalities<H, u64>;

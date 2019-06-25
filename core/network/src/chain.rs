@@ -77,8 +77,8 @@ pub trait FinalityProofProvider<Block: BlockT>: Send + Sync {
 }
 
 impl<B, E, Block, RA> Client<Block> for SubstrateClient<B, E, Block, RA> where
-	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	B: client::backend::Backend<Block, Blake2HasherHasher, Blake2Hasher> + Send + Sync + 'static,
+	E: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher> + Send + Sync + 'static,
 	Self: BlockImport<Block, Error=ConsensusError>,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync

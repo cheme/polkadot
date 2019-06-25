@@ -55,8 +55,6 @@ use crate::changes_trie::build::prepare_input;
 use crate::overlayed_changes::OverlayedChanges;
 use trie::{DBValue, trie_root};
 use crate::client::Externalities as ClientExternalities;
-use crate::client::CHOut;
-
 /// Changes that are made outside of extrinsics are marked with this index;
 pub const NO_EXTRINSIC_INDEX: u32 = 0xffffffff;
 
@@ -99,27 +97,27 @@ pub struct AnchorBlockId<Hash: ::std::fmt::Debug, Number: BlockNumber> {
 }
 
 /// Changes trie storage. Provides access to trie roots and trie nodes.
-pub trait RootsStorage<C: ClientExternalities, Number: BlockNumber>: Send + Sync {
+pub trait RootsStorage<H: Hasher, Number: BlockNumber>: Send + Sync {
 	/// Resolve hash of the block into anchor.
-	fn build_anchor(&self, hash: CHOut<C>) -> Result<AnchorBlockId<CHOut<C>, Number>, String>;
+	fn build_anchor(&self, hash: H::Out) -> Result<AnchorBlockId<H::Out, Number>, String>;
 	/// Get changes trie root for the block with given number which is an ancestor (or the block
 	/// itself) of the anchor_block (i.e. anchor_block.number >= block).
-	fn root(&self, anchor: &AnchorBlockId<CHOut<C>, Number>, block: Number) -> Result<Option<CHOut<C>>, String>;
+	fn root(&self, anchor: &AnchorBlockId<H::Out, Number>, block: Number) -> Result<Option<H::Out>, String>;
 }
 
 /// Changes trie storage. Provides access to trie roots and trie nodes.
-pub trait Storage<C: ClientExternalities, Number: BlockNumber>: RootsStorage<C, Number> {
+pub trait Storage<H: Hasher, Number: BlockNumber>: RootsStorage<H, Number> {
 	/// Get a trie node.
-	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String>;
+	fn get(&self, key: &H::Out, prefix: &[u8]) -> Result<Option<DBValue>, String>;
 }
 
 /// Changes trie storage -> trie backend essence adapter.
-pub struct TrieBackendStorageAdapter<'a, C: ClientExternalities, Number: BlockNumber>(pub &'a dyn Storage<C, Number>);
+pub struct TrieBackendStorageAdapter<'a, H: Hasher, Number: BlockNumber>(pub &'a dyn Storage<H, Number>);
 
-impl<'a, C: ClientExternalities, N: BlockNumber> crate::TrieBackendStorage<C> for TrieBackendStorageAdapter<'a, C, N> {
-	type Overlay = trie::MemoryDB<C::H>;
+impl<'a, H: Hasher, N: BlockNumber> crate::TrieBackendStorage<H> for TrieBackendStorageAdapter<'a, H, N> {
+	type Overlay = trie::MemoryDB<H>;
 
-	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String> {
+	fn get(&self, key: &H::Out, prefix: &[u8]) -> Result<Option<DBValue>, String> {
 		self.0.get(key, prefix)
 	}
 }
@@ -133,18 +131,19 @@ pub type Configuration = primitives::ChangesTrieConfiguration;
 /// Panics if background storage returns an error.
 pub fn compute_changes_trie_root<
   'a,
-  B: Backend<C>,
-  S: Storage<C, Number>,
+  H: Hasher,
+  B: Backend<H, C>,
+  S: Storage<H, Number>,
   Number: BlockNumber,
-  C: ClientExternalities,
+  C: ClientExternalities<H>,
 >(
 	backend: &B,
 	storage: Option<&'a S>,
 	changes: &OverlayedChanges,
-	parent_hash: CHOut<C>,
-) -> Result<Option<(CHOut<C>, Vec<(Vec<u8>, Vec<u8>)>)>, ()>
+	parent_hash: H::Out,
+) -> Result<Option<(H::Out, Vec<(Vec<u8>, Vec<u8>)>)>, ()>
 	where
-		CHOut<C>: Ord + 'static,
+		H::Out: Ord + 'static,
 {
 	let (storage, config) = match (storage, changes.changes_trie_config.as_ref()) {
 		(Some(storage), Some(config)) => (storage, config),
@@ -155,14 +154,14 @@ pub fn compute_changes_trie_root<
 	let parent = storage.build_anchor(parent_hash).map_err(|_| ())?;
 
 	// storage errors are considered fatal (similar to situations when runtime fetches values from storage)
-	let input_pairs = prepare_input::<B, S, Number, C>(backend, storage, config, changes, &parent)
+	let input_pairs = prepare_input::<B, S, H, Number, C>(backend, storage, config, changes, &parent)
 		.expect("storage is not allowed to fail within runtime");
 	match input_pairs {
 		Some(input_pairs) => {
 			let transaction = input_pairs.into_iter()
 				.map(Into::into)
 				.collect::<Vec<_>>();
-			let root = trie_root::<C::H, _, _, _>(transaction.iter().map(|(k, v)| (&*k, &*v)));
+			let root = trie_root::<H, _, _, _>(transaction.iter().map(|(k, v)| (&*k, &*v)));
 
 			Ok(Some((root, transaction)))
 		},

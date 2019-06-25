@@ -29,7 +29,6 @@ use primitives::offchain;
 use primitives::storage::well_known_keys::{CHANGES_TRIE_CONFIG, CODE, HEAP_PAGES};
 use parity_codec::Encode;
 use crate::client::Externalities as ClientExternalities;
-use crate::client::CHOut;
 use super::{ChildStorageKey, Externalities, OverlayedChanges};
 use hash_db::Hasher;
 
@@ -38,25 +37,27 @@ const EXT_NOT_ALLOWED_TO_FAIL: &str = "Externalities not allowed to fail within 
 /// A stub for testing, cannot access client info.
 pub struct NoClient<H>(PhantomData<H>);
 
-impl<H: Hasher> ClientExternalities for NoClient<H> {
-	type H = H;
+impl<H: Hasher> ClientExternalities<H> for NoClient<H> {
 
-	fn state_root_at(&self, _block_number: u64) -> Option<CHOut<Self>> {
+	fn state_root_at(&self, _block_number: u64) -> Option<H::Out> {
 		unreachable!("When using NoClient ClientExternalities functionalities shall not be use");
 	}
 
 }
 
+/// Convenience alias for TestExternalities without client implementation,
+pub type NCTestExternalities<H: Hasher, N: ChangesTrieBlockNumber> = TestExternalities<H, NoClient<H>, N>;
+
 /// Simple HashMap-based Externalities impl.
-pub struct TestExternalities<N: ChangesTrieBlockNumber, C: ClientExternalities> {
+pub struct TestExternalities<H: Hasher, C: ClientExternalities<H>, N: ChangesTrieBlockNumber> {
 	overlay: OverlayedChanges,
-	backend: InMemory<C>,
-	changes_trie_storage: ChangesTrieInMemoryStorage<C, N>,
+	backend: InMemory<H, C>,
+	changes_trie_storage: ChangesTrieInMemoryStorage<H, N>,
 	reroot: Option<u64>,
 	offchain: Option<Box<dyn offchain::Externalities>>,
 }
 
-impl<N: ChangesTrieBlockNumber, C: ClientExternalities> TestExternalities<N, C> {
+impl<H: Hasher, N: ChangesTrieBlockNumber, C: ClientExternalities<H>> TestExternalities<H, C, N> {
 	/// Create a new instance of `TestExternalities`
 	pub fn new(inner: HashMap<Vec<u8>, Vec<u8>>) -> Self {
 		Self::new_with_code(&[], inner)
@@ -106,26 +107,26 @@ impl<N: ChangesTrieBlockNumber, C: ClientExternalities> TestExternalities<N, C> 
 	}
 
 	/// Get mutable reference to changes trie storage.
-	pub fn changes_trie_storage(&mut self) -> &mut ChangesTrieInMemoryStorage<C, N> {
+	pub fn changes_trie_storage(&mut self) -> &mut ChangesTrieInMemoryStorage<H, N> {
 		&mut self.changes_trie_storage
 	}
 }
 
-impl<N: ChangesTrieBlockNumber, C: ClientExternalities> ::std::fmt::Debug for TestExternalities<N, C> {
+impl<H: Hasher, N: ChangesTrieBlockNumber, C: ClientExternalities<H>> ::std::fmt::Debug for TestExternalities<H, C, N> {
 	fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
 		write!(f, "overlay: {:?}\nbackend: {:?}", self.overlay, self.backend.pairs())
 	}
 }
 
-impl<N: ChangesTrieBlockNumber, C: ClientExternalities> PartialEq for TestExternalities<N, C> {
+impl<H: Hasher, N: ChangesTrieBlockNumber, C: ClientExternalities<H>> PartialEq for TestExternalities<H, C, N> {
 	/// This doesn't test if they are in the same state, only if they contains the
 	/// same data at this state
-	fn eq(&self, other: &TestExternalities<N, C>) -> bool {
+	fn eq(&self, other: &TestExternalities<H, C, N>) -> bool {
 		self.iter_pairs_in_order().eq(other.iter_pairs_in_order())
 	}
 }
 
-impl<N: ChangesTrieBlockNumber, C: ClientExternalities> FromIterator<(Vec<u8>, Vec<u8>)> for TestExternalities<N, C> {
+impl<H: Hasher, N: ChangesTrieBlockNumber, C: ClientExternalities<H>> FromIterator<(Vec<u8>, Vec<u8>)> for TestExternalities<H, C, N> {
 	fn from_iter<I: IntoIterator<Item=(Vec<u8>, Vec<u8>)>>(iter: I) -> Self {
 		let mut t = Self::new(Default::default());
 		t.backend = t.backend.update(iter.into_iter().map(|(k, v)| (None, k, Some(v))).collect());
@@ -133,27 +134,28 @@ impl<N: ChangesTrieBlockNumber, C: ClientExternalities> FromIterator<(Vec<u8>, V
 	}
 }
 
-impl<N: ChangesTrieBlockNumber, C: ClientExternalities> Default for TestExternalities<N, C> {
+impl<H: Hasher, N: ChangesTrieBlockNumber, C: ClientExternalities<H>> Default for TestExternalities<H, C, N> {
 	fn default() -> Self { Self::new(Default::default()) }
 }
 
-impl<N: ChangesTrieBlockNumber, C: ClientExternalities> From<TestExternalities<N, C>> for HashMap<Vec<u8>, Vec<u8>> {
-	fn from(tex: TestExternalities<N, C>) -> Self {
+impl<H: Hasher, N: ChangesTrieBlockNumber, C: ClientExternalities<H>> From<TestExternalities<H, C, N>> for HashMap<Vec<u8>, Vec<u8>> {
+	fn from(tex: TestExternalities<H, C, N>) -> Self {
 		tex.iter_pairs_in_order().collect()
 	}
 }
 
-impl<N: ChangesTrieBlockNumber, C: ClientExternalities> From< HashMap<Vec<u8>, Vec<u8>> > for TestExternalities<N, C> {
+impl<H: Hasher, N: ChangesTrieBlockNumber, C: ClientExternalities<H>> From< HashMap<Vec<u8>, Vec<u8>> > for TestExternalities<H, C, N> {
 	fn from(hashmap: HashMap<Vec<u8>, Vec<u8>>) -> Self {
 		Self::from_iter(hashmap)
 	}
 }
 
-impl<N, C> Externalities<C::H> for TestExternalities<N, C>
+impl<H, N, C> Externalities<H> for TestExternalities<H, C, N>
 	where
+		H: Hasher,
 		N: ChangesTrieBlockNumber,
-		C: ClientExternalities,
-		CHOut<C>: Ord + 'static
+		C: ClientExternalities<H>,
+		H::Out: Ord + 'static
 {
 	fn storage(&self, key: &[u8]) -> Option<Vec<u8>> {
 		self.overlay.storage(key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
@@ -164,7 +166,7 @@ impl<N, C> Externalities<C::H> for TestExternalities<N, C>
 		self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
 	}
 
-	fn child_storage(&self, storage_key: ChildStorageKey<C::H>, key: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage(&self, storage_key: ChildStorageKey<H>, key: &[u8]) -> Option<Vec<u8>> {
 		self.overlay
 			.child_storage(storage_key.as_ref(), key)
 			.map(|x| x.map(|x| x.to_vec()))
@@ -184,14 +186,14 @@ impl<N, C> Externalities<C::H> for TestExternalities<N, C>
 
 	fn place_child_storage(
 		&mut self,
-		storage_key: ChildStorageKey<C::H>,
+		storage_key: ChildStorageKey<H>,
 		key: Vec<u8>,
 		value: Option<Vec<u8>>
 	) {
 		self.overlay.set_child_storage(storage_key.into_owned(), key, value);
 	}
 
-	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<C::H>) {
+	fn kill_child_storage(&mut self, storage_key: ChildStorageKey<H>) {
 		let backend = &self.backend;
 		let overlay = &mut self.overlay;
 
@@ -225,7 +227,7 @@ impl<N, C> Externalities<C::H> for TestExternalities<N, C>
 		// TODO EMCH change offline externalities?
 	}
 
-	fn storage_root(&mut self) -> CHOut<C> {
+	fn storage_root(&mut self) -> H::Out {
 		// compute and memoize
 		let delta = self.overlay.committed.top.iter().map(|(k, v)| (k.clone(), v.value.clone()))
 			.chain(self.overlay.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())));
@@ -233,7 +235,7 @@ impl<N, C> Externalities<C::H> for TestExternalities<N, C>
 		self.backend.storage_root(delta).0
 	}
 
-	fn child_storage_root(&mut self, storage_key: ChildStorageKey<C::H>) -> Vec<u8> {
+	fn child_storage_root(&mut self, storage_key: ChildStorageKey<H>) -> Vec<u8> {
 		let storage_key = storage_key.as_ref();
 
 		let (root, _, _) = {
@@ -250,8 +252,8 @@ impl<N, C> Externalities<C::H> for TestExternalities<N, C>
 		root
 	}
 
-	fn storage_changes_root(&mut self, parent: CHOut<C>) -> Result<Option<CHOut<C>>, ()> {
-		Ok(compute_changes_trie_root::<_, _, N, C>(
+	fn storage_changes_root(&mut self, parent: H::Out) -> Result<Option<H::Out>, ()> {
+		Ok(compute_changes_trie_root::<H, _, _, N, C>(
 			&self.backend,
 			Some(&self.changes_trie_storage),
 			&self.overlay,
@@ -271,14 +273,13 @@ mod tests {
 	use super::*;
 	use primitives::{Blake2Hasher, H256};
 	use hex_literal::hex;
-	use crate::client::NoClient;
 
-	type ClientExt = NoClient<Blake2Hasher>;
+	type TestExternalities = super::NCTestExternalities<Blake2Hasher, u64>;
 
 
 	#[test]
 	fn commit_should_work() {
-		let mut ext = TestExternalities::<u64, ClientExt>::default();
+		let mut ext = TestExternalities::default();
 		ext.set_storage(b"doe".to_vec(), b"reindeer".to_vec());
 		ext.set_storage(b"dog".to_vec(), b"puppy".to_vec());
 		ext.set_storage(b"dogglesworth".to_vec(), b"cat".to_vec());
@@ -288,7 +289,7 @@ mod tests {
 
 	#[test]
 	fn set_and_retrieve_code() {
-		let mut ext = TestExternalities::<u64, ClientExt>::default();
+		let mut ext = TestExternalities::default();
 
 		let code = vec![1, 2, 3];
 		ext.set_storage(CODE.to_vec(), code.clone());

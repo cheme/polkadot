@@ -22,7 +22,7 @@ use primitives::ChangesTrieConfiguration;
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use runtime_primitives::traits::{Block as BlockT, NumberFor};
 use state_machine::backend::Backend as StateBackend;
-use state_machine::client::{Externalities as ClientExternalities, CHOut};
+use state_machine::client::{Externalities as ClientExternalities};
 use state_machine::ChangesTrieStorage as StateChangesTrieStorage;
 use consensus::well_known_cache_keys;
 use hash_db::Hasher;
@@ -65,13 +65,13 @@ impl NewBlockState {
 }
 
 /// Block insertion operation. Keeps hold if the inserted block state and data.
-pub trait BlockImportOperation<Block, C> where
+pub trait BlockImportOperation<Block, H, C> where
 	Block: BlockT,
-	C: ClientExternalities,
-	C::H: Hasher<Out=Block::Hash>,
+	H: Hasher<Out=Block::Hash>,
+	C: ClientExternalities<H>,
 {
 	/// Associated state backend type.
-	type State: StateBackend<C>;
+	type State: StateBackend<H, C>;
 
   // TODO EMCH consider removal
 	/// Returns pending state. Returns None for backends with locally-unavailable state data.
@@ -92,9 +92,9 @@ pub trait BlockImportOperation<Block, C> where
 	/// Update cached data.
 	fn update_cache(&mut self, cache: HashMap<well_known_cache_keys::Id, Vec<u8>>);
 	/// Inject storage data into the database.
-	fn update_db_storage(&mut self, update: <Self::State as StateBackend<C>>::Transaction) -> error::Result<()>;
+	fn update_db_storage(&mut self, update: <Self::State as StateBackend<H, C>>::Transaction) -> error::Result<()>;
 	/// Inject storage data into the database replacing any existing data.
-	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> error::Result<CHOut<C>>;
+	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> error::Result<H::Out>;
 	/// Set storage changes.
 	fn update_storage(
 		&mut self,
@@ -102,7 +102,7 @@ pub trait BlockImportOperation<Block, C> where
 		child_update: ChildStorageCollection,
 	) -> error::Result<()>;
 	/// Inject changes trie data into the database.
-	fn update_changes_trie(&mut self, update: MemoryDB<C::H>) -> error::Result<()>;
+	fn update_changes_trie(&mut self, update: MemoryDB<H>) -> error::Result<()>;
 	/// Insert auxiliary keys. Values are `None` if should be deleted.
 	fn insert_aux<I>(&mut self, ops: I) -> error::Result<()>
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>;
@@ -134,19 +134,19 @@ pub trait AuxStore {
 ///
 /// The same applies for live `BlockImportOperation`s: while an import operation building on a parent `P`
 /// is alive, the state for `P` should not be pruned.
-pub trait Backend<Block, C>: AuxStore + Send + Sync where
+pub trait Backend<Block, H, C>: AuxStore + Send + Sync where
 	Block: BlockT,
-	C: ClientExternalities,
-	C::H: Hasher<Out=Block::Hash>,
+	C: ClientExternalities<H>,
+	H: Hasher<Out=Block::Hash>,
 {
 	/// Associated block insertion operation type.
-	type BlockImportOperation: BlockImportOperation<Block, C, State=Self::State>;
+	type BlockImportOperation: BlockImportOperation<Block, H, C, State=Self::State>;
 	/// Associated blockchain backend type.
 	type Blockchain: crate::blockchain::Backend<Block>;
 	/// Associated state backend type.
-	type State: StateBackend<C>;
+	type State: StateBackend<H, C>;
 	/// Changes trie storage.
-	type ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, C>;
+	type ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, H>;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	/// When constructing the genesis, this is called with all-zero hash.
@@ -203,8 +203,8 @@ pub trait Backend<Block, C>: AuxStore + Send + Sync where
 }
 
 /// Changes trie storage that supports pruning.
-pub trait PrunableStateChangesTrieStorage<Block: BlockT, C: ClientExternalities>:
-	StateChangesTrieStorage<C, NumberFor<Block>>
+pub trait PrunableStateChangesTrieStorage<Block: BlockT, H: Hasher>:
+	StateChangesTrieStorage<H, NumberFor<Block>>
 {
 	/// Get number block of oldest, non-pruned changes trie.
 	fn oldest_changes_trie_block(
@@ -215,19 +215,19 @@ pub trait PrunableStateChangesTrieStorage<Block: BlockT, C: ClientExternalities>
 }
 
 /// Mark for all Backend implementations, that are making use of state data, stored locally.
-pub trait LocalBackend<Block, C>: Backend<Block, C>
+pub trait LocalBackend<Block, H, C>: Backend<Block, H, C>
 where
 	Block: BlockT,
-	C: ClientExternalities,
-	C::H: Hasher<Out=Block::Hash>,
+	C: ClientExternalities<H>,
+	H: Hasher<Out=Block::Hash>,
 {}
 
 /// Mark for all Backend implementations, that are fetching required state data from remote nodes.
-pub trait RemoteBackend<Block, C>: Backend<Block, C>
+pub trait RemoteBackend<Block, H, C>: Backend<Block, H, C>
 where
 	Block: BlockT,
-	C: ClientExternalities,
-	C::H: Hasher<Out=Block::Hash>,
+	C: ClientExternalities<H>,
+	H: Hasher<Out=Block::Hash>,
 {
 	/// Returns true if the state for given block is available locally.
 	fn is_local_state_available(&self, block: &BlockId<Block>) -> bool;

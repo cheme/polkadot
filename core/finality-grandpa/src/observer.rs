@@ -38,13 +38,14 @@ use crate::communication::NetworkBridge;
 use crate::consensus_changes::SharedConsensusChanges;
 use crate::environment::{CompletedRound, CompletedRounds, HasVoted};
 use fg_primitives::AuthorityId;
+use crate::CliExt;
 
 struct ObserverChain<'a, Block: BlockT, B, E, RA>(&'a Client<B, E, Block, RA>);
 
 impl<'a, Block: BlockT<Hash=H256>, B, E, RA> grandpa::Chain<Block::Hash, NumberFor<Block>>
 	for ObserverChain<'a, Block, B, E, RA> where
-		B: Backend<Block, Blake2Hasher>,
-		E: CallExecutor<Block, Blake2Hasher>,
+		B: Backend<Block, Blake2Hasher, CliExt>,
+		E: CallExecutor<Block, Blake2Hasher, CliExt>,
 		NumberFor<Block>: BlockNumberOps,
 {
 	fn ancestry(&self, base: Block::Hash, block: Block::Hash) -> Result<Vec<Block::Hash>, GrandpaError> {
@@ -66,8 +67,8 @@ fn grandpa_observer<B, E, Block: BlockT<Hash=H256>, RA, S>(
 	commits: S,
 ) -> impl Future<Item=(), Error=CommandOrError<H256, NumberFor<Block>>> where
 	NumberFor<Block>: BlockNumberOps,
-	B: Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync,
 	RA: Send + Sync,
 	S: Stream<
 		Item = voter::CommunicationIn<H256, NumberFor<Block>, AuthoritySignature, AuthorityId>,
@@ -151,8 +152,8 @@ pub fn run_grandpa_observer<B, E, Block: BlockT<Hash=H256>, N, RA, SC>(
 	network: N,
 	on_exit: impl Future<Item=(),Error=()> + Clone + Send + 'static,
 ) -> ::client::error::Result<impl Future<Item=(),Error=()> + Send + 'static> where
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
 	N: Network<Block> + Send + Sync + 'static,
 	N::In: Send + 'static,
 	SC: SelectChain<Block> + 'static,

@@ -1352,7 +1352,7 @@ mod tests {
 		});
 	}
 
-	fn new_test_ext_with_candidate_holes() -> runtime_io::TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
+	fn new_test_ext_with_candidate_holes() -> runtime_io::TestExternalities<Blake2Hasher> {
 		let mut t = ExtBuilder::default().build();
 		with_externalities(&mut t, || {
 			<Candidates<Test>>::put(vec![0, 0, 1]);

@@ -16,7 +16,7 @@
 
 #![recursion_limit="128"]
 
-use runtime_io::{with_externalities, Blake2Hasher, NoClient};
+use runtime_io::{with_externalities, Blake2Hasher};
 use srml_support::rstd::prelude::*;
 use srml_support::rstd as rstd;
 use srml_support::runtime_primitives::{generic, BuildStorage};
@@ -296,7 +296,7 @@ pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 pub type Block = generic::Block<Header, UncheckedExtrinsic>;
 pub type UncheckedExtrinsic = generic::UncheckedMortalCompactExtrinsic<u32, Index, Call, Signature>;
 
-fn new_test_ext() -> runtime_io::TestExternalities<NoClient<Blake2Hasher>> {
+fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
 	GenesisConfig{
 		module1_Instance1: Some(module1::GenesisConfig {
 			value: 3,

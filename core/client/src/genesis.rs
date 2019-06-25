@@ -62,7 +62,7 @@ mod tests {
 	}
 
 	fn construct_block(
-		backend: &mut InMemory<CliExt>,
+		backend: &mut InMemory<Blake2Hasher, CliExt>,
 		number: BlockNumber,
 		parent_hash: Hash,
 		state_root: Hash,
@@ -126,7 +126,7 @@ mod tests {
 		(vec![].and(&Block { header, extrinsics: transactions }), hash)
 	}
 
-	fn block1(genesis_hash: Hash, backend: &mut InMemory<CliExt>) -> (Vec<u8>, Hash) {
+	fn block1(genesis_hash: Hash, backend: &mut InMemory<Blake2Hasher, CliExt>) -> (Vec<u8>, Hash) {
 		construct_block(
 			backend,
 			1,

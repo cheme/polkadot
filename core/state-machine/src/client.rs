@@ -18,14 +18,11 @@
 use hash_db::Hasher;
 pub use crate::testing::NoClient;
 
-pub type CHOut<C> = <<C as Externalities>::H as Hasher>::Out;
-
 /// TODO EMCH doc
-pub trait Externalities: Send + Sync {
-  type H: Hasher;
+pub trait Externalities<H: Hasher>: Send + Sync {
 
 	/// TODO EMCH doc
 	/// !!! retrun none if the block has been pruned.
   /// TODO ???
-	fn state_root_at(&self, block_number: u64) -> Option<CHOut<Self>>;
+	fn state_root_at(&self, block_number: u64) -> Option<H::Out>;
 }

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
-use runtime_io::{with_externalities, Blake2Hasher, NoClient};
+use runtime_io::{with_externalities, Blake2Hasher};
 use srml_support::{StorageValue, StorageMap, StorageDoubleMap};
 use srml_support::storage::unhashed;
 use srml_support::runtime_primitives::BuildStorage;
@@ -53,7 +53,7 @@ impl Trait for Test {
 	type Origin = u32;
 }
 
-fn new_test_ext() -> runtime_io::TestExternalities<NoClient<Blake2Hasher>> {
+fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
 	GenesisConfig::<Test>::default().build_storage().unwrap().0.into()
 }
 

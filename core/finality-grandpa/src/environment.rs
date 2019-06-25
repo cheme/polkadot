@@ -51,6 +51,7 @@ use crate::consensus_changes::SharedConsensusChanges;
 use crate::justification::GrandpaJustification;
 use crate::until_imported::UntilVoteTargetImported;
 use fg_primitives::AuthorityId;
+use crate::CliExt;
 
 /// Data about a completed round.
 #[derive(Debug, Clone, Decode, Encode, PartialEq)]
@@ -319,8 +320,8 @@ impl<Block: BlockT<Hash=H256>, B, E, N, RA, SC>
 for Environment<B, E, Block, N, RA, SC>
 where
 	Block: 'static,
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + 'static,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static,
 	N: Network<Block> + 'static,
 	N::In: 'static,
 	SC: SelectChain<Block> + 'static,
@@ -411,8 +412,8 @@ pub(crate) fn ancestry<B, Block: BlockT<Hash=H256>, E, RA>(
 	base: Block::Hash,
 	block: Block::Hash,
 ) -> Result<Vec<Block::Hash>, GrandpaError> where
-	B: Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher>,
+	B: Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt>,
 {
 	if base == block { return Err(GrandpaError::NotDescendent) }
 
@@ -447,8 +448,8 @@ impl<B, E, Block: BlockT<Hash=H256>, N, RA, SC>
 for Environment<B, E, Block, N, RA, SC>
 where
 	Block: 'static,
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + 'static + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Send + Sync,
 	N: Network<Block> + 'static + Send,
 	N::In: 'static + Send,
 	RA: 'static + Send + Sync,
@@ -764,8 +765,8 @@ pub(crate) fn finalize_block<B, Block: BlockT<Hash=H256>, E, RA>(
 	number: NumberFor<Block>,
 	justification_or_commit: JustificationOrCommit<Block>,
 ) -> Result<(), CommandOrError<Block::Hash, NumberFor<Block>>> where
-	B: Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync,
 	RA: Send + Sync,
 {
 	// lock must be held through writing to DB to avoid race
@@ -929,8 +930,8 @@ pub(crate) fn canonical_at_height<B, E, Block: BlockT<Hash=H256>, RA>(
 	base_is_canonical: bool,
 	height: NumberFor<Block>,
 ) -> Result<Option<Block::Hash>, ClientError> where
-	B: Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync,
 {
 	if height > base.1 {
 		return Ok(None);
@@ -980,8 +981,8 @@ pub fn is_descendent_of<'a, B, E, Block: BlockT<Hash=H256>, RA>(
 	client: &'a Client<B, E, Block, RA>,
 	current: Option<(&'a H256, &'a H256)>,
 ) -> impl Fn(&H256, &H256) -> Result<bool, client::error::Error> + 'a
-where B: Backend<Block, Blake2Hasher>,
-	  E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
+where B: Backend<Block, Blake2Hasher, CliExt>,
+	  E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync,
 {
 	move |base, hash| {
 		if base == hash { return Ok(false); }

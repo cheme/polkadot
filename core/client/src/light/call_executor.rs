@@ -43,7 +43,6 @@ use crate::light::fetcher::{Fetcher, RemoteCallRequest};
 use executor::{RuntimeVersion, NativeVersion};
 use trie::MemoryDB;
 use state_machine::client::Externalities as ClientExternalities;
-use state_machine::client::CHOut;
 
 use state_machine::client::NoClient;
 // TODO EMCH use an actual impl
@@ -83,7 +82,7 @@ impl<B, F> RemoteCallExecutor<B, F> {
 	}
 }
 
-impl<B, F, Block> CallExecutor<Block, Blake2Hasher> for RemoteCallExecutor<B, F>
+impl<B, F, Block> CallExecutor<Block, Blake2HasherHasher, Blake2Hasher> for RemoteCallExecutor<B, F>
 where
 	Block: BlockT<Hash=H256>,
 	B: ChainBackend<Block>,
@@ -161,7 +160,7 @@ where
 
 	fn call_at_state<
 		O: offchain::Externalities,
-		S: StateBackend<Blake2Hasher>,
+		S: StateBackend<Blake2HasherHasher, Blake2Hasher>,
 		FF: FnOnce(
 			Result<NativeOrEncoded<R>, Self::Error>,
 			Result<NativeOrEncoded<R>, Self::Error>
@@ -180,9 +179,9 @@ where
 		Err(ClientError::NotAvailableOnLightClient.into())
 	}
 
-	fn prove_at_trie_state<S: TrieBackendStorage<Blake2Hasher>>(
+	fn prove_at_trie_state<S: TrieBackendStorage<Blake2HasherHasher>>(
 		&self,
-		_state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
+		_state: &mut state_machine::TrieBackend<S, Blake2HasherHasher, Blake2Hasher>,
 		_changes: &mut OverlayedChanges,
 		_method: &str,
 		_call_data: &[u8]
@@ -198,9 +197,9 @@ where
 impl<Block, B, R, L> Clone for RemoteOrLocalCallExecutor<Block, B, R, L>
 	where
 		Block: BlockT<Hash=H256>,
-		B: RemoteBackend<Block, Blake2Hasher>,
-		R: CallExecutor<Block, Blake2Hasher> + Clone,
-		L: CallExecutor<Block, Blake2Hasher> + Clone,
+		B: RemoteBackend<Block, Blake2HasherHasher, Blake2Hasher>,
+		R: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher> + Clone,
+		L: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher> + Clone,
 {
 	fn clone(&self) -> Self {
 		RemoteOrLocalCallExecutor {
@@ -215,9 +214,9 @@ impl<Block, B, R, L> Clone for RemoteOrLocalCallExecutor<Block, B, R, L>
 impl<Block, B, Remote, Local> RemoteOrLocalCallExecutor<Block, B, Remote, Local>
 	where
 		Block: BlockT<Hash=H256>,
-		B: RemoteBackend<Block, Blake2Hasher>,
-		Remote: CallExecutor<Block, Blake2Hasher>,
-		Local: CallExecutor<Block, Blake2Hasher>,
+		B: RemoteBackend<Block, Blake2HasherHasher, Blake2Hasher>,
+		Remote: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher>,
+		Local: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher>,
 {
 	/// Creates new instance of remote/local call executor.
 	pub fn new(backend: Arc<B>, remote: Remote, local: Local) -> Self {
@@ -225,13 +224,13 @@ impl<Block, B, Remote, Local> RemoteOrLocalCallExecutor<Block, B, Remote, Local>
 	}
 }
 
-impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
+impl<Block, B, Remote, Local> CallExecutor<Block, Blake2HasherHasher, Blake2Hasher> for
 	RemoteOrLocalCallExecutor<Block, B, Remote, Local>
 	where
 		Block: BlockT<Hash=H256>,
-		B: RemoteBackend<Block, Blake2Hasher>,
-		Remote: CallExecutor<Block, Blake2Hasher>,
-		Local: CallExecutor<Block, Blake2Hasher>,
+		B: RemoteBackend<Block, Blake2HasherHasher, Blake2Hasher>,
+		Remote: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher>,
+		Local: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher>,
 {
 	type Error = ClientError;
 
@@ -334,7 +333,7 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 
 	fn call_at_state<
 		O: offchain::Externalities,
-		S: StateBackend<Blake2Hasher>,
+		S: StateBackend<Blake2HasherHasher, Blake2Hasher>,
 		FF: FnOnce(
 			Result<NativeOrEncoded<R>, Self::Error>,
 			Result<NativeOrEncoded<R>, Self::Error>
@@ -374,9 +373,9 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 			).map_err(|e| ClientError::Execution(Box::new(e.to_string())))
 	}
 
-	fn prove_at_trie_state<S: TrieBackendStorage<Blake2Hasher>>(
+	fn prove_at_trie_state<S: TrieBackendStorage<Blake2HasherHasher>>(
 		&self,
-		state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
+		state: &mut state_machine::TrieBackend<S, Blake2HasherHasher, Blake2Hasher>,
 		changes: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
@@ -402,8 +401,8 @@ pub fn prove_execution<Block, S, E>(
 ) -> ClientResult<(Vec<u8>, Vec<Vec<u8>>)>
 	where
 		Block: BlockT<Hash=H256>,
-		S: StateBackend<Blake2Hasher>,
-		E: CallExecutor<Block, Blake2Hasher>,
+		S: StateBackend<Blake2HasherHasher, Blake2Hasher>,
+		E: CallExecutor<Block, Blake2HasherHasher, Blake2Hasher>,
 {
 	let mut trie_state = state.as_trie_backend()
 		.ok_or_else(|| Box::new(state_machine::ExecutionError::UnableToGenerateProof) as Box<dyn state_machine::Error>)?;
@@ -432,19 +431,20 @@ pub fn prove_execution<Block, S, E>(
 ///
 /// Method is executed using passed header as environment' current block.
 /// Proof should include both environment preparation proof and method execution proof.
-pub fn check_execution_proof<Header, E, C>(
+pub fn check_execution_proof<Header, E, H, C>(
 	executor: &E,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: Vec<Vec<u8>>
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
-		E: CodeExecutor<C::H>,
-		C: ClientExternalities,
-		CHOut<C>: Ord + 'static,
+		H: Hasher,
+		E: CodeExecutor<H>,
+		C: ClientExternalities<H>,
+		H::Out: Ord + 'static,
 {
 	let local_state_root = request.header.state_root();
-	let root: CHOut<C> = convert_hash(&local_state_root);
+	let root: H::Out = convert_hash(&local_state_root);
 
 	// prepare execution environment + check preparation proof
 	let mut changes = OverlayedChanges::default();
@@ -456,7 +456,7 @@ pub fn check_execution_proof<Header, E, C>(
 		request.header.hash(),
 		request.header.digest().clone(),
 	);
-	execution_proof_check_on_trie_backend::<_, C>(
+	execution_proof_check_on_trie_backend::<_, H, C>(
 		&mut trie_backend,
 		&mut changes,
 		executor,
@@ -465,7 +465,7 @@ pub fn check_execution_proof<Header, E, C>(
 	)?;
 
 	// execute method
-	let local_result = execution_proof_check_on_trie_backend::<_, C>(
+	let local_result = execution_proof_check_on_trie_backend::<_, H, C>(
 		&mut trie_backend,
 		&mut changes,
 		executor,
@@ -503,7 +503,7 @@ mod tests {
 
 			// check remote execution proof locally
 			let local_executor = test_client::LocalExecutor::new(None);
-			let local_result = check_execution_proof::<_, _, CliExt>(&local_executor, &RemoteCallRequest {
+			let local_result = check_execution_proof::<_, _, _, CliExt>(&local_executor, &RemoteCallRequest {
 				block: test_client::runtime::Hash::default(),
 				header: test_client::runtime::Header {
 					state_root: remote_root.into(),

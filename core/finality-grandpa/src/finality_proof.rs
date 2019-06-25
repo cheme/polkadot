@@ -53,6 +53,7 @@ use substrate_primitives::{H256, Blake2Hasher};
 use substrate_telemetry::{telemetry, CONSENSUS_INFO};
 use fg_primitives::AuthorityId;
 
+use crate::CliExt;
 use crate::justification::GrandpaJustification;
 
 /// Maximum number of fragments that we want to return in a single prove_finality call.
@@ -69,8 +70,8 @@ pub trait AuthoritySetForFinalityProver<Block: BlockT>: Send + Sync {
 /// Client-based implementation of AuthoritySetForFinalityProver.
 impl<B, E, Block: BlockT<Hash=H256>, RA> AuthoritySetForFinalityProver<Block> for Client<B, E, Block, RA>
 	where
-		B: Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 {
 	fn authorities(&self, block: &BlockId<Block>) -> ClientResult<Vec<(AuthorityId, u64)>> {
@@ -137,8 +138,8 @@ pub struct FinalityProofProvider<B, E, Block: BlockT<Hash=H256>, RA> {
 
 impl<B, E, Block: BlockT<Hash=H256>, RA> FinalityProofProvider<B, E, Block, RA>
 	where
-		B: Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 {
 	/// Create new finality proof provider using:
@@ -157,8 +158,8 @@ impl<B, E, Block, RA> network::FinalityProofProvider<Block> for FinalityProofPro
 	where
 		Block: BlockT<Hash=H256>,
 		NumberFor<Block>: BlockNumberOps,
-		B: Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 {
 	fn prove_finality(

@@ -44,6 +44,7 @@ use crate::consensus_changes::ConsensusChanges;
 use crate::environment::canonical_at_height;
 use crate::finality_proof::{AuthoritySetForFinalityChecker, ProvableJustification, make_finality_proof_request};
 use crate::justification::GrandpaJustification;
+use crate::CliExt;
 
 /// LightAuthoritySet is saved under this key in aux storage.
 const LIGHT_AUTHORITY_SET_KEY: &[u8] = b"grandpa_voters";
@@ -57,8 +58,8 @@ pub fn light_block_import<B, E, Block: BlockT<Hash=H256>, RA, PRA>(
 	api: Arc<PRA>,
 ) -> Result<GrandpaLightBlockImport<B, E, Block, RA>, ClientError>
 	where
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 		PRA: ProvideRuntimeApi,
 		PRA::Api: GrandpaApi<Block>,
@@ -108,8 +109,8 @@ impl<B, E, Block: BlockT<Hash=H256>, RA> GrandpaLightBlockImport<B, E, Block, RA
 impl<B, E, Block: BlockT<Hash=H256>, RA> BlockImport<Block>
 	for GrandpaLightBlockImport<B, E, Block, RA> where
 		NumberFor<Block>: grandpa::BlockNumberOps,
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		DigestFor<Block>: Encode,
 		RA: Send + Sync,
 {
@@ -137,8 +138,8 @@ impl<B, E, Block: BlockT<Hash=H256>, RA> BlockImport<Block>
 impl<B, E, Block: BlockT<Hash=H256>, RA> FinalityProofImport<Block>
 	for GrandpaLightBlockImport<B, E, Block, RA> where
 		NumberFor<Block>: grandpa::BlockNumberOps,
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		DigestFor<Block>: Encode,
 		RA: Send + Sync,
 {
@@ -220,8 +221,8 @@ fn do_import_block<B, E, Block: BlockT<Hash=H256>, RA, J>(
 	new_cache: HashMap<well_known_cache_keys::Id, Vec<u8>>,
 ) -> Result<ImportResult, ConsensusError>
 	where
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 		NumberFor<Block>: grandpa::BlockNumberOps,
 		DigestFor<Block>: Encode,
@@ -279,8 +280,8 @@ fn do_import_finality_proof<B, E, Block: BlockT<Hash=H256>, RA, J>(
 	verifier: &dyn Verifier<Block>,
 ) -> Result<(Block::Hash, NumberFor<Block>), ConsensusError>
 	where
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 		DigestFor<Block>: Encode,
 		NumberFor<Block>: grandpa::BlockNumberOps,
@@ -343,8 +344,8 @@ fn do_import_justification<B, E, Block: BlockT<Hash=H256>, RA, J>(
 	justification: Justification,
 ) -> Result<ImportResult, ConsensusError>
 	where
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 		NumberFor<Block>: grandpa::BlockNumberOps,
 		J: ProvableJustification<Block::Header>,
@@ -412,8 +413,8 @@ fn do_finalize_block<B, E, Block: BlockT<Hash=H256>, RA>(
 	justification: Justification,
 ) -> Result<ImportResult, ConsensusError>
 	where
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 		RA: Send + Sync,
 		NumberFor<Block>: grandpa::BlockNumberOps,
 {
@@ -499,8 +500,8 @@ fn require_insert_aux<T: Encode, B, E, Block: BlockT<Hash=H256>, RA>(
 	value_type: &str,
 ) -> Result<(), ConsensusError>
 	where
-		B: Backend<Block, Blake2Hasher> + 'static,
-		E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+		B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+		E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 {
 	#[allow(deprecated)]
 	let backend = &**client.backend();
@@ -537,8 +538,8 @@ pub mod tests {
 	impl<B, E, Block: BlockT<Hash=H256>, RA> BlockImport<Block>
 		for NoJustificationsImport<B, E, Block, RA> where
 			NumberFor<Block>: grandpa::BlockNumberOps,
-			B: Backend<Block, Blake2Hasher> + 'static,
-			E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+			B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+			E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 			DigestFor<Block>: Encode,
 			RA: Send + Sync,
 	{
@@ -565,8 +566,8 @@ pub mod tests {
 	impl<B, E, Block: BlockT<Hash=H256>, RA> FinalityProofImport<Block>
 		for NoJustificationsImport<B, E, Block, RA> where
 			NumberFor<Block>: grandpa::BlockNumberOps,
-			B: Backend<Block, Blake2Hasher> + 'static,
-			E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+			B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+			E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 			DigestFor<Block>: Encode,
 			RA: Send + Sync,
 	{
@@ -594,8 +595,8 @@ pub mod tests {
 		api: Arc<PRA>,
 	) -> Result<NoJustificationsImport<B, E, Block, RA>, ClientError>
 		where
-			B: Backend<Block, Blake2Hasher> + 'static,
-			E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+			B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+			E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 			RA: Send + Sync,
 			PRA: ProvideRuntimeApi,
 			PRA::Api: GrandpaApi<Block>,

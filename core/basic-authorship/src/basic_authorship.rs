@@ -70,8 +70,8 @@ pub trait AuthoringApi: Send + Sync + ProvideRuntimeApi where
 impl<'a, B, E, Block, RA> BlockBuilder<Block>
 	for client::block_builder::BlockBuilder<'a, Block, SubstrateClient<B, E, Block, RA>>
 where
-	B: client::backend::Backend<Block, CliExt> + 'static,
-	E: CallExecutor<Block, CliExt> + Send + Sync + Clone + 'static,
+	B: client::backend::Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync + Clone + 'static,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync + 'static,
 	SubstrateClient<B, E, Block, RA> : ProvideRuntimeApi,
@@ -83,8 +83,8 @@ where
 }
 
 impl<B, E, Block, RA> AuthoringApi for SubstrateClient<B, E, Block, RA> where
-	B: client::backend::Backend<Block, CliExt> + Send + Sync + 'static,
-	E: CallExecutor<Block, CliExt> + Send + Sync + Clone + 'static,
+	B: client::backend::Backend<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync + Clone + 'static,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync + 'static,
 	SubstrateClient<B, E, Block, RA> : ProvideRuntimeApi,

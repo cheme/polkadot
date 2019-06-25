@@ -36,7 +36,7 @@ use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId};
 use log::{warn, trace};
 use primitives::hexdisplay::HexDisplay;
 use primitives::storage::{self, StorageKey, StorageData, StorageChangeSet};
-use primitives::{H256, Blake2Hasher as Blake2HasherHasher, Bytes};
+use primitives::{H256, Blake2Hasher, Bytes};
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::traits::{
 	Block as BlockT, Header, ProvideRuntimeApi, NumberFor,
@@ -48,7 +48,7 @@ use state_machine::{self, ExecutionStrategy};
 
 pub use self::gen_client::Client as StateClient;
 
-type Blake2Hasher = client::NoClient<Blake2HasherHasher>;
+type CliExt = client::NoClient<Blake2Hasher>;
 
 /// Substrate state API
 #[rpc]
@@ -187,8 +187,8 @@ struct QueryStorageRange<Block: BlockT> {
 
 impl<B, E, Block: BlockT, RA> State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256>,
-	B: client::backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher>,
+	B: client::backend::Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt>,
 {
 	/// Create new State API RPC handler.
 	pub fn new(client: Arc<Client<B, E, Block, RA>>, subscriptions: Subscriptions) -> Self {
@@ -335,8 +335,8 @@ impl<B, E, Block: BlockT, RA> State<B, E, Block, RA> where
 
 impl<B, E, Block, RA> State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256>,
-	B: client::backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher>,
+	B: client::backend::Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt>,
 {
 	fn unwrap_or_best(&self, hash: Option<Block::Hash>) -> Result<Block::Hash> {
 		crate::helpers::unwrap_or_else(|| Ok(self.client.info().chain.best_hash), hash)
@@ -345,8 +345,8 @@ impl<B, E, Block, RA> State<B, E, Block, RA> where
 
 impl<B, E, Block, RA> StateApi<Block::Hash> for State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256> + 'static,
-	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static + Clone,
+	B: client::backend::Backend<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync + 'static + Clone,
 	RA: Send + Sync + 'static,
 	Client<B, E, Block, RA>: ProvideRuntimeApi,
 	<Client<B, E, Block, RA> as ProvideRuntimeApi>::Api: Metadata<Block>

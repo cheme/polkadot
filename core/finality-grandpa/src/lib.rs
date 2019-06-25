@@ -65,6 +65,7 @@ use fg_primitives::GrandpaApi;
 use inherents::InherentDataProviders;
 use runtime_primitives::generic::BlockId;
 use consensus_common::SelectChain;
+use client::NoClient;
 use substrate_primitives::{ed25519, H256, Pair, Blake2Hasher};
 use substrate_telemetry::{telemetry, CONSENSUS_INFO, CONSENSUS_DEBUG, CONSENSUS_WARN};
 use serde_json;
@@ -112,6 +113,9 @@ pub use fg_primitives::{AuthorityId, ScheduledChange};
 
 #[cfg(test)]
 mod tests;
+
+// TODO EMCH switch to an actual impl
+type CliExt = NoClient<Blake2Hasher>;
 
 /// A GRANDPA message for a substrate chain.
 pub type Message<Block> = grandpa::Message<<Block as BlockT>::Hash, NumberFor<Block>>;
@@ -203,8 +207,8 @@ pub trait BlockStatus<Block: BlockT> {
 }
 
 impl<B, E, Block: BlockT<Hash=H256>, RA> BlockStatus<Block> for Arc<Client<B, E, Block, RA>> where
-	B: Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync,
 	RA: Send + Sync,
 	NumberFor<Block>: BlockNumberOps,
 {
@@ -303,8 +307,8 @@ pub fn block_import<B, E, Block: BlockT<Hash=H256>, RA, PRA, SC>(
 		LinkHalf<B, E, Block, RA, SC>
 	), ClientError>
 where
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + 'static + Clone + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + 'static + Clone + Send + Sync,
 	RA: Send + Sync,
 	PRA: ProvideRuntimeApi,
 	PRA::Api: GrandpaApi<Block>,
@@ -366,8 +370,8 @@ fn global_communication<Block: BlockT<Hash=H256>, B, E, N, RA>(
 		SinkError = CommandOrError<H256, NumberFor<Block>>,
 	>,
 ) where
-	B: Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
+	B: Backend<Block, Blake2Hasher, CliExt>,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync,
 	N: Network<Block>,
 	RA: Send + Sync,
 	NumberFor<Block>: BlockNumberOps,
@@ -419,8 +423,8 @@ fn register_finality_tracker_inherent_data_provider<B, E, Block: BlockT<Hash=H25
 	client: Arc<Client<B, E, Block, RA>>,
 	inherent_data_providers: &InherentDataProviders,
 ) -> Result<(), consensus_common::Error> where
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
 	RA: Send + Sync + 'static,
 {
 	if !inherent_data_providers.has_provider(&srml_finality_tracker::INHERENT_IDENTIFIER) {
@@ -464,8 +468,8 @@ pub fn run_grandpa_voter<B, E, Block: BlockT<Hash=H256>, N, RA, SC, X>(
 	grandpa_params: GrandpaParams<B, E, Block, N, RA, SC, X>,
 ) -> ::client::error::Result<impl Future<Item=(),Error=()> + Send + 'static> where
 	Block::Hash: Ord,
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
 	N: Network<Block> + Send + Sync + 'static,
 	N::In: Send + 'static,
 	SC: SelectChain<Block> + 'static,
@@ -731,8 +735,8 @@ pub fn run_grandpa<B, E, Block: BlockT<Hash=H256>, N, RA, SC, X>(
 	grandpa_params: GrandpaParams<B, E, Block, N, RA, SC, X>,
 ) -> ::client::error::Result<impl Future<Item=(),Error=()> + Send + 'static> where
 	Block::Hash: Ord,
-	B: Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	B: Backend<Block, Blake2Hasher, CliExt> + 'static,
+	E: CallExecutor<Block, Blake2Hasher, CliExt> + Send + Sync + 'static,
 	N: Network<Block> + Send + Sync + 'static,
 	N::In: Send + 'static,
 	SC: SelectChain<Block> + 'static,

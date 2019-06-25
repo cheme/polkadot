@@ -24,7 +24,6 @@ use log::warn;
 use hash_db::Hasher;
 use parity_codec::{Decode, Encode};
 use crate::client::Externalities as ClientExternalities;
-use crate::client::CHOut;
 use primitives::{
 	storage::well_known_keys, NativeOrEncoded, NeverNativeValue, offchain
 };
@@ -43,6 +42,7 @@ mod trie_backend_essence;
 use overlayed_changes::OverlayedChangeSet;
 pub use trie::{TrieMut, TrieDBMut, DBValue, MemoryDB};
 pub use testing::TestExternalities;
+pub use testing::NCTestExternalities;
 pub use basic::BasicExternalities;
 pub use ext::Ext;
 pub use backend::Backend;
@@ -455,7 +455,7 @@ pub fn always_wasm<E, R: Decode>() -> ExecutionManager<DefaultHandler<R, E>> {
 }
 
 /// Creates new substrate state machine.
-pub fn new<'a, N, B, T, O, Exec, C>(
+pub fn new<'a, H, N, B, T, O, Exec, C>(
 	backend: &'a mut B,
 	changes_trie_storage: Option<&'a T>,
 	offchain_ext: Option<&'a mut O>,
@@ -463,7 +463,7 @@ pub fn new<'a, N, B, T, O, Exec, C>(
 	exec: &'a Exec,
 	method: &'a str,
 	call_data: &'a [u8],
-) -> StateMachine<'a, N, B, T, O, Exec, C> {
+) -> StateMachine<'a, H, N, B, T, O, Exec, C> {
 	StateMachine {
 		backend,
 		changes_trie_storage,
@@ -477,7 +477,7 @@ pub fn new<'a, N, B, T, O, Exec, C>(
 }
 
 /// The substrate state machine.
-pub struct StateMachine<'a, N, B, T, O, Exec, C> {
+pub struct StateMachine<'a, H, N, B, T, O, Exec, C> {
 	backend: &'a mut B,
 	changes_trie_storage: Option<&'a T>,
 	offchain_ext: Option<&'a mut O>,
@@ -485,16 +485,17 @@ pub struct StateMachine<'a, N, B, T, O, Exec, C> {
 	exec: &'a Exec,
 	method: &'a str,
 	call_data: &'a [u8],
-	_hasher: PhantomData<(N, C)>,
+	_hasher: PhantomData<(H, N, C)>,
 }
 
-impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
-	C: ClientExternalities,
-	Exec: CodeExecutor<C::H>,
-	B: Backend<C>,
-	T: ChangesTrieStorage<C, N>,
+impl<'a, H, N, B, T, O, Exec, C> StateMachine<'a, H, N, B, T, O, Exec, C> where
+	H: Hasher,
+	C: ClientExternalities<H>,
+	Exec: CodeExecutor<H>,
+	B: Backend<H, C>,
+	T: ChangesTrieStorage<H, N>,
 	O: offchain::Externalities,
-	CHOut<C>: Ord + 'static,
+	H::Out: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
 	/// Execute a call using the given state backend, overlayed changes, and call executor.
@@ -508,7 +509,7 @@ impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
 	pub fn execute(
 		&mut self,
 		strategy: ExecutionStrategy,
-	) -> Result<(Vec<u8>, B::Transaction, Option<MemoryDB<C::H>>), Box<dyn Error>> {
+	) -> Result<(Vec<u8>, B::Transaction, Option<MemoryDB<H>>), Box<dyn Error>> {
 		// We are not giving a native call and thus we are sure that the result can never be a native
 		// value.
 		self.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
@@ -528,7 +529,7 @@ impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
 		compute_tx: bool,
 		use_native: bool,
 		native_call: Option<NC>,
-	) -> (CallResult<R, Exec::Error>, bool, Option<B::Transaction>, Option<MemoryDB<C::H>>) where
+	) -> (CallResult<R, Exec::Error>, bool, Option<B::Transaction>, Option<MemoryDB<H>>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	{
@@ -560,7 +561,7 @@ impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
 		mut native_call: Option<NC>,
 		orig_prospective: OverlayedChangeSet,
 		on_consensus_failure: Handler,
-	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<C::H>>) where
+	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 		Handler: FnOnce(
@@ -591,7 +592,7 @@ impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
 		compute_tx: bool,
 		mut native_call: Option<NC>,
 		orig_prospective: OverlayedChangeSet,
-	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<C::H>>) where
+	) -> (CallResult<R, Exec::Error>, Option<B::Transaction>, Option<MemoryDB<H>>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	{
@@ -619,7 +620,7 @@ impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
 		manager: ExecutionManager<Handler>,
 		compute_tx: bool,
 		mut native_call: Option<NC>,
-	) -> Result<(NativeOrEncoded<R>, Option<B::Transaction>, Option<MemoryDB<C::H>>), Box<dyn Error>> where
+	) -> Result<(NativeOrEncoded<R>, Option<B::Transaction>, Option<MemoryDB<H>>), Box<dyn Error>> where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 		Handler: FnOnce(
@@ -673,7 +674,7 @@ impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
 }
 
 /// Prove execution using the given state backend, overlayed changes, and call executor.
-pub fn prove_execution<B, Exec, C>(
+pub fn prove_execution<B, H, Exec, C>(
 	mut backend: B,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
@@ -681,10 +682,11 @@ pub fn prove_execution<B, Exec, C>(
 	call_data: &[u8],
 ) -> Result<(Vec<u8>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	B: Backend<C>,
-	Exec: CodeExecutor<C::H>,
-	C: ClientExternalities,
-	CHOut<C>: Ord + 'static,
+	H: Hasher,
+	B: Backend<H, C>,
+	Exec: CodeExecutor<H>,
+	C: ClientExternalities<H>,
+	H::Out: Ord + 'static,
 {
 	let trie_backend = backend.as_trie_backend()
 		.ok_or_else(|| Box::new(ExecutionError::UnableToGenerateProof) as Box<dyn Error>)?;
@@ -700,24 +702,25 @@ where
 ///
 /// Note: changes to code will be in place if this call is made again. For running partial
 /// blocks (e.g. a transaction at a time), ensure a different method is used.
-pub fn prove_execution_on_trie_backend<S, Exec, C>(
-	trie_backend: &mut TrieBackend<S, C>,
+pub fn prove_execution_on_trie_backend<S, H, C, Exec>(
+	trie_backend: &mut TrieBackend<S, H, C>,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
 	method: &str,
 	call_data: &[u8],
 ) -> Result<(Vec<u8>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<C>,
-  C: ClientExternalities,
-	Exec: CodeExecutor<C::H>,
-	CHOut<C>: Ord + 'static,
+  H: Hasher,
+	S: trie_backend_essence::TrieBackendStorage<H>,
+  C: ClientExternalities<H>,
+	Exec: CodeExecutor<H>,
+	H::Out: Ord + 'static,
 {
 	let mut proving_backend = proving_backend::ProvingBackend::new(trie_backend);
 	let (result, _, _) = {
 		let mut sm = StateMachine {
 			backend: &mut proving_backend,
-			changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<C, u64>>,
+			changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<H, u64>>,
 			offchain_ext: NeverOffchainExt::new(),
 			overlay,
 			exec,
@@ -737,8 +740,8 @@ where
 }
 
 /// Check execution proof, generated by `prove_execution` call.
-pub fn execution_proof_check<Exec, C>(
-	root: CHOut<C>,
+pub fn execution_proof_check<Exec, H, C>(
+	root: H::Out,
 	proof: Vec<Vec<u8>>,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
@@ -746,30 +749,32 @@ pub fn execution_proof_check<Exec, C>(
 	call_data: &[u8],
 ) -> Result<Vec<u8>, Box<dyn Error>>
 where
-	C: ClientExternalities,
-	Exec: CodeExecutor<C::H>,
-	CHOut<C>: Ord + 'static,
+	H: Hasher,
+	C: ClientExternalities<H>,
+	Exec: CodeExecutor<H>,
+	H::Out: Ord + 'static,
 {
-	let mut trie_backend = create_proof_check_backend::<C>(root.into(), proof)?;
+	let mut trie_backend = create_proof_check_backend::<H, C>(root.into(), proof)?;
 	execution_proof_check_on_trie_backend(&mut trie_backend, overlay, exec, method, call_data)
 }
 
 /// Check execution proof on proving backend, generated by `prove_execution` call.
-pub fn execution_proof_check_on_trie_backend<Exec, C>(
-	trie_backend: &mut TrieBackend<MemoryDB<C::H>, C>,
+pub fn execution_proof_check_on_trie_backend<Exec, H, C>(
+	trie_backend: &mut TrieBackend<MemoryDB<H>, H, C>,
 	overlay: &mut OverlayedChanges,
 	exec: &Exec,
 	method: &str,
 	call_data: &[u8],
 ) -> Result<Vec<u8>, Box<dyn Error>>
 where
-	C: ClientExternalities,
-	Exec: CodeExecutor<C::H>,
-	CHOut<C>: Ord + 'static,
+	H: Hasher,
+	C: ClientExternalities<H>,
+	Exec: CodeExecutor<H>,
+	H::Out: Ord + 'static,
 {
 	let mut sm = StateMachine {
 		backend: trie_backend,
-		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<C, u64>>,
+		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<H, u64>>,
 		offchain_ext: NeverOffchainExt::new(),
 		overlay,
 		exec,
@@ -785,14 +790,15 @@ where
 }
 
 /// Generate storage read proof.
-pub fn prove_read<B, C>(
+pub fn prove_read<B, H, C>(
 	mut backend: B,
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	B: Backend<C>,
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	B: Backend<H, C>,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
 	let trie_backend = backend.as_trie_backend()
 		.ok_or_else(
@@ -802,15 +808,16 @@ where
 }
 
 /// Generate child storage read proof.
-pub fn prove_child_read<B, C>(
+pub fn prove_child_read<B, H, C>(
 	mut backend: B,
 	storage_key: &[u8],
 	key: &[u8],
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	B: Backend<C>,
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	B: Backend<H, C>,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
 	let trie_backend = backend.as_trie_backend()
 		.ok_or_else(|| Box::new(ExecutionError::UnableToGenerateProof) as Box<dyn Error>)?;
@@ -819,87 +826,93 @@ where
 
 
 /// Generate storage read proof on pre-created trie backend.
-pub fn prove_read_on_trie_backend<S, C>(
-	trie_backend: &mut TrieBackend<S, C>,
+pub fn prove_read_on_trie_backend<S, H, C>(
+	trie_backend: &mut TrieBackend<S, H, C>,
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<C>,
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	S: trie_backend_essence::TrieBackendStorage<H>,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
-	let proving_backend = proving_backend::ProvingBackend::<_, C>::new(trie_backend);
+	let proving_backend = proving_backend::ProvingBackend::<S, H, C>::new(trie_backend);
 	let result = proving_backend.storage(key).map_err(|e| Box::new(e) as Box<dyn Error>)?;
 	Ok((result, proving_backend.extract_proof()))
 }
 
 /// Generate storage read proof on pre-created trie backend.
-pub fn prove_child_read_on_trie_backend<S, C>(
-	trie_backend: &mut TrieBackend<S, C>,
+pub fn prove_child_read_on_trie_backend<S, H, C>(
+	trie_backend: &mut TrieBackend<S, H, C>,
 	storage_key: &[u8],
 	key: &[u8]
 ) -> Result<(Option<Vec<u8>>, Vec<Vec<u8>>), Box<dyn Error>>
 where
-	S: trie_backend_essence::TrieBackendStorage<C>,
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	S: trie_backend_essence::TrieBackendStorage<H>,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
-	let proving_backend = proving_backend::ProvingBackend::<_, C>::new(trie_backend);
+	let proving_backend = proving_backend::ProvingBackend::<S, H, C>::new(trie_backend);
 	let result = proving_backend.child_storage(storage_key, key).map_err(|e| Box::new(e) as Box<dyn Error>)?;
 	Ok((result, proving_backend.extract_proof()))
 }
 
 /// Check storage read proof, generated by `prove_read` call.
-pub fn read_proof_check<C>(
-	root: CHOut<C>,
+pub fn read_proof_check<H, C>(
+	root: H::Out,
 	proof: Vec<Vec<u8>>,
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<dyn Error>>
 where
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
-	let proving_backend = create_proof_check_backend::<C>(root, proof)?;
+	let proving_backend = create_proof_check_backend::<H, C>(root, proof)?;
 	read_proof_check_on_proving_backend(&proving_backend, key)
 }
 
 /// Check child storage read proof, generated by `prove_child_read` call.
-pub fn read_child_proof_check<C>(
-	root: CHOut<C>,
+pub fn read_child_proof_check<H, C>(
+	root: H::Out,
 	proof: Vec<Vec<u8>>,
 	storage_key: &[u8],
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<dyn Error>>
 where
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
-	let proving_backend = create_proof_check_backend::<C>(root, proof)?;
+	let proving_backend = create_proof_check_backend::<H, C>(root, proof)?;
 	read_child_proof_check_on_proving_backend(&proving_backend, storage_key, key)
 }
 
 
 /// Check storage read proof on pre-created proving backend.
-pub fn read_proof_check_on_proving_backend<C>(
-	proving_backend: &TrieBackend<MemoryDB<C::H>, C>,
+pub fn read_proof_check_on_proving_backend<H, C>(
+	proving_backend: &TrieBackend<MemoryDB<H>, H, C>,
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<dyn Error>>
 where
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
 	proving_backend.storage(key).map_err(|e| Box::new(e) as Box<dyn Error>)
 }
 
 /// Check child storage read proof on pre-created proving backend.
-pub fn read_child_proof_check_on_proving_backend<C>(
-	proving_backend: &TrieBackend<MemoryDB<C::H>, C>,
+pub fn read_child_proof_check_on_proving_backend<H, C>(
+	proving_backend: &TrieBackend<MemoryDB<H>, H, C>,
 	storage_key: &[u8],
 	key: &[u8],
 ) -> Result<Option<Vec<u8>>, Box<dyn Error>>
 where
-	C: ClientExternalities,
-	CHOut<C>: Ord
+	H: Hasher,
+	C: ClientExternalities<H>,
+	H::Out: Ord
 {
 	proving_backend.child_storage(storage_key, key).map_err(|e| Box::new(e) as Box<dyn Error>)
 }
@@ -930,11 +943,12 @@ pub(crate) fn set_changes_trie_config(
 }
 
 /// Reads storage value from overlay or from the backend.
-fn try_read_overlay_value<B, C>(overlay: &OverlayedChanges, backend: &B, key: &[u8])
+fn try_read_overlay_value<H, B, C>(overlay: &OverlayedChanges, backend: &B, key: &[u8])
 	-> Result<Option<Vec<u8>>, Box<dyn Error>>
 where
-	C: ClientExternalities,
-	B: Backend<C>,
+	H: Hasher,
+	C: ClientExternalities<H> ,
+	B: Backend<H, C>,
 {
 	match overlay.storage(key).map(|x| x.map(|x| x.to_vec())) {
 		Some(value) => Ok(value),
@@ -1018,7 +1032,7 @@ mod tests {
 	fn execute_works() {
 		assert_eq!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1039,7 +1053,7 @@ mod tests {
 	fn execute_works_with_native_else_wasm() {
 		assert_eq!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1060,7 +1074,7 @@ mod tests {
 		let mut consensus_failed = false;
 		assert!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1098,7 +1112,7 @@ mod tests {
 			&mut Default::default(), &executor, "test", &[]).unwrap();
 
 		// check proof locally
-		let local_result = execution_proof_check::<_, ClientExt>(remote_root, remote_proof,
+		let local_result = execution_proof_check::<_, Blake2Hasher, ClientExt>(remote_root, remote_proof,
 			&mut Default::default(), &executor, "test", &[]).unwrap();
 
 		// check that both results are correct
@@ -1114,7 +1128,7 @@ mod tests {
 			b"abc".to_vec() => b"2".to_vec(),
 			b"bbb".to_vec() => b"3".to_vec()
 		];
-		let mut state = InMemory::<ClientExt>::from(initial);
+		let mut state = InMemory::<Blake2Hasher, ClientExt>::from(initial);
 		let backend = state.as_trie_backend().unwrap();
 		let mut overlay = OverlayedChanges {
 			committed: map![
@@ -1129,7 +1143,7 @@ mod tests {
 		};
 
 		{
-			let changes_trie_storage = InMemoryChangesTrieStorage::<ClientExt, u64>::new();
+			let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
 			let mut ext = Ext::new(&mut overlay, backend, Some(&changes_trie_storage), NeverOffchainExt::new());
 			ext.clear_prefix(b"ab");
 		}
@@ -1151,9 +1165,9 @@ mod tests {
 
 	#[test]
 	fn set_child_storage_works() {
-		let mut state = InMemory::<ClientExt>::default();
+		let mut state = InMemory::<Blake2Hasher, ClientExt>::default();
 		let backend = state.as_trie_backend().unwrap();
-		let changes_trie_storage = InMemoryChangesTrieStorage::<ClientExt, u64>::new();
+		let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
 		let mut overlay = OverlayedChanges::default();
 		let mut ext = Ext::new(
 			&mut overlay,
@@ -1193,12 +1207,12 @@ mod tests {
 		let remote_root = remote_backend.storage_root(::std::iter::empty()).0;
 		let remote_proof = prove_read(remote_backend, b"value2").unwrap().1;
  		// check proof locally
-		let local_result1 = read_proof_check::<ClientExt>(
+		let local_result1 = read_proof_check::<Blake2Hasher, ClientExt>(
 			remote_root,
 			remote_proof.clone(),
 			b"value2"
 		).unwrap();
-		let local_result2 = read_proof_check::<ClientExt>(
+		let local_result2 = read_proof_check::<Blake2Hasher, ClientExt>(
 			remote_root,
 			remote_proof.clone(),
 			&[0xff]
@@ -1214,12 +1228,12 @@ mod tests {
 			b":child_storage:default:sub1",
 			b"value3"
 		).unwrap().1;
-		let local_result1 = read_child_proof_check::<ClientExt>(
+		let local_result1 = read_child_proof_check::<Blake2Hasher, ClientExt>(
 			remote_root,
 			remote_proof.clone(),
 			b":child_storage:default:sub1",b"value3"
 		).unwrap();
-		let local_result2 = read_child_proof_check::<ClientExt>(
+		let local_result2 = read_child_proof_check::<Blake2Hasher, ClientExt>(
 			remote_root,
 			remote_proof.clone(),
 			b":child_storage:default:sub1",
@@ -1233,7 +1247,7 @@ mod tests {
 	fn cannot_change_changes_trie_config() {
 		assert!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1253,7 +1267,7 @@ mod tests {
 	fn cannot_change_changes_trie_config_with_native_else_wasm() {
 		assert!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {

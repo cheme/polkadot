@@ -175,7 +175,10 @@ fn record_proof_works() {
 	builder.push(transaction.clone()).unwrap();
 	let (block, proof) = builder.bake_and_extract_proof().expect("Bake block");
 
-	let mut backend = create_proof_check_backend::<client::NoClient<<<Header as HeaderT>::Hashing as HashT>::Hasher>>(
+	let mut backend = create_proof_check_backend::<
+		<<Header as HeaderT>::Hashing as HashT>::Hasher,
+		client::NoClient<<<Header as HeaderT>::Hashing as HashT>::Hasher>,
+	>(
 		storage_root,
 		proof.expect("Proof was generated"),
 	).expect("Creates proof backend.");

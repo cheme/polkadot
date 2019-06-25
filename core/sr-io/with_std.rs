@@ -23,7 +23,7 @@ use primitives::{
 pub use substrate_state_machine::{
 	Externalities,
 	BasicExternalities,
-	TestExternalities,
+	NCTestExternalities as TestExternalities,
 	ChildStorageKey,
 	client::NoClient,
 };
