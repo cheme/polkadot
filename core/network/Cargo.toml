@@ -39,6 +39,7 @@ unsigned-varint = { version = "0.2.1", features = ["codec"] }
 keyring = { package = "substrate-keyring", path = "../../core/keyring", optional = true }
 test_client = { package = "substrate-test-client", path = "../../core/test-client", optional = true }
 test-client = { package = "substrate-test-runtime-client", path = "../../core/test-runtime/client", optional = true }
+state-machine = { package = "substrate-state-machine", path = "../state-machine" }
 erased-serde = "0.3.9"
 void = "1.0"
 zeroize = "0.6.0"

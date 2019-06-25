@@ -313,10 +313,13 @@ mod tests {
 	use primitives::{Blake2Hasher, map};
 	use substrate_executor::WasmExecutor;
 
+	type NCBlake2Hasher = runtime_io::NoClient<Blake2Hasher>;
+
+
 	const WASM_CODE: &'static [u8] =
 			include_bytes!("../wasm/target/wasm32-unknown-unknown/release/substrate_test_runtime.compact.wasm");
 
-	fn new_test_ext() -> TestExternalities<runtime_io::NoClient<Blake2Hasher>> {
+	fn new_test_ext() -> TestExternalities<NCBlake2Hasher> {
 		let authorities = vec![
 			AuthorityKeyring::Alice.to_raw_public(),
 			AuthorityKeyring::Bob.to_raw_public(),
@@ -331,7 +334,7 @@ mod tests {
 		])
 	}
 
-	fn block_import_works<F>(block_executor: F) where F: Fn(Block, &mut TestExternalities<Blake2Hasher>) {
+	fn block_import_works<F>(block_executor: F) where F: Fn(Block, &mut TestExternalities<NCBlake2Hasher>) {
 		let h = Header {
 			parent_hash: [69u8; 32].into(),
 			number: 1,
@@ -365,7 +368,7 @@ mod tests {
 		})
 	}
 
-	fn block_import_with_transaction_works<F>(block_executor: F) where F: Fn(Block, &mut TestExternalities<Blake2Hasher>) {
+	fn block_import_with_transaction_works<F>(block_executor: F) where F: Fn(Block, &mut TestExternalities<NCBlake2Hasher>) {
 		let mut b1 = Block {
 			header: Header {
 				parent_hash: [69u8; 32].into(),

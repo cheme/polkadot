@@ -31,12 +31,14 @@ use crate::subscriptions::Subscriptions;
 use jsonrpc_derive::rpc;
 use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId};
 use log::warn;
-use primitives::{H256, Blake2Hasher};
+use primitives::{H256, Blake2Hasher as Blake2HasherHasher};
 use runtime_primitives::generic::{BlockId, SignedBlock};
 use runtime_primitives::traits::{Block as BlockT, Header, NumberFor};
 use self::error::Result;
 
 pub use self::gen_client::Client as ChainClient;
+
+type Blake2Hasher = client::NoClient<Blake2HasherHasher>;
 
 /// Substrate blockchain API
 #[rpc]
@@ -120,6 +122,10 @@ impl<B, E, Block: BlockT, RA> Chain<B, E, Block, RA> {
 impl<B, E, Block, RA> Chain<B, E, Block, RA> where
 	Block: BlockT<Hash=H256> + 'static,
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: client::CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	RA: Send + Sync + 'static
 {
@@ -170,6 +176,10 @@ impl<B, E, Block, RA> Chain<B, E, Block, RA> where
 impl<B, E, Block, RA> ChainApi<NumberFor<Block>, Block::Hash, Block::Header, SignedBlock<Block>> for Chain<B, E, Block, RA> where
 	Block: BlockT<Hash=H256> + 'static,
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: client::CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	RA: Send + Sync + 'static
 {

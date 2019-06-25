@@ -80,6 +80,8 @@ impl<B, E, Block, RA> Client<Block> for SubstrateClient<B, E, Block, RA> where
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
 	B::ChangesTrieStorage:
 		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	Self: BlockImport<Block, Error=ConsensusError>,
 	Block: BlockT<Hash=H256>,

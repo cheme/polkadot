@@ -36,6 +36,8 @@ use rpc::{self, apis::system::SystemInfo};
 use parking_lot::Mutex;
 use futures::sync::mpsc;
 
+type NCBlake2Hasher = client::NoClient<Blake2Hasher>;
+
 // Type aliases.
 // These exist mainly to avoid typing `<F as Factory>::Foo` all over the code.
 /// Network service type for a factory.
@@ -58,7 +60,7 @@ pub type FullExecutor<F> = client::LocalCallExecutor<
 pub type LightBackend<F> = client::light::backend::Backend<
 	client_db::light::LightStorage<<F as ServiceFactory>::Block>,
 	network::OnDemand<<F as ServiceFactory>::Block>,
-	Blake2Hasher,
+	NCBlake2Hasher,
 >;
 
 /// Light client executor type for a factory.
@@ -67,7 +69,7 @@ pub type LightExecutor<F> = client::light::call_executor::RemoteOrLocalCallExecu
 	client::light::backend::Backend<
 		client_db::light::LightStorage<<F as ServiceFactory>::Block>,
 		network::OnDemand<<F as ServiceFactory>::Block>,
-		Blake2Hasher
+		NCBlake2Hasher
 	>,
 	client::light::call_executor::RemoteCallExecutor<
 		client::light::blockchain::Blockchain<
@@ -80,7 +82,7 @@ pub type LightExecutor<F> = client::light::call_executor::RemoteOrLocalCallExecu
 		client::light::backend::Backend<
 			client_db::light::LightStorage<<F as ServiceFactory>::Block>,
 			network::OnDemand<<F as ServiceFactory>::Block>,
-			Blake2Hasher
+			NCBlake2Hasher
 		>,
 		CodeExecutor<F>
 	>
@@ -220,10 +222,14 @@ fn maintain_transaction_pool<Api, Backend, Block, Executor, PoolApi>(
 	transaction_pool: &TransactionPool<PoolApi>,
 ) -> error::Result<()> where
 	Block: BlockT<Hash = <Blake2Hasher as ::primitives::Hasher>::Out>,
-	Backend: client::backend::Backend<Block, Blake2Hasher>,
+	Backend: client::backend::Backend<Block, NCBlake2Hasher>,
+	Backend::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
+	<Backend::State as state_machine::backend::Backend<NCBlake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2Hasher>,
 	Client<Backend, Executor, Block, Api>: ProvideRuntimeApi,
 	<Client<Backend, Executor, Block, Api> as ProvideRuntimeApi>::Api: runtime_api::TaggedTransactionQueue<Block>,
-	Executor: client::CallExecutor<Block, Blake2Hasher>,
+	Executor: client::CallExecutor<Block, NCBlake2Hasher>,
 	PoolApi: txpool::ChainApi<Hash = Block::Hash, Block = Block>,
 {
 	// Avoid calling into runtime if there is nothing to prune from the pool anyway.
@@ -390,9 +396,9 @@ pub trait Components: Sized + 'static {
 	/// Associated service factory.
 	type Factory: ServiceFactory;
 	/// Client backend.
-	type Backend: 'static + client::backend::Backend<FactoryBlock<Self::Factory>, Blake2Hasher>;
+	type Backend: 'static + client::backend::Backend<FactoryBlock<Self::Factory>, NCBlake2Hasher>;
 	/// Client executor.
-	type Executor: 'static + client::CallExecutor<FactoryBlock<Self::Factory>, Blake2Hasher> + Send + Sync + Clone;
+	type Executor: 'static + client::CallExecutor<FactoryBlock<Self::Factory>, NCBlake2Hasher> + Send + Sync + Clone;
 	/// The type that implements the runtime API.
 	type RuntimeApi: Send + Sync;
 	/// A type that can start all runtime-dependent services.

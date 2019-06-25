@@ -576,6 +576,7 @@ mod tests {
 	use runtime_primitives::testing::{H256, Block as RawBlock, ExtrinsicWrapper};
 	use state_machine::backend::InMemory;
 	use primitives::Blake2Hasher;
+	type NCBlake2Hasher = client::NoClient<Blake2Hasher>;
 
 	type Block = RawBlock<ExtrinsicWrapper<u32>>;
 	#[test]
@@ -595,39 +596,39 @@ mod tests {
 
 		// blocks  [ 3a(c) 2a(c) 2b 1b 1a(c) 0 ]
 		// state   [ 5     5     4  3  2     2 ]
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![2]))], vec![], Some(h0.clone()), Some(0), || true);
 
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h0.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h0.clone()));
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h1a.clone()), Some(1), || true);
 
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h0.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h0.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![3]))], vec![], Some(h1b.clone()), Some(1), || false);
 
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h1b.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1b.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![4]))], vec![], Some(h2b.clone()), Some(2), || false);
 
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h1a.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1a.clone()));
 		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![5]))], vec![], Some(h2a.clone()), Some(2), || true);
 
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h2a.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h2a.clone()));
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h3a.clone()), Some(3), || true);
 
-		let s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h3a.clone()));
+		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h3a.clone()));
 		assert_eq!(s.storage(&key).unwrap().unwrap(), vec![5]);
 
-		let s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h1a.clone()));
+		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1a.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 
-		let s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h2b.clone()));
+		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h2b.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 
-		let s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h1b.clone()));
+		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h1b.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 
 		// reorg to 3b
 		// blocks  [ 3b(c) 3a 2a 2b(c) 1b 1a 0 ]
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h2b.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h2b.clone()));
 		s.cache.sync_cache(
 			&[h1b.clone(), h2b.clone(), h3b.clone()],
 			&[h1a.clone(), h2a.clone(), h3a.clone()],
@@ -637,7 +638,7 @@ mod tests {
 			Some(3),
 			|| true,
 		);
-		let s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h3a.clone()));
+		let s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(h3a.clone()));
 		assert!(s.storage(&key).unwrap().is_none());
 	}
 
@@ -647,7 +648,7 @@ mod tests {
 		let shared = new_shared_cache::<Block, Blake2Hasher>(109, ((109-36), 109));
 		let h0 = H256::random();
 
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
 
 		let key = H256::random()[..].to_vec();
 		let s_key = H256::random()[..].to_vec();
@@ -683,7 +684,7 @@ mod tests {
 		let shared = new_shared_cache::<Block, Blake2Hasher>(36*3, (2,3));
 		let h0 = H256::random();
 
-		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
+		let mut s = CachingState::new(InMemory::<NCBlake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
 
 		let key = H256::random()[..].to_vec();
 		s.cache.sync_cache(

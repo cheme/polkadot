@@ -175,7 +175,7 @@ fn record_proof_works() {
 	builder.push(transaction.clone()).unwrap();
 	let (block, proof) = builder.bake_and_extract_proof().expect("Bake block");
 
-	let backend = create_proof_check_backend::<<<Header as HeaderT>::Hashing as HashT>::Hasher>(
+	let mut backend = create_proof_check_backend::<client::NoClient<<<Header as HeaderT>::Hashing as HashT>::Hasher>>(
 		storage_root,
 		proof.expect("Proof was generated"),
 	).expect("Creates proof backend.");
@@ -184,7 +184,7 @@ fn record_proof_works() {
 	let mut overlay = Default::default();
 	let executor = NativeExecutor::<LocalExecutor>::new(None);
 	execution_proof_check_on_trie_backend(
-		&backend,
+		&mut backend,
 		&mut overlay,
 		&executor,
 		"Core_execute_block",

@@ -36,7 +36,7 @@ use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId};
 use log::{warn, trace};
 use primitives::hexdisplay::HexDisplay;
 use primitives::storage::{self, StorageKey, StorageData, StorageChangeSet};
-use primitives::{H256, Blake2Hasher, Bytes};
+use primitives::{H256, Blake2Hasher as Blake2HasherHasher, Bytes};
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::traits::{
 	Block as BlockT, Header, ProvideRuntimeApi, NumberFor,
@@ -47,6 +47,8 @@ use self::error::Result;
 use state_machine::{self, ExecutionStrategy};
 
 pub use self::gen_client::Client as StateClient;
+
+type Blake2Hasher = client::NoClient<Blake2HasherHasher>;
 
 /// Substrate state API
 #[rpc]
@@ -186,6 +188,10 @@ struct QueryStorageRange<Block: BlockT> {
 impl<B, E, Block: BlockT, RA> State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256>,
 	B: client::backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 {
 	/// Create new State API RPC handler.
@@ -334,6 +340,10 @@ impl<B, E, Block: BlockT, RA> State<B, E, Block, RA> where
 impl<B, E, Block, RA> State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256>,
 	B: client::backend::Backend<Block, Blake2Hasher>,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 {
 	fn unwrap_or_best(&self, hash: Option<Block::Hash>) -> Result<Block::Hash> {
@@ -344,6 +354,10 @@ impl<B, E, Block, RA> State<B, E, Block, RA> where
 impl<B, E, Block, RA> StateApi<Block::Hash> for State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256> + 'static,
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
+	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static + Clone,
 	RA: Send + Sync + 'static,
 	Client<B, E, Block, RA>: ProvideRuntimeApi,

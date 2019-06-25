@@ -31,7 +31,7 @@ use jsonrpc_derive::rpc;
 use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId};
 use log::warn;
 use parity_codec::{Encode, Decode};
-use primitives::{Bytes, Blake2Hasher, H256};
+use primitives::{Bytes, Blake2Hasher as Blake2HasherHasher, H256};
 use runtime_primitives::{generic, traits};
 use self::error::Result;
 use transaction_pool::{
@@ -44,6 +44,8 @@ use transaction_pool::{
 		watcher::Status,
 	},
 };
+
+type Blake2Hasher = client::NoClient<Blake2HasherHasher>;
 
 pub use self::gen_client::Client as AuthorClient;
 
@@ -101,6 +103,10 @@ impl<B, E, P, RA> Author<B, E, P, RA> where P: PoolChainApi + Sync + Send + 'sta
 
 impl<B, E, P, RA> AuthorApi<ExHash<P>, BlockHash<P>> for Author<B, E, P, RA> where
 	B: client::backend::Backend<<P as PoolChainApi>::Block, Blake2Hasher> + Send + Sync + 'static,
+	B::ChangesTrieStorage:
+		client::backend::PrunableStateChangesTrieStorage<<P as PoolChainApi>::Block, Blake2HasherHasher>,
+	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
+		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: client::CallExecutor<<P as PoolChainApi>::Block, Blake2Hasher> + Send + Sync + 'static,
 	P: PoolChainApi + Sync + Send + 'static,
 	P::Block: traits::Block<Hash=H256>,
