@@ -122,10 +122,6 @@ impl<B, E, Block: BlockT, RA> Chain<B, E, Block, RA> {
 impl<B, E, Block, RA> Chain<B, E, Block, RA> where
 	Block: BlockT<Hash=H256> + 'static,
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: client::CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	RA: Send + Sync + 'static
 {
@@ -176,10 +172,6 @@ impl<B, E, Block, RA> Chain<B, E, Block, RA> where
 impl<B, E, Block, RA> ChainApi<NumberFor<Block>, Block::Hash, Block::Header, SignedBlock<Block>> for Chain<B, E, Block, RA> where
 	Block: BlockT<Hash=H256> + 'static,
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: client::CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	RA: Send + Sync + 'static
 {

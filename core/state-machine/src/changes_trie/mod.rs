@@ -99,27 +99,27 @@ pub struct AnchorBlockId<Hash: ::std::fmt::Debug, Number: BlockNumber> {
 }
 
 /// Changes trie storage. Provides access to trie roots and trie nodes.
-pub trait RootsStorage<H: Hasher, Number: BlockNumber>: Send + Sync {
+pub trait RootsStorage<C: ClientExternalities, Number: BlockNumber>: Send + Sync {
 	/// Resolve hash of the block into anchor.
-	fn build_anchor(&self, hash: H::Out) -> Result<AnchorBlockId<H::Out, Number>, String>;
+	fn build_anchor(&self, hash: CHOut<C>) -> Result<AnchorBlockId<CHOut<C>, Number>, String>;
 	/// Get changes trie root for the block with given number which is an ancestor (or the block
 	/// itself) of the anchor_block (i.e. anchor_block.number >= block).
-	fn root(&self, anchor: &AnchorBlockId<H::Out, Number>, block: Number) -> Result<Option<H::Out>, String>;
+	fn root(&self, anchor: &AnchorBlockId<CHOut<C>, Number>, block: Number) -> Result<Option<CHOut<C>>, String>;
 }
 
 /// Changes trie storage. Provides access to trie roots and trie nodes.
-pub trait Storage<H: Hasher, Number: BlockNumber>: RootsStorage<H, Number> {
+pub trait Storage<C: ClientExternalities, Number: BlockNumber>: RootsStorage<C, Number> {
 	/// Get a trie node.
-	fn get(&self, key: &H::Out, prefix: &[u8]) -> Result<Option<DBValue>, String>;
+	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String>;
 }
 
 /// Changes trie storage -> trie backend essence adapter.
-pub struct TrieBackendStorageAdapter<'a, H: Hasher, Number: BlockNumber>(pub &'a dyn Storage<H, Number>);
+pub struct TrieBackendStorageAdapter<'a, C: ClientExternalities, Number: BlockNumber>(pub &'a dyn Storage<C, Number>);
 
-impl<'a, H: Hasher, N: BlockNumber> crate::TrieBackendStorage<H> for TrieBackendStorageAdapter<'a, H, N> {
-	type Overlay = trie::MemoryDB<H>;
+impl<'a, C: ClientExternalities, N: BlockNumber> crate::TrieBackendStorage<C::H> for TrieBackendStorageAdapter<'a, C, N> {
+	type Overlay = trie::MemoryDB<C::H>;
 
-	fn get(&self, key: &H::Out, prefix: &[u8]) -> Result<Option<DBValue>, String> {
+	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String> {
 		self.0.get(key, prefix)
 	}
 }
@@ -134,7 +134,7 @@ pub type Configuration = primitives::ChangesTrieConfiguration;
 pub fn compute_changes_trie_root<
   'a,
   B: Backend<C>,
-  S: Storage<C::H, Number>,
+  S: Storage<C, Number>,
   Number: BlockNumber,
   C: ClientExternalities,
 >(

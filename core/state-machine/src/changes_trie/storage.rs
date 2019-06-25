@@ -23,6 +23,7 @@ use trie::MemoryDB;
 use parking_lot::RwLock;
 use crate::changes_trie::{RootsStorage, Storage, AnchorBlockId, BlockNumber};
 use crate::trie_backend_essence::TrieBackendStorage;
+use crate::{ClientExternalities, CHOut};
 
 #[cfg(test)]
 use std::collections::HashSet;
@@ -32,14 +33,15 @@ use crate::backend::insert_into_memory_db;
 use crate::changes_trie::input::InputPair;
 
 /// In-memory implementation of changes trie storage.
-pub struct InMemoryStorage<H: Hasher, Number: BlockNumber> {
-	data: RwLock<InMemoryStorageData<H, Number>>,
+pub struct InMemoryStorage<C: ClientExternalities, Number: BlockNumber> {
+	data: RwLock<InMemoryStorageData<C::H, Number>>,
+	_ph: ::std::marker::PhantomData<C>,
 }
 
 /// Adapter for using changes trie storage as a TrieBackendEssence' storage.
-pub struct TrieBackendAdapter<'a, H: Hasher, Number: BlockNumber, S: 'a + Storage<H, Number>> {
+pub struct TrieBackendAdapter<'a, C: ClientExternalities, Number: BlockNumber, S: 'a + Storage<C, Number>> {
 	storage: &'a S,
-	_hasher: ::std::marker::PhantomData<(H, Number)>,
+	_hasher: ::std::marker::PhantomData<(C, Number)>,
 }
 
 struct InMemoryStorageData<H: Hasher, Number: BlockNumber> {
@@ -47,14 +49,15 @@ struct InMemoryStorageData<H: Hasher, Number: BlockNumber> {
 	mdb: MemoryDB<H>,
 }
 
-impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
+impl<C: ClientExternalities, Number: BlockNumber> InMemoryStorage<C, Number> {
 	/// Create the storage from given in-memory database.
-	pub fn with_db(mdb: MemoryDB<H>) -> Self {
+	pub fn with_db(mdb: MemoryDB<C::H>) -> Self {
 		Self {
 			data: RwLock::new(InMemoryStorageData {
 				roots: BTreeMap::new(),
 				mdb,
 			}),
+			_ph: Default::default(),
 		}
 	}
 
@@ -64,12 +67,13 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 	}
 
 	/// Create the storage with given blocks.
-	pub fn with_blocks(blocks: Vec<(Number, H::Out)>) -> Self {
+	pub fn with_blocks(blocks: Vec<(Number, CHOut<C>)>) -> Self {
 		Self {
 			data: RwLock::new(InMemoryStorageData {
 				roots: blocks.into_iter().collect(),
 				mdb: MemoryDB::default(),
 			}),
+			_ph: Default::default(),
 		}
 	}
 
@@ -78,7 +82,7 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 		let mut mdb = MemoryDB::default();
 		let mut roots = BTreeMap::new();
 		for (block, pairs) in inputs {
-			let root = insert_into_memory_db::<H, _>(&mut mdb, pairs.into_iter().map(Into::into));
+			let root = insert_into_memory_db::<C::H, _>(&mut mdb, pairs.into_iter().map(Into::into));
 			if let Some(root) = root {
 				roots.insert(block, root);
 			}
@@ -89,6 +93,7 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 				roots,
 				mdb,
 			}),
+			_ph: Default::default(),
 		}
 	}
 
@@ -98,7 +103,7 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 	}
 
 	#[cfg(test)]
-	pub fn remove_from_storage(&self, keys: &HashSet<H::Out>) {
+	pub fn remove_from_storage(&self, keys: &HashSet<CHOut<C>>) {
 		let mut data = self.data.write();
 		for key in keys {
 			data.mdb.remove_and_purge(key, &[]);
@@ -106,52 +111,52 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 	}
 
 	#[cfg(test)]
-	pub fn into_mdb(self) -> MemoryDB<H> {
+	pub fn into_mdb(self) -> MemoryDB<C::H> {
 		self.data.into_inner().mdb
 	}
 
 	/// Insert changes trie for given block.
-	pub fn insert(&self, block: Number, changes_trie_root: H::Out, trie: MemoryDB<H>) {
+	pub fn insert(&self, block: Number, changes_trie_root: CHOut<C>, trie: MemoryDB<C::H>) {
 		let mut data = self.data.write();
 		data.roots.insert(block, changes_trie_root);
 		data.mdb.consolidate(trie);
 	}
 }
 
-impl<H: Hasher, Number: BlockNumber> RootsStorage<H, Number> for InMemoryStorage<H, Number> {
-	fn build_anchor(&self, parent_hash: H::Out) -> Result<AnchorBlockId<H::Out, Number>, String> {
+impl<C: ClientExternalities, Number: BlockNumber> RootsStorage<C, Number> for InMemoryStorage<C, Number> {
+	fn build_anchor(&self, parent_hash: CHOut<C>) -> Result<AnchorBlockId<CHOut<C>, Number>, String> {
 		self.data.read().roots.iter()
 			.find(|(_, v)| **v == parent_hash)
 			.map(|(k, _)| AnchorBlockId { hash: parent_hash, number: k.clone() })
 			.ok_or_else(|| format!("Can't find associated number for block {:?}", parent_hash))
 	}
 
-	fn root(&self, _anchor_block: &AnchorBlockId<H::Out, Number>, block: Number) -> Result<Option<H::Out>, String> {
+	fn root(&self, _anchor_block: &AnchorBlockId<CHOut<C>, Number>, block: Number) -> Result<Option<CHOut<C>>, String> {
 		Ok(self.data.read().roots.get(&block).cloned())
 	}
 }
 
-impl<H: Hasher, Number: BlockNumber> Storage<H, Number> for InMemoryStorage<H, Number> {
-	fn get(&self, key: &H::Out, prefix: &[u8]) -> Result<Option<DBValue>, String> {
-		MemoryDB::<H>::get(&self.data.read().mdb, key, prefix)
+impl<C: ClientExternalities, Number: BlockNumber> Storage<C, Number> for InMemoryStorage<C, Number> {
+	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String> {
+		MemoryDB::<C::H>::get(&self.data.read().mdb, key, prefix)
 	}
 }
 
-impl<'a, H: Hasher, Number: BlockNumber, S: 'a + Storage<H, Number>> TrieBackendAdapter<'a, H, Number, S> {
+impl<'a, C: ClientExternalities, Number: BlockNumber, S: 'a + Storage<C, Number>> TrieBackendAdapter<'a, C, Number, S> {
 	pub fn new(storage: &'a S) -> Self {
 		Self { storage, _hasher: Default::default() }
 	}
 }
 
-impl<'a, H, Number, S> TrieBackendStorage<H> for TrieBackendAdapter<'a, H, Number, S>
+impl<'a, C, Number, S> TrieBackendStorage<C::H> for TrieBackendAdapter<'a, C, Number, S>
 	where
-		S: 'a + Storage<H, Number>,
+		S: 'a + Storage<C, Number>,
 		Number: BlockNumber,
-		H: Hasher,
+		C: ClientExternalities,
 {
-	type Overlay = MemoryDB<H>;
+	type Overlay = MemoryDB<C::H>;
 
-	fn get(&self, key: &H::Out, prefix: &[u8]) -> Result<Option<DBValue>, String> {
+	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String> {
 		self.storage.get(key, prefix)
 	}
 }

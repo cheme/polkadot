@@ -285,7 +285,7 @@ impl<E, C, B: BlockT, S: BlockchainStorage<B>, F> LightDataChecker<E, C, B, S, F
 		}
 
 		// and now check the key changes proof + get the changes
-		key_changes_proof_check::<_, C::H, _>(
+		key_changes_proof_check::<_, C, _>(
 			&request.changes_trie_config,
 			&RootsStorage {
 				roots: (request.tries_roots.0, &request.tries_roots.2),
@@ -446,24 +446,24 @@ struct RootsStorage<'a, Number: SimpleArithmetic, Hash: 'a> {
 	prev_roots: BTreeMap<Number, Hash>,
 }
 
-impl<'a, H, Number, Hash> ChangesTrieRootsStorage<H, Number> for RootsStorage<'a, Number, Hash>
+impl<'a, C, Number, Hash> ChangesTrieRootsStorage<C, Number> for RootsStorage<'a, Number, Hash>
 	where
-		H: Hasher,
+		C: ClientExternalities,
 		Number: ::std::fmt::Display + Clone + SimpleArithmetic + Encode + Decode + Send + Sync + 'static,
 		Hash: 'a + Send + Sync + Clone + AsRef<[u8]>,
 {
 	fn build_anchor(
 		&self,
-		_hash: H::Out,
-	) -> Result<state_machine::ChangesTrieAnchorBlockId<H::Out, Number>, String> {
+		_hash: CHOut<C>,
+	) -> Result<state_machine::ChangesTrieAnchorBlockId<CHOut<C>, Number>, String> {
 		Err("build_anchor is only called when building block".into())
 	}
 
 	fn root(
 		&self,
-		_anchor: &ChangesTrieAnchorBlockId<H::Out, Number>,
+		_anchor: &ChangesTrieAnchorBlockId<CHOut<C>, Number>,
 		block: Number,
-	) -> Result<Option<H::Out>, String> {
+	) -> Result<Option<CHOut<C>>, String> {
 		// we can't ask for roots from parallel forks here => ignore anchor
 		let root = if block < self.roots.0 {
 			self.prev_roots.get(&Number::unique_saturated_from(block)).cloned()
@@ -476,7 +476,7 @@ impl<'a, H, Number, Hash> ChangesTrieRootsStorage<H, Number> for RootsStorage<'a
 		};
 
 		Ok(root.map(|root| {
-			let mut hasher_root: H::Out = Default::default();
+			let mut hasher_root: CHOut<C> = Default::default();
 			hasher_root.as_mut().copy_from_slice(root.as_ref());
 			hasher_root
 		}))

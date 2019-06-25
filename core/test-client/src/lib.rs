@@ -165,10 +165,6 @@ impl<Executor, Backend, G: GenesisInit> TestClientBuilder<
 	) where
 		Executor: client::CallExecutor<Block, CliExt>,
 		Backend: client::backend::Backend<Block, CliExt>,
-		Backend::ChangesTrieStorage:
-			client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
-		<Backend::State as state_machine::Backend<CliExt>>::TrieBackendStorage:
-			state_machine::TrieBackendStorage<Blake2Hasher>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
 	{
 
@@ -220,10 +216,6 @@ impl<E, Backend, G: GenesisInit> TestClientBuilder<
 		I: Into<Option<executor::NativeExecutor<E>>>,
 		E: executor::NativeExecutionDispatch,
 		Backend: client::backend::Backend<Block, CliExt>,
-		Backend::ChangesTrieStorage:
-			client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
-		<Backend::State as state_machine::Backend<CliExt>>::TrieBackendStorage:
-			state_machine::TrieBackendStorage<Blake2Hasher>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
 	{
 		let executor = executor.into().unwrap_or_else(|| executor::NativeExecutor::new(None));

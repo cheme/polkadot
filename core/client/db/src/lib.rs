@@ -589,7 +589,7 @@ impl<Block: BlockT<Hash=H256>> DbChangesTrieStorage<Block> {
 	}
 }
 
-impl<Block> client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>
+impl<Block> client::backend::PrunableStateChangesTrieStorage<Block, NCBlake2Hasher>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -610,7 +610,7 @@ where
 	}
 }
 
-impl<Block> state_machine::ChangesTrieRootsStorage<Blake2Hasher, NumberFor<Block>>
+impl<Block> state_machine::ChangesTrieRootsStorage<NCBlake2Hasher, NumberFor<Block>>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,
@@ -677,7 +677,7 @@ where
 	}
 }
 
-impl<Block> state_machine::ChangesTrieStorage<Blake2Hasher, NumberFor<Block>>
+impl<Block> state_machine::ChangesTrieStorage<NCBlake2Hasher, NumberFor<Block>>
 	for DbChangesTrieStorage<Block>
 where
 	Block: BlockT<Hash=H256>,

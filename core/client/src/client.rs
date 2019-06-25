@@ -296,9 +296,6 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 		S: BuildStorage,
 		Block: BlockT<Hash=H256>,
 		B: backend::LocalBackend<Block, Blake2Hasher>,
-		B::ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-		<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-			state_machine::TrieBackendStorage<Blake2HasherHasher>,
 {
 	let call_executor = LocalCallExecutor::new(backend.clone(), executor);
 	Client::new(backend, call_executor, build_genesis_storage, Default::default())
@@ -307,9 +304,6 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
 	// TODO EMCH two bad backend constraint (no relation of constraint of inner types)
-	B::ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -554,7 +548,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		let last_number = self.backend.blockchain().expect_block_number_from_id(&last)?;
 		let last_hash = self.backend.blockchain().expect_block_hash_from_id(&last)?;
 
-		key_changes::<_, Blake2HasherHasher, _>(
+		key_changes::<_, Blake2Hasher, _>(
 			&config,
 			&*storage,
 			first,
@@ -603,12 +597,12 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		cht_size: NumberFor<Block>,
 	) -> error::Result<ChangesProof<Block::Header>> {
 		struct AccessedRootsRecorder<'a, Block: BlockT> {
-			storage: &'a dyn ChangesTrieStorage<Blake2HasherHasher, NumberFor<Block>>,
+			storage: &'a dyn ChangesTrieStorage<Blake2Hasher, NumberFor<Block>>,
 			min: NumberFor<Block>,
 			required_roots_proofs: Mutex<BTreeMap<NumberFor<Block>, H256>>,
 		};
 
-		impl<'a, Block: BlockT> ChangesTrieRootsStorage<Blake2HasherHasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
+		impl<'a, Block: BlockT> ChangesTrieRootsStorage<Blake2Hasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
 			fn build_anchor(&self, hash: H256) -> Result<ChangesTrieAnchorBlockId<H256, NumberFor<Block>>, String> {
 				self.storage.build_anchor(hash)
 			}
@@ -631,7 +625,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			}
 		}
 
-		impl<'a, Block: BlockT> ChangesTrieStorage<Blake2HasherHasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
+		impl<'a, Block: BlockT> ChangesTrieStorage<Blake2Hasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
 			fn get(&self, key: &H256, prefix: &[u8]) -> Result<Option<DBValue>, String> {
 				self.storage.get(key, prefix)
 			}
@@ -656,7 +650,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			.expect_block_number_from_id(&BlockId::Hash(first))?;
 		let last_number = self.backend.blockchain()
 			.expect_block_number_from_id(&BlockId::Hash(last))?;
-		let key_changes_proof = key_changes_proof::<_, Blake2HasherHasher, _>(
+		let key_changes_proof = key_changes_proof::<_, Blake2Hasher, _>(
 			&config,
 			&recording_storage,
 			first_number,
@@ -1431,7 +1425,6 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync
@@ -1459,7 +1452,6 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> wher
 
 impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	Block: BlockT<Hash=H256>,
 {
 	fn cache(&self) -> Option<Arc<dyn Cache<Block>>> {
@@ -1469,9 +1461,6 @@ impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 	RA: ConstructRuntimeApi<Block, Self>
@@ -1485,9 +1474,6 @@ impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 {
@@ -1547,9 +1533,6 @@ impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 {
@@ -1595,7 +1578,6 @@ impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> 
 
 impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -1607,10 +1589,6 @@ impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> BlockNumberToHash for Client<B, E, Block, RA> where
 	B: backend::Backend<Block, Blake2Hasher>,
-  // TODO EMCH those backend constraint (a similaro other one): find a way to skip tem.
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -1670,7 +1648,6 @@ impl<B, Block> Clone for LongestChain<B, Block> {
 impl<B, Block> LongestChain<B, Block>
 where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	Block: BlockT<Hash=H256>,
 {
 	/// Instantiate a new LongestChain for Backend B
@@ -1816,7 +1793,6 @@ where
 impl<B, Block> SelectChain<Block> for LongestChain<B, Block>
 where
 	B: backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
 	Block: BlockT<Hash=H256>,
 {
 
@@ -1845,9 +1821,6 @@ where
 impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 	where
 		B: backend::Backend<Block, Blake2Hasher>,
-		B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-		<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-			state_machine::TrieBackendStorage<Blake2HasherHasher>,
 		E: CallExecutor<Block, Blake2Hasher>,
 		Block: BlockT<Hash=H256>,
 {
@@ -1859,9 +1832,6 @@ impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 impl<B, E, Block, RA> backend::AuxStore for Client<B, E, Block, RA>
 	where
 		B: backend::Backend<Block, Blake2Hasher>,
-		B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-		<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-			state_machine::TrieBackendStorage<Blake2HasherHasher>,
 		E: CallExecutor<Block, Blake2Hasher>,
 		Block: BlockT<Hash=H256>,
 {

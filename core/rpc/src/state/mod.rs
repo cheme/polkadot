@@ -188,10 +188,6 @@ struct QueryStorageRange<Block: BlockT> {
 impl<B, E, Block: BlockT, RA> State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256>,
 	B: client::backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 {
 	/// Create new State API RPC handler.
@@ -340,10 +336,6 @@ impl<B, E, Block: BlockT, RA> State<B, E, Block, RA> where
 impl<B, E, Block, RA> State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256>,
 	B: client::backend::Backend<Block, Blake2Hasher>,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher>,
 {
 	fn unwrap_or_best(&self, hash: Option<Block::Hash>) -> Result<Block::Hash> {
@@ -354,10 +346,6 @@ impl<B, E, Block, RA> State<B, E, Block, RA> where
 impl<B, E, Block, RA> StateApi<Block::Hash> for State<B, E, Block, RA> where
 	Block: BlockT<Hash=H256> + 'static,
 	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static + Clone,
 	RA: Send + Sync + 'static,
 	Client<B, E, Block, RA>: ProvideRuntimeApi,

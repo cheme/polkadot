@@ -24,6 +24,7 @@ use crate::proving_backend::ProvingBackendEssence;
 use crate::trie_backend_essence::TrieBackendEssence;
 use crate::changes_trie::{AnchorBlockId, Configuration, Storage, BlockNumber};
 use crate::changes_trie::storage::TrieBackendAdapter;
+use crate::{ClientExternalities, CHOut};
 
 /// Get number of oldest block for which changes trie is not pruned
 /// given changes trie configuration, pruning parameter and number of
@@ -47,11 +48,11 @@ pub fn oldest_non_pruned_trie<Number: BlockNumber>(
 /// `min_blocks_to_keep` blocks. We only prune changes tries at `max_digest_interval`
 /// ranges.
 /// Returns MemoryDB that contains all deleted changes tries nodes.
-pub fn prune<S: Storage<H, Number>, H: Hasher, Number: BlockNumber, F: FnMut(H::Out)>(
+pub fn prune<S: Storage<C, Number>, C: ClientExternalities, Number: BlockNumber, F: FnMut(CHOut<C>)>(
 	config: &Configuration,
 	storage: &S,
 	min_blocks_to_keep: Number,
-	current_block: &AnchorBlockId<H::Out, Number>,
+	current_block: &AnchorBlockId<CHOut<C>, Number>,
 	mut remove_trie_node: F,
 ) {
 	// select range for pruning
@@ -84,9 +85,9 @@ pub fn prune<S: Storage<H, Number>, H: Hasher, Number: BlockNumber, F: FnMut(H::
 
 		// enumerate all changes trie' keys, recording all nodes that have been 'touched'
 		// (effectively - all changes trie nodes)
-		let mut proof_recorder: Recorder<H::Out> = Default::default();
+		let mut proof_recorder: Recorder<CHOut<C>> = Default::default();
 		{
-			let mut trie = ProvingBackendEssence::<_, H> {
+			let mut trie = ProvingBackendEssence::<_, C::H> {
 				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
 				proof_recorder: &mut proof_recorder,
 			};
@@ -178,12 +179,12 @@ mod tests {
 		}
 	}
 
-	fn prune_by_collect<S: Storage<H, u64>, H: Hasher>(
+	fn prune_by_collect<S: Storage<C, u64>, C: ClientExternalities>(
 		config: &Configuration,
 		storage: &S,
 		min_blocks_to_keep: u64,
 		current_block: u64,
-	) -> HashSet<H::Out> {
+	) -> HashSet<CHOut<C>> {
 		let mut pruned_trie_nodes = HashSet::new();
 		prune(config, storage, min_blocks_to_keep, &AnchorBlockId { hash: Default::default(), number: current_block },
 			|node| { pruned_trie_nodes.insert(node); });
@@ -192,7 +193,7 @@ mod tests {
 
 	#[test]
 	fn prune_works() {
-		fn prepare_storage() -> InMemoryStorage<Blake2Hasher, u64> {
+		fn prepare_storage() -> InMemoryStorage<crate::client::NoClient<Blake2Hasher>, u64> {
 			let mut mdb1 = MemoryDB::<Blake2Hasher>::default();
 			let root1 = insert_into_memory_db::<Blake2Hasher, _>(&mut mdb1, vec![(vec![10], vec![20])]).unwrap();
 			let mut mdb2 = MemoryDB::<Blake2Hasher>::default();

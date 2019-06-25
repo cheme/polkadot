@@ -182,9 +182,6 @@ impl<B, E> Clone for LocalCallExecutor<B, E> where E: Clone {
 impl<B, E, Block> CallExecutor<Block, Blake2Hasher> for LocalCallExecutor<B, E>
 where
 	B: backend::Backend<Block, Blake2Hasher>,
-  B::ChangesTrieStorage: backend::PrunableStateChangesTrieStorage<Block, Blake2HasherHasher>,
-	<B::State as state_machine::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: CodeExecutor<Blake2HasherHasher> + RuntimeInfo,
 	Block: BlockT<Hash=H256>,
 {
@@ -325,10 +322,7 @@ where
 		manager: ExecutionManager<F>,
 		native_call: Option<NC>,
 		side_effects_handler: Option<&mut O>,
-	) -> error::Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<Blake2HasherHasher>>)>
-		where
-			S::TrieBackendStorage: state_machine::TrieBackendStorage<Blake2HasherHasher>,
-	{
+	) -> error::Result<(NativeOrEncoded<R>, S::Transaction, Option<MemoryDB<Blake2HasherHasher>>)> {
 		state_machine::new(
 			state,
 			self.backend.changes_trie_storage(),

@@ -57,9 +57,6 @@ pub trait ClientExt<Block: BlockT>: Sized {
 impl<B, E, RA, Block> ClientExt<Block> for Client<B, E, Block, RA>
 	where
 		B: client::backend::Backend<Block, CliExt>,
-		B::ChangesTrieStorage: client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
-		<B::State as state_machine::Backend<CliExt>>::TrieBackendStorage:
-			state_machine::TrieBackendStorage<Blake2Hasher>,
 		E: client::CallExecutor<Block, CliExt>,
 		Self: BlockImport<Block, Error=ConsensusError>,
 		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,

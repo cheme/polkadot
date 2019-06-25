@@ -223,10 +223,6 @@ fn maintain_transaction_pool<Api, Backend, Block, Executor, PoolApi>(
 ) -> error::Result<()> where
 	Block: BlockT<Hash = <Blake2Hasher as ::primitives::Hasher>::Out>,
 	Backend: client::backend::Backend<Block, NCBlake2Hasher>,
-	Backend::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
-	<Backend::State as state_machine::backend::Backend<NCBlake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2Hasher>,
 	Client<Backend, Executor, Block, Api>: ProvideRuntimeApi,
 	<Client<Backend, Executor, Block, Api> as ProvideRuntimeApi>::Api: runtime_api::TaggedTransactionQueue<Block>,
 	Executor: client::CallExecutor<Block, NCBlake2Hasher>,

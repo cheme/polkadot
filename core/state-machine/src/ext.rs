@@ -92,7 +92,7 @@ where
 impl<'a, N, B, T, O, C> Ext<'a, N, B, T, O, C>
 where
 	B: 'a + Backend<C>,
-	T: 'a + ChangesTrieStorage<C::H, N>,
+	T: 'a + ChangesTrieStorage<C, N>,
 	O: 'a + offchain::Externalities,
 	C: 'a + ClientExternalities,
 	CHOut<C>: Ord + 'static,
@@ -146,7 +146,7 @@ where
 impl<'a, N, B, T, O, C> Ext<'a, N, B, T, O, C>
 where
 	B: 'a + Backend<C>,
-	T: 'a + ChangesTrieStorage<C::H, N>,
+	T: 'a + ChangesTrieStorage<C, N>,
 	O: 'a + offchain::Externalities,
 	C: 'a + ClientExternalities,
 	N: crate::changes_trie::BlockNumber,
@@ -168,7 +168,7 @@ where
 impl<'a, B, T, N, O, C> Externalities<C::H> for Ext<'a, N, B, T, O, C>
 where
 	B: 'a + Backend<C>,
-	T: 'a + ChangesTrieStorage<C::H, N>,
+	T: 'a + ChangesTrieStorage<C, N>,
 	O: 'a + offchain::Externalities,
 	C: 'a + ClientExternalities,
 	CHOut<C>: Ord + 'static,
@@ -391,7 +391,7 @@ mod tests {
 
 
 	type TestBackend = InMemory<ClientExt>;
-	type TestChangesTrieStorage = InMemoryChangesTrieStorage<Blake2Hasher, u64>;
+	type TestChangesTrieStorage = InMemoryChangesTrieStorage<ClientExt, u64>;
 	type TestExt<'a> = Ext<'a, u64, TestBackend, TestChangesTrieStorage, crate::NeverOffchainExt, ClientExt>;
 
 	fn prepare_overlay_with_changes() -> OverlayedChanges {

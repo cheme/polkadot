@@ -51,7 +51,7 @@ impl<H: Hasher> ClientExternalities for NoClient<H> {
 pub struct TestExternalities<N: ChangesTrieBlockNumber, C: ClientExternalities> {
 	overlay: OverlayedChanges,
 	backend: InMemory<C>,
-	changes_trie_storage: ChangesTrieInMemoryStorage<C::H, N>,
+	changes_trie_storage: ChangesTrieInMemoryStorage<C, N>,
 	reroot: Option<u64>,
 	offchain: Option<Box<dyn offchain::Externalities>>,
 }
@@ -106,7 +106,7 @@ impl<N: ChangesTrieBlockNumber, C: ClientExternalities> TestExternalities<N, C> 
 	}
 
 	/// Get mutable reference to changes trie storage.
-	pub fn changes_trie_storage(&mut self) -> &mut ChangesTrieInMemoryStorage<C::H, N> {
+	pub fn changes_trie_storage(&mut self) -> &mut ChangesTrieInMemoryStorage<C, N> {
 		&mut self.changes_trie_storage
 	}
 }

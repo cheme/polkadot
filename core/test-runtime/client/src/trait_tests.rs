@@ -35,10 +35,6 @@ use super::client;
 /// helper to test the `leaves` implementation for various backends
 pub fn test_leaves_for_backend<B: 'static>(backend: Arc<B>) where
 	B: backend::LocalBackend<runtime::Block, CliExt>,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
-	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	// block tree:
 	// G -> A1 -> A2 -> A3 -> A4 -> A5
@@ -155,10 +151,6 @@ pub fn test_leaves_for_backend<B: 'static>(backend: Arc<B>) where
 /// helper to test the `children` implementation for various backends
 pub fn test_children_for_backend<B: 'static>(backend: Arc<B>) where
 	B: backend::LocalBackend<runtime::Block, CliExt>,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
-	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	// block tree:
 	// G -> A1 -> A2 -> A3 -> A4 -> A5
@@ -250,10 +242,6 @@ pub fn test_children_for_backend<B: 'static>(backend: Arc<B>) where
 
 pub fn test_blockchain_query_by_number_gets_canonical<B: 'static>(backend: Arc<B>) where
 	B: backend::LocalBackend<runtime::Block, CliExt>,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
-	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	// block tree:
 	// G -> A1 -> A2 -> A3 -> A4 -> A5

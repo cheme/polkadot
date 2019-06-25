@@ -44,7 +44,7 @@ pub fn prepare_input<'a, B, S, Number, C>(
 ) -> Result<Option<Vec<InputPair<Number>>>, String>
 	where
 		B: Backend<C>,
-		S: Storage<C::H, Number>,
+		S: Storage<C, Number>,
 		C: ClientExternalities,
 		Number: BlockNumber,
 {
@@ -53,7 +53,7 @@ pub fn prepare_input<'a, B, S, Number, C>(
 		backend,
 		parent.number.clone() + 1.into(),
 		changes)?);
-	input.extend(prepare_digest_input::<_, C::H, Number>(
+	input.extend(prepare_digest_input::<_, C, Number>(
 		parent,
 		config,
 		storage)?);
@@ -99,22 +99,22 @@ fn prepare_extrinsics_input<B, Number, C>(
 }
 
 /// Prepare DigestIndex input pairs.
-fn prepare_digest_input<'a, S, H, Number>(
-	parent: &'a AnchorBlockId<H::Out, Number>,
+fn prepare_digest_input<'a, S, C, Number>(
+	parent: &'a AnchorBlockId<CHOut<C>, Number>,
 	config: &Configuration,
 	storage: &'a S
 ) -> Result<impl Iterator<Item=InputPair<Number>> + 'a, String>
 	where
-		S: Storage<H, Number>,
-		H: Hasher,
-		H::Out: 'a,
+		S: Storage<C, Number>,
+		C: ClientExternalities,
+		CHOut<C>: 'a,
 		Number: BlockNumber,
 {
 	let mut digest_map = BTreeMap::<Vec<u8>, BTreeSet<Number>>::new();
 	for digest_build_block in digest_build_iterator(config, parent.number.clone() + One::one()) {
 		let trie_root = storage.root(parent, digest_build_block.clone())?;
 		let trie_root = trie_root.ok_or_else(|| format!("No changes trie root for block {}", digest_build_block.clone()))?;
-		let trie_storage = TrieBackendEssence::<_, H>::new(
+		let trie_storage = TrieBackendEssence::<_, C::H>::new(
 			crate::changes_trie::TrieBackendStorageAdapter(storage),
 			trie_root,
 		);
@@ -157,7 +157,7 @@ mod test {
 
 	fn prepare_for_build() -> (
 		InMemory<ClientExt>,
-		InMemoryStorage<Blake2Hasher, u64>,
+		InMemoryStorage<ClientExt, u64>,
 		OverlayedChanges,
 	) {
 		let backend: InMemory<_> = vec![

@@ -159,10 +159,6 @@ impl<B> TestClientBuilderExt<B> for TestClientBuilder<
 	B
 > where
 	B: client::backend::Backend<runtime::Block, CliExt>,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<runtime::Block, Blake2Hasher>,
-	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2Hasher>,
 {
 	fn set_support_changes_trie(mut self, support_changes_trie: bool) -> Self {
 		self.genesis_init_mut().support_changes_trie = support_changes_trie;

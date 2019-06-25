@@ -492,7 +492,7 @@ impl<'a, N, B, T, O, Exec, C> StateMachine<'a, N, B, T, O, Exec, C> where
 	C: ClientExternalities,
 	Exec: CodeExecutor<C::H>,
 	B: Backend<C>,
-	T: ChangesTrieStorage<C::H, N>,
+	T: ChangesTrieStorage<C, N>,
 	O: offchain::Externalities,
 	CHOut<C>: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
@@ -717,7 +717,7 @@ where
 	let (result, _, _) = {
 		let mut sm = StateMachine {
 			backend: &mut proving_backend,
-			changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<C::H, u64>>,
+			changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<C, u64>>,
 			offchain_ext: NeverOffchainExt::new(),
 			overlay,
 			exec,
@@ -769,7 +769,7 @@ where
 {
 	let mut sm = StateMachine {
 		backend: trie_backend,
-		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<C::H, u64>>,
+		changes_trie_storage: None as Option<&changes_trie::InMemoryStorage<C, u64>>,
 		offchain_ext: NeverOffchainExt::new(),
 		overlay,
 		exec,
@@ -1018,7 +1018,7 @@ mod tests {
 	fn execute_works() {
 		assert_eq!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1039,7 +1039,7 @@ mod tests {
 	fn execute_works_with_native_else_wasm() {
 		assert_eq!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1060,7 +1060,7 @@ mod tests {
 		let mut consensus_failed = false;
 		assert!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1129,7 +1129,7 @@ mod tests {
 		};
 
 		{
-			let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
+			let changes_trie_storage = InMemoryChangesTrieStorage::<ClientExt, u64>::new();
 			let mut ext = Ext::new(&mut overlay, backend, Some(&changes_trie_storage), NeverOffchainExt::new());
 			ext.clear_prefix(b"ab");
 		}
@@ -1153,7 +1153,7 @@ mod tests {
 	fn set_child_storage_works() {
 		let mut state = InMemory::<ClientExt>::default();
 		let backend = state.as_trie_backend().unwrap();
-		let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
+		let changes_trie_storage = InMemoryChangesTrieStorage::<ClientExt, u64>::new();
 		let mut overlay = OverlayedChanges::default();
 		let mut ext = Ext::new(
 			&mut overlay,
@@ -1233,7 +1233,7 @@ mod tests {
 	fn cannot_change_changes_trie_config() {
 		assert!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {
@@ -1253,7 +1253,7 @@ mod tests {
 	fn cannot_change_changes_trie_config_with_native_else_wasm() {
 		assert!(new(
 			&mut trie_backend::tests::test_trie(),
-			Some(&InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new()),
+			Some(&InMemoryChangesTrieStorage::<ClientExt, u64>::new()),
 			NeverOffchainExt::new(),
 			&mut Default::default(),
 			&DummyCodeExecutor {

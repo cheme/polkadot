@@ -103,10 +103,6 @@ impl<B, E, P, RA> Author<B, E, P, RA> where P: PoolChainApi + Sync + Send + 'sta
 
 impl<B, E, P, RA> AuthorApi<ExHash<P>, BlockHash<P>> for Author<B, E, P, RA> where
 	B: client::backend::Backend<<P as PoolChainApi>::Block, Blake2Hasher> + Send + Sync + 'static,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<<P as PoolChainApi>::Block, Blake2HasherHasher>,
-	<B::State as state_machine::backend::Backend<Blake2Hasher>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2HasherHasher>,
 	E: client::CallExecutor<<P as PoolChainApi>::Block, Blake2Hasher> + Send + Sync + 'static,
 	P: PoolChainApi + Sync + Send + 'static,
 	P::Block: traits::Block<Hash=H256>,

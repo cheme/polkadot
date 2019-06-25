@@ -146,7 +146,7 @@ pub trait Backend<Block, C>: AuxStore + Send + Sync where
 	/// Associated state backend type.
 	type State: StateBackend<C>;
 	/// Changes trie storage.
-	type ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, C::H>;
+	type ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, C>;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	/// When constructing the genesis, this is called with all-zero hash.
@@ -203,8 +203,8 @@ pub trait Backend<Block, C>: AuxStore + Send + Sync where
 }
 
 /// Changes trie storage that supports pruning.
-pub trait PrunableStateChangesTrieStorage<Block: BlockT, H: Hasher>:
-	StateChangesTrieStorage<H, NumberFor<Block>>
+pub trait PrunableStateChangesTrieStorage<Block: BlockT, C: ClientExternalities>:
+	StateChangesTrieStorage<C, NumberFor<Block>>
 {
 	/// Get number block of oldest, non-pruned changes trie.
 	fn oldest_changes_trie_block(

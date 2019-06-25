@@ -71,8 +71,6 @@ impl<'a, B, E, Block, RA> BlockBuilder<Block>
 	for client::block_builder::BlockBuilder<'a, Block, SubstrateClient<B, E, Block, RA>>
 where
 	B: client::backend::Backend<Block, CliExt> + 'static,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
 	E: CallExecutor<Block, CliExt> + Send + Sync + Clone + 'static,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync + 'static,
@@ -86,10 +84,6 @@ where
 
 impl<B, E, Block, RA> AuthoringApi for SubstrateClient<B, E, Block, RA> where
 	B: client::backend::Backend<Block, CliExt> + Send + Sync + 'static,
-	B::ChangesTrieStorage:
-		client::backend::PrunableStateChangesTrieStorage<Block, Blake2Hasher>,
-	<B::State as state_machine::backend::Backend<CliExt>>::TrieBackendStorage:
-		state_machine::TrieBackendStorage<Blake2Hasher>,
 	E: CallExecutor<Block, CliExt> + Send + Sync + Clone + 'static,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync + 'static,
