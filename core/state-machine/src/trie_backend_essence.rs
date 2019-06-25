@@ -279,7 +279,7 @@ impl<'a,
 /// Key-value pairs storage that is used by trie backend essence.
 pub trait TrieBackendStorage<C: ClientExternalities>: Send + Sync {
 	/// Type of in-memory overlay.
-	type Overlay: hash_db::HashDB<C::H, DBValue> + Default + Consolidate;
+	type Overlay: hash_db::HashDB<<C as ClientExternalities>::H, DBValue> + Default + Consolidate;
 	/// Get the value stored at key.
 	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String>;
 }

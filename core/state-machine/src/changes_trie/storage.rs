@@ -138,7 +138,9 @@ impl<C: ClientExternalities, Number: BlockNumber> RootsStorage<C, Number> for In
 
 impl<C: ClientExternalities, Number: BlockNumber> Storage<C, Number> for InMemoryStorage<C, Number> {
 	fn get(&self, key: &CHOut<C>, prefix: &[u8]) -> Result<Option<DBValue>, String> {
-		MemoryDB::<C::H>::get(&self.data.read().mdb, key, prefix)
+		// TODO EMCH change of call method here TOOD try to find which on was
+		// call before.
+		Ok(hash_db::HashDB::<C::H, _>::get(&self.data.read().mdb, key, prefix))
 	}
 }
 
