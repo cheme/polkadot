@@ -519,8 +519,10 @@ struct DbGenesisStorage(pub H256);
 impl DbGenesisStorage {
 	pub fn new() -> Self {
 		let mut root = H256::default();
-		let mut mdb = MemoryDB::<Blake2Hasher>::default();
-		state_machine::TrieDBMut::<Blake2Hasher>::new(&mut mdb, &mut root);
+		{
+			let mut mdb = MemoryDB::<Blake2Hasher>::default();
+			state_machine::TrieDBMut::<Blake2Hasher>::new(&mut mdb, &mut root);
+		}
 		DbGenesisStorage(root)
 	}
 }

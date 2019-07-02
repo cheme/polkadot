@@ -24,6 +24,7 @@ use rstd::convert::{TryInto, TryFrom};
 use crate::storage::well_known_keys::CHILD_STORAGE_KEY_PREFIX;
 #[cfg(feature = "std")]
 pub use impl_serde::serialize as bytes;
+use hash_db::Hasher;
 
 /// `KeySpace` type contains a unique identifier to use for accessing
 /// child trie node in a underlying key value database.
@@ -41,13 +42,14 @@ pub use impl_serde::serialize as bytes;
 pub type KeySpace = Vec<u8>;
 
 
+#[cfg(not(feature = "legacy-trie"))]
 /// Keyspace to use for the parent trie key.
 pub const NO_CHILD_KEYSPACE: [u8;2] = [0, 0];
 
-// see FIXME #2741 for removal of this allocation on every operation.
-// (the PrefixedDB one is enough). Method could be to pass mutable
-// vector to `KeyFunction` and have an new key function to estimate
-// required additional allocation size.
+#[cfg(feature = "legacy-trie")]
+// Keyspace to use for the parent trie key.
+const NO_CHILD_KEYSPACE: [u8;0] = [];
+
 /// Generate a new keyspace for a child trie.
 pub fn generate_keyspace<N>(block_nb: &N, parent_trie: &ParentTrie) -> Vec<u8>
 	where
@@ -80,17 +82,32 @@ pub fn generate_keyspace<N>(block_nb: &N, parent_trie: &ParentTrie) -> Vec<u8>
 	result
 }
 
+// see FIXME #2741 for removal of this allocation on every operation.
+// Simpliest would be to put an additional optional field in prefix.
 /// Utility function used for merging `KeySpace` data and `prefix` data
 /// before calling key value database primitives.
 /// Note that it currently does a costy append operation resulting in bigger
 /// key length but possibly allowing prefix related operation at lower level.
-pub fn keyspace_as_prefix_alloc(ks: &KeySpace, prefix: &[u8]) -> Vec<u8> {
-	let n_pre_len = NO_CHILD_KEYSPACE.len();
-	// only use on prefixed db where NO_CHILD_KEYSPACE is added.
-	debug_assert!(prefix.len() >= n_pre_len);
-	let mut res = rstd::vec![0; ks.len() + prefix.len() - n_pre_len];
-	res[..ks.len()].copy_from_slice(&ks);
-	res[ks.len()..].copy_from_slice(&prefix[n_pre_len..]);
+pub fn keyspace_as_prefix_alloc(ks: Option<&KeySpace>, prefix: &[u8]) -> Vec<u8> {
+	if let Some(ks) = ks {
+		let mut res = rstd::vec![0; ks.len() + prefix.len()];
+		res[..ks.len()].copy_from_slice(&ks);
+		res[ks.len()..].copy_from_slice(prefix);
+		res
+	} else {
+		let mut res = rstd::vec![0; NO_CHILD_KEYSPACE.len() + prefix.len()];
+		res[..NO_CHILD_KEYSPACE.len()].copy_from_slice(&NO_CHILD_KEYSPACE[..]);
+		res[NO_CHILD_KEYSPACE.len()..].copy_from_slice(prefix);
+		res
+	}
+}
+
+/// Make database key from hash and prefix.
+/// (here prefix already contains optional keyspace).
+pub fn prefixed_key<H: Hasher>(key: &H::Out, prefix: &[u8]) -> Vec<u8> {
+	let mut res = Vec::with_capacity(prefix.len() + key.as_ref().len());
+	res.extend_from_slice(prefix);
+	res.extend_from_slice(key.as_ref());
 	res
 }
 
