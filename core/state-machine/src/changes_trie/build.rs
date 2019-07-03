@@ -30,7 +30,7 @@ use crate::client::Externalities as ClientExternalities;
 
 /// Prepare input pairs for building a changes trie of given block.
 ///
-/// Returns Err if storage error has occured OR if storage haven't returned
+/// Returns Err if storage error has occurred OR if storage haven't returned
 /// required data.
 /// Returns Ok(None) data required to prepare input pairs is not collected
 /// or storage is not provided.
