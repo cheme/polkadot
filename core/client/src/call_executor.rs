@@ -322,8 +322,8 @@ where
 		side_effects_handler: Option<&mut O>,
 	) -> error::Result<(
 		NativeOrEncoded<R>,
-		(S::Transaction, <Blake2Hasher as Hasher>::Out),
-		Option<MemoryDB<Blake2Hasher>>,
+		(S::Transaction, <Blake2HasherHasher as Hasher>::Out),
+		Option<MemoryDB<Blake2HasherHasher>>,
 	)> {
 		state_machine::new(
 			state,

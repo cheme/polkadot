@@ -223,6 +223,7 @@ impl<H, N, C> Externalities<H> for TestExternalities<H, C, N>
 		let _guard = panic_handler::AbortGuard::new(true);
 		self.overlay.clear();
 		self.reroot = Some(block_number);
+    // TODO here self.backend reroot not ok?? -> InMemory not impl
 		// TODO EMCH change trie storage?
 		// TODO EMCH change offline externalities?
 	}

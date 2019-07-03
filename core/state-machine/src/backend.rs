@@ -419,6 +419,7 @@ impl<H: Hasher, C: ClientExternalities<H>> Backend<H, C> for InMemory<H, C> {
 	}
 
 	fn reroot(&mut self, hash: u64) -> bool {
+    println!("------InMemory reroot returning false");
 		// fetch trie backend then get all kv into this memory
     // TODO probably sure it is a bad idea to implement
     // TODO InMemory should be only for building new block

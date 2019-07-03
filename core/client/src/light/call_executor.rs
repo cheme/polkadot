@@ -177,8 +177,8 @@ where
 		_side_effects_handler: Option<&mut O>,
 	) -> ClientResult<(
 		NativeOrEncoded<R>,
-		(S::Transaction, <Blake2Hasher as Hasher>::Out),
-		Option<MemoryDB<Blake2Hasher>>,
+		(S::Transaction, <Blake2HasherHasher as Hasher>::Out),
+		Option<MemoryDB<Blake2HasherHasher>>,
 	)> {
 		Err(ClientError::NotAvailableOnLightClient.into())
 	}
@@ -354,8 +354,8 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2HasherHasher, Blake2Hash
 		side_effects_handler: Option<&mut O>,
 	) -> ClientResult<(
 		NativeOrEncoded<R>,
-		(S::Transaction, <Blake2Hasher as Hasher>::Out),
-		Option<MemoryDB<Blake2Hasher>>,
+		(S::Transaction, <Blake2HasherHasher as Hasher>::Out),
+		Option<MemoryDB<Blake2HasherHasher>>,
 	)> {
 		// there's no actual way/need to specify native/wasm execution strategy on light node
 		// => we can safely ignore passed values
