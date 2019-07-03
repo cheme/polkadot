@@ -35,7 +35,7 @@ use state_machine::client::{Externalities as ClientExternalities};
 
 use crate::cht;
 use crate::error::{Error as ClientError, Result as ClientResult};
-use crate::light::blockchain::{Blockchain, Storage as BlockchainStorage};
+use crate::light::blockchain::{Blockchain, Storage as BlockchainStorage, ClientBlockChainAdapter};
 use crate::light::call_executor::check_execution_proof;
 
 /// Remote call request.
@@ -97,6 +97,7 @@ pub struct RemoteReadChildRequest<Header: HeaderT> {
 pub struct RemoteChangesRequest<Header: HeaderT> {
 	/// Changes trie configuration.
 	pub changes_trie_config: ChangesTrieConfiguration,
+	/// Query changes from range of blocks, starting (and including) with this hash...
 	/// Query changes from range of blocks, starting (and including) with this hash...
 	pub first_block: (Header::Number, Header::Hash),
 	/// ...ending (and including) with this hash. Should come after first_block and
@@ -413,7 +414,9 @@ impl<E, Block, H, C, S, F> FetchChecker<Block> for LightDataChecker<E, H, C, Blo
 		request: &RemoteCallRequest<Block::Header>,
 		remote_proof: Vec<Vec<u8>>
 	) -> ClientResult<Vec<u8>> {
-		check_execution_proof::<_, _, H, C>(&self.executor, request, remote_proof)
+    // TODO EMCH create client exec from Blockchain ??
+    let client = ClientBlockChainAdapter(& *self.blockchain, PhantomData);
+		check_execution_proof::<_, _, H, ClientBlockChainAdapter<S, F, Block, H>>(Some(&client), &self.executor, request, remote_proof)
 	}
 
 	fn check_changes_proof(

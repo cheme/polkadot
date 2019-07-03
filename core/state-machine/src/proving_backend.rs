@@ -190,9 +190,9 @@ impl<'a, H, S, C> Backend<H, C> for ProvingBackend<'a, S, H, C>
 		None
 	}
 
-	fn reroot(&mut self, hash: u64) -> bool {
+	fn reroot(&mut self, block_nb: u64, hash: H::Out) -> bool {
 		// do not reinint proof
-		self.backend.reroot(hash)
+		self.backend.reroot(block_nb, hash)
 	}
 
 	fn rerooted(&self) -> Option<u64> {

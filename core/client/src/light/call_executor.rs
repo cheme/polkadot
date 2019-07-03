@@ -440,6 +440,7 @@ pub fn prove_execution<Block, S, E>(
 /// Method is executed using passed header as environment' current block.
 /// Proof should include both environment preparation proof and method execution proof.
 pub fn check_execution_proof<Header, E, H, C>(
+	client: Option<&C>,
 	executor: &E,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: Vec<Vec<u8>>
@@ -466,6 +467,7 @@ pub fn check_execution_proof<Header, E, H, C>(
 	);
 	execution_proof_check_on_trie_backend::<_, H, C>(
 		&mut trie_backend,
+		client,
 		&mut changes,
 		executor,
 		"Core_initialize_block",
@@ -475,6 +477,7 @@ pub fn check_execution_proof<Header, E, H, C>(
 	// execute method
 	let local_result = execution_proof_check_on_trie_backend::<_, H, C>(
 		&mut trie_backend,
+		client,
 		&mut changes,
 		executor,
 		&request.method,

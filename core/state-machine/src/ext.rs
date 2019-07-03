@@ -85,6 +85,8 @@ where
 	///
 	/// If None, some methods from the trait might not supported.
 	offchain_externalities: Option<&'a mut O>,
+  // TODO EMCH doc
+	client: Option<&'a C>,
 	/// Dummy usage of N arg.
 	_phantom: ::std::marker::PhantomData<N>,
 }
@@ -105,6 +107,7 @@ where
 		backend: &'a mut B,
 		changes_trie_storage: Option<&'a T>,
 		offchain_externalities: Option<&'a mut O>,
+		client: Option<&'a C>,
 	) -> Self {
 		Ext {
 			overlay,
@@ -113,6 +116,7 @@ where
 			changes_trie_storage,
 			changes_trie_transaction: None,
 			offchain_externalities,
+			client,
 			_phantom: Default::default(),
 		}
 	}
@@ -275,21 +279,26 @@ where
 	fn reroot(&mut self, block_number: u64) {
 		let _guard = panic_handler::AbortGuard::new(true);
 		self.mark_dirty();
-		self.overlay.clear();
-		// TODO EMCH change trie storage?
-		if self.backend.reroot(block_number) {
-//		if let Some(root) = self.client.state_root_at(block_number) {
-//			self.backend.reroot(root);
-		} else {
-			// case where you need to resync chain state
-			// TODO EMCH this need test : if client panic but this panic is handled
-			// as an execution failure, this is incorrect: we need to shutdown here
-			// and not act as if sometihng is invalid -> need a test
-			panic!("Your client need to be resynch, access to block {} state impossible.", block_number);
-		}
-		// TODO make prune and all durable change out of this extrinsic call (needs to return the info
-		// somehow).
-		// TODO EMCH change offline externalities?
+
+		if let Some(hash) = self.client.as_ref().and_then(|c|c.state_root_at(block_number)) {
+		  self.overlay.clear();
+      // TODO EMCH change trie storage?
+      if self.backend.reroot(block_number, hash) {
+  //		if let Some(root) = self.client.state_root_at(block_number) {
+  //			self.backend.reroot(root);
+      } else {
+        // case where you need to resync chain state
+        // TODO EMCH this need test : if client panic but this panic is handled
+        // as an execution failure, this is incorrect: we need to shutdown here
+        // and not act as if sometihng is invalid -> need a test
+        panic!("Your client need to be resynch, access to block {} state impossible.", block_number);
+      }
+      // TODO make prune and all durable change out of this extrinsic call (needs to return the info
+      // somehow).
+      // TODO EMCH change offline externalities?
+    } else {
+      // TODO EMCH canenot reroot -> fail as panic
+    }
 	}
 
 	fn storage_root(&mut self) -> H::Out {

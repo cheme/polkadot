@@ -198,6 +198,7 @@ where
 		let return_data = state_machine::new(
 			&mut state,
 			self.backend.changes_trie_storage(),
+      Some(& *self.backend),
 			side_effects_handler,
 			&mut changes,
 			&self.executor,
@@ -263,6 +264,7 @@ where
 				state_machine::new(
 					&mut backend,
 					self.backend.changes_trie_storage(),
+          Some(& *self.backend),
 					side_effects_handler,
 					&mut *changes.borrow_mut(),
 					&self.executor,
@@ -280,6 +282,7 @@ where
 			None => state_machine::new(
 				&mut state,
 				self.backend.changes_trie_storage(),
+        Some(& *self.backend),
 				side_effects_handler,
 				&mut *changes.borrow_mut(),
 				&self.executor,
@@ -299,7 +302,7 @@ where
 	fn runtime_version(&self, id: &BlockId<Block>) -> error::Result<RuntimeVersion> {
 		let mut overlay = OverlayedChanges::default();
 		let mut state = self.backend.state_at(*id)?;
-		let mut ext = Ext::new(&mut overlay, &mut state, self.backend.changes_trie_storage(), NeverOffchainExt::new());
+		let mut ext = Ext::new(&mut overlay, &mut state, self.backend.changes_trie_storage(), NeverOffchainExt::new(), Some(& *self.backend));
 		self.executor.runtime_version(&mut ext).ok_or(error::Error::VersionInvalid.into())
 	}
 
@@ -328,6 +331,7 @@ where
 		state_machine::new(
 			state,
 			self.backend.changes_trie_storage(),
+      Some(& *self.backend),
 			side_effects_handler,
 			changes,
 			&self.executor,

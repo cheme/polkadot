@@ -701,6 +701,18 @@ where
 	}
 }
 
+impl<Block, H, C> ClientExternalities<H> for Backend<Block, H, C>
+where
+	Block: BlockT,
+	C: ClientExternalities<H>,
+	H: Hasher<Out=Block::Hash>,
+	H::Out: Ord,
+{
+  fn state_root_at(&self, block_number: u64) -> Option<H::Out> {
+    unimplemented!("TODO EMCH")
+  }
+}
+
 impl<Block, H, C> backend::LocalBackend<Block, H, C> for Backend<Block, H, C>
 where
 	Block: BlockT,

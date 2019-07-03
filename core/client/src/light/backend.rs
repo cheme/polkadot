@@ -108,6 +108,24 @@ impl<S: AuxStore, F, H: Hasher, C> AuxStore for Backend<S, F, H, C> {
 	}
 }
 
+
+impl<S, F, H, C> ClientExternalities<H> for Backend<S, F, H, C>
+where
+//	Block: BlockT,
+//	S: BlockchainStorage<Block>,
+	S: Send + Sync,
+	F: Send + Sync,
+//	F: Fetcher<Block>,
+	C: ClientExternalities<H>,
+	H: Hasher,
+	//H: Hasher<Out=Block::Hash>,
+	H::Out: Ord,
+{
+  fn state_root_at(&self, block_number: u64) -> Option<H::Out> {
+    unimplemented!("TODO EMCH")
+  }
+}
+
 impl<S, F, Block, H, C> ClientBackend<Block, H, C> for Backend<S, F, H, C> where
 	Block: BlockT,
 	S: BlockchainStorage<Block>,
@@ -414,7 +432,7 @@ where
 		None
 	}
 
-	fn reroot(&mut self, _: u64) -> bool { false }
+	fn reroot(&mut self, _: u64, _: H::Out) -> bool { false }
 
 	fn rerooted(&self) -> Option<u64> {
 		None
@@ -519,11 +537,11 @@ where
 		}
 	}
 
-	fn reroot(&mut self, r: u64) -> bool {
+	fn reroot(&mut self, r: u64, h: H::Out) -> bool {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref mut state) =>
-				StateBackend::<H, C>::reroot(state, r),
-			OnDemandOrGenesisState::Genesis(ref mut state) => state.reroot(r),
+				StateBackend::<H, C>::reroot(state, r, h),
+			OnDemandOrGenesisState::Genesis(ref mut state) => state.reroot(r, h),
 		}
 	}
 

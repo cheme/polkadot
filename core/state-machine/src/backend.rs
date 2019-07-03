@@ -153,7 +153,7 @@ pub trait Backend<H: Hasher, C: ClientExternalities<H>> {
 	/// was a bit painfull) -> this fn really does not fit.
 	/// Return false if state does not allow rerooting (block missing
 	/// or pruned).
-	fn reroot(&mut self, hash: u64) -> bool;
+	fn reroot(&mut self, block_nb: u64, hash: H::Out) -> bool;
 	/// retrun the rerooted hash if the backend has been rerooted,
 	/// this is dangerous as if this api is not checked things will
 	/// break.
@@ -418,7 +418,7 @@ impl<H: Hasher, C: ClientExternalities<H>> Backend<H, C> for InMemory<H, C> {
 		self.trie.as_mut()
 	}
 
-	fn reroot(&mut self, hash: u64) -> bool {
+	fn reroot(&mut self, block_nb: u64, hash: H::Out) -> bool {
     println!("------InMemory reroot returning false");
 		// fetch trie backend then get all kv into this memory
     // TODO probably sure it is a bad idea to implement

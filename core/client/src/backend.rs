@@ -68,10 +68,10 @@ impl NewBlockState {
 pub trait BlockImportOperation<Block, H, C> where
 	Block: BlockT,
 	H: Hasher<Out=Block::Hash>,
-	C: ClientExternalities<H>,
+	C: ClientExternalities<Block>,
 {
 	/// Associated state backend type.
-	type State: StateBackend<H, C>;
+	type State: StateBackend<H>;
 
   // TODO EMCH consider removal
 	/// Returns pending state. Returns None for backends with locally-unavailable state data.
@@ -134,9 +134,8 @@ pub trait AuxStore {
 ///
 /// The same applies for live `BlockImportOperation`s: while an import operation building on a parent `P`
 /// is alive, the state for `P` should not be pruned.
-pub trait Backend<Block, H, C>: AuxStore + Send + Sync where
+pub trait Backend<Block, H>: AuxStore + Send + Sync + ClientExternalities<Block> where
 	Block: BlockT,
-	C: ClientExternalities<H>,
 	H: Hasher<Out=Block::Hash>,
 {
 	/// Associated block insertion operation type.
@@ -215,18 +214,16 @@ pub trait PrunableStateChangesTrieStorage<Block: BlockT, H: Hasher>:
 }
 
 /// Mark for all Backend implementations, that are making use of state data, stored locally.
-pub trait LocalBackend<Block, H, C>: Backend<Block, H, C>
+pub trait LocalBackend<Block, H>: Backend<Block, H>
 where
 	Block: BlockT,
-	C: ClientExternalities<H>,
 	H: Hasher<Out=Block::Hash>,
 {}
 
 /// Mark for all Backend implementations, that are fetching required state data from remote nodes.
-pub trait RemoteBackend<Block, H, C>: Backend<Block, H, C>
+pub trait RemoteBackend<Block, H>: Backend<Block, H>
 where
 	Block: BlockT,
-	C: ClientExternalities<H>,
 	H: Hasher<Out=Block::Hash>,
 {
 	/// Returns true if the state for given block is available locally.

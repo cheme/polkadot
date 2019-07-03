@@ -93,7 +93,7 @@ pub fn build_proof<Header, Hasher, Cli, BlocksI, HashesI>(
 ) -> ClientResult<Vec<Vec<u8>>>
 	where
 		Header: HeaderT,
-		Cli: ClientExternalities<Hasher>,
+		Cli: ClientExternalities<BlocksI>,
 		Hasher: hash_db::Hasher,
 		Hasher::Out: Ord,
 		BlocksI: IntoIterator<Item=Header::Number>,
@@ -127,7 +127,7 @@ pub fn check_proof<Header, Hasher, Cli>(
 	where
 		Header: HeaderT,
 		Hasher: hash_db::Hasher,
-		Cli: ClientExternalities<Hasher>,
+		Cli: ClientExternalities<>,
 		Hasher::Out: Ord,
 {
 	do_check_proof::<Header, Hasher, _>(local_root, local_number, remote_hash, move |local_root, local_cht_key|

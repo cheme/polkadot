@@ -22,8 +22,10 @@ use futures::{Future, IntoFuture};
 use parking_lot::Mutex;
 
 use runtime_primitives::{Justification, generic::BlockId};
-use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor, Zero};
+use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor, Zero, Hash as HashT};
 use consensus::well_known_cache_keys;
+use state_machine::client::{Externalities as ClientExternalities};
+use primitives::Hasher;
 
 use crate::backend::{AuxStore, NewBlockState};
 use crate::blockchain::{Backend as BlockchainBackend, BlockStatus, Cache as BlockchainCache,
@@ -151,6 +153,29 @@ impl<S, F, Block> BlockchainHeaderBackend<Block> for Blockchain<S, F> where Bloc
 	}
 }
 
+/// TODO EMCH doc or change clientExt
+pub struct ClientBlockChainAdapter<'a, S, F, Block, H>(pub &'a Blockchain<S, F>, pub std::marker::PhantomData<(Block, H)>);
+
+// TODO EMCH should we resume clienteternalities to a blockchainbackend??
+impl<'a, S, F, Block, H> ClientExternalities<
+  //<<<Block as BlockT>::Header as HeaderT>::Hashing as HashT>::Hasher
+  H
+> for ClientBlockChainAdapter<'a, S, F, Block, H> 
+  where
+    Block: BlockT,
+    S: Storage<Block>,
+    F: Send + Sync, 
+    H: Hasher,
+//    F: Fetcher<Block>,
+{
+
+  fn state_root_at(&self, block_number: u64) -> Option<
+//  <<<<Block as BlockT>::Header as HeaderT>::Hashing as HashT>::Hasher as Hasher>::Out
+    H::Out
+    > {
+      unimplemented!("TODO EMCH, probably a type hell")
+    }
+}
 impl<S, F, Block> BlockchainBackend<Block> for Blockchain<S, F> where Block: BlockT, S: Storage<Block>, F: Fetcher<Block> {
 	fn body(&self, id: BlockId<Block>) -> ClientResult<Option<Vec<Block::Extrinsic>>> {
 		let header = match self.header(id)? {

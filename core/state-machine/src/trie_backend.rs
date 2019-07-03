@@ -193,14 +193,10 @@ impl<
 		Some(self)
 	}
 
-	fn reroot(&mut self, block_nb: u64) -> bool {
-		if let Some(hash) = self.client.as_ref().and_then(|c|c.state_root_at(block_nb)) {
-			self.essence.reroot(hash);
-			self.rerooted = Some(block_nb);
-			true
-		} else {
-			false
-		}
+	fn reroot(&mut self, block_nb: u64, hash: H::Out) -> bool {
+		self.essence.reroot(hash);
+		self.rerooted = Some(block_nb);
+		true
 	}
 
 	fn rerooted(&self) -> Option<u64> {
