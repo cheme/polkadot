@@ -711,8 +711,8 @@ where
 		} else {
 			panic!("TODO EMCH when all works consider using associated type");
 		};
-    
-    // TODO EMCH better error management(difference between not found and pruned).
+		
+		// TODO EMCH better error management(difference between not found and pruned).
 		self.blockchain.hash(block_number).unwrap_or(None)
 		// TODO EMCH on H::Out found is it pruned (I guess there is no
 		// prunning for in mem : should be good to confirm by reading
