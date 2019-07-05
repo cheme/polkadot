@@ -138,6 +138,7 @@ impl<S, F, Block, H, C> ClientBackend<Block, H, C> for Backend<S, F, H, C> where
 	type Blockchain = Blockchain<S, F>;
 	type State = OnDemandOrGenesisState<Block, S, F, H, C>;
 	type ChangesTrieStorage = in_mem::ChangesTrieStorage<Block, H>;
+	type OffchainStorage = in_mem::OffchainStorage;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		Ok(ImportOperation {
@@ -212,6 +213,10 @@ impl<S, F, Block, H, C> ClientBackend<Block, H, C> for Backend<S, F, H, C> where
 	}
 
 	fn changes_trie_storage(&self) -> Option<&Self::ChangesTrieStorage> {
+		None
+	}
+
+	fn offchain_storage(&self) -> Option<Self::OffchainStorage> {
 		None
 	}
 

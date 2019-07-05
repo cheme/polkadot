@@ -14,7 +14,6 @@ state_machine = { package = "substrate-state-machine", path = "../../state-machi
 [features]
 default = [
 	"std",
-	"runtime/include-wasm-blob",
 ]
 std = [
 	"runtime/std",

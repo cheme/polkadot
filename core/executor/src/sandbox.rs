@@ -567,13 +567,14 @@ mod tests {
 	use state_machine::NCTestExternalities as CoreTestExternalities;
 	use state_machine::client::NoClient;
 	use wabt;
+	use runtime_test::WASM_BINARY;
 
 	type TestExternalities<H> = CoreTestExternalities<H, u64>;
 
 	#[test]
 	fn sandbox_should_work() {
-		let mut ext = TestExternalities::default();
-		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -604,8 +605,13 @@ mod tests {
 
 	#[test]
 	fn sandbox_trap() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -625,8 +631,13 @@ mod tests {
 
 	#[test]
 	fn sandbox_should_trap_when_heap_exhausted() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -650,8 +661,13 @@ mod tests {
 
 	#[test]
 	fn start_called() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -688,8 +704,13 @@ mod tests {
 
 	#[test]
 	fn invoke_args() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -722,8 +743,13 @@ mod tests {
 
 	#[test]
 	fn return_val() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -744,8 +770,13 @@ mod tests {
 
 	#[test]
 	fn unlinkable_module() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -764,8 +795,13 @@ mod tests {
 
 	#[test]
 	fn corrupted_module() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		// Corrupted wasm file
 		let code = &[0, 0, 0, 0, 1, 0, 0, 0];
@@ -778,8 +814,13 @@ mod tests {
 
 	#[test]
 	fn start_fn_ok() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
@@ -801,8 +842,13 @@ mod tests {
 
 	#[test]
 	fn start_fn_traps() {
+<<<<<<< HEAD
 		let mut ext = TestExternalities::default();
 		let test_code = include_bytes!("../wasm/target/wasm32-unknown-unknown/release/runtime_test.compact.wasm");
+=======
+		let mut ext = TestExternalities::<Blake2Hasher>::default();
+		let test_code = WASM_BINARY;
+>>>>>>> master
 
 		let code = wabt::wat2wasm(r#"
 		(module
