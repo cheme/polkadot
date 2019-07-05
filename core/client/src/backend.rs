@@ -22,6 +22,7 @@ use primitives::ChangesTrieConfiguration;
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use runtime_primitives::traits::{Block as BlockT, NumberFor};
 use state_machine::backend::Backend as StateBackend;
+use state_machine::client::{Externalities as ClientExternalities};
 use state_machine::ChangesTrieStorage as StateChangesTrieStorage;
 use consensus::well_known_cache_keys;
 use hash_db::Hasher;
@@ -127,7 +128,7 @@ pub trait AuxStore {
 ///
 /// The same applies for live `BlockImportOperation`s: while an import operation building on a parent `P`
 /// is alive, the state for `P` should not be pruned.
-pub trait Backend<Block, H>: AuxStore + Send + Sync where
+pub trait Backend<Block, H>: AuxStore + Send + Sync + ClientExternalities<H> where
 	Block: BlockT,
 	H: Hasher<Out=Block::Hash>,
 {

@@ -18,7 +18,7 @@
 
 use std::collections::{HashMap, BTreeMap};
 use std::iter::FromIterator;
-use hash_db::Hasher;
+use std::marker::PhantomData;
 use crate::backend::{InMemory, Backend};
 use primitives::storage::well_known_keys::is_child_storage_key;
 use crate::changes_trie::{
@@ -28,10 +28,26 @@ use crate::changes_trie::{
 use primitives::offchain;
 use primitives::storage::well_known_keys::{CHANGES_TRIE_CONFIG, CODE, HEAP_PAGES};
 use parity_codec::Encode;
+use crate::client::Externalities as ClientExternalities;
 use super::{ChildStorageKey, Externalities, OverlayedChanges};
+use hash_db::Hasher;
 
 const EXT_NOT_ALLOWED_TO_FAIL: &str = "Externalities not allowed to fail within runtime";
 
+/// A stub for testing, cannot access client info.
+pub struct NoClient<H>(PhantomData<H>);
+
+impl<H: Hasher> ClientExternalities<H> for NoClient<H> {
+
+	fn state_root_at(&self, _block_number: u64) -> Option<H::Out> {
+		unreachable!("When using NoClient ClientExternalities functionalities shall not be use");
+	}
+
+}
+
+/*/// Convenience alias for TestExternalities without client implementation,
+pub type NCTestExternalities<H: Hasher, N: ChangesTrieBlockNumber> = TestExternalities<H, NoClient<H>, N>;
+*/
 /// Simple HashMap-based Externalities impl.
 pub struct TestExternalities<H: Hasher, N: ChangesTrieBlockNumber> {
 	overlay: OverlayedChanges,

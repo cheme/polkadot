@@ -24,6 +24,7 @@ use runtime_primitives::generic::{BlockId, DigestItem};
 use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor};
 use runtime_primitives::{Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::backend::{Backend as StateBackend, InMemory};
+use state_machine::client::{Externalities as ClientExternalities};
 use state_machine::{self, InMemoryChangesTrieStorage, ChangesTrieAnchorBlockId};
 use hash_db::Hasher;
 use trie::MemoryDB;
@@ -689,6 +690,28 @@ where
 
 	fn get_import_lock(&self) -> &Mutex<()> {
 		&self.import_lock
+	}
+}
+
+impl<Block, H> ClientExternalities<H> for Backend<Block, H>
+where
+	Block: BlockT,
+	H: Hasher<Out=Block::Hash>,
+	H::Out: Ord,
+{
+	fn state_root_at(&self, block_number: u64) -> Option<H::Out> {
+		use std::convert::TryFrom;
+		let block_number = if let Ok(block_number) = TryFrom::try_from(block_number) {
+			block_number
+		} else {
+			panic!("TODO EMCH when all works consider using associated type");
+		};
+    
+    // TODO EMCH better error management(difference between not found and pruned).
+		self.blockchain.hash(block_number).unwrap_or(None)
+		// TODO EMCH on H::Out found is it pruned (I guess there is no
+		// prunning for in mem : should be good to confirm by reading
+		// pruninng tests). Warn THERE IS THREE IMPL of this.
 	}
 }
 

@@ -23,11 +23,13 @@ use std::borrow::Cow;
 use log::warn;
 use hash_db::Hasher;
 use parity_codec::{Decode, Encode};
+use crate::client::Externalities as ClientExternalities;
 use primitives::{
 	storage::well_known_keys, NativeOrEncoded, NeverNativeValue, offchain
 };
 
 pub mod backend;
+pub mod client;
 mod changes_trie;
 mod ext;
 mod testing;

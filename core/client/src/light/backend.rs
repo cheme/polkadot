@@ -24,6 +24,7 @@ use parking_lot::{RwLock, Mutex};
 
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::{Backend as StateBackend, TrieBackend, backend::InMemory as InMemoryState};
+use state_machine::client::{Externalities as ClientExternalities};
 use runtime_primitives::traits::{Block as BlockT, NumberFor, Zero, Header};
 use crate::in_mem::{self, check_genesis_storage};
 use crate::backend::{
@@ -41,10 +42,11 @@ use consensus::well_known_cache_keys;
 const IN_MEMORY_EXPECT_PROOF: &str = "InMemory state backend has Void error type and always succeeds; qed";
 
 /// Light client backend.
-pub struct Backend<S, F, H: Hasher> {
+pub struct Backend<S, F, Block, H: Hasher> {
 	blockchain: Arc<Blockchain<S, F>>,
 	genesis_state: RwLock<Option<InMemoryState<H>>>,
 	import_lock: Mutex<()>,
+	_ph: ::std::marker::PhantomData<(Block)>,
 }
 
 /// Light block (header and justification) import operation.
@@ -56,7 +58,7 @@ pub struct ImportOperation<Block: BlockT, S, F, H: Hasher> {
 	finalized_blocks: Vec<BlockId<Block>>,
 	set_head: Option<BlockId<Block>>,
 	storage_update: Option<InMemoryState<H>>,
-	_phantom: ::std::marker::PhantomData<(S, F)>,
+	_ph: ::std::marker::PhantomData<(S, F)>,
 }
 
 /// On-demand state.
@@ -75,13 +77,14 @@ pub enum OnDemandOrGenesisState<Block: BlockT, S, F, H: Hasher> {
 	Genesis(InMemoryState<H>),
 }
 
-impl<S, F, H: Hasher> Backend<S, F, H> {
+impl<S, F, B, H: Hasher> Backend<S, F, B, H> {
 	/// Create new light backend.
 	pub fn new(blockchain: Arc<Blockchain<S, F>>) -> Self {
 		Self {
 			blockchain,
 			genesis_state: RwLock::new(None),
 			import_lock: Default::default(),
+			_ph: Default::default(),
 		}
 	}
 
@@ -91,7 +94,7 @@ impl<S, F, H: Hasher> Backend<S, F, H> {
 	}
 }
 
-impl<S: AuxStore, F, H: Hasher> AuxStore for Backend<S, F, H> {
+impl<S: AuxStore, F, B, H: Hasher> AuxStore for Backend<S, F, B, H> {
 	fn insert_aux<
 		'a,
 		'b: 'a,
@@ -107,7 +110,7 @@ impl<S: AuxStore, F, H: Hasher> AuxStore for Backend<S, F, H> {
 	}
 }
 
-impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, H> where
+impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, Block, H> where
 	Block: BlockT,
 	S: BlockchainStorage<Block>,
 	F: Fetcher<Block>,
@@ -128,7 +131,7 @@ impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, H> where
 			finalized_blocks: Vec::new(),
 			set_head: None,
 			storage_update: None,
-			_phantom: Default::default(),
+			_ph: Default::default(),
 		})
 	}
 
@@ -224,7 +227,26 @@ impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, H> where
 	}
 }
 
-impl<S, F, Block, H> RemoteBackend<Block, H> for Backend<S, F, H>
+impl<S, F, Block, H> ClientExternalities<H> for Backend<S, F, Block, H> where
+	Block: BlockT,
+	S: BlockchainStorage<Block>,
+	F: Fetcher<Block>,
+	H: Hasher<Out=Block::Hash>,
+	H::Out: Ord,
+{
+	fn state_root_at(&self, block_number: u64) -> Option<H::Out> {
+		use std::convert::TryFrom;
+		let block_number = if let Ok(block_number) = TryFrom::try_from(block_number) {
+			block_number
+		} else {
+			panic!("TODO EMCH when all works consider using associated type");
+		};
+    // TODO EMCH better error handle?? for light client does it really matter??
+		self.blockchain.hash(block_number).unwrap_or(None)
+	}
+}
+
+impl<S, F, Block, H> RemoteBackend<Block, H> for Backend<S, F, Block, H>
 where
 	Block: BlockT,
 	S: BlockchainStorage<Block>,
@@ -516,7 +538,8 @@ mod tests {
 		let def = Default::default();
 		let header0 = test_client::runtime::Header::new(0, def, def, def, Default::default());
 
-		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
+		let backend: Backend<_, _, _, Blake2Hasher> =
+			Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 		let mut op = backend.begin_operation().unwrap();
 		op.set_block_data(header0, None, None, NewBlockState::Final).unwrap();
 		op.reset_storage(Default::default(), Default::default()).unwrap();
@@ -530,7 +553,8 @@ mod tests {
 
 	#[test]
 	fn remote_state_is_created_when_genesis_state_is_inavailable() {
-		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
+		let backend: Backend<_, _, _, Blake2Hasher> =
+			Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 
 		match backend.state_at(BlockId::Number(0)).unwrap() {
 			OnDemandOrGenesisState::OnDemand(_) => (),

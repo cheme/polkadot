@@ -44,6 +44,7 @@ use client::LocalCallExecutor;
 pub type LightBackend<Block> = client::light::backend::Backend<
 	client_db::light::LightStorage<Block>,
 	LightFetcher,
+	Block,
 	Blake2Hasher,
 >;
 

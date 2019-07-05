@@ -56,6 +56,7 @@ use runtime_primitives::traits::{
 use state_machine::backend::Backend as StateBackend;
 use executor::RuntimeInfo;
 use state_machine::{CodeExecutor, DBValue};
+use state_machine::client::{Externalities as ClientExternalities};
 use crate::utils::{Meta, db_err, meta_keys, read_db, block_id_to_lookup_key, read_meta};
 use client::leaves::{LeafSet, FinalizationDisplaced};
 use client::children;
@@ -1396,6 +1397,19 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 
 	fn get_import_lock(&self) -> &Mutex<()> {
 		&self.import_lock
+	}
+}
+
+impl<Block> ClientExternalities<Blake2Hasher> for Backend<Block> where Block: BlockT<Hash=H256> {
+	fn state_root_at(&self, block_number: u64) -> Option<H256> {
+		use std::convert::TryFrom;
+		let block_number = if let Ok(block_number) = TryFrom::try_from(block_number) {
+			block_number
+		} else {
+			panic!("TODO EMCH when all works consider using associated type");
+		};
+    // TODO EMCH better error handle?? for light client does it really matter??
+		self.blockchain.hash(block_number).unwrap_or(None)
 	}
 }
 

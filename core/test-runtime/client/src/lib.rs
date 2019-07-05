@@ -85,6 +85,7 @@ pub type LightExecutor = client::light::call_executor::RemoteOrLocalCallExecutor
 		client::light::backend::Backend<
 			client_db::light::LightStorage<runtime::Block>,
 			LightFetcher,
+			runtime::Block,
 			Blake2Hasher
 		>,
 		NativeExecutor<LocalExecutor>
