@@ -433,7 +433,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	/// Reads storage value at a given block + key, returning read proof.
 	pub fn read_proof(&self, id: &BlockId<Block>, key: &[u8]) -> error::Result<Vec<Vec<u8>>> {
 		self.state_at(id)
-			.and_then(|state| prove_read(state, key)
+			.and_then(|state| prove_read::<_, _, B>(state, key)
 				.map(|(_, proof)| proof)
 				.map_err(Into::into))
 	}
@@ -447,7 +447,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		key: &[u8]
 	) -> error::Result<Vec<Vec<u8>>> {
 		self.state_at(id)
-			.and_then(|state| prove_child_read(state, storage_key, key)
+			.and_then(|state| prove_child_read::<_, _, B>(state, storage_key, key)
 				.map(|(_, proof)| proof)
 				.map_err(Into::into))
 	}
@@ -496,7 +496,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			Some(old_current_num)
 		});
 		let headers = cht_range.map(|num| self.block_hash(num));
-		let proof = cht::build_proof::<Block::Header, Blake2Hasher, _, _>(cht_size, cht_num, ::std::iter::once(block_num), headers)?;
+		let proof = cht::build_proof::<Block::Header, Blake2Hasher, B, _, _>(cht_size, cht_num, ::std::iter::once(block_num), headers)?;
 		Ok((header, proof))
 	}
 
@@ -701,7 +701,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		let roots = cht_range
 			.map(|num| self.header(&BlockId::Number(num))
 			.map(|block| block.and_then(|block| block.digest().log(DigestItem::as_changes_trie_root).cloned())));
-		let proof = cht::build_proof::<Block::Header, Blake2Hasher, _, _>(cht_size, cht_num, blocks, roots)?;
+		let proof = cht::build_proof::<Block::Header, Blake2Hasher, B, _, _>(cht_size, cht_num, blocks, roots)?;
 		Ok(proof)
 	}
 
@@ -922,7 +922,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		}
 
 		// FIXME #1232: correct path logic for when to execute this function
-		let (storage_update,changes_update,storage_changes) = self.block_execution(&operation.op, &import_headers, origin, hash, body.clone())?;
+		let (storage_update,changes_update,storage_changes) = self.block_execution(&mut operation.op, &import_headers, origin, hash, body.clone())?;
 
 		let is_new_best = finalized || match fork_choice {
 			ForkChoiceStrategy::LongestChain => import_headers.post().number() > &last_best_number,
@@ -971,7 +971,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 	fn block_execution(
 		&self,
-		transaction: &B::BlockImportOperation,
+		transaction: &mut B::BlockImportOperation,
 		import_headers: &PrePostHeader<Block::Header>,
 		origin: BlockOrigin,
 		hash: Block::Hash,
@@ -987,7 +987,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		where
 			E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone,
 	{
-		match transaction.state()? {
+		match transaction.state_mut()? {
 			Some(transaction_state) => {
 				let mut overlay = Default::default();
 				let get_execution_manager = |execution_strategy: ExecutionStrategy| {

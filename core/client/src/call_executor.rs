@@ -103,7 +103,7 @@ where
 		R: Encode + Decode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	>(&self,
-		state: &S,
+		state: &mut S,
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8],
@@ -135,7 +135,7 @@ where
 	/// No changes are made.
 	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<H>>(
 		&self,
-		trie_state: &state_machine::TrieBackend<S, H>,
+		trie_state: &mut state_machine::TrieBackend<S, H>,
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
@@ -188,10 +188,11 @@ where
 		side_effects_handler: Option<&mut O>,
 	) -> error::Result<Vec<u8>> {
 		let mut changes = OverlayedChanges::default();
-		let state = self.backend.state_at(*id)?;
+		let mut state = self.backend.state_at(*id)?;
 		let return_data = state_machine::new(
-			&state,
+			&mut state,
 			self.backend.changes_trie_storage(),
+			Some(& *self.backend),
 			side_effects_handler,
 			&mut changes,
 			&self.executor,
@@ -249,14 +250,15 @@ where
 							as Box<dyn state_machine::Error>
 					)?;
 
-				let backend = state_machine::ProvingBackend::new_with_recorder(
+				let mut backend = state_machine::ProvingBackend::new_with_recorder(
 					trie_state,
 					recorder.clone()
 				);
 
 				state_machine::new(
-					&backend,
+					&mut backend,
 					self.backend.changes_trie_storage(),
+					Some(& *self.backend),
 					side_effects_handler,
 					&mut *changes.borrow_mut(),
 					&self.executor,
@@ -272,8 +274,9 @@ where
 				.map_err(Into::into)
 			}
 			None => state_machine::new(
-				&state,
+				&mut state,
 				self.backend.changes_trie_storage(),
+				Some(& *self.backend),
 				side_effects_handler,
 				&mut *changes.borrow_mut(),
 				&self.executor,
@@ -292,8 +295,14 @@ where
 
 	fn runtime_version(&self, id: &BlockId<Block>) -> error::Result<RuntimeVersion> {
 		let mut overlay = OverlayedChanges::default();
-		let state = self.backend.state_at(*id)?;
-		let mut ext = Ext::new(&mut overlay, &state, self.backend.changes_trie_storage(), NeverOffchainExt::new());
+		let mut state = self.backend.state_at(*id)?;
+		let mut ext = Ext::new(
+			&mut overlay,
+			&mut state,
+			self.backend.changes_trie_storage(),
+			NeverOffchainExt::new(),
+			Some(& *self.backend),
+		);
 		self.executor.runtime_version(&mut ext).ok_or(error::Error::VersionInvalid.into())
 	}
 
@@ -307,7 +316,7 @@ where
 		R: Encode + Decode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	>(&self,
-		state: &S,
+		state: &mut S,
 		changes: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8],
@@ -322,6 +331,7 @@ where
 		state_machine::new(
 			state,
 			self.backend.changes_trie_storage(),
+			Some(& *self.backend),
 			side_effects_handler,
 			changes,
 			&self.executor,
@@ -342,13 +352,14 @@ where
 
 	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
 		&self,
-		trie_state: &state_machine::TrieBackend<S, Blake2Hasher>,
+		trie_state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
 	) -> Result<(Vec<u8>, Vec<Vec<u8>>), error::Error> {
 		state_machine::prove_execution_on_trie_backend(
 			trie_state,
+			Some(& *self.backend), 
 			overlay,
 			&self.executor,
 			method,

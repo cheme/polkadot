@@ -555,7 +555,15 @@ impl<H: Hasher, S: StateBackend<H>, B:Block> StateBackend<H> for CachingState<H,
 		self.state.child_keys(child_key, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn reroot(&mut self, b: u64, h: H::Out) -> bool {
+		self.state.reroot(b, h)
+	}
+
+	fn rerooted(&self) -> Option<u64> {
+		self.state.rerooted()
+	}
+
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, H>> {
 		self.state.as_trie_backend()
 	}
 }

@@ -37,6 +37,13 @@ const EXT_NOT_ALLOWED_TO_FAIL: &str = "Externalities not allowed to fail within 
 /// A stub for testing, cannot access client info.
 pub struct NoClient<H>(PhantomData<H>);
 
+impl<H> NoClient<H> {
+  /// get test instance.
+	pub fn new() -> Self {
+		NoClient(PhantomData)
+	}
+}
+
 impl<H: Hasher> ClientExternalities<H> for NoClient<H> {
 
 	fn state_root_at(&self, _block_number: u64) -> Option<H::Out> {
@@ -53,6 +60,7 @@ pub struct TestExternalities<H: Hasher, N: ChangesTrieBlockNumber> {
 	overlay: OverlayedChanges,
 	backend: InMemory<H>,
 	changes_trie_storage: ChangesTrieInMemoryStorage<H, N>,
+	rerooted: Option<u64>,
 	offchain: Option<Box<dyn offchain::Externalities>>,
 }
 
@@ -79,6 +87,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 			overlay,
 			changes_trie_storage: ChangesTrieInMemoryStorage::new(),
 			backend: inner.into(),
+			rerooted: None,
 			offchain: None,
 		}
 	}
@@ -215,6 +224,16 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 	}
 
 	fn chain_id(&self) -> u64 { 42 }
+
+	fn reroot(&mut self, block_number: u64) {
+		let _guard = panic_handler::AbortGuard::new(true);
+		self.overlay.clear();
+		self.rerooted = Some(block_number);
+		// TODO here self.backend reroot not ok?? -> InMemory not impl
+		// TODO EMCH change trie storage?
+		// TODO EMCH change offline externalities?
+		// TODO copy from EXt as usual
+	}
 
 	fn storage_root(&mut self) -> H::Out {
 		// compute and memoize

@@ -25,6 +25,7 @@ use crate::Backend;
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
 	essence: TrieBackendEssence<S, H>,
+	rerooted: Option<u64>,
 }
 
 impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> {
@@ -32,6 +33,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> {
 	pub fn new(storage: S, root: H::Out) -> Self {
 		TrieBackend {
 			essence: TrieBackendEssence::new(storage, root),
+			rerooted: None,
 		}
 	}
 
@@ -179,9 +181,20 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		(root, is_default, write_overlay)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, H>> {
 		Some(self)
 	}
+
+	fn reroot(&mut self, block_nb: u64, hash: H::Out) -> bool {
+		self.essence.reroot(hash);
+		self.rerooted = Some(block_nb);
+		true
+	}
+
+	fn rerooted(&self) -> Option<u64> {
+		self.rerooted.clone()
+	}
+
 }
 
 #[cfg(test)]

@@ -282,6 +282,11 @@ where
 		Ok(None)
 	}
 
+	fn state_mut(&mut self) -> ClientResult<Option<&mut Self::State>> {
+		// None means 'locally-stateless' backend
+		Ok(None)
+	}
+
 	fn set_block_data(
 		&mut self,
 		header: Block::Header,
@@ -427,7 +432,13 @@ where
 		Vec::new()
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, H>> {
+		None
+	}
+
+	fn reroot(&mut self, _: u64, _: H::Out) -> bool { false }
+
+	fn rerooted(&self) -> Option<u64> {
 		None
 	}
 }
@@ -522,12 +533,29 @@ where
 		}
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, H>> {
 		match self {
 			OnDemandOrGenesisState::OnDemand(ref mut state) => state.as_trie_backend(),
 			OnDemandOrGenesisState::Genesis(ref mut state) => state.as_trie_backend(),
 		}
 	}
+
+	fn reroot(&mut self, r: u64, h: H::Out) -> bool {
+		match *self {
+			OnDemandOrGenesisState::OnDemand(ref mut state) =>
+				StateBackend::<H>::reroot(state, r, h),
+			OnDemandOrGenesisState::Genesis(ref mut state) => state.reroot(r, h),
+		}
+	}
+
+	fn rerooted(&self) -> Option<u64> {
+			match *self {
+			OnDemandOrGenesisState::OnDemand(ref state) =>
+				StateBackend::<H>::rerooted(state),
+			OnDemandOrGenesisState::Genesis(ref state) => state.rerooted(),
+		}
+	}
+
 }
 
 #[cfg(test)]

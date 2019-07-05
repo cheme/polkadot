@@ -148,6 +148,8 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 		trie_root::<H, _, _, _>(self.inner.clone())
 	}
 
+	fn reroot(&mut self, _block_nb: u64) { }
+
 	fn child_storage_root(&mut self, _storage_key: ChildStorageKey<H>) -> Vec<u8> {
 		vec![42]
 	}

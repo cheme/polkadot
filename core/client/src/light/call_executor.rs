@@ -42,6 +42,7 @@ use crate::error::{Error as ClientError, Result as ClientResult};
 use crate::light::fetcher::{Fetcher, RemoteCallRequest};
 use executor::{RuntimeVersion, NativeVersion};
 use trie::MemoryDB;
+use state_machine::client::Externalities as ClientExternalities;
 
 /// Call executor that executes methods on remote node, querying execution proof
 /// and checking proof by re-executing locally.
@@ -163,7 +164,7 @@ where
 		R: Encode + Decode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str>,
 	>(&self,
-		_state: &S,
+		_state: &mut S,
 		_changes: &mut OverlayedChanges,
 		_method: &str,
 		_call_data: &[u8],
@@ -180,7 +181,7 @@ where
 
 	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
 		&self,
-		_state: &state_machine::TrieBackend<S, Blake2Hasher>,
+		_state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
 		_changes: &mut OverlayedChanges,
 		_method: &str,
 		_call_data: &[u8]
@@ -340,7 +341,7 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 		R: Encode + Decode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
 	>(&self,
-		state: &S,
+		state: &mut S,
 		changes: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8],
@@ -378,7 +379,7 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 
 	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
 		&self,
-		state: &state_machine::TrieBackend<S, Blake2Hasher>,
+		state: &mut state_machine::TrieBackend<S, Blake2Hasher>,
 		changes: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
@@ -407,7 +408,7 @@ pub fn prove_execution<Block, S, E>(
 		S: StateBackend<Blake2Hasher>,
 		E: CallExecutor<Block, Blake2Hasher>,
 {
-	let trie_state = state.as_trie_backend()
+	let mut trie_state = state.as_trie_backend()
 		.ok_or_else(|| Box::new(state_machine::ExecutionError::UnableToGenerateProof) as Box<dyn state_machine::Error>)?;
 
 	// prepare execution environment + record preparation proof
@@ -420,7 +421,7 @@ pub fn prove_execution<Block, S, E>(
 	)?;
 
 	// execute method + record execution proof
-	let (result, exec_proof) = executor.prove_at_trie_state(&trie_state, &mut changes, method, call_data)?;
+	let (result, exec_proof) = executor.prove_at_trie_state(&mut trie_state, &mut changes, method, call_data)?;
 	let total_proof = init_proof.into_iter()
 		.chain(exec_proof.into_iter())
 		.collect::<HashSet<_>>()
@@ -434,15 +435,17 @@ pub fn prove_execution<Block, S, E>(
 ///
 /// Method is executed using passed header as environment' current block.
 /// Proof should include both environment preparation proof and method execution proof.
-pub fn check_execution_proof<Header, E, H>(
+pub fn check_execution_proof<Header, E, H, C>(
+	client: Option<&C>,
 	executor: &E,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: Vec<Vec<u8>>
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
-		E: CodeExecutor<H>,
 		H: Hasher,
+		E: CodeExecutor<H>,
+		C: ClientExternalities<H>,
 		H::Out: Ord + 'static,
 {
 	let local_state_root = request.header.state_root();
@@ -450,7 +453,7 @@ pub fn check_execution_proof<Header, E, H>(
 
 	// prepare execution environment + check preparation proof
 	let mut changes = OverlayedChanges::default();
-	let trie_backend = create_proof_check_backend(root, remote_proof)?;
+	let mut trie_backend = create_proof_check_backend::<H, C>(root, remote_proof)?;
 	let next_block = <Header as HeaderT>::new(
 		*request.header.number() + One::one(),
 		Default::default(),
@@ -458,8 +461,9 @@ pub fn check_execution_proof<Header, E, H>(
 		request.header.hash(),
 		request.header.digest().clone(),
 	);
-	execution_proof_check_on_trie_backend::<H, _>(
-		&trie_backend,
+	execution_proof_check_on_trie_backend::<H, C, _>(
+		&mut trie_backend,
+		client,
 		&mut changes,
 		executor,
 		"Core_initialize_block",
@@ -467,8 +471,9 @@ pub fn check_execution_proof<Header, E, H>(
 	)?;
 
 	// execute method
-	let local_result = execution_proof_check_on_trie_backend::<H, _>(
-		&trie_backend,
+	let local_result = execution_proof_check_on_trie_backend::<H, C, _>(
+		&mut trie_backend,
+		client,
 		&mut changes,
 		executor,
 		&request.method,

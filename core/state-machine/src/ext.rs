@@ -25,6 +25,7 @@ use hash_db::Hasher;
 use primitives::offchain;
 use primitives::storage::well_known_keys::is_child_storage_key;
 use trie::{MemoryDB, TrieDBMut, TrieMut, default_child_trie_root};
+use crate::client::Externalities as ClientExternalities;
 
 const EXT_NOT_ALLOWED_TO_FAIL: &str = "Externalities not allowed to fail within runtime";
 
@@ -58,15 +59,16 @@ impl<B: error::Error, E: error::Error> error::Error for Error<B, E> {
 }
 
 /// Wraps a read-only backend, call executor, and current overlayed changes.
-pub struct Ext<'a, H, N, B, T, O>
+pub struct Ext<'a, H, C, N, B, T, O>
 where
-	H: Hasher,
+	H: 'a + Hasher,
 	B: 'a + Backend<H>,
+	C: 'a + ClientExternalities<H>,
 {
 	/// The overlayed changes to write to.
 	overlay: &'a mut OverlayedChanges,
 	/// The storage backend to read from.
-	backend: &'a B,
+	backend: &'a mut B,
 	/// The storage transaction necessary to commit to the backend. Is cached when
 	/// `storage_root` is called and the cache is cleared on every subsequent change.
 	storage_transaction: Option<(B::Transaction, H::Out)>,
@@ -83,25 +85,30 @@ where
 	///
 	/// If None, some methods from the trait might not supported.
 	offchain_externalities: Option<&'a mut O>,
+	// TODO EMCH doc
+	client: Option<&'a C>,
 	/// Dummy usage of N arg.
 	_phantom: ::std::marker::PhantomData<N>,
 }
 
-impl<'a, H, N, B, T, O> Ext<'a, H, N, B, T, O>
+impl<'a, H, N, B, T, O, C> Ext<'a, H, C, N, B, T, O>
 where
 	H: Hasher,
 	B: 'a + Backend<H>,
+	C: 'a + ClientExternalities<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
 	O: 'a + offchain::Externalities,
+	C: 'a + ClientExternalities<H>,
 	H::Out: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
 	/// Create a new `Ext` from overlayed changes and read-only backend
 	pub fn new(
 		overlay: &'a mut OverlayedChanges,
-		backend: &'a B,
+		backend: &'a mut B,
 		changes_trie_storage: Option<&'a T>,
 		offchain_externalities: Option<&'a mut O>,
+		client: Option<&'a C>,
 	) -> Self {
 		Ext {
 			overlay,
@@ -110,6 +117,7 @@ where
 			changes_trie_storage,
 			changes_trie_transaction: None,
 			offchain_externalities,
+			client,
 			_phantom: Default::default(),
 		}
 	}
@@ -141,12 +149,13 @@ where
 }
 
 #[cfg(test)]
-impl<'a, H, N, B, T, O> Ext<'a, H, N, B, T, O>
+impl<'a, H, N, B, T, O, C> Ext<'a, H, C, N, B, T, O>
 where
 	H: Hasher,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
 	O: 'a + offchain::Externalities,
+	C: 'a + ClientExternalities<H>,
 	N: crate::changes_trie::BlockNumber,
 {
 	pub fn storage_pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -163,12 +172,13 @@ where
 	}
 }
 
-impl<'a, B, T, H, N, O> Externalities<H> for Ext<'a, H, N, B, T, O>
+impl<'a, H, B, T, N, O, C> Externalities<H> for Ext<'a, H, C, N, B, T, O>
 where
 	H: Hasher,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
 	O: 'a + offchain::Externalities,
+	C: 'a + ClientExternalities<H>,
 	H::Out: Ord + 'static,
 	N: crate::changes_trie::BlockNumber,
 {
@@ -240,8 +250,10 @@ where
 
 		self.mark_dirty();
 		self.overlay.clear_child_storage(storage_key.as_ref());
-		self.backend.for_keys_in_child_storage(storage_key.as_ref(), |key| {
-			self.overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
+		let overlay = &mut self.overlay;
+		let backend = &self.backend;
+		backend.for_keys_in_child_storage(storage_key.as_ref(), |key| {
+			overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
 		});
 	}
 
@@ -254,13 +266,40 @@ where
 
 		self.mark_dirty();
 		self.overlay.clear_prefix(prefix);
-		self.backend.for_keys_with_prefix(prefix, |key| {
-			self.overlay.set_storage(key.to_vec(), None);
+		let overlay = &mut self.overlay;
+		let backend = &self.backend;
+		backend.for_keys_with_prefix(prefix, |key| {
+			overlay.set_storage(key.to_vec(), None);
 		});
 	}
 
 	fn chain_id(&self) -> u64 {
 		42
+	}
+
+	fn reroot(&mut self, block_number: u64) {
+		let _guard = panic_handler::AbortGuard::new(true);
+		self.mark_dirty();
+
+		if let Some(hash) = self.client.as_ref().and_then(|c|c.state_root_at(block_number)) {
+			self.overlay.clear();
+			// TODO EMCH change trie storage?
+			if self.backend.reroot(block_number, hash) {
+	//		if let Some(root) = self.client.state_root_at(block_number) {
+	//			self.backend.reroot(root);
+			} else {
+				// case where you need to resync chain state
+				// TODO EMCH this need test : if client panic but this panic is handled
+				// as an execution failure, this is incorrect: we need to shutdown here
+				// and not act as if sometihng is invalid -> need a test
+				panic!("Your client need to be resynch, access to block {} state impossible.", block_number);
+			}
+			// TODO make prune and all durable change out of this extrinsic call (needs to return the info
+			// somehow).
+			// TODO EMCH change offline externalities?
+		} else {
+			// TODO EMCH canenot reroot -> fail as panic
+		}
 	}
 
 	fn storage_root(&mut self) -> H::Out {
@@ -359,10 +398,22 @@ mod tests {
 		InMemoryStorage as InMemoryChangesTrieStorage};
 	use crate::overlayed_changes::OverlayedValue;
 	use super::*;
+	use crate::client::NoClient;
+
+	// TODO EMCH actual client ext tester??
+	type ClientExt = NoClient<Blake2Hasher>;
 
 	type TestBackend = InMemory<Blake2Hasher>;
 	type TestChangesTrieStorage = InMemoryChangesTrieStorage<Blake2Hasher, u64>;
-	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend, TestChangesTrieStorage, crate::NeverOffchainExt>;
+	type TestExt<'a> = Ext<
+		'a,
+		Blake2Hasher,
+		ClientExt,
+		u64,
+		TestBackend,
+		TestChangesTrieStorage,
+		crate::NeverOffchainExt
+	>;
 
 	fn prepare_overlay_with_changes() -> OverlayedChanges {
 		OverlayedChanges {
@@ -387,8 +438,9 @@ mod tests {
 	#[test]
 	fn storage_changes_root_is_none_when_storage_is_not_provided() {
 		let mut overlay = prepare_overlay_with_changes();
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, None, None);
+		let mut backend = TestBackend::default();
+		let cli_ext = ClientExt::new();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, None, None, Some(&cli_ext));
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(), None);
 	}
 
@@ -397,8 +449,9 @@ mod tests {
 		let mut overlay = prepare_overlay_with_changes();
 		overlay.changes_trie_config = None;
 		let storage = TestChangesTrieStorage::with_blocks(vec![(100, Default::default())]);
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut backend = TestBackend::default();
+		let cli_ext = ClientExt::new();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, Some(&storage), None, Some(&cli_ext));
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(), None);
 	}
 
@@ -406,8 +459,9 @@ mod tests {
 	fn storage_changes_root_is_some_when_extrinsic_changes_are_non_empty() {
 		let mut overlay = prepare_overlay_with_changes();
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut backend = TestBackend::default();
+		let cli_ext = ClientExt::new();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, Some(&storage), None, Some(&cli_ext));
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(),
 			Some(hex!("5b829920b9c8d554a19ee2a1ba593c4f2ee6fc32822d083e04236d693e8358d5").into()));
 	}
@@ -417,8 +471,9 @@ mod tests {
 		let mut overlay = prepare_overlay_with_changes();
 		overlay.prospective.top.get_mut(&vec![1]).unwrap().value = None;
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
-		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut backend = TestBackend::default();
+		let cli_ext = ClientExt::new();
+		let mut ext = TestExt::new(&mut overlay, &mut backend, Some(&storage), None, Some(&cli_ext));
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(),
 			Some(hex!("bcf494e41e29a15c9ae5caa053fe3cb8b446ee3e02a254efbdec7a19235b76e4").into()));
 	}

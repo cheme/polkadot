@@ -461,6 +461,10 @@ where
 		Ok(Some(&self.old_state))
 	}
 
+	fn state_mut(&mut self) -> error::Result<Option<&mut Self::State>> {
+		Ok(Some(&mut self.old_state))
+	}
+
 	fn set_block_data(
 		&mut self,
 		header: <Block as BlockT>::Header,

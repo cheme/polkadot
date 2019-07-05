@@ -72,8 +72,13 @@ pub trait BlockImportOperation<Block, H> where
 	/// Associated state backend type.
 	type State: StateBackend<H>;
 
+  // TODO EMCH consider removal
 	/// Returns pending state. Returns None for backends with locally-unavailable state data.
 	fn state(&self) -> error::Result<Option<&Self::State>>;
+
+	/// Returns pending mutable state. Returns None for backends with locally-unavailable state data.
+	fn state_mut(&mut self) -> error::Result<Option<&mut Self::State>>;
+
 	/// Append block data to the transaction.
 	fn set_block_data(
 		&mut self,

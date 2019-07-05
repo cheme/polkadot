@@ -171,7 +171,15 @@ impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
 		self.state.child_keys(child_key, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&state_machine::TrieBackend<Self::TrieBackendStorage, Blake2Hasher>> {
+	fn reroot(&mut self, b: u64, h: H256) -> bool {
+		self.state.reroot(b, h) 
+	}
+
+  fn rerooted(&self) -> Option<u64> {
+		self.state.rerooted()
+	}
+
+	fn as_trie_backend(&mut self) -> Option<&mut state_machine::TrieBackend<Self::TrieBackendStorage, Blake2Hasher>> {
 		self.state.as_trie_backend()
 	}
 }
@@ -411,6 +419,10 @@ where Block: BlockT<Hash=H256>,
 
 	fn state(&self) -> Result<Option<&Self::State>, client::error::Error> {
 		Ok(Some(&self.old_state))
+	}
+
+	fn state_mut(&mut self) -> Result<Option<&mut Self::State>, client::error::Error> {
+		Ok(Some(&mut self.old_state))
 	}
 
 	fn set_block_data(

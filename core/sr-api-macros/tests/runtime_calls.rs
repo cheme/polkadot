@@ -38,6 +38,7 @@ fn calling_function_with_strat(strat: ExecutionStrategy) {
 	assert_eq!(runtime_api.benchmark_add_one(&block_id, &1).unwrap(), 2);
 }
 
+
 #[test]
 fn calling_native_runtime_function() {
 	calling_function_with_strat(ExecutionStrategy::NativeWhenPossible);
@@ -154,6 +155,10 @@ fn initialize_block_is_skipped() {
 
 #[test]
 fn record_proof_works() {
+
+	use state_machine::client::NoClient;
+	type ClientExt = NoClient<<<Header as HeaderT>::Hashing as HashT>::Hasher>;
+
 	let (client, longest_chain) = TestClientBuilder::new()
 		.set_execution_strategy(ExecutionStrategy::Both)
 		.build_with_longest_chain();
@@ -175,7 +180,10 @@ fn record_proof_works() {
 	builder.push(transaction.clone()).unwrap();
 	let (block, proof) = builder.bake_and_extract_proof().expect("Bake block");
 
-	let backend = create_proof_check_backend::<<<Header as HeaderT>::Hashing as HashT>::Hasher>(
+	let mut backend = create_proof_check_backend::<
+		<<Header as HeaderT>::Hashing as HashT>::Hasher,
+		state_machine::client::NoClient<<<Header as HeaderT>::Hashing as HashT>::Hasher>,
+	>(
 		storage_root,
 		proof.expect("Proof was generated"),
 	).expect("Creates proof backend.");
@@ -184,7 +192,8 @@ fn record_proof_works() {
 	let mut overlay = Default::default();
 	let executor = NativeExecutor::<LocalExecutor>::new(None);
 	execution_proof_check_on_trie_backend(
-		&backend,
+		&mut backend,
+		Some(&ClientExt::new()),
 		&mut overlay,
 		&executor,
 		"Core_execute_block",

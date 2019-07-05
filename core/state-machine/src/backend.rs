@@ -111,7 +111,7 @@ pub trait Backend<H: Hasher> {
 	}
 
 	/// Try convert into trie backend.
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>>;
+	fn as_trie_backend(&mut self) -> Option<&mut TrieBackend<Self::TrieBackendStorage, H>>;
 
 	/// Calculate the storage root, with given delta over what is already stored
 	/// in the backend, and produce a "transaction" that can be used to commit.
@@ -147,6 +147,17 @@ pub trait Backend<H: Hasher> {
 		(root, txs)
 	}
 
+	/// TODO EMCH document, this does not look good (mut on this
+	/// trait is awkward at best).
+	/// TODO EMCH this requires inner mutablility (change to &mut
+	/// was a bit painfull) -> this fn really does not fit.
+	/// Return false if state does not allow rerooting (block missing
+	/// or pruned).
+	fn reroot(&mut self, block_nb: u64, hash: H::Out) -> bool;
+	/// retrun the rerooted hash if the backend has been rerooted,
+	/// this is dangerous as if this api is not checked things will
+	/// break.
+	fn rerooted(&self) -> Option<u64>;
 }
 
 /// Trait that allows consolidate two transactions together.
@@ -193,6 +204,7 @@ impl error::Error for Void {
 pub struct InMemory<H: Hasher> {
 	inner: HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>,
 	trie: Option<TrieBackend<MemoryDB<H>, H>>,
+	rerooted: Option<u64>,
 	_hasher: PhantomData<H>,
 }
 
@@ -201,6 +213,7 @@ impl<H: Hasher> Default for InMemory<H> {
 		InMemory {
 			inner: Default::default(),
 			trie: None,
+			rerooted: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -211,6 +224,7 @@ impl<H: Hasher> Clone for InMemory<H> {
 		InMemory {
 			inner: self.inner.clone(),
 			trie: None,
+			rerooted: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -242,6 +256,7 @@ impl<H: Hasher> From<HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>> for In
 		InMemory {
 			inner: inner,
 			trie: None,
+			rerooted: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -254,6 +269,7 @@ impl<H: Hasher> From<HashMap<Vec<u8>, Vec<u8>>> for InMemory<H> {
 		InMemory {
 			inner: expanded,
 			trie: None,
+			rerooted: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -374,7 +390,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 			.collect()
 	}
 
-	fn as_trie_backend(&mut self)-> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self)-> Option<&mut TrieBackend<Self::TrieBackendStorage, H>> {
 		let mut mdb = MemoryDB::default();
 		let mut root = None;
 		let mut new_child_roots = Vec::new();
@@ -399,7 +415,22 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 			None => insert_into_memory_db::<H, _>(&mut mdb, ::std::iter::empty())?,
 		};
 		self.trie = Some(TrieBackend::new(mdb, root));
-		self.trie.as_ref()
+		self.trie.as_mut()
+	}
+
+	fn reroot(&mut self, block_nb: u64, hash: H::Out) -> bool {
+    println!("------InMemory reroot returning false");
+		// fetch trie backend then get all kv into this memory
+    // TODO probably sure it is a bad idea to implement
+    // TODO InMemory should be only for building new block
+    // from scratch.
+    // TODO EMCH can still put a optional trie backend.
+    false
+	}
+
+	fn rerooted(&self) -> Option<u64> {
+		// fetch trie backend then get all kv into this memory
+		self.rerooted.clone()
 	}
 }
 

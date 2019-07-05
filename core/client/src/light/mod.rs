@@ -85,6 +85,7 @@ pub fn new_fetch_checker<E, B: BlockT, S: BlockchainStorage<B>, F>(
 ) -> LightDataChecker<E, Blake2Hasher, B, S, F>
 	where
 		E: CodeExecutor<Blake2Hasher>,
+		F: Fetcher<B>,
 {
 	LightDataChecker::new(blockchain, executor)
 }
