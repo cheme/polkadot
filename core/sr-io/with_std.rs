@@ -403,7 +403,7 @@ impl Api for () {}
 /// Execute the given closure with global function available whose functionality routes into the
 /// externalities `ext`. Forwards the value that the closure returns.
 // NOTE: need a concrete hasher here due to limitations of the `environmental!` macro, otherwise a type param would have been fine I think.
-pub fn with_externalities<R, F: FnOnce() -> R>(ext: &mut dyn Externalities<Blake2Hasher>, f: F) -> R {
+pub fn with_externalities<H, R, F: FnOnce() -> R>(ext: &mut dyn Externalities<H>, f: F) -> R {
 	ext::using(ext, f)
 }
 

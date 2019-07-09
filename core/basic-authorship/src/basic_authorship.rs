@@ -28,10 +28,10 @@ use client::{
 };
 use codec::Decode;
 use consensus_common::{self, evaluation};
-use primitives::{H256, Blake2Hasher, ExecutionContext};
+use primitives::ExecutionContext;
 use runtime_primitives::traits::{
 	Block as BlockT, Hash as HashT, Header as HeaderT, ProvideRuntimeApi,
-	DigestFor,
+	DigestFor, BlockOut,
 };
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::ApplyError;
@@ -68,9 +68,10 @@ pub trait AuthoringApi: Send + Sync + ProvideRuntimeApi where
 impl<'a, B, E, Block, RA> BlockBuilder<Block>
 	for client::block_builder::BlockBuilder<'a, Block, SubstrateClient<B, E, Block, RA>>
 where
-	B: client::backend::Backend<Block, Blake2Hasher> + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone + 'static,
-	Block: BlockT<Hash=H256>,
+	B: client::backend::Backend<Block> + 'static,
+	E: CallExecutor<Block> + Send + Sync + Clone + 'static,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 	RA: Send + Sync + 'static,
 	SubstrateClient<B, E, Block, RA> : ProvideRuntimeApi,
 	<SubstrateClient<B, E, Block, RA> as ProvideRuntimeApi>::Api: BlockBuilderApi<Block>,
@@ -81,9 +82,11 @@ where
 }
 
 impl<B, E, Block, RA> AuthoringApi for SubstrateClient<B, E, Block, RA> where
-	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone + 'static,
-	Block: BlockT<Hash=H256>,
+	B: client::backend::Backend<Block> + Send + Sync + 'static,
+	E: CallExecutor<Block> + Send + Sync + Clone + 'static,
+	Block::Hash: Ord,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 	RA: Send + Sync + 'static,
 	SubstrateClient<B, E, Block, RA> : ProvideRuntimeApi,
 	<SubstrateClient<B, E, Block, RA> as ProvideRuntimeApi>::Api: BlockBuilderApi<Block>,

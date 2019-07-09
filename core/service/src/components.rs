@@ -29,8 +29,8 @@ use transaction_pool::txpool::{self, Options as TransactionPoolOptions, Pool as 
 use runtime_primitives::{
 	BuildStorage, traits::{Block as BlockT, Header as HeaderT, ProvideRuntimeApi}, generic::BlockId
 };
+use runtime_primitives::traits::{BlockHasher, BlockOut};
 use crate::config::Configuration;
-use primitives::{Blake2Hasher, H256};
 use rpc::{self, apis::system::SystemInfo};
 use futures::{prelude::*, future::Executor, sync::mpsc};
 
@@ -60,7 +60,7 @@ pub type FullExecutor<F> = client::LocalCallExecutor<
 pub type LightBackend<F> = client::light::backend::Backend<
 	client_db::light::LightStorage<<F as ServiceFactory>::Block>,
 	network::OnDemand<<F as ServiceFactory>::Block>,
-	Blake2Hasher,
+	BlockHasher<<F as ServiceFactory>::Block>,
 >;
 
 /// Light client executor type for a factory.
@@ -69,7 +69,7 @@ pub type LightExecutor<F> = client::light::call_executor::RemoteOrLocalCallExecu
 	client::light::backend::Backend<
 		client_db::light::LightStorage<<F as ServiceFactory>::Block>,
 		network::OnDemand<<F as ServiceFactory>::Block>,
-		Blake2Hasher
+		BlockHasher<<F as ServiceFactory>::Block>,
 	>,
 	client::light::call_executor::RemoteCallExecutor<
 		client::light::blockchain::Blockchain<
@@ -82,7 +82,7 @@ pub type LightExecutor<F> = client::light::call_executor::RemoteOrLocalCallExecu
 		client::light::backend::Backend<
 			client_db::light::LightStorage<<F as ServiceFactory>::Block>,
 			network::OnDemand<<F as ServiceFactory>::Block>,
-			Blake2Hasher
+			BlockHasher<<F as ServiceFactory>::Block>,
 		>,
 		CodeExecutor<F>
 	>
@@ -122,7 +122,7 @@ pub type ComponentClient<C> = Client<
 
 /// A offchain workers storage backend type.
 pub type ComponentOffchainStorage<C> = <
-	<C as Components>::Backend as client::backend::Backend<ComponentBlock<C>, Blake2Hasher>
+	<C as Components>::Backend as client::backend::Backend<ComponentBlock<C>>
 >::OffchainStorage;
 
 /// Block type for `Components`
@@ -191,11 +191,12 @@ fn maintain_transaction_pool<Api, Backend, Block, Executor, PoolApi>(
 	client: &Client<Backend, Executor, Block, Api>,
 	transaction_pool: &TransactionPool<PoolApi>,
 ) -> error::Result<()> where
-	Block: BlockT<Hash = <Blake2Hasher as ::primitives::Hasher>::Out>,
-	Backend: client::backend::Backend<Block, Blake2Hasher>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
+	Backend: client::backend::Backend<Block>,
 	Client<Backend, Executor, Block, Api>: ProvideRuntimeApi,
 	<Client<Backend, Executor, Block, Api> as ProvideRuntimeApi>::Api: runtime_api::TaggedTransactionQueue<Block>,
-	Executor: client::CallExecutor<Block, Blake2Hasher>,
+	Executor: client::CallExecutor<Block>,
 	PoolApi: txpool::ChainApi<Hash = Block::Hash, Block = Block>,
 {
 	// Avoid calling into runtime if there is nothing to prune from the pool anyway.
@@ -278,7 +279,7 @@ pub type TaskExecutor = Arc<dyn Executor<Box<dyn Future<Item = (), Error = ()> +
 /// A collection of types and methods to build a service on top of the substrate service.
 pub trait ServiceFactory: 'static + Sized {
 	/// Block type.
-	type Block: BlockT<Hash=H256>;
+	type Block: BlockT;
 	/// The type that implements the runtime API.
 	type RuntimeApi: Send + Sync;
 	/// Network protocol extensions.
@@ -371,9 +372,9 @@ pub trait Components: Sized + 'static {
 	/// Associated service factory.
 	type Factory: ServiceFactory;
 	/// Client backend.
-	type Backend: 'static + client::backend::Backend<FactoryBlock<Self::Factory>, Blake2Hasher>;
+	type Backend: 'static + client::backend::Backend<FactoryBlock<Self::Factory>>;
 	/// Client executor.
-	type Executor: 'static + client::CallExecutor<FactoryBlock<Self::Factory>, Blake2Hasher> + Send + Sync + Clone;
+	type Executor: 'static + client::CallExecutor<FactoryBlock<Self::Factory>> + Send + Sync + Clone;
 	/// The type that implements the runtime API.
 	type RuntimeApi: Send + Sync;
 	/// A type that can start all runtime-dependent services.

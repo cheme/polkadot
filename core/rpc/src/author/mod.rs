@@ -31,7 +31,7 @@ use jsonrpc_derive::rpc;
 use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId};
 use log::warn;
 use parity_codec::{Encode, Decode};
-use primitives::{Bytes, Blake2Hasher, H256};
+use primitives::{Bytes};
 use runtime_primitives::{generic, traits};
 use self::error::Result;
 use transaction_pool::{
@@ -100,10 +100,11 @@ impl<B, E, P, RA> Author<B, E, P, RA> where P: PoolChainApi + Sync + Send + 'sta
 }
 
 impl<B, E, P, RA> AuthorApi<ExHash<P>, BlockHash<P>> for Author<B, E, P, RA> where
-	B: client::backend::Backend<<P as PoolChainApi>::Block, Blake2Hasher> + Send + Sync + 'static,
-	E: client::CallExecutor<<P as PoolChainApi>::Block, Blake2Hasher> + Send + Sync + 'static,
+	B: client::backend::Backend<<P as PoolChainApi>::Block> + Send + Sync + 'static,
+	E: client::CallExecutor<<P as PoolChainApi>::Block> + Send + Sync + 'static,
 	P: PoolChainApi + Sync + Send + 'static,
-	P::Block: traits::Block<Hash=H256>,
+	P::Block: traits::Block,
+	traits::BlockOut<P::Block>: Ord,
 	P::Error: 'static,
 	RA: Send + Sync + 'static
 {

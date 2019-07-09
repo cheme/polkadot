@@ -24,7 +24,7 @@ use parking_lot::{RwLock, Mutex};
 
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::{Backend as StateBackend, TrieBackend, backend::InMemory as InMemoryState};
-use runtime_primitives::traits::{Block as BlockT, NumberFor, Zero, Header};
+use runtime_primitives::traits::{Block as BlockT, NumberFor, Zero, Header, BlockHasher, BlockOut};
 use crate::in_mem::{self, check_genesis_storage};
 use crate::backend::{
 	AuxStore, Backend as ClientBackend, BlockImportOperation, RemoteBackend, NewBlockState,
@@ -48,14 +48,14 @@ pub struct Backend<S, F, H: Hasher> {
 }
 
 /// Light block (header and justification) import operation.
-pub struct ImportOperation<Block: BlockT, S, F, H: Hasher> {
+pub struct ImportOperation<Block: BlockT, S, F> {
 	header: Option<Block::Header>,
 	cache: HashMap<well_known_cache_keys::Id, Vec<u8>>,
 	leaf_state: NewBlockState,
 	aux_ops: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	finalized_blocks: Vec<BlockId<Block>>,
 	set_head: Option<BlockId<Block>>,
-	storage_update: Option<InMemoryState<H>>,
+	storage_update: Option<InMemoryState<BlockHasher<Block>>>,
 	_phantom: ::std::marker::PhantomData<(S, F)>,
 }
 
@@ -68,11 +68,11 @@ pub struct OnDemandState<Block: BlockT, S, F> {
 }
 
 /// On-demand or in-memory genesis state.
-pub enum OnDemandOrGenesisState<Block: BlockT, S, F, H: Hasher> {
+pub enum OnDemandOrGenesisState<Block: BlockT, S, F> {
 	/// On-demand state - storage values are fetched from remote nodes.
 	OnDemand(OnDemandState<Block, S, F>),
 	/// Genesis state - storage values are stored in-memory.
-	Genesis(InMemoryState<H>),
+	Genesis(InMemoryState<BlockHasher<Block>>),
 }
 
 impl<S, F, H: Hasher> Backend<S, F, H> {
@@ -107,17 +107,16 @@ impl<S: AuxStore, F, H: Hasher> AuxStore for Backend<S, F, H> {
 	}
 }
 
-impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, H> where
+impl<S, F, Block> ClientBackend<Block> for Backend<S, F, BlockHasher<Block>> where
 	Block: BlockT,
 	S: BlockchainStorage<Block>,
 	F: Fetcher<Block>,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
-	type BlockImportOperation = ImportOperation<Block, S, F, H>;
+	type BlockImportOperation = ImportOperation<Block, S, F>;
 	type Blockchain = Blockchain<S, F>;
-	type State = OnDemandOrGenesisState<Block, S, F, H>;
-	type ChangesTrieStorage = in_mem::ChangesTrieStorage<Block, H>;
+	type State = OnDemandOrGenesisState<Block, S, F>;
+	type ChangesTrieStorage = in_mem::ChangesTrieStorage<Block>;
 	type OffchainStorage = in_mem::OffchainStorage;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
@@ -229,13 +228,12 @@ impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, H> where
 	}
 }
 
-impl<S, F, Block, H> RemoteBackend<Block, H> for Backend<S, F, H>
+impl<S, F, Block> RemoteBackend<Block> for Backend<S, F, BlockHasher<Block>>
 where
 	Block: BlockT,
 	S: BlockchainStorage<Block>,
 	F: Fetcher<Block>,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
 	fn is_local_state_available(&self, block: &BlockId<Block>) -> bool {
 		self.genesis_state.read().is_some()
@@ -245,15 +243,14 @@ where
 	}
 }
 
-impl<S, F, Block, H> BlockImportOperation<Block, H> for ImportOperation<Block, S, F, H>
+impl<S, F, Block> BlockImportOperation<Block> for ImportOperation<Block, S, F>
 where
 	Block: BlockT,
 	F: Fetcher<Block>,
 	S: BlockchainStorage<Block>,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
-	type State = OnDemandOrGenesisState<Block, S, F, H>;
+	type State = OnDemandOrGenesisState<Block, S, F>;
 
 	fn state(&self) -> ClientResult<Option<&Self::State>> {
 		// None means 'locally-stateless' backend
@@ -276,17 +273,17 @@ where
 		self.cache = cache;
 	}
 
-	fn update_db_storage(&mut self, _update: <Self::State as StateBackend<H>>::Transaction) -> ClientResult<()> {
+	fn update_db_storage(&mut self, _update: <Self::State as StateBackend<BlockHasher<Block>>>::Transaction) -> ClientResult<()> {
 		// we're not storing anything locally => ignore changes
 		Ok(())
 	}
 
-	fn update_changes_trie(&mut self, _update: MemoryDB<H>) -> ClientResult<()> {
+	fn update_changes_trie(&mut self, _update: MemoryDB<BlockHasher<Block>>) -> ClientResult<()> {
 		// we're not storing anything locally => ignore changes
 		Ok(())
 	}
 
-	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> ClientResult<H::Out> {
+	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> ClientResult<BlockOut<Block>> {
 		check_genesis_storage(&top, &children)?;
 
 		// this is only called when genesis block is imported => shouldn't be performance bottleneck
@@ -304,7 +301,7 @@ where
 			storage.insert(Some(child_key), child_storage);
 		}
 
-		let storage_update: InMemoryState<H> = storage.into();
+		let storage_update: InMemoryState<BlockHasher<Block>> = storage.into();
 		let (storage_root, _) = storage_update.full_storage_root(::std::iter::empty(), child_delta);
 		self.storage_update = Some(storage_update);
 
@@ -410,22 +407,21 @@ where
 	}
 }
 
-impl<Block, S, F, H> StateBackend<H> for OnDemandOrGenesisState<Block, S, F, H>
+impl<Block, S, F> StateBackend<BlockHasher<Block>> for OnDemandOrGenesisState<Block, S, F>
 where
 	Block: BlockT,
 	F: Fetcher<Block>,
 	S: BlockchainStorage<Block>,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
 	type Error = ClientError;
 	type Transaction = ();
-	type TrieBackendStorage = MemoryDB<H>;
+	type TrieBackendStorage = MemoryDB<BlockHasher<Block>>;
 
 	fn storage(&self, key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::storage(state, key),
+				StateBackend::<BlockHasher<Block>>::storage(state, key),
 			OnDemandOrGenesisState::Genesis(ref state) =>
 				Ok(state.storage(key).expect(IN_MEMORY_EXPECT_PROOF)),
 		}
@@ -434,7 +430,7 @@ where
 	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::child_storage(state, storage_key, key),
+				StateBackend::<BlockHasher<Block>>::child_storage(state, storage_key, key),
 			OnDemandOrGenesisState::Genesis(ref state) =>
 				Ok(state.child_storage(storage_key, key).expect(IN_MEMORY_EXPECT_PROOF)),
 		}
@@ -443,7 +439,7 @@ where
 	fn for_keys_with_prefix<A: FnMut(&[u8])>(&self, prefix: &[u8], action: A) {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::for_keys_with_prefix(state, prefix, action),
+				StateBackend::<BlockHasher<Block>>::for_keys_with_prefix(state, prefix, action),
 			OnDemandOrGenesisState::Genesis(ref state) => state.for_keys_with_prefix(prefix, action),
 		}
 	}
@@ -451,18 +447,18 @@ where
 	fn for_keys_in_child_storage<A: FnMut(&[u8])>(&self, storage_key: &[u8], action: A) {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::for_keys_in_child_storage(state, storage_key, action),
+				StateBackend::<BlockHasher<Block>>::for_keys_in_child_storage(state, storage_key, action),
 			OnDemandOrGenesisState::Genesis(ref state) => state.for_keys_in_child_storage(storage_key, action),
 		}
 	}
 
-	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
+	fn storage_root<I>(&self, delta: I) -> (BlockOut<Block>, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::storage_root(state, delta),
+				StateBackend::<BlockHasher<Block>>::storage_root(state, delta),
 			OnDemandOrGenesisState::Genesis(ref state) => {
 				let (root, _) = state.storage_root(delta);
 				(root, ())
@@ -476,7 +472,7 @@ where
 	{
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::child_storage_root(state, key, delta),
+				StateBackend::<BlockHasher<Block>>::child_storage_root(state, key, delta),
 			OnDemandOrGenesisState::Genesis(ref state) => {
 				let (root, is_equal, _) = state.child_storage_root(key, delta);
 				(root, is_equal, ())
@@ -487,7 +483,7 @@ where
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::pairs(state),
+				StateBackend::<BlockHasher<Block>>::pairs(state),
 			OnDemandOrGenesisState::Genesis(ref state) => state.pairs(),
 		}
 	}
@@ -495,12 +491,12 @@ where
 	fn keys(&self, prefix: &[u8]) -> Vec<Vec<u8>> {
 		match *self {
 			OnDemandOrGenesisState::OnDemand(ref state) =>
-				StateBackend::<H>::keys(state, prefix),
+				StateBackend::<BlockHasher<Block>>::keys(state, prefix),
 			OnDemandOrGenesisState::Genesis(ref state) => state.keys(prefix),
 		}
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, BlockHasher<Block>>> {
 		match self {
 			OnDemandOrGenesisState::OnDemand(ref mut state) => state.as_trie_backend(),
 			OnDemandOrGenesisState::Genesis(ref mut state) => state.as_trie_backend(),

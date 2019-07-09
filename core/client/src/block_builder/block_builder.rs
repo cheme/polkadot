@@ -21,8 +21,9 @@ use runtime_primitives::ApplyOutcome;
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::traits::{
 	Header as HeaderT, Hash, Block as BlockT, One, HashFor, ProvideRuntimeApi, ApiRef, DigestFor,
+	BlockOut,
 };
-use primitives::{H256, ExecutionContext};
+use primitives::{ExecutionContext};
 use crate::blockchain::HeaderBackend;
 use crate::runtime_api::{Core, ApiExt};
 use crate::error;
@@ -37,7 +38,8 @@ pub struct BlockBuilder<'a, Block, A: ProvideRuntimeApi> where Block: BlockT {
 
 impl<'a, Block, A> BlockBuilder<'a, Block, A>
 where
-	Block: BlockT<Hash=H256>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 	A: ProvideRuntimeApi + HeaderBackend<Block> + 'a,
 	A::Api: BlockBuilderApi<Block>,
 {

@@ -31,9 +31,8 @@ use crate::subscriptions::Subscriptions;
 use jsonrpc_derive::rpc;
 use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId};
 use log::warn;
-use primitives::{H256, Blake2Hasher};
 use runtime_primitives::generic::{BlockId, SignedBlock};
-use runtime_primitives::traits::{Block as BlockT, Header, NumberFor};
+use runtime_primitives::traits::{Block as BlockT, Header, NumberFor, BlockOut};
 use self::error::Result;
 
 pub use self::gen_client::Client as ChainClient;
@@ -118,9 +117,10 @@ impl<B, E, Block: BlockT, RA> Chain<B, E, Block, RA> {
 }
 
 impl<B, E, Block, RA> Chain<B, E, Block, RA> where
-	Block: BlockT<Hash=H256> + 'static,
-	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	E: client::CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	Block: BlockT + 'static,
+	BlockOut<Block>: Ord,
+	B: client::backend::Backend<Block> + Send + Sync + 'static,
+	E: client::CallExecutor<Block> + Send + Sync + 'static,
 	RA: Send + Sync + 'static
 {
 	fn unwrap_or_best(&self, hash: Option<Block::Hash>) -> Result<Block::Hash> {
@@ -168,9 +168,10 @@ impl<B, E, Block, RA> Chain<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> ChainApi<NumberFor<Block>, Block::Hash, Block::Header, SignedBlock<Block>> for Chain<B, E, Block, RA> where
-	Block: BlockT<Hash=H256> + 'static,
-	B: client::backend::Backend<Block, Blake2Hasher> + Send + Sync + 'static,
-	E: client::CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
+	Block: BlockT + 'static,
+	BlockOut<Block>: Ord,
+	B: client::backend::Backend<Block> + Send + Sync + 'static,
+	E: client::CallExecutor<Block> + Send + Sync + 'static,
 	RA: Send + Sync + 'static
 {
 	type Metadata = crate::metadata::Metadata;

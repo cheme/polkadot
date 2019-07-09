@@ -24,9 +24,9 @@ pub mod fetcher;
 use std::sync::Arc;
 
 use executor::RuntimeInfo;
-use primitives::{H256, Blake2Hasher};
 use runtime_primitives::BuildStorage;
 use runtime_primitives::traits::Block as BlockT;
+use runtime_primitives::traits::{BlockOut, BlockHasher};
 use state_machine::CodeExecutor;
 
 use crate::call_executor::LocalCallExecutor;
@@ -43,7 +43,7 @@ pub fn new_light_blockchain<B: BlockT, S: BlockchainStorage<B>, F>(storage: S) -
 }
 
 /// Create an instance of light client backend.
-pub fn new_light_backend<B, S, F>(blockchain: Arc<Blockchain<S, F>>, fetcher: Arc<F>) -> Arc<Backend<S, F, Blake2Hasher>>
+pub fn new_light_backend<B, S, F>(blockchain: Arc<Blockchain<S, F>>, fetcher: Arc<F>) -> Arc<Backend<S, F, BlockHasher<B>>>
 	where
 		B: BlockT,
 		S: BlockchainStorage<B>,
@@ -55,22 +55,23 @@ pub fn new_light_backend<B, S, F>(blockchain: Arc<Blockchain<S, F>>, fetcher: Ar
 
 /// Create an instance of light client.
 pub fn new_light<B, S, F, GS, RA, E>(
-	backend: Arc<Backend<S, F, Blake2Hasher>>,
+	backend: Arc<Backend<S, F, BlockHasher<B>>>,
 	fetcher: Arc<F>,
 	genesis_storage: GS,
 	code_executor: E,
-) -> ClientResult<Client<Backend<S, F, Blake2Hasher>, RemoteOrLocalCallExecutor<
+) -> ClientResult<Client<Backend<S, F, BlockHasher<B>>, RemoteOrLocalCallExecutor<
 	B,
-	Backend<S, F, Blake2Hasher>,
+	Backend<S, F, BlockHasher<B>>,
 	RemoteCallExecutor<Blockchain<S, F>, F>,
-	LocalCallExecutor<Backend<S, F, Blake2Hasher>, E>
+	LocalCallExecutor<Backend<S, F, BlockHasher<B>>, E>
 >, B, RA>>
 	where
-		B: BlockT<Hash=H256>,
+		B: BlockT,
+		BlockOut<B>: Ord,
 		S: BlockchainStorage<B>,
 		F: Fetcher<B>,
 		GS: BuildStorage,
-		E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
+		E: CodeExecutor<BlockHasher<B>> + RuntimeInfo<BlockHasher<B>>,
 {
 	let remote_executor = RemoteCallExecutor::new(backend.blockchain().clone(), fetcher);
 	let local_executor = LocalCallExecutor::new(backend.clone(), code_executor);
@@ -82,9 +83,9 @@ pub fn new_light<B, S, F, GS, RA, E>(
 pub fn new_fetch_checker<E, B: BlockT, S: BlockchainStorage<B>, F>(
 	blockchain: Arc<Blockchain<S, F>>,
 	executor: E,
-) -> LightDataChecker<E, Blake2Hasher, B, S, F>
+) -> LightDataChecker<E, BlockHasher<B>, B, S, F>
 	where
-		E: CodeExecutor<Blake2Hasher>,
+		E: CodeExecutor<BlockHasher<B>>,
 {
 	LightDataChecker::new(blockchain, executor)
 }

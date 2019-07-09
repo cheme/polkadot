@@ -21,11 +21,9 @@ use consensus::{
 	ImportBlock, BlockImport, BlockOrigin, Error as ConsensusError,
 	ForkChoiceStrategy,
 };
-use hash_db::Hasher;
 use runtime_primitives::Justification;
-use runtime_primitives::traits::{Block as BlockT};
+use runtime_primitives::traits::{Block as BlockT, BlockOut};
 use runtime_primitives::generic::BlockId;
-use primitives::Blake2Hasher;
 use parity_codec::alloc::collections::hash_map::HashMap;
 
 /// Extension trait for a test client.
@@ -55,10 +53,11 @@ pub trait ClientExt<Block: BlockT>: Sized {
 
 impl<B, E, RA, Block> ClientExt<Block> for Client<B, E, Block, RA>
 	where
-		B: client::backend::Backend<Block, Blake2Hasher>,
-		E: client::CallExecutor<Block, Blake2Hasher>,
+		B: client::backend::Backend<Block>,
+		E: client::CallExecutor<Block>,
 		Self: BlockImport<Block, Error=ConsensusError>,
-		Block: BlockT<Hash=<Blake2Hasher as Hasher>::Out>,
+		Block: BlockT,
+		BlockOut<Block>: Ord,
 {
 	fn import(&self, origin: BlockOrigin, block: Block)
 		-> Result<(), ConsensusError>

@@ -708,7 +708,11 @@ pub type NumberFor<B> = <<B as Block>::Header as Header>::Number;
 pub type DigestFor<B> = Digest<<<B as Block>::Header as Header>::Hash>;
 /// Extract the digest item type for a block.
 pub type DigestItemFor<B> = DigestItem<<<B as Block>::Header as Header>::Hash>;
-
+/// Extract the Hasher item type for a block.
+pub type BlockHasher<B> = <<<B as Block>::Header as Header>::Hashing as Hash>::Hasher;
+/// Extract the digest item type for a block.
+pub type BlockOut<B> = <<<<B as Block>::Header as Header>::Hashing as Hash>::Hasher as Hasher>::Out;
+// TODO EMCH reexxporst Hasher ?
 /// A "checkable" piece of information, used by the standard Substrate Executive in order to
 /// check the validity of a piece of extrinsic information, usually by verifying the signature.
 /// Implement for pieces of information that require some additional context `Context` in order to be

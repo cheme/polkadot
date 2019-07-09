@@ -21,11 +21,10 @@ use std::sync::Arc;
 use parking_lot::{RwLock, Mutex};
 use primitives::{ChangesTrieConfiguration, storage::well_known_keys};
 use runtime_primitives::generic::{BlockId, DigestItem};
-use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor};
+use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor, BlockHasher, BlockOut};
 use runtime_primitives::{Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::backend::{Backend as StateBackend, InMemory};
 use state_machine::{self, InMemoryChangesTrieStorage, ChangesTrieAnchorBlockId};
-use hash_db::Hasher;
 use trie::MemoryDB;
 use consensus::well_known_cache_keys::Id as CacheKeyId;
 
@@ -436,25 +435,23 @@ impl<Block: BlockT> light::blockchain::Storage<Block> for Blockchain<Block>
 }
 
 /// In-memory operation.
-pub struct BlockImportOperation<Block: BlockT, H: Hasher> {
+pub struct BlockImportOperation<Block: BlockT> {
 	pending_block: Option<PendingBlock<Block>>,
 	pending_cache: HashMap<CacheKeyId, Vec<u8>>,
-	old_state: InMemory<H>,
-	new_state: Option<InMemory<H>>,
-	changes_trie_update: Option<MemoryDB<H>>,
+	old_state: InMemory<BlockHasher<Block>>,
+	new_state: Option<InMemory<BlockHasher<Block>>>,
+	changes_trie_update: Option<MemoryDB<BlockHasher<Block>>>,
 	aux: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	finalized_blocks: Vec<(BlockId<Block>, Option<Justification>)>,
 	set_head: Option<BlockId<Block>>,
 }
 
-impl<Block, H> backend::BlockImportOperation<Block, H> for BlockImportOperation<Block, H>
+impl<Block> backend::BlockImportOperation<Block> for BlockImportOperation<Block>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
-	type State = InMemory<H>;
+	type State = InMemory<BlockHasher<Block>>;
 
 	fn state(&self) -> error::Result<Option<&Self::State>> {
 		Ok(Some(&self.old_state))
@@ -479,17 +476,17 @@ where
 		self.pending_cache = cache;
 	}
 
-	fn update_db_storage(&mut self, update: <InMemory<H> as StateBackend<H>>::Transaction) -> error::Result<()> {
+	fn update_db_storage(&mut self, update: <InMemory<BlockHasher<Block>> as StateBackend<BlockHasher<Block>>>::Transaction) -> error::Result<()> {
 		self.new_state = Some(self.old_state.update(update));
 		Ok(())
 	}
 
-	fn update_changes_trie(&mut self, update: MemoryDB<H>) -> error::Result<()> {
+	fn update_changes_trie(&mut self, update: MemoryDB<BlockHasher<Block>>) -> error::Result<()> {
 		self.changes_trie_update = Some(update);
 		Ok(())
 	}
 
-	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> error::Result<H::Out> {
+	fn reset_storage(&mut self, top: StorageOverlay, children: ChildrenStorageOverlay) -> error::Result<BlockOut<Block>> {
 		check_genesis_storage(&top, &children)?;
 
 		let child_delta = children.into_iter()
@@ -533,26 +530,24 @@ where
 }
 
 /// In-memory backend. Keeps all states and blocks in memory. Useful for testing.
-pub struct Backend<Block, H>
+pub struct Backend<Block>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
-	states: RwLock<HashMap<Block::Hash, InMemory<H>>>,
-	changes_trie_storage: ChangesTrieStorage<Block, H>,
+	states: RwLock<HashMap<Block::Hash, InMemory<BlockHasher<Block>>>>,
+	changes_trie_storage: ChangesTrieStorage<Block>,
 	blockchain: Blockchain<Block>,
 	import_lock: Mutex<()>,
 }
 
-impl<Block, H> Backend<Block, H>
+impl<Block> Backend<Block>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
 	/// Create a new instance of in-mem backend.
-	pub fn new() -> Backend<Block, H> {
+	pub fn new() -> Backend<Block> {
 		Backend {
 			states: RwLock::new(HashMap::new()),
 			changes_trie_storage: ChangesTrieStorage(InMemoryChangesTrieStorage::new()),
@@ -562,11 +557,10 @@ where
 	}
 }
 
-impl<Block, H> backend::AuxStore for Backend<Block, H>
+impl<Block> backend::AuxStore for Backend<Block>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
 	fn insert_aux<
 		'a,
@@ -583,16 +577,15 @@ where
 	}
 }
 
-impl<Block, H> backend::Backend<Block, H> for Backend<Block, H>
+impl<Block> backend::Backend<Block> for Backend<Block>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
-	type BlockImportOperation = BlockImportOperation<Block, H>;
+	type BlockImportOperation = BlockImportOperation<Block>;
 	type Blockchain = Blockchain<Block>;
-	type State = InMemory<H>;
-	type ChangesTrieStorage = ChangesTrieStorage<Block, H>;
+	type State = InMemory<BlockHasher<Block>>;
+	type ChangesTrieStorage = ChangesTrieStorage<Block>;
 	type OffchainStorage = OffchainStorage;
 
 	fn begin_operation(&self) -> error::Result<Self::BlockImportOperation> {
@@ -697,18 +690,16 @@ where
 	}
 }
 
-impl<Block, H> backend::LocalBackend<Block, H> for Backend<Block, H>
+impl<Block> backend::LocalBackend<Block> for Backend<Block>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {}
 
-impl<Block, H> backend::RemoteBackend<Block, H> for Backend<Block, H>
+impl<Block> backend::RemoteBackend<Block> for Backend<Block>
 where
 	Block: BlockT,
-	H: Hasher<Out=Block::Hash>,
-	H::Out: Ord,
+	BlockOut<Block>: Ord,
 {
 	fn is_local_state_available(&self, block: &BlockId<Block>) -> bool {
 		self.blockchain.expect_block_number_from_id(block)
@@ -718,8 +709,9 @@ where
 }
 
 /// Prunable in-memory changes trie storage.
-pub struct ChangesTrieStorage<Block: BlockT, H: Hasher>(InMemoryChangesTrieStorage<H, NumberFor<Block>>);
-impl<Block: BlockT, H: Hasher> backend::PrunableStateChangesTrieStorage<Block, H> for ChangesTrieStorage<Block, H> {
+pub struct ChangesTrieStorage<Block: BlockT>(InMemoryChangesTrieStorage<BlockHasher<Block>, NumberFor<Block>>);
+
+impl<Block: BlockT> backend::PrunableStateChangesTrieStorage<Block> for ChangesTrieStorage<Block> {
 	fn oldest_changes_trie_block(
 		&self,
 		_config: &ChangesTrieConfiguration,
@@ -729,33 +721,32 @@ impl<Block: BlockT, H: Hasher> backend::PrunableStateChangesTrieStorage<Block, H
 	}
 }
 
-impl<Block, H> state_machine::ChangesTrieRootsStorage<H, NumberFor<Block>> for ChangesTrieStorage<Block, H>
+impl<Block> state_machine::ChangesTrieRootsStorage<BlockHasher<Block>, NumberFor<Block>> for ChangesTrieStorage<Block>
 	where
 		Block: BlockT,
-		H: Hasher,
 {
 	fn build_anchor(
 		&self,
-		_hash: H::Out,
-	) -> Result<state_machine::ChangesTrieAnchorBlockId<H::Out, NumberFor<Block>>, String> {
+		_hash: BlockOut<Block>,
+	) -> Result<state_machine::ChangesTrieAnchorBlockId<BlockOut<Block>, NumberFor<Block>>, String> {
 		Err("Dummy implementation".into())
 	}
 
 	fn root(
 		&self,
-		_anchor: &ChangesTrieAnchorBlockId<H::Out, NumberFor<Block>>,
+		_anchor: &ChangesTrieAnchorBlockId<BlockOut<Block>, NumberFor<Block>>,
 		_block: NumberFor<Block>,
-	) -> Result<Option<H::Out>, String> {
+	) -> Result<Option<BlockOut<Block>>, String> {
 		Err("Dummy implementation".into())
 	}
 }
 
-impl<Block, H> state_machine::ChangesTrieStorage<H, NumberFor<Block>> for ChangesTrieStorage<Block, H>
+// TODO EMCH remove H from trait??
+impl<Block> state_machine::ChangesTrieStorage<BlockHasher<Block>, NumberFor<Block>> for ChangesTrieStorage<Block>
 	where
 		Block: BlockT,
-		H: Hasher,
 {
-	fn get(&self, _key: &H::Out, _prefix: &[u8]) -> Result<Option<state_machine::DBValue>, String> {
+	fn get(&self, key: &BlockOut<Block>, prefix: &[u8]) -> Result<Option<state_machine::DBValue>, String> {
 		Err("Dummy implementation".into())
 	}
 }

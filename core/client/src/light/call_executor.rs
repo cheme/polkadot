@@ -24,9 +24,9 @@ use std::{
 use futures::{IntoFuture, Future};
 
 use parity_codec::{Encode, Decode};
-use primitives::{offchain, H256, Blake2Hasher, convert_hash, NativeOrEncoded};
+use primitives::{offchain, convert_hash, NativeOrEncoded};
 use runtime_primitives::generic::BlockId;
-use runtime_primitives::traits::{One, Block as BlockT, Header as HeaderT};
+use runtime_primitives::traits::{One, Block as BlockT, Header as HeaderT, BlockHasher, BlockOut};
 use state_machine::{
 	self, Backend as StateBackend, CodeExecutor, OverlayedChanges,
 	ExecutionStrategy, create_proof_check_backend,
@@ -54,7 +54,7 @@ pub struct RemoteCallExecutor<B, F> {
 ///
 /// Calls are executed locally if state is available locally. Otherwise, calls
 /// are redirected to remote call executor.
-pub struct RemoteOrLocalCallExecutor<Block: BlockT<Hash=H256>, B, R, L> {
+pub struct RemoteOrLocalCallExecutor<Block: BlockT, B, R, L> {
 	backend: Arc<B>,
 	remote: R,
 	local: L,
@@ -77,9 +77,10 @@ impl<B, F> RemoteCallExecutor<B, F> {
 	}
 }
 
-impl<B, F, Block> CallExecutor<Block, Blake2Hasher> for RemoteCallExecutor<B, F>
+impl<B, F, Block> CallExecutor<Block> for RemoteCallExecutor<B, F>
 where
-	Block: BlockT<Hash=H256>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 	B: ChainBackend<Block>,
 	F: Fetcher<Block>,
 	Block::Hash: Ord,
@@ -155,7 +156,7 @@ where
 
 	fn call_at_state<
 		O: offchain::Externalities,
-		S: StateBackend<Blake2Hasher>,
+		S: StateBackend<BlockHasher<Block>>,
 		FF: FnOnce(
 			Result<NativeOrEncoded<R>, Self::Error>,
 			Result<NativeOrEncoded<R>, Self::Error>
@@ -172,15 +173,15 @@ where
 		_side_effects_handler: Option<&mut O>,
 	) -> ClientResult<(
 		NativeOrEncoded<R>,
-		(S::Transaction, <Blake2Hasher as Hasher>::Out),
-		Option<MemoryDB<Blake2Hasher>>,
+		(S::Transaction, BlockOut<Block>),
+		Option<MemoryDB<BlockHasher<Block>>>,
 	)> {
 		Err(ClientError::NotAvailableOnLightClient.into())
 	}
 
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<BlockHasher<Block>>>(
 		&self,
-		_state: &state_machine::TrieBackend<S, Blake2Hasher>,
+		_state: &state_machine::TrieBackend<S, BlockHasher<Block>>,
 		_changes: &mut OverlayedChanges,
 		_method: &str,
 		_call_data: &[u8]
@@ -195,10 +196,11 @@ where
 
 impl<Block, B, R, L> Clone for RemoteOrLocalCallExecutor<Block, B, R, L>
 	where
-		Block: BlockT<Hash=H256>,
-		B: RemoteBackend<Block, Blake2Hasher>,
-		R: CallExecutor<Block, Blake2Hasher> + Clone,
-		L: CallExecutor<Block, Blake2Hasher> + Clone,
+		Block: BlockT,
+		BlockOut<Block>: Ord,
+		B: RemoteBackend<Block>,
+		R: CallExecutor<Block> + Clone,
+		L: CallExecutor<Block> + Clone,
 {
 	fn clone(&self) -> Self {
 		RemoteOrLocalCallExecutor {
@@ -212,10 +214,11 @@ impl<Block, B, R, L> Clone for RemoteOrLocalCallExecutor<Block, B, R, L>
 
 impl<Block, B, Remote, Local> RemoteOrLocalCallExecutor<Block, B, Remote, Local>
 	where
-		Block: BlockT<Hash=H256>,
-		B: RemoteBackend<Block, Blake2Hasher>,
-		Remote: CallExecutor<Block, Blake2Hasher>,
-		Local: CallExecutor<Block, Blake2Hasher>,
+		Block: BlockT,
+		BlockOut<Block>: Ord,
+		B: RemoteBackend<Block>,
+		Remote: CallExecutor<Block>,
+		Local: CallExecutor<Block>,
 {
 	/// Creates new instance of remote/local call executor.
 	pub fn new(backend: Arc<B>, remote: Remote, local: Local) -> Self {
@@ -223,13 +226,15 @@ impl<Block, B, Remote, Local> RemoteOrLocalCallExecutor<Block, B, Remote, Local>
 	}
 }
 
-impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
+impl<Block, B, Remote, Local> CallExecutor<Block> for
 	RemoteOrLocalCallExecutor<Block, B, Remote, Local>
 	where
-		Block: BlockT<Hash=H256>,
-		B: RemoteBackend<Block, Blake2Hasher>,
-		Remote: CallExecutor<Block, Blake2Hasher>,
-		Local: CallExecutor<Block, Blake2Hasher>,
+		Block: BlockT,
+		BlockOut<Block>: Ord,
+		Block::Hash: Ord,
+		B: RemoteBackend<Block>,
+		Remote: CallExecutor<Block>,
+		Local: CallExecutor<Block>,
 {
 	type Error = ClientError;
 
@@ -332,7 +337,7 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 
 	fn call_at_state<
 		O: offchain::Externalities,
-		S: StateBackend<Blake2Hasher>,
+		S: StateBackend<BlockHasher<Block>>,
 		FF: FnOnce(
 			Result<NativeOrEncoded<R>, Self::Error>,
 			Result<NativeOrEncoded<R>, Self::Error>
@@ -349,8 +354,8 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 		side_effects_handler: Option<&mut O>,
 	) -> ClientResult<(
 		NativeOrEncoded<R>,
-		(S::Transaction, <Blake2Hasher as Hasher>::Out),
-		Option<MemoryDB<Blake2Hasher>>,
+		(S::Transaction, BlockOut<Block>),
+		Option<MemoryDB<BlockHasher<Block>>>,
 	)> {
 		// there's no actual way/need to specify native/wasm execution strategy on light node
 		// => we can safely ignore passed values
@@ -376,9 +381,9 @@ impl<Block, B, Remote, Local> CallExecutor<Block, Blake2Hasher> for
 			).map_err(|e| ClientError::Execution(Box::new(e.to_string())))
 	}
 
-	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<Blake2Hasher>>(
+	fn prove_at_trie_state<S: state_machine::TrieBackendStorage<BlockHasher<Block>>>(
 		&self,
-		state: &state_machine::TrieBackend<S, Blake2Hasher>,
+		state: &state_machine::TrieBackend<S, BlockHasher<Block>>,
 		changes: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
@@ -403,9 +408,10 @@ pub fn prove_execution<Block, S, E>(
 	call_data: &[u8],
 ) -> ClientResult<(Vec<u8>, Vec<Vec<u8>>)>
 	where
-		Block: BlockT<Hash=H256>,
-		S: StateBackend<Blake2Hasher>,
-		E: CallExecutor<Block, Blake2Hasher>,
+		Block: BlockT,
+		BlockOut<Block>: Ord,
+		S: StateBackend<BlockHasher<Block>>,
+		E: CallExecutor<Block>,
 {
 	let trie_state = state.as_trie_backend()
 		.ok_or_else(|| Box::new(state_machine::ExecutionError::UnableToGenerateProof) as Box<dyn state_machine::Error>)?;

@@ -37,7 +37,7 @@ use consensus::{
 use runtime_primitives::traits::{
 	Block as BlockT, Header as HeaderT, Zero, NumberFor, CurrentHeight,
 	BlockNumberToHash, ApiRef, ProvideRuntimeApi,
-	SaturatedConversion, One, DigestFor,
+	SaturatedConversion, One, DigestFor, BlockHasher, BlockOut,
 };
 use runtime_primitives::generic::DigestItem;
 use runtime_primitives::BuildStorage;
@@ -46,7 +46,7 @@ use crate::runtime_api::{
 	InitializeBlock,
 };
 use primitives::{
-	Blake2Hasher, H256, ChangesTrieConfiguration, convert_hash,
+	ChangesTrieConfiguration, convert_hash,
 	NeverNativeValue, ExecutionContext
 };
 use primitives::storage::{StorageKey, StorageData};
@@ -58,7 +58,6 @@ use state_machine::{
 	ChangesTrieRootsStorage, ChangesTrieStorage,
 	key_changes, key_changes_proof, OverlayedChanges, NeverOffchainExt,
 };
-use hash_db::Hasher;
 
 use crate::backend::{
 	self, BlockImportOperation, PrunableStateChangesTrieStorage,
@@ -90,10 +89,11 @@ pub type FinalityNotifications<Block> = mpsc::UnboundedReceiver<FinalityNotifica
 
 type StorageUpdate<B, Block> = <
 	<
-		<B as backend::Backend<Block, Blake2Hasher>>::BlockImportOperation
-			as BlockImportOperation<Block, Blake2Hasher>
-	>::State as state_machine::Backend<Blake2Hasher>>::Transaction;
-type ChangesUpdate = trie::MemoryDB<Blake2Hasher>;
+		<B as backend::Backend<Block>>::BlockImportOperation
+			as BlockImportOperation<Block>
+	>::State as state_machine::Backend<BlockHasher<Block>>>::Transaction;
+
+type ChangesUpdate<Block> = trie::MemoryDB<BlockHasher<Block>>;
 
 /// Execution strategies settings.
 #[derive(Debug, Clone)]
@@ -136,7 +136,7 @@ pub struct Client<B, E, Block, RA> where Block: BlockT {
 }
 
 /// Client import operation, a wrapper for the backend.
-pub struct ClientImportOperation<Block: BlockT, H: Hasher<Out=Block::Hash>, B: backend::Backend<Block, H>> {
+pub struct ClientImportOperation<Block: BlockT, B: backend::Backend<Block>> {
 	op: B::BlockImportOperation,
 	notify_imported: Option<(
 		Block::Hash,
@@ -262,14 +262,15 @@ pub fn new_in_mem<E, Block, S, RA>(
 	executor: E,
 	genesis_storage: S,
 ) -> error::Result<Client<
-	in_mem::Backend<Block, Blake2Hasher>,
-	LocalCallExecutor<in_mem::Backend<Block, Blake2Hasher>, E>,
+	in_mem::Backend<Block>,
+	LocalCallExecutor<in_mem::Backend<Block>, E>,
 	Block,
 	RA
 >> where
-	E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
+	E: CodeExecutor<BlockHasher<Block>> + RuntimeInfo<BlockHasher<Block>>,
 	S: BuildStorage,
-	Block: BlockT<Hash=H256>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	new_with_backend(Arc::new(in_mem::Backend::new()), executor, genesis_storage)
 }
@@ -282,19 +283,21 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 	build_genesis_storage: S,
 ) -> error::Result<Client<B, LocalCallExecutor<B, E>, Block, RA>>
 	where
-		E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
+		E: CodeExecutor<BlockHasher<Block>> + RuntimeInfo<BlockHasher<Block>>,
 		S: BuildStorage,
-		Block: BlockT<Hash=H256>,
-		B: backend::LocalBackend<Block, Blake2Hasher>
+		Block: BlockT,
+		BlockOut<Block>: Ord,
+		B: backend::LocalBackend<Block>
 {
 	let call_executor = LocalCallExecutor::new(backend.clone(), executor);
 	Client::new(backend, call_executor, build_genesis_storage, Default::default())
 }
 
 impl<B, E, Block, RA> Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher>,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	/// Creates new Substrate Client with given blockchain and code executor.
 	pub fn new<S: BuildStorage>(
@@ -496,7 +499,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			Some(old_current_num)
 		});
 		let headers = cht_range.map(|num| self.block_hash(num));
-		let proof = cht::build_proof::<Block::Header, Blake2Hasher, _, _>(cht_size, cht_num, ::std::iter::once(block_num), headers)?;
+		let proof = cht::build_proof::<Block::Header, BlockHasher<Block>, _, _>(cht_size, cht_num, ::std::iter::once(block_num), headers)?;
 		Ok((header, proof))
 	}
 
@@ -537,7 +540,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		let last_number = self.backend.blockchain().expect_block_number_from_id(&last)?;
 		let last_hash = self.backend.blockchain().expect_block_hash_from_id(&last)?;
 
-		key_changes::<_, Blake2Hasher, _>(
+		key_changes::<_, BlockHasher<Block>, _>(
 			&config,
 			&*storage,
 			first,
@@ -586,21 +589,21 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		cht_size: NumberFor<Block>,
 	) -> error::Result<ChangesProof<Block::Header>> {
 		struct AccessedRootsRecorder<'a, Block: BlockT> {
-			storage: &'a dyn ChangesTrieStorage<Blake2Hasher, NumberFor<Block>>,
+			storage: &'a dyn ChangesTrieStorage<BlockHasher<Block>, NumberFor<Block>>,
 			min: NumberFor<Block>,
-			required_roots_proofs: Mutex<BTreeMap<NumberFor<Block>, H256>>,
+			required_roots_proofs: Mutex<BTreeMap<NumberFor<Block>, BlockOut<Block>>>,
 		};
 
-		impl<'a, Block: BlockT> ChangesTrieRootsStorage<Blake2Hasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
-			fn build_anchor(&self, hash: H256) -> Result<ChangesTrieAnchorBlockId<H256, NumberFor<Block>>, String> {
+		impl<'a, Block: BlockT> ChangesTrieRootsStorage<BlockHasher<Block>, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
+			fn build_anchor(&self, hash: BlockOut<Block>) -> Result<ChangesTrieAnchorBlockId<BlockOut<Block>, NumberFor<Block>>, String> {
 				self.storage.build_anchor(hash)
 			}
 
 			fn root(
 				&self,
-				anchor: &ChangesTrieAnchorBlockId<H256, NumberFor<Block>>,
+				anchor: &ChangesTrieAnchorBlockId<BlockOut<Block>, NumberFor<Block>>,
 				block: NumberFor<Block>,
-			) -> Result<Option<H256>, String> {
+			) -> Result<Option<BlockOut<Block>>, String> {
 				let root = self.storage.root(anchor, block)?;
 				if block < self.min {
 					if let Some(ref root) = root {
@@ -614,8 +617,8 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			}
 		}
 
-		impl<'a, Block: BlockT> ChangesTrieStorage<Blake2Hasher, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
-			fn get(&self, key: &H256, prefix: &[u8]) -> Result<Option<DBValue>, String> {
+		impl<'a, Block: BlockT> ChangesTrieStorage<BlockHasher<Block>, NumberFor<Block>> for AccessedRootsRecorder<'a, Block> {
+			fn get(&self, key: &BlockOut<Block>, prefix: &[u8]) -> Result<Option<DBValue>, String> {
 				self.storage.get(key, prefix)
 			}
 		}
@@ -639,7 +642,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			.expect_block_number_from_id(&BlockId::Hash(first))?;
 		let last_number = self.backend.blockchain()
 			.expect_block_number_from_id(&BlockId::Hash(last))?;
-		let key_changes_proof = key_changes_proof::<_, Blake2Hasher, _>(
+		let key_changes_proof = key_changes_proof::<_, BlockHasher<Block>, _>(
 			&config,
 			&recording_storage,
 			first_number,
@@ -701,7 +704,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		let roots = cht_range
 			.map(|num| self.header(&BlockId::Number(num))
 			.map(|block| block.and_then(|block| block.digest().log(DigestItem::as_changes_trie_root).cloned())));
-		let proof = cht::build_proof::<Block::Header, Blake2Hasher, _, _>(cht_size, cht_num, blocks, roots)?;
+		let proof = cht::build_proof::<Block::Header, BlockHasher<Block>, _, _>(cht_size, cht_num, blocks, roots)?;
 		Ok(proof)
 	}
 
@@ -762,7 +765,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 	/// Lock the import lock, and run operations inside.
 	pub fn lock_import_and_run<R, Err, F>(&self, f: F) -> Result<R, Err> where
-		F: FnOnce(&mut ClientImportOperation<Block, Blake2Hasher, B>) -> Result<R, Err>,
+		F: FnOnce(&mut ClientImportOperation<Block, B>) -> Result<R, Err>,
 		Err: From<error::Error>,
 	{
 		let inner = || {
@@ -806,7 +809,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	/// Set a block as best block, and apply it to an operation.
 	pub fn apply_head(
 		&self,
-		operation: &mut ClientImportOperation<Block, Blake2Hasher, B>,
+		operation: &mut ClientImportOperation<Block, B>,
 		id: BlockId<Block>,
 	) -> error::Result<()> {
 		operation.op.mark_head(id)
@@ -816,11 +819,11 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	/// then `finalized` *must* be true.
 	pub fn apply_block(
 		&self,
-		operation: &mut ClientImportOperation<Block, Blake2Hasher, B>,
+		operation: &mut ClientImportOperation<Block, B>,
 		import_block: ImportBlock<Block>,
 		new_cache: HashMap<CacheKeyId, Vec<u8>>,
 	) -> error::Result<ImportResult> where
-		E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone,
+		E: CallExecutor<Block> + Send + Sync + Clone,
 	{
 		let ImportBlock {
 			origin,
@@ -881,7 +884,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 	fn execute_and_import_block(
 		&self,
-		operation: &mut ClientImportOperation<Block, Blake2Hasher, B>,
+		operation: &mut ClientImportOperation<Block, B>,
 		origin: BlockOrigin,
 		hash: Block::Hash,
 		import_headers: PrePostHeader<Block::Header>,
@@ -892,7 +895,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		aux: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 		fork_choice: ForkChoiceStrategy,
 	) -> error::Result<ImportResult> where
-		E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone,
+		E: CallExecutor<Block> + Send + Sync + Clone,
 	{
 		let parent_hash = import_headers.post().parent_hash().clone();
 		match self.backend.blockchain().status(BlockId::Hash(hash))? {
@@ -978,14 +981,14 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		body: Option<Vec<Block::Extrinsic>>,
 	) -> error::Result<(
 		Option<StorageUpdate<B, Block>>,
-		Option<Option<ChangesUpdate>>,
+		Option<Option<ChangesUpdate<Block>>>,
 		Option<(
 			Vec<(Vec<u8>, Option<Vec<u8>>)>,
 			Vec<(Vec<u8>, Vec<(Vec<u8>, Option<Vec<u8>>)>)>
 		)>
 	)>
 		where
-			E: CallExecutor<Block, Blake2Hasher> + Send + Sync + Clone,
+			E: CallExecutor<Block> + Send + Sync + Clone,
 	{
 		match transaction.state()? {
 			Some(transaction_state) => {
@@ -1039,7 +1042,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 	fn apply_finality_with_block_hash(
 		&self,
-		operation: &mut ClientImportOperation<Block, Blake2Hasher, B>,
+		operation: &mut ClientImportOperation<Block, B>,
 		block: Block::Hash,
 		justification: Option<Justification>,
 		best_block: Block::Hash,
@@ -1174,7 +1177,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		D: IntoIterator<Item=&'a &'b [u8]>,
 	>(
 		&self,
-		operation: &mut ClientImportOperation<Block, Blake2Hasher, B>,
+		operation: &mut ClientImportOperation<Block, B>,
 		insert: I,
 		delete: D
 	) -> error::Result<()> {
@@ -1190,7 +1193,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	/// block (any other finalized blocks are left unjustified).
 	pub fn apply_finality(
 		&self,
-		operation: &mut ClientImportOperation<Block, Blake2Hasher, B>,
+		operation: &mut ClientImportOperation<Block, B>,
 		id: BlockId<Block>,
 		justification: Option<Justification>,
 		notify: bool,
@@ -1330,9 +1333,10 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block> + Send + Sync,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 	RA: Send + Sync
 {
 	fn header(&self, id: BlockId<Block>) -> error::Result<Option<Block::Header>> {
@@ -1357,8 +1361,9 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> wher
 }
 
 impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	fn cache(&self) -> Option<Arc<dyn Cache<Block>>> {
 		self.backend.blockchain().cache()
@@ -1366,9 +1371,10 @@ impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block> + Clone + Send + Sync,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 	RA: ConstructRuntimeApi<Block, Self>
 {
 	type Api = <RA as ConstructRuntimeApi<Block, Self>>::RuntimeApi;
@@ -1379,9 +1385,10 @@ impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block> + Clone + Send + Sync,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	fn call_api_at<
 		'a,
@@ -1438,9 +1445,10 @@ impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block> + Clone + Send + Sync,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	type Error = ConsensusError;
 
@@ -1483,9 +1491,10 @@ impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> 
 }
 
 impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher>,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	type BlockNumber = <Block::Header as HeaderT>::Number;
 	fn current_height(&self) -> Self::BlockNumber {
@@ -1494,9 +1503,10 @@ impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> BlockNumberToHash for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
-	E: CallExecutor<Block, Blake2Hasher>,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	type BlockNumber = <Block::Header as HeaderT>::Number;
 	type Hash = Block::Hash;
@@ -1508,8 +1518,9 @@ impl<B, E, Block, RA> BlockNumberToHash for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> BlockchainEvents<Block> for Client<B, E, Block, RA>
 where
-	E: CallExecutor<Block, Blake2Hasher>,
-	Block: BlockT<Hash=H256>,
+	E: CallExecutor<Block>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	/// Get block import event stream.
 	fn import_notification_stream(&self) -> ImportNotifications<Block> {
@@ -1553,8 +1564,9 @@ impl<B, Block> Clone for LongestChain<B, Block> {
 
 impl<B, Block> LongestChain<B, Block>
 where
-	B: backend::Backend<Block, Blake2Hasher>,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 	/// Instantiate a new LongestChain for Backend B
 	pub fn new(backend: Arc<B>) -> Self {
@@ -1698,8 +1710,9 @@ where
 
 impl<B, Block> SelectChain<Block> for LongestChain<B, Block>
 where
-	B: backend::Backend<Block, Blake2Hasher>,
-	Block: BlockT<Hash=H256>,
+	B: backend::Backend<Block>,
+	Block: BlockT,
+	BlockOut<Block>: Ord,
 {
 
 	fn leaves(&self) -> Result<Vec<<Block as BlockT>::Hash>, ConsensusError> {
@@ -1726,9 +1739,10 @@ where
 
 impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 	where
-		B: backend::Backend<Block, Blake2Hasher>,
-		E: CallExecutor<Block, Blake2Hasher>,
-		Block: BlockT<Hash=H256>,
+		B: backend::Backend<Block>,
+		E: CallExecutor<Block>,
+		Block: BlockT,
+		BlockOut<Block>: Ord,
 {
 	fn block_body(&self, id: &BlockId<Block>) -> error::Result<Option<Vec<<Block as BlockT>::Extrinsic>>> {
 		self.body(id)
@@ -1737,9 +1751,10 @@ impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 
 impl<B, E, Block, RA> backend::AuxStore for Client<B, E, Block, RA>
 	where
-		B: backend::Backend<Block, Blake2Hasher>,
-		E: CallExecutor<Block, Blake2Hasher>,
-		Block: BlockT<Hash=H256>,
+		B: backend::Backend<Block>,
+		E: CallExecutor<Block>,
+		Block: BlockT,
+		BlockOut<Block>: Ord,
 {
 	/// Insert auxiliary data into key-value store.
 	fn insert_aux<

@@ -21,6 +21,7 @@ parking_lot = "0.8.0"
 log = "0.4"
 libsecp256k1 = "0.2.1"
 tiny-keccak = "1.4.2"
+hash-db = "0.14.0"
 
 [dev-dependencies]
 assert_matches = "1.1"

@@ -17,6 +17,7 @@
 //! Rust implementation of Substrate contracts.
 
 use std::{collections::HashMap, convert::TryFrom, str};
+use std::marker::PhantomData;
 use tiny_keccak;
 use secp256k1;
 
@@ -30,11 +31,11 @@ use primitives::{blake2_128, blake2_256, twox_64, twox_128, twox_256, ed25519, s
 use primitives::offchain;
 use primitives::hexdisplay::HexDisplay;
 use primitives::sandbox as sandbox_primitives;
-use primitives::{H256, Blake2Hasher};
 use trie::ordered_trie_root;
 use crate::sandbox;
 use crate::allocator;
 use log::trace;
+use hash_db::Hasher;
 
 #[cfg(feature="wasm-extern-trace")]
 macro_rules! debug_trace {
@@ -45,16 +46,17 @@ macro_rules! debug_trace {
 	( $( $x:tt )* ) => ()
 }
 
-struct FunctionExecutor<'e, E: Externalities<Blake2Hasher> + 'e> {
+struct FunctionExecutor<'e, H: Hasher, E: Externalities<H> + 'e> {
 	sandbox_store: sandbox::Store,
 	heap: allocator::FreeingBumpHeapAllocator,
 	memory: MemoryRef,
 	table: Option<TableRef>,
 	ext: &'e mut E,
 	hash_lookup: HashMap<Vec<u8>, Vec<u8>>,
+	_ph: PhantomData<(H)>,
 }
 
-impl<'e, E: Externalities<Blake2Hasher>> FunctionExecutor<'e, E> {
+impl<'e, H: Hasher, E: Externalities<H>> FunctionExecutor<'e, H, E> {
 	fn new(m: MemoryRef, t: Option<TableRef>, e: &'e mut E) -> Result<Self> {
 		Ok(FunctionExecutor {
 			sandbox_store: sandbox::Store::new(),
@@ -63,11 +65,12 @@ impl<'e, E: Externalities<Blake2Hasher>> FunctionExecutor<'e, E> {
 			table: t,
 			ext: e,
 			hash_lookup: HashMap::new(),
+			_ph: Default::default(),
 		})
 	}
 }
 
-impl<'e, E: Externalities<Blake2Hasher>> sandbox::SandboxCapabilities for FunctionExecutor<'e, E> {
+impl<'e, H: Hasher, E: Externalities<H>> sandbox::SandboxCapabilities for FunctionExecutor<'e, H, E> {
 	fn store(&self) -> &sandbox::Store {
 		&self.sandbox_store
 	}
@@ -131,7 +134,7 @@ fn u32_to_key(key: u32) -> std::result::Result<Option<offchain::CryptoKeyId>, ()
 	}
 }
 
-impl_function_executor!(this: FunctionExecutor<'e, E>,
+impl_function_executor!(this: FunctionExecutor<'e, H, E>,
 	ext_print_utf8(utf8_data: *const u8, utf8_len: u32) => {
 		if let Ok(utf8) = this.memory.get(utf8_data, utf8_len as usize) {
 			if let Ok(message) = String::from_utf8(utf8) {
@@ -500,7 +503,7 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		Ok(offset)
 	},
 	ext_storage_changes_root(parent_hash_data: *const u8, parent_hash_len: u32, result: *mut u8) -> u32 => {
-		let mut parent_hash = H256::default();
+		let mut parent_hash = H::Out::default();
 		if parent_hash_len != parent_hash.as_ref().len() as u32 {
 			return Err("Invalid parent_hash_len in ext_storage_changes_root".into());
 		}
@@ -510,7 +513,7 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		let r = this.ext.storage_changes_root(parent_hash)
 			.map_err(|_| "Invaid parent_hash passed to ext_storage_changes_root")?;
 		if let Some(r) = r {
-			this.memory.set(result, &r[..])
+			this.memory.set(result, r.as_ref())
 				.map_err(|_| "Invalid attempt to set memory in ext_storage_changes_root")?;
 			Ok(1)
 		} else {
@@ -537,8 +540,8 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 					)
 			)
 			.collect::<Result<Vec<_>>>()?;
-		let r = ordered_trie_root::<Blake2Hasher, _, _>(values.into_iter());
-		this.memory.set(result, &r[..])
+		let r = ordered_trie_root::<H, _, _>(values.into_iter());
+		this.memory.set(result, r.as_ref())
 			.map_err(|_| "Invalid attempt to set memory in ext_blake2_256_enumerated_trie_root")?;
 		Ok(())
 	},
@@ -1199,7 +1202,8 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		this.sandbox_store.memory_teardown(memory_idx)?;
 		Ok(())
 	},
-	=> <'e, E: Externalities<Blake2Hasher> + 'e>
+  -> H::Out: Ord,
+	=> <'e, H: Hasher,  E: Externalities<H> + 'e>
 );
 
 /// Wasm rust executor for contracts.
@@ -1220,14 +1224,16 @@ impl WasmExecutor {
 	/// Signature of this method needs to be `(I32, I32) -> I64`.
 	///
 	/// This should be used for tests only.
-	pub fn call<E: Externalities<Blake2Hasher>>(
+	pub fn call<H: Hasher, E: Externalities<H>>(
 		&self,
 		ext: &mut E,
 		heap_pages: usize,
 		code: &[u8],
 		method: &str,
 		data: &[u8],
-	) -> Result<Vec<u8>> {
+	) -> Result<Vec<u8>> where
+    H::Out: Ord,
+  {
 		let module = ::wasmi::Module::from_buffer(code)?;
 		let module = self.prepare_module(ext, heap_pages, &module)?;
 		self.call_in_wasm_module(ext, &module, method, data)
@@ -1237,7 +1243,8 @@ impl WasmExecutor {
 	///
 	/// This should be used for tests only.
 	pub fn call_with_custom_signature<
-		E: Externalities<Blake2Hasher>,
+    H: Hasher,
+		E: Externalities<H>,
 		F: FnOnce(&mut dyn FnMut(&[u8]) -> Result<u32>) -> Result<Vec<RuntimeValue>>,
 		FR: FnOnce(Option<RuntimeValue>, &MemoryRef) -> Result<Option<R>>,
 		R,
@@ -1249,7 +1256,9 @@ impl WasmExecutor {
 		method: &str,
 		create_parameters: F,
 		filter_result: FR,
-	) -> Result<R> {
+	) -> Result<R>  where
+    H::Out: Ord,
+  {
 		let module = wasmi::Module::from_buffer(code)?;
 		let module = self.prepare_module(ext, heap_pages, &module)?;
 		self.call_in_wasm_module_with_custom_signature(
@@ -1271,13 +1280,15 @@ impl WasmExecutor {
 	}
 
 	/// Call a given method in the given wasm-module runtime.
-	pub fn call_in_wasm_module<E: Externalities<Blake2Hasher>>(
+	pub fn call_in_wasm_module<H: Hasher, E: Externalities<H>>(
 		&self,
 		ext: &mut E,
 		module_instance: &ModuleRef,
 		method: &str,
 		data: &[u8],
-	) -> Result<Vec<u8>> {
+	) -> Result<Vec<u8>> where
+    H::Out: Ord,
+  {
 		self.call_in_wasm_module_with_custom_signature(
 			ext,
 			module_instance,
@@ -1300,7 +1311,8 @@ impl WasmExecutor {
 
 	/// Call a given method in the given wasm-module runtime.
 	fn call_in_wasm_module_with_custom_signature<
-		E: Externalities<Blake2Hasher>,
+		H: Hasher,
+		E: Externalities<H>,
 		F: FnOnce(&mut dyn FnMut(&[u8]) -> Result<u32>) -> Result<Vec<RuntimeValue>>,
 		FR: FnOnce(Option<RuntimeValue>, &MemoryRef) -> Result<Option<R>>,
 		R,
@@ -1311,7 +1323,9 @@ impl WasmExecutor {
 		method: &str,
 		create_parameters: F,
 		filter_result: FR,
-	) -> Result<R> {
+	) -> Result<R>  where 
+		H::Out: Ord,
+  {
 		// extract a reference to a linear memory, optional reference to a table
 		// and then initialize FunctionExecutor.
 		let memory = Self::get_mem_instance(module_instance)?;
@@ -1355,18 +1369,19 @@ impl WasmExecutor {
 	}
 
 	/// Prepare module instance
-	pub fn prepare_module<E: Externalities<Blake2Hasher>>(
+	pub fn prepare_module<H: Hasher, E: Externalities<H>>(
 		&self,
 		ext: &mut E,
 		heap_pages: usize,
 		module: &Module,
-		) -> Result<ModuleRef>
+		) -> Result<ModuleRef> where
+    H::Out: Ord,
 	{
 		// start module instantiation. Don't run 'start' function yet.
 		let intermediate_instance = ModuleInstance::new(
 			module,
 			&ImportsBuilder::new()
-			.with_resolver("env", FunctionExecutor::<E>::resolver())
+			.with_resolver("env", FunctionExecutor::<H, E>::resolver())
 		)?;
 
 		// extract a reference to a linear memory, optional reference to a table
@@ -1389,6 +1404,7 @@ impl WasmExecutor {
 mod tests {
 	use super::*;
 
+  use primitives::{H256, Blake2Hasher};
 	use parity_codec::Encode;
 
 	use state_machine::TestExternalities as CoreTestExternalities;

@@ -492,7 +492,6 @@ pub struct GrandpaParams<B, E, Block: BlockT<Hash=H256>, N, RA, SC, X> {
 pub fn run_grandpa_voter<B, E, Block: BlockT<Hash=H256>, N, RA, SC, X>(
 	grandpa_params: GrandpaParams<B, E, Block, N, RA, SC, X>,
 ) -> ::client::error::Result<impl Future<Item=(),Error=()> + Send + 'static> where
-	Block::Hash: Ord,
 	B: Backend<Block, Blake2Hasher> + 'static,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	N: Network<Block> + Send + Sync + 'static,
@@ -764,7 +763,6 @@ pub fn run_grandpa_voter<B, E, Block: BlockT<Hash=H256>, N, RA, SC, X>(
 pub fn run_grandpa<B, E, Block: BlockT<Hash=H256>, N, RA, SC, X>(
 	grandpa_params: GrandpaParams<B, E, Block, N, RA, SC, X>,
 ) -> ::client::error::Result<impl Future<Item=(),Error=()> + Send + 'static> where
-	Block::Hash: Ord,
 	B: Backend<Block, Blake2Hasher> + 'static,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync + 'static,
 	N: Network<Block> + Send + Sync + 'static,

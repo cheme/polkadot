@@ -219,8 +219,9 @@ macro_rules! dispatch_fn {
 macro_rules! impl_function_executor {
 	( $objectname:ident : $structname:ty,
 	  $( $name:ident ( $( $names:ident : $params:ty ),* ) $( -> $returns:ty )* => $body:tt , )*
+	  $( -> $where:ty : Ord, )*
 	  => $($pre:tt)+ ) => (
-		impl $( $pre ) + $structname {
+		impl $( $pre ) + $structname where $( $where : Ord, )* {
 			#[allow(unused)]
 			fn resolver() -> &'static dyn $crate::wasmi::ModuleImportResolver {
 				struct Resolver;
@@ -241,7 +242,8 @@ macro_rules! impl_function_executor {
 			}
 		}
 
-		impl $( $pre ) + $crate::wasmi::Externals for $structname {
+		impl $( $pre ) + $crate::wasmi::Externals for $structname
+      where $( $where : Ord, ) * {
 			fn invoke_index(
 				&mut self,
 				index: usize,

@@ -43,16 +43,16 @@ pub use native_executor::{with_native_environment, NativeExecutor, NativeExecuti
 pub use state_machine::Externalities;
 pub use runtime_version::{RuntimeVersion, NativeVersion};
 pub use parity_codec::Codec;
-#[doc(hidden)]
-pub use primitives::Blake2Hasher;
+
+use hash_db::Hasher;
 
 /// Provides runtime information.
-pub trait RuntimeInfo {
+pub trait RuntimeInfo<H: Hasher> {
 	/// Native runtime information.
 	fn native_version(&self) -> &NativeVersion;
 
 	/// Extract RuntimeVersion of given :code block
-	fn runtime_version<E: Externalities<Blake2Hasher>> (
+	fn runtime_version<E: Externalities<H>> (
 		&self,
 		ext: &mut E,
 	) -> Option<RuntimeVersion>;
