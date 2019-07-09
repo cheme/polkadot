@@ -54,7 +54,7 @@ use runtime_primitives::{
 	BuildStorage
 };
 use runtime_primitives::traits::{
-	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion, HeaderHasher,
+	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion
 };
 use state_machine::backend::Backend as StateBackend;
 use executor::RuntimeInfo;
@@ -380,14 +380,6 @@ impl<Block: BlockT> client::blockchain::Backend<Block> for BlockchainDb<Block> {
 		children::read_children(&*self.db, columns::META, meta_keys::CHILDREN_PREFIX, parent_hash)
 	}
 }
-
-
-impl<Block: BlockT> ClientExternalities<HeaderHasher<Block::Header>> for BlockchainDb<Block> {
-  fn state_root_at(&self, _block_number: u64) -> Option<<HeaderHasher<Block::Header> as Hasher>::Out> {
-    unimplemented!("TODO EMCH");
-  }
-}
-
 
 impl<Block: BlockT> client::blockchain::ProvideCache<Block> for BlockchainDb<Block> {
 	fn cache(&self) -> Option<Arc<dyn client::blockchain::Cache<Block>>> {

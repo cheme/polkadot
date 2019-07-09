@@ -18,21 +18,19 @@
 //! blocks. CHT roots are stored for headers of ancient blocks.
 
 use std::{sync::{Weak, Arc}, collections::HashMap};
-use std::marker::PhantomData;
 use futures::{Future, IntoFuture};
 use parking_lot::Mutex;
 
 use runtime_primitives::{Justification, generic::BlockId};
-use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor, Zero, HeaderHasher};
+use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor, Zero};
 use consensus::well_known_cache_keys;
-use hash_db::Hasher;
+
 use crate::backend::{AuxStore, NewBlockState};
 use crate::blockchain::{Backend as BlockchainBackend, BlockStatus, Cache as BlockchainCache,
 	HeaderBackend as BlockchainHeaderBackend, Info as BlockchainInfo, ProvideCache};
 use crate::cht;
 use crate::error::{Error as ClientError, Result as ClientResult};
 use crate::light::fetcher::{Fetcher, RemoteBodyRequest, RemoteHeaderRequest};
-use state_machine::client::{Externalities as ClientExternalities};
 
 /// Light client blockchain storage.
 pub trait Storage<Block: BlockT>: AuxStore + BlockchainHeaderBackend<Block> {
@@ -76,19 +74,17 @@ pub trait Storage<Block: BlockT>: AuxStore + BlockchainHeaderBackend<Block> {
 }
 
 /// Light client blockchain.
-pub struct Blockchain<B, S, F> {
+pub struct Blockchain<S, F> {
 	fetcher: Mutex<Weak<F>>,
 	storage: S,
-	_ph: PhantomData<(B)>,
 }
 
-impl<B, S, F> Blockchain<B, S, F> {
+impl<S, F> Blockchain<S, F> {
 	/// Create new light blockchain backed with given storage.
 	pub fn new(storage: S) -> Self {
 		Self {
 			fetcher: Mutex::new(Default::default()),
 			storage,
-      _ph: Default::default(),
 		}
 	}
 
@@ -108,7 +104,7 @@ impl<B, S, F> Blockchain<B, S, F> {
 	}
 }
 
-impl<S, F, Block> BlockchainHeaderBackend<Block> for Blockchain<Block, S, F> where Block: BlockT, S: Storage<Block>, F: Fetcher<Block> {
+impl<S, F, Block> BlockchainHeaderBackend<Block> for Blockchain<S, F> where Block: BlockT, S: Storage<Block>, F: Fetcher<Block> {
 	fn header(&self, id: BlockId<Block>) -> ClientResult<Option<Block::Header>> {
 		match self.storage.header(id)? {
 			Some(header) => Ok(Some(header)),
@@ -155,7 +151,7 @@ impl<S, F, Block> BlockchainHeaderBackend<Block> for Blockchain<Block, S, F> whe
 	}
 }
 
-impl<S, F, Block> BlockchainBackend<Block> for Blockchain<Block, S, F> where Block: BlockT, S: Storage<Block>, F: Fetcher<Block> {
+impl<S, F, Block> BlockchainBackend<Block> for Blockchain<S, F> where Block: BlockT, S: Storage<Block>, F: Fetcher<Block> {
 	fn body(&self, id: BlockId<Block>) -> ClientResult<Option<Vec<Block::Extrinsic>>> {
 		let header = match self.header(id)? {
 			Some(header) => header,
@@ -192,18 +188,7 @@ impl<S, F, Block> BlockchainBackend<Block> for Blockchain<Block, S, F> where Blo
 	}
 }
 
-impl<S, F, Block> ClientExternalities<HeaderHasher<Block::Header>> for Blockchain<Block, S, F>
-  where
-    Block: BlockT,
-    S: Storage<Block>,
-    F: Fetcher<Block>
-{
-  fn state_root_at(&self, bloc_number: u64) -> Option<<HeaderHasher<Block::Header> as Hasher>::Out> {
-    unimplemented!("TODO EMCH");
-  }
-}
-
-impl<S: Storage<Block>, F, Block: BlockT> ProvideCache<Block> for Blockchain<Block, S, F> {
+impl<S: Storage<Block>, F, Block: BlockT> ProvideCache<Block> for Blockchain<S, F> {
 	fn cache(&self) -> Option<Arc<dyn BlockchainCache<Block>>> {
 		self.storage.cache()
 	}

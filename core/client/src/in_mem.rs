@@ -21,7 +21,7 @@ use std::sync::Arc;
 use parking_lot::{RwLock, Mutex};
 use primitives::{ChangesTrieConfiguration, storage::well_known_keys};
 use runtime_primitives::generic::{BlockId, DigestItem};
-use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor, HashFor, HeaderHasher};
+use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor};
 use runtime_primitives::{Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::backend::{Backend as StateBackend, InMemory};
 use state_machine::client::{Externalities as ClientExternalities};
@@ -354,12 +354,6 @@ impl<Block: BlockT> blockchain::Backend<Block> for Blockchain<Block> {
 	}
 }
 
-impl<Block: BlockT> ClientExternalities<HeaderHasher<Block::Header>> for Blockchain<Block> {
-  fn state_root_at(&self, bloc_number: u64) -> Option<<HeaderHasher<Block::Header> as Hasher>::Out> {
-    unimplemented!("TODO EMCH");
-  }
-}
-
 impl<Block: BlockT> blockchain::ProvideCache<Block> for Blockchain<Block> {
 	fn cache(&self) -> Option<Arc<dyn blockchain::Cache<Block>>> {
 		None
@@ -594,7 +588,7 @@ where
 	}
 }
 
-impl<Block, H> backend::Backend<Block> for Backend<Block, H>
+impl<Block, H> backend::Backend<Block, H> for Backend<Block, H>
 where
 	Block: BlockT,
 	H: Hasher<Out=Block::Hash>,
@@ -730,7 +724,7 @@ where
 	}
 }
 
-impl<Block, H> backend::LocalBackend<Block> for Backend<Block, H>
+impl<Block, H> backend::LocalBackend<Block, H> for Backend<Block, H>
 where
 	Block: BlockT,
 	H: Hasher<Out=Block::Hash>,

@@ -26,7 +26,7 @@ use parity_codec::{Decode, Encode};
 use primitives::{ChangesTrieConfiguration, convert_hash};
 use runtime_primitives::traits::{
 	Block as BlockT, Header as HeaderT, Hash, HashFor, NumberFor,
-	SimpleArithmetic, CheckedConversion, HeaderHasher,
+	SimpleArithmetic, CheckedConversion,
 };
 use state_machine::{CodeExecutor, ChangesTrieRootsStorage, ChangesTrieAnchorBlockId,
 	TrieBackend, read_proof_check, key_changes_proof_check,
@@ -174,6 +174,16 @@ pub trait Fetcher<Block: BlockT>: Send + Sync {
 	fn remote_body(&self, request: RemoteBodyRequest<Block::Header>) -> Self::RemoteBodyResult;
 }
 
+// TODO EMCH remove this default impl
+impl<Block: BlockT> ClientExternalities<<HashFor<Block> as Hash>::Hasher> for FetchChecker<Block> {
+
+  fn state_root_at(&self, _: u64) -> Option<
+<<HashFor<Block> as Hash>::Hasher as Hasher>::Out
+    > {
+      unimplemented!("TODO EMCH");
+    }
+}
+
 /// Light client remote data checker.
 ///
 /// Implementations of this trait should not use any prunable blockchain data
@@ -218,23 +228,22 @@ pub trait FetchChecker<Block: BlockT>: Send + Sync {
 	) -> ClientResult<Vec<Block::Extrinsic>>;
 }
 
-// TODO EMCH remove H in favor of block header H
 /// Remote data checker.
-pub struct LightDataChecker<E, B: BlockT, S: BlockchainStorage<B>, F> {
-	blockchain: Arc<Blockchain<B, S, F>>,
+pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>, F> {
+	blockchain: Arc<Blockchain<S, F>>,
 	executor: E,
+	_hasher: PhantomData<(B, H)>,
 }
 
-impl<E, B, S, F> LightDataChecker<E, B, S, F> 
+impl<E, H, B, S, F> LightDataChecker<E, H, B, S, F> 
 where
 	B: BlockT,
 	S: BlockchainStorage<B>,
-	F: Fetcher<B>,
 {
 	/// Create new light data checker.
-	pub fn new(blockchain: Arc<Blockchain<B, S, F>>, executor: E) -> Self {
+	pub fn new(blockchain: Arc<Blockchain<S, F>>, executor: E) -> Self {
 		Self {
-			blockchain, executor
+			blockchain, executor, _hasher: PhantomData
 		}
 	}
 
@@ -246,7 +255,9 @@ where
 		cht_size: NumberFor<B>,
 	) -> ClientResult<Vec<(NumberFor<B>, u32)>>
 		where
-			<HeaderHasher<B::Header> as Hasher>::Out: Ord,
+			H: Hasher,
+			H::Out: Ord,
+			F: ClientExternalities<H>,
 	{
 		// since we need roots of all changes tries for the range begin..max
 		// => remote node can't use max block greater that one that we have passed
@@ -290,7 +301,7 @@ where
 		}
 
 		// and now check the key changes proof + get the changes
-		key_changes_proof_check::<_, HeaderHasher<B::Header>, _>(
+		key_changes_proof_check::<_, H, _>(
 			&request.changes_trie_config,
 			&RootsStorage {
 				roots: (request.tries_roots.0, &request.tries_roots.2),
@@ -315,7 +326,9 @@ where
 		remote_roots_proof: Vec<Vec<u8>>,
 	) -> ClientResult<()>
 		where
-			<HeaderHasher<B::Header> as Hasher>::Out: Ord,
+			H: Hasher,
+			H::Out: Ord,
+			F: ClientExternalities<H>,
 	{
 		// all the checks are sharing the same storage
 		let storage = create_proof_check_backend_storage(remote_roots_proof);
@@ -336,7 +349,7 @@ where
 				// check if the proofs storage contains the root
 				// normally this happens in when the proving backend is created, but since
 				// we share the storage for multiple checks, do it here
-				let mut cht_root = <HeaderHasher<B::Header> as Hasher>::Out::default();
+				let mut cht_root = H::Out::default();
 				cht_root.as_mut().copy_from_slice(local_cht_root.as_ref());
 				if !storage.contains(&cht_root, &[]) {
 					return Err(ClientError::InvalidCHTProof.into());
@@ -345,7 +358,7 @@ where
 				// check proof for single changes trie root
 				let proving_backend = TrieBackend::new(storage, cht_root);
 				let remote_changes_trie_root = remote_roots[&block];
-				cht::check_proof_on_proving_backend::<B::Header, Blockchain<B, S, F>>(
+				cht::check_proof_on_proving_backend::<B::Header, H, F>(
 					local_cht_root,
 					block,
 					remote_changes_trie_root,
@@ -360,29 +373,14 @@ where
 	}
 }
 
-impl<E, Block, S, F> ClientExternalities<HeaderHasher<Block::Header>> for LightDataChecker<E, Block, S, F>
+impl<E, Block, H, S, F> FetchChecker<Block> for LightDataChecker<E, H, Block, S, F>
 	where
 		Block: BlockT,
-		E: CodeExecutor<HeaderHasher<Block::Header>>,
-		<HeaderHasher<Block::Header> as Hasher>::Out: Ord + 'static,
+		E: CodeExecutor<H>,
+		H: Hasher,
+		H::Out: Ord + 'static,
 		S: BlockchainStorage<Block>,
-		F: Fetcher<Block>,
-{	
-	fn state_root_at(&self, _: u64) -> Option<
-<<HashFor<Block> as Hash>::Hasher as Hasher>::Out
-		> {
-			unimplemented!("TODO EMCH");
-		}
-}
-
-
-impl<E, Block, S, F> FetchChecker<Block> for LightDataChecker<E, Block, S, F>
-	where
-		Block: BlockT,
-		E: CodeExecutor<HeaderHasher<Block::Header>>,
-		<HeaderHasher<Block::Header> as Hasher>::Out : Ord,
-		S: BlockchainStorage<Block>,
-		F: Fetcher<Block>,
+		F: ClientExternalities<H>,
 {
 	fn check_header_proof(
 		&self,
@@ -393,7 +391,7 @@ impl<E, Block, S, F> FetchChecker<Block> for LightDataChecker<E, Block, S, F>
 		let remote_header = remote_header.ok_or_else(||
 			ClientError::from(ClientError::InvalidCHTProof))?;
 		let remote_header_hash = remote_header.hash();
-		cht::check_proof::<Block::Header, Self>(
+		cht::check_proof::<Block::Header, H, F>(
 			request.cht_root,
 			request.block,
 			remote_header_hash,
@@ -406,7 +404,7 @@ impl<E, Block, S, F> FetchChecker<Block> for LightDataChecker<E, Block, S, F>
 		request: &RemoteReadRequest<Block::Header>,
 		remote_proof: Vec<Vec<u8>>
 	) -> ClientResult<Option<Vec<u8>>> {
-		read_proof_check::<HeaderHasher<Block::Header>, Self>(convert_hash(request.header.state_root()), remote_proof, &request.key)
+		read_proof_check::<H, F>(convert_hash(request.header.state_root()), remote_proof, &request.key)
 			.map_err(Into::into)
 	}
 
@@ -415,7 +413,7 @@ impl<E, Block, S, F> FetchChecker<Block> for LightDataChecker<E, Block, S, F>
 		request: &RemoteReadChildRequest<Block::Header>,
 		remote_proof: Vec<Vec<u8>>
 	) -> ClientResult<Option<Vec<u8>>> {
-		read_child_proof_check::<HeaderHasher<Block::Header>, Self>(
+		read_child_proof_check::<H, F>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			&request.storage_key,
@@ -428,7 +426,11 @@ impl<E, Block, S, F> FetchChecker<Block> for LightDataChecker<E, Block, S, F>
 		request: &RemoteCallRequest<Block::Header>,
 		remote_proof: Vec<Vec<u8>>
 	) -> ClientResult<Vec<u8>> {
-		check_execution_proof::<_, _, Blockchain<Block, S, F>>(Some(& *self.blockchain), &self.executor, request, remote_proof)
+    if let Some(cli) = self.blockchain.fetcher().upgrade() {
+		  check_execution_proof::<_, _, H, F>(Some(&cli), &self.executor, request, remote_proof)
+    } else {
+      unimplemented!("TODO EMCH check update failure");
+    }
 	}
 
 	fn check_changes_proof(

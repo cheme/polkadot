@@ -76,7 +76,6 @@ pub type LightExecutor = client::light::call_executor::RemoteOrLocalCallExecutor
 	LightBackend,
 	client::light::call_executor::RemoteCallExecutor<
 		client::light::blockchain::Blockchain<
-			runtime::Block,
 			client_db::light::LightStorage<runtime::Block>,
 			LightFetcher
 		>,

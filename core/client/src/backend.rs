@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use crate::error;
 use primitives::ChangesTrieConfiguration;
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
-use runtime_primitives::traits::{Block as BlockT, NumberFor, BlockHasher};
+use runtime_primitives::traits::{Block as BlockT, NumberFor};
 use state_machine::backend::Backend as StateBackend;
 use state_machine::client::{Externalities as ClientExternalities};
 use state_machine::ChangesTrieStorage as StateChangesTrieStorage;
@@ -133,17 +133,18 @@ pub trait AuxStore {
 ///
 /// The same applies for live `BlockImportOperation`s: while an import operation building on a parent `P`
 /// is alive, the state for `P` should not be pruned.
-pub trait Backend<Block>: AuxStore + Send + Sync + ClientExternalities<BlockHasher<Block>> where
+pub trait Backend<Block, H>: AuxStore + Send + Sync + ClientExternalities<H> where
 	Block: BlockT,
+	H: Hasher<Out=Block::Hash>,
 {
 	/// Associated block insertion operation type.
-	type BlockImportOperation: BlockImportOperation<Block, BlockHasher<Block>, State=Self::State>;
+	type BlockImportOperation: BlockImportOperation<Block, H, State=Self::State>;
 	/// Associated blockchain backend type.
 	type Blockchain: crate::blockchain::Backend<Block>;
 	/// Associated state backend type.
-	type State: StateBackend<BlockHasher<Block>>;
+	type State: StateBackend<H>;
 	/// Changes trie storage.
-	type ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, BlockHasher<Block>>;
+	type ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, H>;
 	/// Offchain workers local storage.
 	type OffchainStorage: OffchainStorage;
 
@@ -236,14 +237,14 @@ pub trait PrunableStateChangesTrieStorage<Block: BlockT, H: Hasher>:
 }
 
 /// Mark for all Backend implementations, that are making use of state data, stored locally.
-pub trait LocalBackend<Block>: Backend<Block>
+pub trait LocalBackend<Block, H>: Backend<Block, H>
 where
 	Block: BlockT,
+	H: Hasher<Out=Block::Hash>,
 {}
 
-// TODO EMCH remove H??
 /// Mark for all Backend implementations, that are fetching required state data from remote nodes.
-pub trait RemoteBackend<Block, H>: Backend<Block>
+pub trait RemoteBackend<Block, H>: Backend<Block, H>
 where
 	Block: BlockT,
 	H: Hasher<Out=Block::Hash>,
