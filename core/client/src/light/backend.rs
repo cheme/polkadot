@@ -25,7 +25,7 @@ use parking_lot::{RwLock, Mutex};
 use runtime_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::{Backend as StateBackend, TrieBackend, backend::InMemory as InMemoryState};
 use state_machine::client::{Externalities as ClientExternalities};
-use runtime_primitives::traits::{Block as BlockT, NumberFor, Zero, Header};
+use runtime_primitives::traits::{Block as BlockT, NumberFor, Zero, Header, HeaderHasher};
 use crate::in_mem::{self, check_genesis_storage};
 use crate::backend::{
 	AuxStore, Backend as ClientBackend, BlockImportOperation, RemoteBackend, NewBlockState,
@@ -40,13 +40,12 @@ use trie::MemoryDB;
 use consensus::well_known_cache_keys;
 
 const IN_MEMORY_EXPECT_PROOF: &str = "InMemory state backend has Void error type and always succeeds; qed";
-
+// TODO hasher from block ??
 /// Light client backend.
 pub struct Backend<S, F, Block, H: Hasher> {
-	blockchain: Arc<Blockchain<S, F>>,
+	blockchain: Arc<Blockchain<Block, S, F>>,
 	genesis_state: RwLock<Option<InMemoryState<H>>>,
 	import_lock: Mutex<()>,
-	_ph: ::std::marker::PhantomData<(Block)>,
 }
 
 /// Light block (header and justification) import operation.
@@ -64,7 +63,7 @@ pub struct ImportOperation<Block: BlockT, S, F, H: Hasher> {
 /// On-demand state.
 pub struct OnDemandState<Block: BlockT, S, F> {
 	fetcher: Weak<F>,
-	blockchain: Weak<Blockchain<S, F>>,
+	blockchain: Weak<Blockchain<Block, S, F>>,
 	block: Block::Hash,
 	cached_header: RwLock<Option<Block::Header>>,
 }
@@ -79,17 +78,16 @@ pub enum OnDemandOrGenesisState<Block: BlockT, S, F, H: Hasher> {
 
 impl<S, F, B, H: Hasher> Backend<S, F, B, H> {
 	/// Create new light backend.
-	pub fn new(blockchain: Arc<Blockchain<S, F>>) -> Self {
+	pub fn new(blockchain: Arc<Blockchain<B, S, F>>) -> Self {
 		Self {
 			blockchain,
 			genesis_state: RwLock::new(None),
 			import_lock: Default::default(),
-			_ph: Default::default(),
 		}
 	}
 
 	/// Get shared blockchain reference.
-	pub fn blockchain(&self) -> &Arc<Blockchain<S, F>> {
+	pub fn blockchain(&self) -> &Arc<Blockchain<B, S, F>> {
 		&self.blockchain
 	}
 }
@@ -110,7 +108,8 @@ impl<S: AuxStore, F, B, H: Hasher> AuxStore for Backend<S, F, B, H> {
 	}
 }
 
-impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, Block, H> where
+
+impl<S, F, Block, H> ClientBackend<Block> for Backend<S, F, Block, H> where
 	Block: BlockT,
 	S: BlockchainStorage<Block>,
 	F: Fetcher<Block>,
@@ -118,7 +117,7 @@ impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, Block, H> where
 	H::Out: Ord,
 {
 	type BlockImportOperation = ImportOperation<Block, S, F, H>;
-	type Blockchain = Blockchain<S, F>;
+	type Blockchain = Blockchain<Block, S, F>;
 	type State = OnDemandOrGenesisState<Block, S, F, H>;
 	type ChangesTrieStorage = in_mem::ChangesTrieStorage<Block, H>;
 	type OffchainStorage = in_mem::OffchainStorage;
@@ -187,7 +186,7 @@ impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, Block, H> where
 		self.blockchain.storage().finalize_header(block)
 	}
 
-	fn blockchain(&self) -> &Blockchain<S, F> {
+	fn blockchain(&self) -> &Blockchain<Block, S, F> {
 		&self.blockchain
 	}
 

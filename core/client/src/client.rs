@@ -90,7 +90,7 @@ pub type FinalityNotifications<Block> = mpsc::UnboundedReceiver<FinalityNotifica
 
 type StorageUpdate<B, Block> = <
 	<
-		<B as backend::Backend<Block, Blake2Hasher>>::BlockImportOperation
+		<B as backend::Backend<Block>>::BlockImportOperation
 			as BlockImportOperation<Block, Blake2Hasher>
 	>::State as state_machine::Backend<Blake2Hasher>>::Transaction;
 type ChangesUpdate = trie::MemoryDB<Blake2Hasher>;
@@ -136,7 +136,7 @@ pub struct Client<B, E, Block, RA> where Block: BlockT {
 }
 
 /// Client import operation, a wrapper for the backend.
-pub struct ClientImportOperation<Block: BlockT, H: Hasher<Out=Block::Hash>, B: backend::Backend<Block, H>> {
+pub struct ClientImportOperation<Block: BlockT, H: Hasher<Out=Block::Hash>, B: backend::Backend<Block>> {
 	op: B::BlockImportOperation,
 	notify_imported: Option<(
 		Block::Hash,
@@ -285,14 +285,14 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 		E: CodeExecutor<Blake2Hasher> + RuntimeInfo,
 		S: BuildStorage,
 		Block: BlockT<Hash=H256>,
-		B: backend::LocalBackend<Block, Blake2Hasher>
+		B: backend::LocalBackend<Block>
 {
 	let call_executor = LocalCallExecutor::new(backend.clone(), executor);
 	Client::new(backend, call_executor, build_genesis_storage, Default::default())
 }
 
 impl<B, E, Block, RA> Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -1330,7 +1330,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	E: CallExecutor<Block, Blake2Hasher> + Send + Sync,
 	Block: BlockT<Hash=H256>,
 	RA: Send + Sync
@@ -1357,7 +1357,7 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> wher
 }
 
 impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	Block: BlockT<Hash=H256>,
 {
 	fn cache(&self) -> Option<Arc<dyn Cache<Block>>> {
@@ -1366,7 +1366,7 @@ impl<B, E, Block, RA> ProvideCache<Block> for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 	RA: ConstructRuntimeApi<Block, Self>
@@ -1379,7 +1379,7 @@ impl<B, E, Block, RA> ProvideRuntimeApi for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 {
@@ -1438,7 +1438,7 @@ impl<B, E, Block, RA> CallRuntimeAt<Block> for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	E: CallExecutor<Block, Blake2Hasher> + Clone + Send + Sync,
 	Block: BlockT<Hash=H256>,
 {
@@ -1483,7 +1483,7 @@ impl<B, E, Block, RA> consensus::BlockImport<Block> for Client<B, E, Block, RA> 
 }
 
 impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -1494,7 +1494,7 @@ impl<B, E, Block, RA> CurrentHeight for Client<B, E, Block, RA> where
 }
 
 impl<B, E, Block, RA> BlockNumberToHash for Client<B, E, Block, RA> where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	E: CallExecutor<Block, Blake2Hasher>,
 	Block: BlockT<Hash=H256>,
 {
@@ -1553,7 +1553,7 @@ impl<B, Block> Clone for LongestChain<B, Block> {
 
 impl<B, Block> LongestChain<B, Block>
 where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	Block: BlockT<Hash=H256>,
 {
 	/// Instantiate a new LongestChain for Backend B
@@ -1698,7 +1698,7 @@ where
 
 impl<B, Block> SelectChain<Block> for LongestChain<B, Block>
 where
-	B: backend::Backend<Block, Blake2Hasher>,
+	B: backend::Backend<Block>,
 	Block: BlockT<Hash=H256>,
 {
 
@@ -1726,7 +1726,7 @@ where
 
 impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 	where
-		B: backend::Backend<Block, Blake2Hasher>,
+		B: backend::Backend<Block>,
 		E: CallExecutor<Block, Blake2Hasher>,
 		Block: BlockT<Hash=H256>,
 {
@@ -1737,7 +1737,7 @@ impl<B, E, Block, RA> BlockBody<Block> for Client<B, E, Block, RA>
 
 impl<B, E, Block, RA> backend::AuxStore for Client<B, E, Block, RA>
 	where
-		B: backend::Backend<Block, Blake2Hasher>,
+		B: backend::Backend<Block>,
 		E: CallExecutor<Block, Blake2Hasher>,
 		Block: BlockT<Hash=H256>,
 {

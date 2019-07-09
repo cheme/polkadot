@@ -26,7 +26,7 @@ use futures::{IntoFuture, Future};
 use parity_codec::{Encode, Decode};
 use primitives::{offchain, H256, Blake2Hasher, convert_hash, NativeOrEncoded};
 use runtime_primitives::generic::BlockId;
-use runtime_primitives::traits::{One, Block as BlockT, Header as HeaderT};
+use runtime_primitives::traits::{One, Block as BlockT, Header as HeaderT, HeaderHasher};
 use state_machine::{
 	self, Backend as StateBackend, CodeExecutor, OverlayedChanges,
 	ExecutionStrategy, create_proof_check_backend,
@@ -435,7 +435,7 @@ pub fn prove_execution<Block, S, E>(
 ///
 /// Method is executed using passed header as environment' current block.
 /// Proof should include both environment preparation proof and method execution proof.
-pub fn check_execution_proof<Header, E, H, C>(
+pub fn check_execution_proof<Header, E, C>(
 	client: Option<&C>,
 	executor: &E,
 	request: &RemoteCallRequest<Header>,
@@ -443,17 +443,16 @@ pub fn check_execution_proof<Header, E, H, C>(
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
-		H: Hasher,
-		E: CodeExecutor<H>,
-		C: ClientExternalities<H>,
-		H::Out: Ord + 'static,
+		E: CodeExecutor<HeaderHasher<Header>>,
+		C: ClientExternalities<HeaderHasher<Header>>,
+		<HeaderHasher<Header> as Hasher>::Out: Ord + 'static,
 {
 	let local_state_root = request.header.state_root();
-	let root: H::Out = convert_hash(&local_state_root);
+	let root: <HeaderHasher<Header> as Hasher>::Out = convert_hash(&local_state_root);
 
 	// prepare execution environment + check preparation proof
 	let mut changes = OverlayedChanges::default();
-	let mut trie_backend = create_proof_check_backend::<H, C>(root, remote_proof)?;
+	let mut trie_backend = create_proof_check_backend::<_, C>(root, remote_proof)?;
 	let next_block = <Header as HeaderT>::new(
 		*request.header.number() + One::one(),
 		Default::default(),
@@ -461,7 +460,7 @@ pub fn check_execution_proof<Header, E, H, C>(
 		request.header.hash(),
 		request.header.digest().clone(),
 	);
-	execution_proof_check_on_trie_backend::<H, C, _>(
+	execution_proof_check_on_trie_backend::<HeaderHasher<Header>, C, _>(
 		&mut trie_backend,
 		client,
 		&mut changes,
@@ -471,7 +470,7 @@ pub fn check_execution_proof<Header, E, H, C>(
 	)?;
 
 	// execute method
-	let local_result = execution_proof_check_on_trie_backend::<H, C, _>(
+	let local_result = execution_proof_check_on_trie_backend::<HeaderHasher<Header>, C, _>(
 		&mut trie_backend,
 		client,
 		&mut changes,
@@ -486,12 +485,15 @@ pub fn check_execution_proof<Header, E, H, C>(
 #[cfg(test)]
 mod tests {
 	use consensus::BlockOrigin;
-	use test_client::{self, runtime::Header, ClientExt, TestClient};
+	use test_client::{self, runtime::Header, ClientExt as ClientExtT, TestClient};
 	use executor::NativeExecutionDispatch;
 	use crate::backend::{Backend, NewBlockState};
 	use crate::in_mem::Backend as InMemBackend;
 	use crate::light::fetcher::tests::OkCallFetcher;
 	use super::*;
+
+	use state_machine::client::NoClient;
+	type ClientExt = NoClient<Blake2Hasher>;
 
 	#[test]
 	fn execution_proof_is_generated_and_checked() {
@@ -509,7 +511,8 @@ mod tests {
 
 			// check remote execution proof locally
 			let local_executor = test_client::LocalExecutor::new(None);
-			let local_result = check_execution_proof(&local_executor, &RemoteCallRequest {
+			let cli_ext = ClientExt::new();
+			let local_result = check_execution_proof(Some(&cli_ext), &local_executor, &RemoteCallRequest {
 				block: test_client::runtime::Hash::default(),
 				header: test_client::runtime::Header {
 					state_root: remote_root.into(),

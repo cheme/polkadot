@@ -30,7 +30,8 @@ use parity_codec::Encode;
 use trie;
 
 use primitives::{H256, convert_hash};
-use runtime_primitives::traits::{Header as HeaderT, SimpleArithmetic, Zero, One};
+use runtime_primitives::traits::{Header as HeaderT, Hash as HashT, SimpleArithmetic, Zero, One,
+  HeaderHasher};
 use state_machine::backend::InMemory as InMemoryState;
 use state_machine::client::{Externalities as ClientExternalities};
 use state_machine::{MemoryDB, TrieBackend, Backend as StateBackend,
@@ -116,9 +117,8 @@ pub fn build_proof<Header, Hasher, Cli, BlocksI, HashesI>(
 	}
 	Ok(total_proof.into_iter().collect())
 }
-
 /// Check CHT-based header proof.
-pub fn check_proof<Header, Hasher, Cli>(
+pub fn check_proof<Header, Cli>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
@@ -126,35 +126,33 @@ pub fn check_proof<Header, Hasher, Cli>(
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
-		Cli: ClientExternalities<Hasher>,
-		Hasher: hash_db::Hasher,
-		Hasher::Out: Ord,
+		Cli: ClientExternalities<HeaderHasher<Header>>,
+		<HeaderHasher<Header> as hash_db::Hasher>::Out: Ord,
 {
-	do_check_proof::<Header, Hasher, _>(local_root, local_number, remote_hash, move |local_root, local_cht_key|
-		read_proof_check::<Hasher, Cli>(local_root, remote_proof,
+	do_check_proof::<Header, _>(local_root, local_number, remote_hash, move |local_root, local_cht_key|
+		read_proof_check::<HeaderHasher<Header>, Cli>(local_root, remote_proof,
 			local_cht_key).map_err(|e| ClientError::from(e)))
 }
 
 /// Check CHT-based header proof on pre-created proving backend.
-pub fn check_proof_on_proving_backend<Header, Hasher, Cli>(
+pub fn check_proof_on_proving_backend<Header, Cli>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	proving_backend: &TrieBackend<MemoryDB<Hasher>, Hasher>,
+	proving_backend: &TrieBackend<MemoryDB<HeaderHasher<Header>>, HeaderHasher<Header>>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
-		Cli: ClientExternalities<Hasher>,
-		Hasher: hash_db::Hasher,
-		Hasher::Out: Ord,
+		Cli: ClientExternalities<HeaderHasher<Header>>,
+		<HeaderHasher<Header> as hash_db::Hasher>::Out: Ord,
 {
-	do_check_proof::<Header, Hasher, _>(local_root, local_number, remote_hash, |_, local_cht_key|
-		read_proof_check_on_proving_backend::<Hasher, Cli>(
+	do_check_proof::<Header, _>(local_root, local_number, remote_hash, |_, local_cht_key|
+		read_proof_check_on_proving_backend::<HeaderHasher<Header>, Cli>(
 			proving_backend, local_cht_key).map_err(|e| ClientError::from(e)))
 }
 
 /// Check CHT-based header proof using passed checker function.
-fn do_check_proof<Header, Hasher, F>(
+fn do_check_proof<Header, F>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
@@ -162,11 +160,10 @@ fn do_check_proof<Header, Hasher, F>(
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
-		Hasher: hash_db::Hasher,
-		Hasher::Out: Ord,
-		F: FnOnce(Hasher::Out, &[u8]) -> ClientResult<Option<Vec<u8>>>,
+		<HeaderHasher<Header> as hash_db::Hasher>::Out: Ord,
+		F: FnOnce(<HeaderHasher<Header> as hash_db::Hasher>::Out, &[u8]) -> ClientResult<Option<Vec<u8>>>,
 {
-	let root: Hasher::Out = convert_hash(&local_root);
+	let root: <HeaderHasher<Header> as hash_db::Hasher>::Out = convert_hash(&local_root);
 	let local_cht_key = encode_cht_key(local_number);
 	let local_cht_value = checker(root, &local_cht_key)?;
 	let local_cht_value = local_cht_value.ok_or_else(|| ClientError::InvalidCHTProof)?;
@@ -310,7 +307,9 @@ pub fn decode_cht_value(value: &[u8]) -> Option<H256> {
 mod tests {
 	use primitives::{Blake2Hasher};
 	use test_client::runtime::Header;
+	use state_machine::client::NoClient;
 	use super::*;
+	type CliExt = NoClient<Blake2Hasher>;
 
 	#[test]
 	fn is_build_required_works() {
@@ -370,7 +369,7 @@ mod tests {
 	#[test]
 	#[should_panic]
 	fn build_proof_panics_when_querying_wrong_block() {
-		assert!(build_proof::<Header, Blake2Hasher, _, _>(
+		assert!(build_proof::<Header, Blake2Hasher, CliExt, _, _>(
 			SIZE as _,
 			0,
 			vec![(SIZE * 1000) as u64],
@@ -381,7 +380,7 @@ mod tests {
 
 	#[test]
 	fn build_proof_works() {
-		assert!(build_proof::<Header, Blake2Hasher, _, _>(
+		assert!(build_proof::<Header, Blake2Hasher, CliExt, _, _>(
 			SIZE as _,
 			0,
 			vec![(SIZE / 2) as u64],
