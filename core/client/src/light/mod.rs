@@ -38,12 +38,12 @@ use crate::light::call_executor::{RemoteCallExecutor, RemoteOrLocalCallExecutor}
 use crate::light::fetcher::{Fetcher, LightDataChecker};
 
 /// Create an instance of light client blockchain backend.
-pub fn new_light_blockchain<B: BlockT, S: BlockchainStorage<B>, F>(storage: S) -> Arc<Blockchain<S, F>> {
+pub fn new_light_blockchain<B: BlockT, S: BlockchainStorage<B>, F>(storage: S) -> Arc<Blockchain<B, S, F>> {
 	Arc::new(Blockchain::new(storage))
 }
 
 /// Create an instance of light client backend.
-pub fn new_light_backend<B, S, F>(blockchain: Arc<Blockchain<S, F>>, fetcher: Arc<F>) -> Arc<Backend<S, F, B, Blake2Hasher>>
+pub fn new_light_backend<B, S, F>(blockchain: Arc<Blockchain<B, S, F>>, fetcher: Arc<F>) -> Arc<Backend<S, F, B, Blake2Hasher>>
 	where
 		B: BlockT,
 		S: BlockchainStorage<B>,
@@ -62,7 +62,7 @@ pub fn new_light<B, S, F, GS, RA, E>(
 ) -> ClientResult<Client<Backend<S, F, B, Blake2Hasher>, RemoteOrLocalCallExecutor<
 	B,
 	Backend<S, F, B, Blake2Hasher>,
-	RemoteCallExecutor<Blockchain<S, F>, F>,
+	RemoteCallExecutor<Blockchain<B, S, F>, F>,
 	LocalCallExecutor<Backend<S, F, B, Blake2Hasher>, E>
 >, B, RA>>
 	where
@@ -80,7 +80,7 @@ pub fn new_light<B, S, F, GS, RA, E>(
 
 /// Create an instance of fetch data checker.
 pub fn new_fetch_checker<E, B: BlockT, S: BlockchainStorage<B>, F>(
-	blockchain: Arc<Blockchain<S, F>>,
+	blockchain: Arc<Blockchain<B, S, F>>,
 	executor: E,
 ) -> LightDataChecker<E, Blake2Hasher, B, S, F>
 	where

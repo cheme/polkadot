@@ -18,11 +18,12 @@
 
 use std::sync::Arc;
 
-use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor};
+use runtime_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor, HeaderHasher};
 use runtime_primitives::generic::BlockId;
 use runtime_primitives::Justification;
 use consensus::well_known_cache_keys;
 
+use state_machine::client::{Externalities as ClientExternalities};
 use crate::error::{Error, Result};
 
 /// Blockchain database header backend. Does not perform any validation.
@@ -72,8 +73,10 @@ pub trait HeaderBackend<Block: BlockT>: Send + Sync {
 	}
 }
 
+// TODO EMCH consider directly putting Blake2Hasher for client externalities (see environmental
+// def).
 /// Blockchain database backend. Does not perform any validation.
-pub trait Backend<Block: BlockT>: HeaderBackend<Block> {
+pub trait Backend<Block: BlockT>: HeaderBackend<Block> + ClientExternalities<HeaderHasher<Block::Header>> {
 	/// Get block body. Returns `None` if block is not found.
 	fn body(&self, id: BlockId<Block>) -> Result<Option<Vec<<Block as BlockT>::Extrinsic>>>;
 	/// Get block justification. Returns `None` if justification does not exist.
