@@ -24,7 +24,7 @@ use hash_db::{HashDB, Hasher};
 use num_traits::One;
 use trie::{Recorder, MemoryDB};
 use crate::changes_trie::{AnchorBlockId, Configuration, RootsStorage, Storage, BlockNumber};
-use crate::changes_trie::input::{DigestIndex, ExtrinsicIndex, DigestIndexValue, ExtrinsicIndexValue, ChildIndex};
+use crate::changes_trie::input::{DigestIndex, ExtrinsicIndex, DigestIndexValue, ExtrinsicIndexValue};
 use crate::changes_trie::storage::{TrieBackendAdapter, InMemoryStorage};
 use crate::proving_backend::ProvingBackendEssence;
 use crate::trie_backend_essence::{TrieBackendEssence};
@@ -248,32 +248,17 @@ impl<'a, RS, S, H, Number> DrilldownIteratorEssence<'a, RS, S, H, Number>
 				// AND trie roots for old blocks are known (both on full + light node)
 				let trie_root = self.roots_storage.root(&self.end, block.clone())?
 					.ok_or_else(|| format!("Changes trie root for block {} is not found", block.clone()))?;
-				let trie_root = if let Some(storage_key) = self.storage_key {
-					let child_key = ChildIndex {
-						block: block.clone(),
-						storage_key: storage_key.to_vec(),
-					}.encode();
-					if let Some(trie_root) = trie_reader(&self.storage, trie_root, &child_key)?
-						.and_then(|v| <Vec<u8>>::decode(&mut &v[..]))
-						.map(|v| {
-							let mut hash = H::Out::default();
-							hash.as_mut().copy_from_slice(&v[..]);
-							hash
-						}) {
-						trie_root
-					} else {
-						continue;
-					}
-				} else {
-					trie_root
-				};
 
 				// only return extrinsics for blocks before self.max
 				// most of blocks will be filtered out before pushing to `self.blocks`
 				// here we just throwing away changes at digest blocks we're processing
 				debug_assert!(block >= self.begin, "We shall not touch digests earlier than a range' begin");
 				if block <= self.end.number {
-					let extrinsics_key = ExtrinsicIndex { block: block.clone(), key: self.key.to_vec() }.encode();
+					let extrinsics_key = ExtrinsicIndex {
+						block: block.clone(),
+						storage_key: self.storage_key.map(|sk| sk.to_vec()),
+						key: self.key.to_vec(),
+					}.encode();
 					let extrinsics = trie_reader(&self.storage, trie_root, &extrinsics_key);
 					if let Some(extrinsics) = extrinsics? {
 						let extrinsics: Option<ExtrinsicIndexValue> = Decode::decode(&mut &extrinsics[..]);
@@ -283,7 +268,11 @@ impl<'a, RS, S, H, Number> DrilldownIteratorEssence<'a, RS, S, H, Number>
 					}
 				}
 
-				let blocks_key = DigestIndex { block: block.clone(), key: self.key.to_vec() }.encode();
+				let blocks_key = DigestIndex {
+					block: block.clone(),
+					storage_key: self.storage_key.map(|sk| sk.to_vec()),
+					key: self.key.to_vec(),
+				}.encode();
 				let blocks = trie_reader(&self.storage, trie_root, &blocks_key);
 				if let Some(blocks) = blocks? {
 					let blocks: Option<DigestIndexValue<Number>> = Decode::decode(&mut &blocks[..]);
@@ -480,24 +469,26 @@ mod tests {
 		let backend = InMemoryStorage::with_inputs(vec![
 			// digest: 1..4 => [(3, 0)]
 			(1, vec![
+				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 1, storage_key: Some(b"1".to_vec()), key: vec![42] }, vec![0]),
 			]),
 			(2, vec![
+				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 2, storage_key: Some(b"1".to_vec()), key: vec![42] }, vec![3]),
 			]),
 			(3, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 3, key: vec![42] }, vec![0]),
+				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 3, storage_key: None, key: vec![42] }, vec![0]),
 			]),
 			(4, vec![
-				InputPair::DigestIndex(DigestIndex { block: 4, key: vec![42] }, vec![3]),
+				InputPair::DigestIndex(DigestIndex { block: 4, storage_key: None, key: vec![42] }, vec![3]),
 			]),
 			// digest: 5..8 => [(6, 3), (8, 1+2)]
 			(5, vec![]),
 			(6, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 6, key: vec![42] }, vec![3]),
+				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 6, storage_key: None, key: vec![42] }, vec![3]),
 			]),
 			(7, vec![]),
 			(8, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 8, key: vec![42] }, vec![1, 2]),
-				InputPair::DigestIndex(DigestIndex { block: 8, key: vec![42] }, vec![6]),
+				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 8, storage_key: None, key: vec![42] }, vec![1, 2]),
+				InputPair::DigestIndex(DigestIndex { block: 8, storage_key: None, key: vec![42] }, vec![6]),
 			]),
 			// digest: 9..12 => []
 			(9, vec![]),
@@ -509,20 +500,9 @@ mod tests {
 			(14, vec![]),
 			(15, vec![]),
 			(16, vec![
-				InputPair::DigestIndex(DigestIndex { block: 16, key: vec![42] }, vec![4, 8]),
-			]),
-		], vec![(b"1".to_vec(), vec![
-				(1, vec![
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 1, key: vec![42] }, vec![0]),
-				]),
-				(2, vec![
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 2, key: vec![42] }, vec![3]),
-				]),
-				(16, vec![
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 16, key: vec![42] }, vec![5]),
-
-					InputPair::DigestIndex(DigestIndex { block: 16, key: vec![42] }, vec![2]),
-				]),
+				InputPair::DigestIndex(DigestIndex { block: 16, storage_key: None, key: vec![42] }, vec![4, 8]),
+				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: 16, storage_key: Some(b"1".to_vec()), key: vec![42] }, vec![5]),
+				InputPair::DigestIndex(DigestIndex { block: 16, storage_key: Some(b"1".to_vec()), key: vec![42] }, vec![2]),
 			]),
 		]);
 

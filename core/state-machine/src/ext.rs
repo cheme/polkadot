@@ -395,7 +395,7 @@ mod tests {
 		let backend = TestBackend::default();
 		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(),
-			Some(hex!("5b829920b9c8d554a19ee2a1ba593c4f2ee6fc32822d083e04236d693e8358d5").into()));
+			Some(hex!("a4aa43829fc619190ff5a7d2bf4c29ed83651183c88601425729248aa7cea5b5").into()));
 	}
 
 	#[test]
@@ -406,6 +406,6 @@ mod tests {
 		let backend = TestBackend::default();
 		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(),
-			Some(hex!("bcf494e41e29a15c9ae5caa053fe3cb8b446ee3e02a254efbdec7a19235b76e4").into()));
+			Some(hex!("abac4455aac68005fdc3bb70b768830962b08662bff691c7f1a3ba82989ba78b").into()));
 	}
 }
