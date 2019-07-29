@@ -86,7 +86,7 @@ fn child_storage_key_or_panic<H: Hasher>(storage_key: &[u8]) -> ChildStorageKey<
 	}
 }
 
-impl<H> StorageApi<H> for Hash<H>
+impl<H> StorageApi<H> for H
 	where
 		H: Hasher,
 		H::Out: Ord,
@@ -227,7 +227,7 @@ impl<H> StorageApi<H> for Hash<H>
 	}
 }
 
-impl<H: Hasher> OtherApi<H> for Hash<H> {
+impl<H: Hasher> OtherApi<H> for H {
 	fn chain_id() -> u64 {
 		ext::with::<H, _, _>(|ext|
 			ext.chain_id()
@@ -299,7 +299,7 @@ fn with_offchain<H, R, F>(f: F, msg: &'static str) -> R
 	).expect("offchain-worker functions cannot be called outside of an Externalities-provided environment.")
 }
 
-impl<H: Hasher> OffchainApi<H> for Hash<H> {
+impl<H: Hasher> OffchainApi<H> for H {
 	fn submit_transaction<T: codec::Encode>(data: &T) -> Result<(), ()> {
 		with_offchain::<H, _, _>(|ext| {
 			ext.submit_transaction(codec::Encode::encode(data))
@@ -460,7 +460,7 @@ impl<H: Hasher> OffchainApi<H> for Hash<H> {
 	}
 }
 
-impl<H> Api<H> for Hash<H>
+impl<H> Api<H> for H
 	where
 		H: Hasher,
 		H::Out: Ord,
@@ -550,7 +550,7 @@ mod std_tests {
 		super::with_externalities::<Blake2Hasher, _, _>(ext, f)
 	}
 
-  type H = Hash<Blake2Hasher>;
+  type H = Blake2Hasher;
 
 	#[test]
 	fn storage_works() {

@@ -59,10 +59,6 @@ pub trait Printable {
 	fn print(self);
 }
 
-/// Default api, generic other `Hasher`.
-#[derive(Default)]
-pub struct Hash<H>(rstd::marker::PhantomData<H>);
-
 /// Converts a public trait definition into a private trait and set of public functions.
 macro_rules! export_api {
 	(
@@ -128,7 +124,7 @@ macro_rules! export_api {
 					$( $( $w_name : $w_ty ),+ )?
 			{
 				#[allow(deprecated)]
-				<Hash<H>>:: $name $(::< $( $g_name ),+ > )? ( $( $arg ),* )
+				<H>:: $name $(::< $( $g_name ),+ > )? ( $( $arg ),* )
 			}
 		)*
 	};
