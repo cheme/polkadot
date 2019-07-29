@@ -27,13 +27,48 @@ pub use substrate_state_machine::{
 	ChildStorageKey
 };
 
-use environmental::environmental;
 use primitives::{offchain, hexdisplay::HexDisplay, H256};
 
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 
-environmental!(ext: trait Externalities<Blake2Hasher>);
+pub mod ext {
+
+	use super::*;
+	use rstd::cell::RefCell;
+ 
+	trait DummyLocal { }
+
+	thread_local!(
+		static ENV_EXT: RefCell<Option<*mut (dyn DummyLocal + 'static)>>
+			= RefCell::new(None)
+	);
+
+	pub fn using<H, R, F: FnOnce() -> R>(protected: &mut dyn Externalities<H>, f: F) -> R {
+			 let lifetime_extended = unsafe {
+				 ::environmental::imp::transmute::<
+						&mut dyn Externalities<H>,
+						&mut (dyn DummyLocal + 'static),
+					>(protected)
+			};
+			::environmental::using(&ENV_EXT, lifetime_extended, f)
+	}
+
+	pub fn with<H, R, F: for<'a> FnOnce(&'a mut (Externalities<H> + 'a)) -> R>(
+		f: F,
+	) -> Option<R> {
+		::environmental::with(&ENV_EXT, |x| {
+			let x = unsafe {
+				::environmental::imp::transmute::<
+					&mut dyn DummyLocal,
+					&mut dyn Externalities<H>,
+				>(x)
+			};
+			f(x)
+		})
+	}
+
+}
 
 /// Additional bounds for `Hasher` trait for with_std.
 pub trait HasherBounds {}
@@ -50,15 +85,15 @@ fn child_storage_key_or_panic(storage_key: &[u8]) -> ChildStorageKey<Blake2Hashe
 		None => panic!("child storage key is invalid"),
 	}
 }
-
+// TODO EMCH change () to Ph<H>
 impl StorageApi for () {
 	fn storage(key: &[u8]) -> Option<Vec<u8>> {
-		ext::with(|ext| ext.storage(key).map(|s| s.to_vec()))
+		ext::with::<Blake2Hasher, _, _>(|ext| ext.storage(key).map(|s| s.to_vec()))
 			.expect("storage cannot be called outside of an Externalities-provided environment.")
 	}
 
 	fn read_storage(key: &[u8], value_out: &mut [u8], value_offset: usize) -> Option<usize> {
-		ext::with(|ext| ext.storage(key).map(|value| {
+		ext::with::<Blake2Hasher, _, _>(|ext| ext.storage(key).map(|value| {
 			let value = &value[value_offset..];
 			let written = std::cmp::min(value.len(), value_out.len());
 			value_out[..written].copy_from_slice(&value[..written]);
@@ -75,7 +110,7 @@ impl StorageApi for () {
 	}
 
 	fn set_storage(key: &[u8], value: &[u8]) {
-		ext::with(|ext|
+		ext::with::<Blake2Hasher, _, _>(|ext|
 			ext.set_storage(key.to_vec(), value.to_vec())
 		);
 	}
@@ -86,7 +121,7 @@ impl StorageApi for () {
 		value_out: &mut [u8],
 		value_offset: usize,
 	) -> Option<usize> {
-		ext::with(|ext| {
+		ext::with::<Blake2Hasher, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.child_storage(storage_key, key)
 				.map(|value| {
@@ -100,66 +135,66 @@ impl StorageApi for () {
 	}
 
 	fn set_child_storage(storage_key: &[u8], key: &[u8], value: &[u8]) {
-		ext::with(|ext| {
+		ext::with::<Blake2Hasher, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.set_child_storage(storage_key, key.to_vec(), value.to_vec())
 		});
 	}
 
 	fn clear_storage(key: &[u8]) {
-		ext::with(|ext|
+		ext::with::<Blake2Hasher, _, _>(|ext|
 			ext.clear_storage(key)
 		);
 	}
 
 	fn clear_child_storage(storage_key: &[u8], key: &[u8]) {
-		ext::with(|ext| {
+		ext::with::<Blake2Hasher, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.clear_child_storage(storage_key, key)
 		});
 	}
 
 	fn kill_child_storage(storage_key: &[u8]) {
-		ext::with(|ext| {
+		ext::with::<Blake2Hasher, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.kill_child_storage(storage_key)
 		});
 	}
 
 	fn exists_storage(key: &[u8]) -> bool {
-		ext::with(|ext|
+		ext::with::<Blake2Hasher, _, _>(|ext|
 			ext.exists_storage(key)
 		).unwrap_or(false)
 	}
 
 	fn exists_child_storage(storage_key: &[u8], key: &[u8]) -> bool {
-		ext::with(|ext| {
+		ext::with::<Blake2Hasher, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.exists_child_storage(storage_key, key)
 		}).unwrap_or(false)
 	}
 
 	fn clear_prefix(prefix: &[u8]) {
-		ext::with(|ext|
+		ext::with::<Blake2Hasher, _, _>(|ext|
 			ext.clear_prefix(prefix)
 		);
 	}
 
 	fn storage_root() -> [u8; 32] {
-		ext::with(|ext|
+		ext::with::<Blake2Hasher, _, _>(|ext|
 			ext.storage_root()
 		).unwrap_or(H256::zero()).into()
 	}
 
 	fn child_storage_root(storage_key: &[u8]) -> Vec<u8> {
-		ext::with(|ext| {
+		ext::with::<Blake2Hasher, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.child_storage_root(storage_key)
 		}).expect("child_storage_root cannot be called outside of an Externalities-provided environment.")
 	}
 
 	fn storage_changes_root(parent_hash: [u8; 32]) -> Option<[u8; 32]> {
-		ext::with(|ext|
+		ext::with::<Blake2Hasher, _, _>(|ext|
 			ext.storage_changes_root(parent_hash.into()).map(|h| h.map(|h| h.into()))
 		).unwrap_or(Ok(None)).expect("Invalid parent hash passed to storage_changes_root")
 	}
@@ -196,7 +231,7 @@ impl StorageApi for () {
 
 impl OtherApi for () {
 	fn chain_id() -> u64 {
-		ext::with(|ext|
+		ext::with::<Blake2Hasher, _, _>(|ext|
 			ext.chain_id()
 		).unwrap_or(0)
 	}
@@ -254,8 +289,9 @@ impl HashingApi for () {
 	}
 }
 
+// TODO EMCH Blake2Hasher -> H
 fn with_offchain<R>(f: impl FnOnce(&mut dyn offchain::Externalities) -> R, msg: &'static str) -> R {
-	ext::with(|ext| ext
+	ext::with::<Blake2Hasher, _, _>(|ext| ext
 		.offchain()
 		.map(|ext| f(ext))
 		.expect(msg)
@@ -444,7 +480,7 @@ pub fn with_storage<R, F: FnOnce() -> R>(storage: &mut StorageOverlay, f: F) -> 
 	let mut alt_storage = Default::default();
 	rstd::mem::swap(&mut alt_storage, storage);
 	let mut ext = BasicExternalities::new(alt_storage);
-	let r = ext::using(&mut ext, f);
+	let r = ext::using::<Blake2Hasher, _, _>(&mut ext, f);
 	*storage = ext.into_storages().0;
 	r
 }
@@ -463,7 +499,7 @@ pub fn with_storage_and_children<R, F: FnOnce() -> R>(
 	rstd::mem::swap(&mut alt_children_storage, children_storage);
 
 	let mut ext = BasicExternalities::new_with_children(alt_storage, alt_children_storage);
-	let r = ext::using(&mut ext, f);
+	let r = ext::using::<Blake2Hasher, _, _>(&mut ext, f);
 
 	let storage_tuple = ext.into_storages();
 	*storage = storage_tuple.0;

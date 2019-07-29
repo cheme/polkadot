@@ -26,6 +26,8 @@ use log::trace;
 
 use crate::RuntimesCache;
 
+// TODO EMCH: this cache is statically bound to hasher by the size of its key.
+// -> Dyn type cache key to keep using a [u8;x] ??
 thread_local! {
 	static RUNTIMES_CACHE: RefCell<RuntimesCache> = RefCell::new(RuntimesCache::new());
 }

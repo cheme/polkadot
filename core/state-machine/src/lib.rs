@@ -1288,4 +1288,26 @@ mod tests {
 			ExecutionStrategy::NativeElseWasm
 		).is_err());
 	}
+
+
+  #[test]
+  fn externality_dyn() {
+    type DynExt<'a, H> = &'a mut dyn Externalities<H>;
+    let mut state = InMemory::<Blake2Hasher>::default();
+    let backend = state.as_trie_backend().unwrap();
+    let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
+    let mut overlay = OverlayedChanges::default();
+    {
+      let mut ext = Ext::new(
+        &mut overlay,
+        backend,
+        Some(&changes_trie_storage),
+        NeverOffchainExt::new()
+      );
+      let dynext: DynExt<_> = &mut ext;
+      dynext.offchain();
+    }
+  }
+
 }
+
