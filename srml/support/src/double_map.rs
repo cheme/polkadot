@@ -20,6 +20,7 @@ use crate::rstd::prelude::*;
 use crate::codec::{Codec, Encode};
 use crate::storage::unhashed;
 use sr_std::borrow::Borrow;
+use substrate_primitives::Hasher;
 
 /// An implementation of a map with a two keys.
 ///
@@ -33,7 +34,11 @@ use sr_std::borrow::Borrow;
 /// is a hash of a `Key2`.
 ///
 /// Hasher are implemented in derive_key* methods.
-pub trait StorageDoubleMapWithHasher {
+pub trait StorageDoubleMapWithHasher<H>
+  where
+    H: Hasher,
+    H::Out: Ord,
+{
 	type Key1: Encode;
 	type Key2: Encode;
 	type Value: Codec + Default;
@@ -48,7 +53,7 @@ pub trait StorageDoubleMapWithHasher {
 		Q: Codec,
 		R: Codec
 	{
-		unhashed::put(&Self::full_key(k1, k2)[..], &val);
+		unhashed::put::<H, _>(&Self::full_key(k1, k2)[..], &val);
 	}
 
 	/// Remove an entry from this map.
@@ -59,7 +64,7 @@ pub trait StorageDoubleMapWithHasher {
 		Q: Codec,
 		R: Codec
 	{
-		unhashed::kill(&Self::full_key(k1, k2)[..]);
+		unhashed::kill::<H>(&Self::full_key(k1, k2)[..]);
 	}
 
 	/// Get an entry from this map.
@@ -72,7 +77,7 @@ pub trait StorageDoubleMapWithHasher {
 		Q: Codec,
 		R: Codec
 	{
-		unhashed::get(&Self::full_key(k1, k2)[..])
+		unhashed::get::<H, _>(&Self::full_key(k1, k2)[..])
 	}
 
 	/// Returns `true` if value under the specified keys exists.
@@ -83,7 +88,7 @@ pub trait StorageDoubleMapWithHasher {
 		Q: Codec,
 		R: Codec
 	{
-		unhashed::exists(&Self::full_key(k1, k2)[..])
+		unhashed::exists::<H>(&Self::full_key(k1, k2)[..])
 	}
 
 	/// Removes all entries that shares the `k1` as the first key.
@@ -92,7 +97,7 @@ pub trait StorageDoubleMapWithHasher {
 		Self::Key1: Borrow<Q>,
 		Q: Codec
 	{
-		unhashed::kill_prefix(&Self::derive_key1(Self::encode_key1(k1)))
+		unhashed::kill_prefix::<H>(&Self::derive_key1(Self::encode_key1(k1)))
 	}
 
 	/// Encode key1 into Vec<u8> and prepend a prefix

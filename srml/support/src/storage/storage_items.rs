@@ -165,7 +165,13 @@ macro_rules! __storage_items_internal {
 	// generator for values.
 	(($($vis:tt)*) ($get_fn:ident) ($wraptype:ident $gettype:ty) ($getter:ident) ($taker:ident) $name:ident : $key:expr => $ty:ty) => {
 		$crate::__storage_items_internal!{ ($($vis)*) () ($wraptype $gettype) ($getter) ($taker) $name : $key => $ty }
-		pub fn $get_fn() -> $gettype { <$name as $crate::storage::hashed::generator::StorageValue<$ty>> :: get(&$crate::storage::RuntimeStorage) }
+		pub fn $get_fn<H>() -> $gettype
+			where
+				H: Hasher,
+				H::Out: ord,
+		{
+			<$name as $crate::storage::hashed::generator::StorageValue<$ty>> :: get :: <H> (&$crate::storage::RuntimeStorage)
+		}
 	};
 	(($($vis:tt)*) () ($wraptype:ident $gettype:ty) ($getter:ident) ($taker:ident) $name:ident : $key:expr => $ty:ty) => {
 		$($vis)* struct $name;
@@ -212,8 +218,13 @@ macro_rules! __storage_items_internal {
 	// generator for maps.
 	(($($vis:tt)*) ($get_fn:ident) ($wraptype:ident $gettype:ty) ($getter:ident) ($taker:ident) $name:ident : $prefix:expr => map [$kty:ty => $ty:ty]) => {
 		$crate::__storage_items_internal!{ ($($vis)*) () ($wraptype $gettype) ($getter) ($taker) $name : $prefix => map [$kty => $ty] }
-		pub fn $get_fn<K: $crate::storage::generator::Borrow<$kty>>(key: K) -> $gettype {
-			<$name as $crate::storage::hashed::generator::StorageMap<$kty, $ty>> :: get(key.borrow(), &$crate::storage::RuntimeStorage)
+		pub fn $get_fn<H, K>(key: K) -> $gettype
+			where
+				H: Hasher,
+				H::Out: ord,
+        K: $crate::storage::generator::Borrow<$kty>,
+		{
+			<$name as $crate::storage::hashed::generator::StorageMap<$kty, $ty>> :: get :: <H, _> (key.borrow(), &$crate::storage::RuntimeStorage)
 		}
 	};
 	(($($vis:tt)*) () ($wraptype:ident $gettype:ty) ($getter:ident) ($taker:ident) $name:ident : $prefix:expr => map [$kty:ty => $ty:ty]) => {

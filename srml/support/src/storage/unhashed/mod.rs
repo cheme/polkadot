@@ -18,93 +18,165 @@
 
 use crate::rstd::borrow::Borrow;
 use super::{Codec, Encode, Decode, KeyedVec, Vec};
+use substrate_primitives::Hasher;
 
 pub mod generator;
 
 /// Return the value of the item in storage under `key`, or `None` if there is no explicit entry.
-pub fn get<T: Decode + Sized>(key: &[u8]) -> Option<T> {
-	runtime_io::storage(key).map(|val| {
+pub fn get<H, T>(key: &[u8]) -> Option<T>
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized,
+{
+	runtime_io::storage::<H>(key).map(|val| {
 		Decode::decode(&mut &val[..]).expect("storage is not null, therefore must be a valid type")
 	})
 }
 
 /// Return the value of the item in storage under `key`, or the type's default if there is no
 /// explicit entry.
-pub fn get_or_default<T: Decode + Sized + Default>(key: &[u8]) -> T {
-	get(key).unwrap_or_else(Default::default)
+pub fn get_or_default<H, T>(key: &[u8]) -> T
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized + Default,
+{
+	get::<H, T>(key).unwrap_or_else(Default::default)
 }
 
 /// Return the value of the item in storage under `key`, or `default_value` if there is no
 /// explicit entry.
-pub fn get_or<T: Decode + Sized>(key: &[u8], default_value: T) -> T {
-	get(key).unwrap_or(default_value)
+pub fn get_or<H, T>(key: &[u8], default_value: T) -> T
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized,
+{
+	get::<H, T>(key).unwrap_or(default_value)
 }
 
 /// Return the value of the item in storage under `key`, or `default_value()` if there is no
 /// explicit entry.
-pub fn get_or_else<T: Decode + Sized, F: FnOnce() -> T>(key: &[u8], default_value: F) -> T {
-	get(key).unwrap_or_else(default_value)
+pub fn get_or_else<H, T, F>(key: &[u8], default_value: F) -> T
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized,
+		F: FnOnce() -> T,
+{
+	get::<H, T>(key).unwrap_or_else(default_value)
 }
 
 /// Put `value` in storage under `key`.
-pub fn put<T: Encode + ?Sized>(key: &[u8], value: &T) {
-	value.using_encoded(|slice| runtime_io::set_storage(key, slice));
+pub fn put<H, T>(key: &[u8], value: &T)
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Encode + ?Sized,
+{
+	value.using_encoded(|slice| runtime_io::set_storage::<H>(key, slice));
 }
 
 /// Remove `key` from storage, returning its value if it had an explicit entry or `None` otherwise.
-pub fn take<T: Decode + Sized>(key: &[u8]) -> Option<T> {
-	let r = get(key);
+pub fn take<H, T>(key: &[u8]) -> Option<T>
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized,
+{
+	let r = get::<H, T>(key);
 	if r.is_some() {
-		kill(key);
+		kill::<H>(key);
 	}
 	r
 }
 
 /// Remove `key` from storage, returning its value, or, if there was no explicit entry in storage,
 /// the default for its type.
-pub fn take_or_default<T: Decode + Sized + Default>(key: &[u8]) -> T {
-	take(key).unwrap_or_else(Default::default)
+pub fn take_or_default<H, T>(key: &[u8]) -> T
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized + Default,
+{
+	take::<H, T>(key).unwrap_or_else(Default::default)
 }
 
 /// Return the value of the item in storage under `key`, or `default_value` if there is no
 /// explicit entry. Ensure there is no explicit entry on return.
-pub fn take_or<T: Decode + Sized>(key: &[u8], default_value: T) -> T {
-	take(key).unwrap_or(default_value)
+pub fn take_or<H, T>(key: &[u8], default_value: T) -> T
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized,
+{
+	take::<H, T>(key).unwrap_or(default_value)
 }
 
 /// Return the value of the item in storage under `key`, or `default_value()` if there is no
 /// explicit entry. Ensure there is no explicit entry on return.
-pub fn take_or_else<T: Decode + Sized, F: FnOnce() -> T>(key: &[u8], default_value: F) -> T {
-	take(key).unwrap_or_else(default_value)
+pub fn take_or_else<H, T, F>(key: &[u8], default_value: F) -> T
+	where
+		H: Hasher,
+		H::Out: Ord,
+		T: Decode + Sized,
+		F: FnOnce() -> T,
+{
+	take::<H, T>(key).unwrap_or_else(default_value)
 }
 
 /// Check to see if `key` has an explicit entry in storage.
-pub fn exists(key: &[u8]) -> bool {
-	runtime_io::read_storage(key, &mut [0;0][..], 0).is_some()
+pub fn exists<H>(key: &[u8]) -> bool
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
+	runtime_io::read_storage::<H>(key, &mut [0;0][..], 0).is_some()
 }
 
 /// Ensure `key` has no explicit entry in storage.
-pub fn kill(key: &[u8]) {
-	runtime_io::clear_storage(key);
+pub fn kill<H>(key: &[u8])
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
+	runtime_io::clear_storage::<H>(key);
 }
 
 /// Ensure keys with the given `prefix` have no entries in storage.
-pub fn kill_prefix(prefix: &[u8]) {
-	runtime_io::clear_prefix(prefix);
+pub fn kill_prefix<H>(prefix: &[u8])
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
+	runtime_io::clear_prefix::<H>(prefix);
 }
 
 /// Get a Vec of bytes from storage.
-pub fn get_raw(key: &[u8]) -> Option<Vec<u8>> {
-	runtime_io::storage(key)
+pub fn get_raw<H>(key: &[u8]) -> Option<Vec<u8>>
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
+	runtime_io::storage::<H>(key)
 }
 
 /// Put a raw byte slice into storage.
-pub fn put_raw(key: &[u8], value: &[u8]) {
-	runtime_io::set_storage(key, value)
+pub fn put_raw<H>(key: &[u8], value: &[u8])
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
+	runtime_io::set_storage::<H>(key, value)
 }
 
 /// A trait to conveniently store a vector of storable data.
-pub trait StorageVec {
+pub trait StorageVec<H>
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
 	type Item: Default + Sized + Codec;
 	const PREFIX: &'static [u8];
 
@@ -122,7 +194,7 @@ pub trait StorageVec {
 		let mut count: u32 = 0;
 
 		for i in items.into_iter() {
-			put(&count.to_keyed_vec(Self::PREFIX), i.borrow());
+			put::<H, _>(&count.to_keyed_vec(Self::PREFIX), i.borrow());
 			count = count.checked_add(1).expect("exceeded runtime storage capacity");
 		}
 
@@ -131,26 +203,26 @@ pub trait StorageVec {
 
 	fn set_item(index: u32, item: &Self::Item) {
 		if index < Self::count() {
-			put(&index.to_keyed_vec(Self::PREFIX), item);
+			put::<H, _>(&index.to_keyed_vec(Self::PREFIX), item);
 		}
 	}
 
 	fn clear_item(index: u32) {
 		if index < Self::count() {
-			kill(&index.to_keyed_vec(Self::PREFIX));
+			kill::<H>(&index.to_keyed_vec(Self::PREFIX));
 		}
 	}
 
 	fn item(index: u32) -> Self::Item {
-		get_or_default(&index.to_keyed_vec(Self::PREFIX))
+		get_or_default::<H, _>(&index.to_keyed_vec(Self::PREFIX))
 	}
 
 	fn set_count(count: u32) {
 		(count..Self::count()).for_each(Self::clear_item);
-		put(&b"len".to_keyed_vec(Self::PREFIX), &count);
+		put::<H, _>(&b"len".to_keyed_vec(Self::PREFIX), &count);
 	}
 
 	fn count() -> u32 {
-		get_or_default(&b"len".to_keyed_vec(Self::PREFIX))
+		get_or_default::<H, _>(&b"len".to_keyed_vec(Self::PREFIX))
 	}
 }

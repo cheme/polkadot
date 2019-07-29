@@ -270,7 +270,7 @@ pub trait EnumerableStorageMap<K: codec::Codec, V: codec::Codec>: StorageMap<K, 
 
 	/// Enumerate all elements in the map.
 	fn enumerate<'a, S: HashedStorage<Self::Hasher>>(
-		storage: &'a S
+		storage: S
 	) -> Box<dyn Iterator<Item = (K, V)> + 'a> where K: 'a, V: 'a;
 }
 
