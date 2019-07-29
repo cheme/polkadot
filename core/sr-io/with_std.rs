@@ -15,7 +15,7 @@
 // along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 use primitives::{
-	blake2_128, blake2_256, twox_128, twox_256, twox_64, ed25519, Blake2Hasher,
+	blake2_128, blake2_256, twox_128, twox_256, twox_64, ed25519,
 	sr25519, Pair
 };
 // Switch to this after PoC-3
@@ -27,7 +27,7 @@ pub use substrate_state_machine::{
 	ChildStorageKey
 };
 
-use primitives::{offchain, hexdisplay::HexDisplay, H256};
+use primitives::{offchain, hexdisplay::HexDisplay};
 
 #[cfg(feature = "std")]
 use std::collections::HashMap;
@@ -79,21 +79,25 @@ impl<T: Hasher> HasherBounds for T {}
 ///
 /// Panicking here is aligned with what the `without_std` environment would do
 /// in the case of an invalid child storage key.
-fn child_storage_key_or_panic(storage_key: &[u8]) -> ChildStorageKey<Blake2Hasher> {
+fn child_storage_key_or_panic<H: Hasher>(storage_key: &[u8]) -> ChildStorageKey<H> {
 	match ChildStorageKey::from_slice(storage_key) {
 		Some(storage_key) => storage_key,
 		None => panic!("child storage key is invalid"),
 	}
 }
-// TODO EMCH change () to Ph<H>
-impl StorageApi for () {
+
+impl<H> StorageApi<H> for Hash<H>
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
 	fn storage(key: &[u8]) -> Option<Vec<u8>> {
-		ext::with::<Blake2Hasher, _, _>(|ext| ext.storage(key).map(|s| s.to_vec()))
+		ext::with::<H, _, _>(|ext| ext.storage(key).map(|s| s.to_vec()))
 			.expect("storage cannot be called outside of an Externalities-provided environment.")
 	}
 
 	fn read_storage(key: &[u8], value_out: &mut [u8], value_offset: usize) -> Option<usize> {
-		ext::with::<Blake2Hasher, _, _>(|ext| ext.storage(key).map(|value| {
+		ext::with::<H, _, _>(|ext| ext.storage(key).map(|value| {
 			let value = &value[value_offset..];
 			let written = std::cmp::min(value.len(), value_out.len());
 			value_out[..written].copy_from_slice(&value[..written]);
@@ -102,7 +106,7 @@ impl StorageApi for () {
 	}
 
 	fn child_storage(storage_key: &[u8], key: &[u8]) -> Option<Vec<u8>> {
-		ext::with(|ext| {
+		ext::with::<H, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.child_storage(storage_key, key).map(|s| s.to_vec())
 		})
@@ -110,7 +114,7 @@ impl StorageApi for () {
 	}
 
 	fn set_storage(key: &[u8], value: &[u8]) {
-		ext::with::<Blake2Hasher, _, _>(|ext|
+		ext::with::<H, _, _>(|ext|
 			ext.set_storage(key.to_vec(), value.to_vec())
 		);
 	}
@@ -121,7 +125,7 @@ impl StorageApi for () {
 		value_out: &mut [u8],
 		value_offset: usize,
 	) -> Option<usize> {
-		ext::with::<Blake2Hasher, _, _>(|ext| {
+		ext::with::<H, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.child_storage(storage_key, key)
 				.map(|value| {
@@ -135,103 +139,97 @@ impl StorageApi for () {
 	}
 
 	fn set_child_storage(storage_key: &[u8], key: &[u8], value: &[u8]) {
-		ext::with::<Blake2Hasher, _, _>(|ext| {
+		ext::with::<H, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.set_child_storage(storage_key, key.to_vec(), value.to_vec())
 		});
 	}
 
 	fn clear_storage(key: &[u8]) {
-		ext::with::<Blake2Hasher, _, _>(|ext|
+		ext::with::<H, _, _>(|ext|
 			ext.clear_storage(key)
 		);
 	}
 
 	fn clear_child_storage(storage_key: &[u8], key: &[u8]) {
-		ext::with::<Blake2Hasher, _, _>(|ext| {
+		ext::with::<H, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.clear_child_storage(storage_key, key)
 		});
 	}
 
 	fn kill_child_storage(storage_key: &[u8]) {
-		ext::with::<Blake2Hasher, _, _>(|ext| {
+		ext::with::<H, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.kill_child_storage(storage_key)
 		});
 	}
 
 	fn exists_storage(key: &[u8]) -> bool {
-		ext::with::<Blake2Hasher, _, _>(|ext|
+		ext::with::<H, _, _>(|ext|
 			ext.exists_storage(key)
 		).unwrap_or(false)
 	}
 
 	fn exists_child_storage(storage_key: &[u8], key: &[u8]) -> bool {
-		ext::with::<Blake2Hasher, _, _>(|ext| {
+		ext::with::<H, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.exists_child_storage(storage_key, key)
 		}).unwrap_or(false)
 	}
 
 	fn clear_prefix(prefix: &[u8]) {
-		ext::with::<Blake2Hasher, _, _>(|ext|
+		ext::with::<H, _, _>(|ext|
 			ext.clear_prefix(prefix)
 		);
 	}
 
-	fn storage_root() -> [u8; 32] {
-		ext::with::<Blake2Hasher, _, _>(|ext|
+	fn storage_root() -> H::Out {
+		ext::with::<H, _, _>(|ext|
 			ext.storage_root()
-		).unwrap_or(H256::zero()).into()
+		).unwrap_or(H::Out::default())
 	}
 
 	fn child_storage_root(storage_key: &[u8]) -> Vec<u8> {
-		ext::with::<Blake2Hasher, _, _>(|ext| {
+		ext::with::<H, _, _>(|ext| {
 			let storage_key = child_storage_key_or_panic(storage_key);
 			ext.child_storage_root(storage_key)
 		}).expect("child_storage_root cannot be called outside of an Externalities-provided environment.")
 	}
 
-	fn storage_changes_root(parent_hash: [u8; 32]) -> Option<[u8; 32]> {
-		ext::with::<Blake2Hasher, _, _>(|ext|
-			ext.storage_changes_root(parent_hash.into()).map(|h| h.map(|h| h.into()))
+	// TODO EMCH: return H::Out
+	fn storage_changes_root(parent_hash: H::Out) -> Option<H::Out> {
+		ext::with::<H, _, _>(|ext|
+			ext.storage_changes_root(parent_hash)
 		).unwrap_or(Ok(None)).expect("Invalid parent hash passed to storage_changes_root")
 	}
 
-	fn enumerated_trie_root<H>(input: &[&[u8]]) -> H::Out
-	where
-		H: Hasher,
-		H::Out: Ord,
+	fn enumerated_trie_root(input: &[&[u8]]) -> H::Out
 	{
 		trie::ordered_trie_root::<H, _, _>(input.iter())
 	}
 
-	fn trie_root<H, I, A, B>(input: I) -> H::Out
+	fn trie_root<I, A, B>(input: I) -> H::Out
 	where
 		I: IntoIterator<Item = (A, B)>,
 		A: AsRef<[u8]> + Ord,
 		B: AsRef<[u8]>,
-		H: Hasher,
-		H::Out: Ord,
 	{
 		trie::trie_root::<H, _, _, _>(input)
 	}
 
-	fn ordered_trie_root<H, I, A>(input: I) -> H::Out
+	fn ordered_trie_root<I, A>(input: I) -> H::Out
 	where
 		I: IntoIterator<Item = A>,
 		A: AsRef<[u8]>,
-		H: Hasher,
-		H::Out: Ord,
 	{
 		trie::ordered_trie_root::<H, _, _>(input)
 	}
 }
 
-impl OtherApi for () {
+impl<H: Hasher> OtherApi<H> for Hash<H> {
 	fn chain_id() -> u64 {
-		ext::with::<Blake2Hasher, _, _>(|ext|
+		ext::with::<H, _, _>(|ext|
 			ext.chain_id()
 		).unwrap_or(0)
 	}
@@ -241,7 +239,7 @@ impl OtherApi for () {
 	}
 }
 
-impl CryptoApi for () {
+impl<E> CryptoApi for E {
 	fn ed25519_verify<P: AsRef<[u8]>>(sig: &[u8; 64], msg: &[u8], pubkey: P) -> bool {
 		ed25519::Pair::verify_weak(sig, msg, pubkey)
 	}
@@ -263,7 +261,7 @@ impl CryptoApi for () {
 	}
 }
 
-impl HashingApi for () {
+impl<E> HashingApi for E {
 	fn keccak_256(data: &[u8]) -> [u8; 32] {
 		tiny_keccak::keccak256(data)
 	}
@@ -289,36 +287,39 @@ impl HashingApi for () {
 	}
 }
 
-// TODO EMCH Blake2Hasher -> H
-fn with_offchain<R>(f: impl FnOnce(&mut dyn offchain::Externalities) -> R, msg: &'static str) -> R {
-	ext::with::<Blake2Hasher, _, _>(|ext| ext
+fn with_offchain<H, R, F>(f: F, msg: &'static str) -> R
+	where
+		H: Hasher,
+		F: FnOnce(&mut dyn offchain::Externalities) -> R,
+{
+	ext::with::<H, _, _>(|ext| ext
 		.offchain()
 		.map(|ext| f(ext))
 		.expect(msg)
 	).expect("offchain-worker functions cannot be called outside of an Externalities-provided environment.")
 }
 
-impl OffchainApi for () {
+impl<H: Hasher> OffchainApi<H> for Hash<H> {
 	fn submit_transaction<T: codec::Encode>(data: &T) -> Result<(), ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.submit_transaction(codec::Encode::encode(data))
 		}, "submit_transaction can be called only in the offchain worker context")
 	}
 
 	fn network_state() -> Result<OpaqueNetworkState, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.network_state()
 		}, "network_state can be called only in the offchain worker context")
 	}
 
 	fn pubkey(key: offchain::CryptoKey) -> Result<Vec<u8>, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.pubkey(key)
 		}, "authority_pubkey can be called only in the offchain worker context")
 	}
 
 	fn new_crypto_key(crypto: offchain::CryptoKind) -> Result<offchain::CryptoKey, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.new_crypto_key(crypto)
 		}, "new_crypto_key can be called only in the offchain worker context")
 	}
@@ -327,7 +328,7 @@ impl OffchainApi for () {
 		key: offchain::CryptoKey,
 		data: &[u8],
 	) -> Result<Vec<u8>, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.encrypt(key, data)
 		}, "encrypt can be called only in the offchain worker context")
 	}
@@ -336,7 +337,7 @@ impl OffchainApi for () {
 		key: offchain::CryptoKey,
 		data: &[u8],
 	) -> Result<Vec<u8>, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.decrypt(key, data)
 		}, "decrypt can be called only in the offchain worker context")
 	}
@@ -345,7 +346,7 @@ impl OffchainApi for () {
 		key: offchain::CryptoKey,
 		data: &[u8],
 	) -> Result<Vec<u8>, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.sign(key, data)
 		}, "sign can be called only in the offchain worker context")
 	}
@@ -355,31 +356,31 @@ impl OffchainApi for () {
 		msg: &[u8],
 		signature: &[u8],
 	) -> Result<bool, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.verify(key, msg, signature)
 		}, "verify can be called only in the offchain worker context")
 	}
 
 	fn timestamp() -> offchain::Timestamp {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.timestamp()
 		}, "timestamp can be called only in the offchain worker context")
 	}
 
 	fn sleep_until(deadline: offchain::Timestamp) {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.sleep_until(deadline)
 		}, "sleep_until can be called only in the offchain worker context")
 	}
 
 	fn random_seed() -> [u8; 32] {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.random_seed()
 		}, "random_seed can be called only in the offchain worker context")
 	}
 
 	fn local_storage_set(kind: offchain::StorageKind, key: &[u8], value: &[u8]) {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.local_storage_set(kind, key, value)
 		}, "local_storage_set can be called only in the offchain worker context")
 	}
@@ -390,13 +391,13 @@ impl OffchainApi for () {
 		old_value: Option<&[u8]>,
 		new_value: &[u8],
 	) -> bool {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.local_storage_compare_and_set(kind, key, old_value, new_value)
 		}, "local_storage_compare_and_set can be called only in the offchain worker context")
 	}
 
 	fn local_storage_get(kind: offchain::StorageKind, key: &[u8]) -> Option<Vec<u8>> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.local_storage_get(kind, key)
 		}, "local_storage_get can be called only in the offchain worker context")
 	}
@@ -406,7 +407,7 @@ impl OffchainApi for () {
 		uri: &str,
 		meta: &[u8]
 	) -> Result<offchain::HttpRequestId, ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.http_request_start(method, uri, meta)
 		}, "http_request_start can be called only in the offchain worker context")
 	}
@@ -416,7 +417,7 @@ impl OffchainApi for () {
 		name: &str,
 		value: &str
 	) -> Result<(), ()> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.http_request_add_header(request_id, name, value)
 		}, "http_request_add_header can be called only in the offchain worker context")
 	}
@@ -426,7 +427,7 @@ impl OffchainApi for () {
 		chunk: &[u8],
 		deadline: Option<offchain::Timestamp>
 	) -> Result<(), offchain::HttpError> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.http_request_write_body(request_id, chunk, deadline)
 		}, "http_request_write_body can be called only in the offchain worker context")
 	}
@@ -435,7 +436,7 @@ impl OffchainApi for () {
 		ids: &[offchain::HttpRequestId],
 		deadline: Option<offchain::Timestamp>
 	) -> Vec<offchain::HttpRequestStatus> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.http_response_wait(ids, deadline)
 		}, "http_response_wait can be called only in the offchain worker context")
 	}
@@ -443,7 +444,7 @@ impl OffchainApi for () {
 	fn http_response_headers(
 		request_id: offchain::HttpRequestId
 	) -> Vec<(Vec<u8>, Vec<u8>)> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.http_response_headers(request_id)
 		}, "http_response_headers can be called only in the offchain worker context")
 	}
@@ -453,18 +454,22 @@ impl OffchainApi for () {
 		buffer: &mut [u8],
 		deadline: Option<offchain::Timestamp>
 	) -> Result<usize, offchain::HttpError> {
-		with_offchain(|ext| {
+		with_offchain::<H, _, _>(|ext| {
 			ext.http_response_read_body(request_id, buffer, deadline)
 		}, "http_response_read_body can be called only in the offchain worker context")
 	}
 }
 
-impl Api for () {}
+impl<H> Api<H> for Hash<H>
+	where
+		H: Hasher,
+		H::Out: Ord,
+{ }
 
 /// Execute the given closure with global function available whose functionality routes into the
 /// externalities `ext`. Forwards the value that the closure returns.
 // NOTE: need a concrete hasher here due to limitations of the `environmental!` macro, otherwise a type param would have been fine I think.
-pub fn with_externalities<R, F: FnOnce() -> R>(ext: &mut dyn Externalities<Blake2Hasher>, f: F) -> R {
+pub fn with_externalities<H, R, F: FnOnce() -> R>(ext: &mut dyn Externalities<H>, f: F) -> R {
 	ext::using(ext, f)
 }
 
@@ -476,11 +481,16 @@ pub type ChildrenStorageOverlay = HashMap<Vec<u8>, StorageOverlay>;
 
 /// Execute the given closure with global functions available whose functionality routes into
 /// externalities that draw from and populate `storage`. Forwards the value that the closure returns.
-pub fn with_storage<R, F: FnOnce() -> R>(storage: &mut StorageOverlay, f: F) -> R {
+pub fn with_storage<H, R, F>(storage: &mut StorageOverlay, f: F) -> R
+	where
+		H: Hasher,
+		H::Out: Ord,
+		F: FnOnce() -> R,
+{
 	let mut alt_storage = Default::default();
 	rstd::mem::swap(&mut alt_storage, storage);
 	let mut ext = BasicExternalities::new(alt_storage);
-	let r = ext::using::<Blake2Hasher, _, _>(&mut ext, f);
+	let r = ext::using::<H, _, _>(&mut ext, f);
 	*storage = ext.into_storages().0;
 	r
 }
@@ -488,18 +498,24 @@ pub fn with_storage<R, F: FnOnce() -> R>(storage: &mut StorageOverlay, f: F) -> 
 /// Execute the given closure with global functions available whose functionality routes into
 /// externalities that draw from and populate `storage` and `children_storage`.
 /// Forwards the value that the closure returns.
-pub fn with_storage_and_children<R, F: FnOnce() -> R>(
+pub fn with_storage_and_children<H, R, F>(
 	storage: &mut StorageOverlay,
 	children_storage: &mut ChildrenStorageOverlay,
 	f: F
-) -> R {
+) -> R
+	where
+		H: Hasher,
+		H::Out: Ord,
+		F: FnOnce() -> R,
+{
+
 	let mut alt_storage = Default::default();
 	let mut alt_children_storage = Default::default();
 	rstd::mem::swap(&mut alt_storage, storage);
 	rstd::mem::swap(&mut alt_children_storage, children_storage);
 
 	let mut ext = BasicExternalities::new_with_children(alt_storage, alt_children_storage);
-	let r = ext::using::<Blake2Hasher, _, _>(&mut ext, f);
+	let r = ext::using::<H, _, _>(&mut ext, f);
 
 	let storage_tuple = ext.into_storages();
 	*storage = storage_tuple.0;
@@ -529,25 +545,30 @@ impl Printable for u64 {
 #[cfg(test)]
 mod std_tests {
 	use super::*;
-	use primitives::map;
+	use primitives::{Blake2Hasher, map};
+	fn with_externalities<R, F: FnOnce() -> R>(ext: &mut dyn Externalities<Blake2Hasher>, f: F) -> R {
+		super::with_externalities::<Blake2Hasher, _, _>(ext, f)
+	}
+
+  type H = Hash<Blake2Hasher>;
 
 	#[test]
 	fn storage_works() {
 		let mut t = BasicExternalities::default();
 		assert!(with_externalities(&mut t, || {
-			assert_eq!(storage(b"hello"), None);
-			set_storage(b"hello", b"world");
-			assert_eq!(storage(b"hello"), Some(b"world".to_vec()));
-			assert_eq!(storage(b"foo"), None);
-			set_storage(b"foo", &[1, 2, 3][..]);
+			assert_eq!(H::storage(b"hello"), None);
+			H::set_storage(b"hello", b"world");
+			assert_eq!(H::storage(b"hello"), Some(b"world".to_vec()));
+			assert_eq!(H::storage(b"foo"), None);
+			H::set_storage(b"foo", &[1, 2, 3][..]);
 			true
 		}));
 
 		t = BasicExternalities::new(map![b"foo".to_vec() => b"bar".to_vec()]);
 
 		assert!(!with_externalities(&mut t, || {
-			assert_eq!(storage(b"hello"), None);
-			assert_eq!(storage(b"foo"), Some(b"bar".to_vec()));
+			assert_eq!(H::storage(b"hello"), None);
+			assert_eq!(H::storage(b"foo"), Some(b"bar".to_vec()));
 			false
 		}));
 	}
@@ -560,10 +581,10 @@ mod std_tests {
 
 		with_externalities(&mut t, || {
 			let mut v = [0u8; 4];
-			assert!(read_storage(b":test", &mut v[..], 0).unwrap() >= 4);
+			assert!(H::read_storage(b":test", &mut v[..], 0).unwrap() >= 4);
 			assert_eq!(v, [11u8, 0, 0, 0]);
 			let mut w = [0u8; 11];
-			assert!(read_storage(b":test", &mut w[..], 4).unwrap() >= 11);
+			assert!(H::read_storage(b":test", &mut w[..], 4).unwrap() >= 11);
 			assert_eq!(&w, b"Hello world");
 		});
 	}
@@ -578,12 +599,12 @@ mod std_tests {
 		]);
 
 		with_externalities(&mut t, || {
-			clear_prefix(b":abc");
+			H::clear_prefix(b":abc");
 
-			assert!(storage(b":a").is_some());
-			assert!(storage(b":abdd").is_some());
-			assert!(storage(b":abcd").is_none());
-			assert!(storage(b":abc").is_none());
+			assert!(H::storage(b":a").is_some());
+			assert!(H::storage(b":abdd").is_some());
+			assert!(H::storage(b":abcd").is_none());
+			assert!(H::storage(b":abc").is_none());
 		});
 	}
 }

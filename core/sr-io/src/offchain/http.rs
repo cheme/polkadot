@@ -16,7 +16,9 @@
 
 //! A non-std set of HTTP types.
 
+use hash_db::Hasher;
 use rstd::str;
+use rstd::marker::PhantomData;
 use rstd::prelude::Vec;
 #[cfg(not(feature = "std"))]
 use rstd::prelude::vec;
@@ -188,15 +190,19 @@ impl<'a, I: AsRef<[u8]>, T: IntoIterator<Item=I>> Request<'a, T> {
 	///
 	/// Err is returned in case the deadline is reached
 	/// or the request timeouts.
-	pub fn send(self) -> Result<PendingRequest, HttpError> {
+	pub fn send<H>(self) -> Result<PendingRequest<H>, HttpError>
+		where
+			H: Hasher,
+			H::Out: Ord,
+	{
 		let meta = &[];
 
 		// start an http request.
-		let id = crate::http_request_start(self.method.as_ref(), self.url, meta).map_err(|_| HttpError::IoError)?;
+		let id = crate::http_request_start::<H>(self.method.as_ref(), self.url, meta).map_err(|_| HttpError::IoError)?;
 
 		// add custom headers
 		for header in &self.headers {
-			crate::http_request_add_header(
+			crate::http_request_add_header::<H>(
 				id,
 				header.name(),
 				header.value(),
@@ -205,14 +211,15 @@ impl<'a, I: AsRef<[u8]>, T: IntoIterator<Item=I>> Request<'a, T> {
 
 		// write body
 		for chunk in self.body {
-			crate::http_request_write_body(id, chunk.as_ref(), self.deadline)?;
+			crate::http_request_write_body::<H>(id, chunk.as_ref(), self.deadline)?;
 		}
 
 		// finalise the request
-		crate::http_request_write_body(id, &[], self.deadline)?;
+		crate::http_request_write_body::<H>(id, &[], self.deadline)?;
 
 		Ok(PendingRequest {
 			id,
+			_ph: PhantomData,
 		})
 	}
 }
@@ -232,15 +239,21 @@ pub enum Error {
 /// A struct representing an uncompleted http request.
 #[derive(PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Debug))]
-pub struct PendingRequest {
+pub struct PendingRequest<H> {
 	/// Request ID
 	pub id: RequestId,
+	/// Technical constraint on chain trait.
+	pub _ph: PhantomData<H>,
 }
 
 /// A result of waiting for a pending request.
 pub type HttpResult = Result<Response, Error>;
 
-impl PendingRequest {
+impl<H> PendingRequest<H>
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
 	/// Wait for the request to complete.
 	///
 	/// NOTE this waits for the request indefinitely.
@@ -253,12 +266,12 @@ impl PendingRequest {
 
 	/// Attempts to wait for the request to finish,
 	/// but will return `Err` in case the deadline is reached.
-	pub fn try_wait(self, deadline: impl Into<Option<Timestamp>>) -> Result<HttpResult, PendingRequest> {
+	pub fn try_wait(self, deadline: impl Into<Option<Timestamp>>) -> Result<HttpResult, PendingRequest<H>> {
 		Self::try_wait_all(vec![self], deadline).pop().expect("One request passed, one status received; qed")
 	}
 
 	/// Wait for all provided requests.
-	pub fn wait_all(requests: Vec<PendingRequest>) -> Vec<HttpResult> {
+	pub fn wait_all(requests: Vec<PendingRequest<H>>) -> Vec<HttpResult> {
 		Self::try_wait_all(requests, None)
 			.into_iter()
 			.map(|r| match r {
@@ -272,11 +285,11 @@ impl PendingRequest {
 	///
 	/// Requests that are complete will resolve to an `Ok` others will return a `DeadlineReached` error.
 	pub fn try_wait_all(
-		requests: Vec<PendingRequest>,
+		requests: Vec<PendingRequest<H>>,
 		deadline: impl Into<Option<Timestamp>>
-	) -> Vec<Result<HttpResult, PendingRequest>> {
+	) -> Vec<Result<HttpResult, PendingRequest<H>>> {
 		let ids = requests.iter().map(|r| r.id).collect::<Vec<_>>();
-		let statuses = crate::http_response_wait(&ids, deadline.into());
+		let statuses = crate::http_response_wait::<H>(&ids, deadline.into());
 
 		statuses
 			.into_iter()
@@ -312,15 +325,23 @@ impl Response {
 	}
 
 	/// Retrieve the headers for this response.
-	pub fn headers(&mut self) -> &Headers {
+	pub fn headers<H>(&mut self) -> &Headers
+		where
+			H: Hasher,
+			H::Out: Ord,
+	{
 		if self.headers.is_none() {
-			self.headers = Some(Headers { raw: crate::http_response_headers(self.id) });
+			self.headers = Some(Headers { raw: crate::http_response_headers::<H>(self.id) });
 		}
 		self.headers.as_ref().expect("Headers were just set; qed")
 	}
 
 	/// Retrieve the body of this response.
-	pub fn body(&self) -> ResponseBody {
+	pub fn body<H>(&self) -> ResponseBody<H>
+		where
+			H: Hasher,
+			H::Out: Ord,
+	{
 		ResponseBody::new(self.id)
 	}
 }
@@ -333,18 +354,31 @@ impl Response {
 /// 2. Or because of IOError. In such case the reader is not resumable and will keep
 ///    returning `None`.
 /// 3. The body has been returned. The reader will keep returning `None`.
-#[derive(Clone)]
-pub struct ResponseBody {
+pub struct ResponseBody<H> {
 	id: RequestId,
 	error: Option<HttpError>,
 	buffer: [u8; 4096],
 	filled_up_to: Option<usize>,
 	position: usize,
 	deadline: Option<Timestamp>,
+	_ph: PhantomData<H>,
 }
 
+impl<H> Clone for ResponseBody<H> {
+	fn clone(&self) -> Self {
+		ResponseBody {
+			id: self.id.clone(),
+			error: self.error.clone(),
+			buffer: self.buffer.clone(),
+			filled_up_to: self.filled_up_to.clone(),
+			position: self.position.clone(),
+			deadline: self.deadline.clone(),
+			_ph: PhantomData,
+		}
+	}
+}
 #[cfg(feature = "std")]
-impl std::fmt::Debug for ResponseBody {
+impl<H> std::fmt::Debug for ResponseBody<H> {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
 		fmt.debug_struct("ResponseBody")
 			.field("id", &self.id)
@@ -357,7 +391,7 @@ impl std::fmt::Debug for ResponseBody {
 	}
 }
 
-impl ResponseBody {
+impl<H> ResponseBody<H> {
 	fn new(id: RequestId) -> Self {
 		ResponseBody {
 			id,
@@ -366,6 +400,7 @@ impl ResponseBody {
 			filled_up_to: None,
 			position: 0,
 			deadline: None,
+			_ph: PhantomData,
 		}
 	}
 
@@ -384,7 +419,11 @@ impl ResponseBody {
 	}
 }
 
-impl Iterator for ResponseBody {
+impl<H> Iterator for ResponseBody<H>
+	where
+		H: Hasher,
+		H::Out: Ord,
+{
 	type Item = u8;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -393,7 +432,7 @@ impl Iterator for ResponseBody {
 		}
 
 		if self.filled_up_to.is_none() {
-			let result = crate::http_response_read_body(self.id, &mut self.buffer, self.deadline);
+			let result = crate::http_response_read_body::<H>(self.id, &mut self.buffer, self.deadline);
 			match result {
 				Err(e) => {
 					self.error = Some(e);
@@ -483,18 +522,19 @@ mod tests {
 	use super::*;
 	use crate::{TestExternalities, with_externalities};
 	use substrate_offchain::testing;
+	use primitives::Blake2Hasher;
 
 	#[test]
 	fn should_send_a_basic_request_and_get_response() {
 		let (offchain, state) = testing::TestOffchainExt::new();
-		let mut t = TestExternalities::default();
+		let mut t = TestExternalities::<Blake2Hasher>::default();
 		t.set_offchain_externalities(offchain);
 
 		with_externalities(&mut t, || {
 			let request: Request = Request::get("http://localhost:1234");
 			let pending = request
 				.add_header("X-Auth", "hunter2")
-				.send()
+				.send::<Blake2Hasher>()
 				.unwrap();
 			// make sure it's sent correctly
 			state.write().fulfill_pending_request(
@@ -514,12 +554,12 @@ mod tests {
 			let mut response = pending.wait().unwrap();
 
 			// then check the response
-			let mut headers = response.headers().into_iter();
+			let mut headers = response.headers::<Blake2Hasher>().into_iter();
 			assert_eq!(headers.current(), None);
 			assert_eq!(headers.next(), false);
 			assert_eq!(headers.current(), None);
 
-			let body = response.body();
+			let body = response.body::<Blake2Hasher>();
 			assert_eq!(body.clone().collect::<Vec<_>>(), b"1234".to_vec());
 			assert_eq!(body.error(), &None);
 		})
@@ -528,7 +568,7 @@ mod tests {
 	#[test]
 	fn should_send_a_post_request() {
 		let (offchain, state) = testing::TestOffchainExt::new();
-		let mut t = TestExternalities::default();
+		let mut t = TestExternalities::<Blake2Hasher>::default();
 		t.set_offchain_externalities(offchain);
 
 		with_externalities(&mut t, || {
@@ -536,7 +576,7 @@ mod tests {
 				.method(Method::Post)
 				.url("http://localhost:1234")
 				.body(vec![b"1234"])
-				.send()
+				.send::<Blake2Hasher>()
 				.unwrap();
 			// make sure it's sent correctly
 			state.write().fulfill_pending_request(
@@ -556,12 +596,12 @@ mod tests {
 			let mut response = pending.wait().unwrap();
 
 			// then check the response
-			let mut headers = response.headers().into_iter();
+			let mut headers = response.headers::<Blake2Hasher>().into_iter();
 			assert_eq!(headers.current(), None);
 			assert_eq!(headers.next(), true);
 			assert_eq!(headers.current(), Some(("Test", "Header")));
 
-			let body = response.body();
+			let body = response.body::<Blake2Hasher>();
 			assert_eq!(body.clone().collect::<Vec<_>>(), b"1234".to_vec());
 			assert_eq!(body.error(), &None);
 		})

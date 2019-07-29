@@ -480,10 +480,10 @@ impl Hash for BlakeTwo256 {
 		runtime_io::ordered_trie_root::<Blake2Hasher, _, _>(input).into()
 	}
 	fn storage_root() -> Self::Output {
-		runtime_io::storage_root().into()
+		runtime_io::storage_root::<Blake2Hasher>().into()
 	}
 	fn storage_changes_root(parent_hash: Self::Output) -> Option<Self::Output> {
-		runtime_io::storage_changes_root(parent_hash.into()).map(Into::into)
+		runtime_io::storage_changes_root::<Blake2Hasher>(parent_hash.into()).map(Into::into)
 	}
 }
 

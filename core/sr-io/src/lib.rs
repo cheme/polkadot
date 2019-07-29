@@ -59,8 +59,11 @@ pub trait Printable {
 	fn print(self);
 }
 
-/// Converts a public trait definition into a private trait and set of public functions
-/// that assume the trait is implemented for `()` for ease of calling.
+/// Default api, generic other `Hasher`.
+#[derive(Default)]
+pub struct Hash<H>(rstd::marker::PhantomData<H>);
+
+/// Converts a public trait definition into a private trait and set of public functions.
 macro_rules! export_api {
 	(
 		$( #[$trait_attr:meta] )*
@@ -90,14 +93,49 @@ macro_rules! export_api {
 				$( where $( $w_name : $w_ty ),+ )?
 			{
 				#[allow(deprecated)]
-				<()>:: $name $(::< $( $g_name ),+ > )?  ( $( $arg ),* )
+				<()>:: $name $(::< $( $g_name ),+ > )? ( $( $arg ),* )
 			}
 		)*
-	}
+	};
+	(
+		$( #[$trait_attr:meta] )*
+		pub(crate) trait $trait_name:ident <H> {
+			$(
+				$( #[$attr:meta] )*
+				fn $name:ident
+					$(< $( $g_name:ident $( : $g_ty:path )? ),+ >)?
+					( $( $arg:ident : $arg_ty:ty ),* )
+					$( -> $ret:ty )?
+					$( where $( $w_name:path : $w_ty:path ),+ )?;
+			)*
+		}
+	) => {
+		$( #[$trait_attr] )*
+		pub(crate) trait $trait_name <H: Hasher> {
+			$(
+				$( #[$attr] )*
+				fn $name $(< $( $g_name $( : $g_ty )? ),+ >)? ( $($arg : $arg_ty ),* ) $( -> $ret )?
+				$( where $( $w_name : $w_ty ),+ )?;
+			)*
+		}
+
+		$(
+			$( #[$attr] )*
+			pub fn $name < H, $( $( $g_name $( : $g_ty )? ),+ )? > ( $($arg : $arg_ty ),* ) $( -> $ret )?
+				where
+					H: Hasher,
+					H::Out: Ord,
+					$( $( $w_name : $w_ty ),+ )?
+			{
+				#[allow(deprecated)]
+				<Hash<H>>:: $name $(::< $( $g_name ),+ > )? ( $( $arg ),* )
+			}
+		)*
+	};
 }
 
 export_api! {
-	pub(crate) trait StorageApi {
+	pub(crate) trait StorageApi<H> {
 		/// Get `key` from storage and return a `Vec`, empty if there's a problem.
 		fn storage(key: &[u8]) -> Option<Vec<u8>>;
 
@@ -143,49 +181,38 @@ export_api! {
 		fn clear_prefix(prefix: &[u8]);
 
 		/// "Commit" all existing operations and compute the resultant storage root.
-		fn storage_root() -> [u8; 32];
+		fn storage_root() -> H::Out;
 
 		/// "Commit" all existing operations and compute the resultant child storage root.
 		fn child_storage_root(storage_key: &[u8]) -> Vec<u8>;
 
 		/// "Commit" all existing operations and get the resultant storage change root.
-		fn storage_changes_root(parent_hash: [u8; 32]) -> Option<[u8; 32]>;
+		fn storage_changes_root(parent_hash: H::Out) -> Option<H::Out>;
 
 		/// A trie root formed from the enumerated items.
 		/// TODO [#2382] remove (just use `ordered_trie_root` (NOTE currently not implemented for without_std))
-		fn enumerated_trie_root<H>(input: &[&[u8]]) -> H::Out
-		where
-			H: Hasher,
-			H: self::imp::HasherBounds,
-			H::Out: Ord
-		;
+		fn enumerated_trie_root(input: &[&[u8]]) -> H::Out;
 
 		/// A trie root formed from the iterated items.
-		fn trie_root<H, I, A, B>(input: I) -> H::Out
+		fn trie_root<I, A, B>(input: I) -> H::Out
 		where
 			I: IntoIterator<Item = (A, B)>,
 			A: AsRef<[u8]>,
 			A: Ord,
-			B: AsRef<[u8]>,
-			H: Hasher,
-			H: self::imp::HasherBounds,
-			H::Out: Ord
+			B: AsRef<[u8]>
 		;
 
 		/// A trie root formed from the enumerated items.
-		fn ordered_trie_root<H, I, A>(input: I) -> H::Out
+		fn ordered_trie_root<I, A>(input: I) -> H::Out
 		where
 			I: IntoIterator<Item = A>,
-			A: AsRef<[u8]>,
-			H: Hasher,
-			H: self::imp::HasherBounds,
-			H::Out: Ord
+			A: AsRef<[u8]>
 		;
 	}
 }
 
 export_api! {
-	pub(crate) trait OtherApi {
+	pub(crate) trait OtherApi<H> {
 		/// The current relay chain identifier.
 		fn chain_id() -> u64;
 
@@ -236,7 +263,7 @@ export_api! {
 }
 
 export_api! {
-	pub(crate) trait OffchainApi {
+	pub(crate) trait OffchainApi<H> {
 		/// Submit transaction to the pool.
 		///
 		/// The transaction will end up in the pool.
@@ -390,7 +417,7 @@ export_api! {
 /// API trait that should cover all other APIs.
 ///
 /// Implement this to make sure you implement all APIs.
-trait Api: StorageApi + OtherApi + CryptoApi + HashingApi + OffchainApi {}
+trait Api<H: Hasher> : StorageApi<H> + OtherApi<H> + CryptoApi + HashingApi + OffchainApi<H> {}
 
 mod imp {
 	use super::*;
