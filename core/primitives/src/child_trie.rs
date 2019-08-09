@@ -214,6 +214,51 @@ impl ChildTrie {
 		})
 	}
 
+	/// Method to delete a child trie content.
+	///
+	/// It does not actually delete content but simply return the
+	/// keyspace of this content that can be use for a full keyspace
+	/// driven data deletion.
+	///
+	/// There is two cases wether we want to keep the child trie
+	/// definition node or not.
+	/// `keep_trie` is optional, if defined, we keep the trie and replace
+	/// its keyspace, otherwhise the trie is dropped.
+	///
+	/// Move all contents between two tries can be achieve this way (remove first
+	/// getting its keyspace and instead of sending the keyspace
+	/// to a runtime keyspace drop function, we reuse it in `keep_trie`
+	/// for another trie.
+	///
+	/// The function return the a tuple of the KeySpace to remove (or use
+	/// in another context) and the optional new trie.
+	///
+	/// It is important that both returned value are used.
+	pub fn remove_or_replace_keyspace(
+		mut self,
+		keep_trie: Option<KeySpace>,
+	) -> (Option<KeySpace>, Option<Self>) {
+		let is_new = self.is_new();
+		if let Some(new_keyspace) = keep_trie {
+			let old_keyspace = self.keyspace;
+			self.keyspace = new_keyspace;
+			// warning after a remove the child trie is considered new.
+			self.root = None;
+			if is_new {
+				(None, Some(self))
+			} else {
+				(Some(old_keyspace), Some(self))
+			}
+		} else {
+			if is_new {
+				(Some(self.keyspace), None)
+			} else {
+				(None, None)
+			}
+		}
+	}
+
+
 	/// Get a reference to the child trie information
 	/// needed for a read only query.
 	pub fn node_ref(&self) -> ChildTrieReadRef {

@@ -24,8 +24,7 @@ use crate::{Externalities, OverlayedChanges, OverlayedValueResult};
 use hash_db::Hasher;
 use primitives::offchain;
 use primitives::storage::well_known_keys::is_child_storage_key;
-use primitives::child_trie::ChildTrie;
-use primitives::child_trie::ChildTrieReadRef;
+use primitives::child_trie::{ChildTrie, ChildTrieReadRef, KeySpace};
 use trie::{MemoryDB, default_child_trie_root};
 use trie::trie_types::Layout;
 
@@ -280,14 +279,28 @@ where
 		self.overlay.set_child_trie(ct)
 	}
 
-	fn kill_child_storage(&mut self, child_trie: &ChildTrie) {
+	fn kill_child_storage(
+		&mut self,
+		child_trie: ChildTrie,
+		keep_root: Option<KeySpace>,
+	) -> Option<ChildTrie> {
 		let _guard = panic_handler::AbortGuard::force_abort();
-
 		self.mark_dirty();
-		self.overlay.clear_child_storage(child_trie);
-		self.backend.for_keys_in_child_storage(child_trie.node_ref(), |key| {
-			self.overlay.set_child_storage(child_trie, key.to_vec(), None);
-		});
+
+		let (result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root.clone());
+		if need_check {
+			// try update backend value
+			if let Some(child_trie) = self.backend.child_trie(child_trie.parent_slice())
+				.expect(EXT_NOT_ALLOWED_TO_FAIL) {
+				self.overlay.set_child_trie(child_trie.clone());
+
+				let (result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root);
+        debug_assert!(need_check == false);
+        return result;
+			}
+		}
+
+		result
 	}
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {

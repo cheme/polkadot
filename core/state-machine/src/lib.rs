@@ -24,7 +24,7 @@ use hash_db::Hasher;
 use parity_codec::{Decode, Encode};
 use primitives::{
 	storage::well_known_keys, NativeOrEncoded, NeverNativeValue, offchain,
-	child_trie::{ChildTrie, ChildTrieReadRef},
+	child_trie::{ChildTrie, ChildTrieReadRef, KeySpace},
 };
 
 pub mod backend;
@@ -151,8 +151,12 @@ pub trait Externalities<H: Hasher> {
 	}
 
 	/// Clear an entire child storage and update parent.
-	fn kill_child_storage(&mut self, child_trie: &ChildTrie);
-
+	fn kill_child_storage(
+		&mut self,
+		child_trie: ChildTrie,
+		keep_root: Option<KeySpace>,
+	) -> Option<ChildTrie>;
+	
 	/// Clear storage entries which keys are start with the given prefix.
 	fn clear_prefix(&mut self, prefix: &[u8]);
 
@@ -1175,7 +1179,7 @@ mod tests {
 		);
 		ext.set_child_storage(&child_trie, b"abc".to_vec(), b"def".to_vec());
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"abc"), Some(b"def".to_vec()));
-		ext.kill_child_storage(&child_trie);
+		ext.kill_child_storage(child_trie.clone(), None);
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"abc"), None);
 	}
 

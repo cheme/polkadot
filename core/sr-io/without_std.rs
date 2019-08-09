@@ -326,7 +326,11 @@ pub mod ext {
 		/// See [`ext_kill_storage`] for details.
 		///
 		/// A child storage is used e.g. by a contract.
-		fn ext_kill_child_storage(prefix_storage_key_data: *const u8, storage_key_len: u32);
+		fn ext_kill_child_storage(
+			prefix_storage_key_data: *const u8,
+			storage_key_len: u32,
+			keep_root: u8,
+		);
 		/// A child storage function.
 		///
 		/// See [`ext_get_allocated_storage`] for details.
@@ -860,12 +864,13 @@ impl StorageApi for () {
 		}
 	}
 
-	fn kill_child_storage(child_trie: &ChildTrie) {
+	fn kill_child_storage(child_trie: &ChildTrie, keep_root: bool) {
 		let storage_key = child_trie.parent_slice();
 		unsafe {
 			ext_kill_child_storage.get()(
 				storage_key.as_ptr(),
-				storage_key.len() as u32
+				storage_key.len() as u32,
+				keep_root as u8,
 			);
 		}
 	}

@@ -60,6 +60,24 @@ pub struct ChildOverlayChangeSet {
 	pub values: HashMap<Vec<u8>, Option<Vec<u8>>>,
 	/// Child trie value.
 	pub child_trie: ChildTrie,
+	/// Status for child.
+	pub status: ChildStatus,
+}
+
+/// Child status.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChildStatus {
+	/// keyspace dropped and node to be removed.
+	Deleted,
+	/// Keyspace deleted, but node is updated to
+	/// a new keyspace. Node will be updated
+	/// unless it has no content and no extension
+	/// content.
+	KeySpaceOnly,
+	/// Nothing to do, node will only need
+	/// update if some content has been
+	/// set (change of root).
+	Untouched,
 }
 
 /// Prospective or committed overlayed change set.
@@ -71,8 +89,11 @@ pub struct OverlayedChangeSet {
 	/// Child storage changes.
 	pub children: HashMap<KeySpace, ChildOverlayChangeSet>,
 	/// Association from parent storage location to keyspace.
-	/// If value is none the child is moved or deleted.
-	pub pending_child: HashMap<Vec<u8>, Option<KeySpace>>,
+	pub pending_child: HashMap<Vec<u8>, KeySpace>,
+	/// Keyspace marked for deletion (deletion of a full child).
+	/// No attached logic on the keyspace (checking for child deletion
+	/// is pending child purpose).
+	pub keyspace_to_delete: BTreeSet<KeySpace>,
 }
 
 #[cfg(test)]
@@ -82,6 +103,7 @@ impl FromIterator<(Vec<u8>, OverlayedValue)> for OverlayedChangeSet {
 			top: iter.into_iter().collect(),
 			children: Default::default(),
 			pending_child: Default::default(),
+			keyspace_to_delete: Default::default(),
 		}
 	}
 }
@@ -89,7 +111,8 @@ impl FromIterator<(Vec<u8>, OverlayedValue)> for OverlayedChangeSet {
 impl OverlayedChangeSet {
 	/// Whether the change set is empty.
 	pub fn is_empty(&self) -> bool {
-		self.top.is_empty() && self.children.is_empty()
+		self.top.is_empty()
+			&& self.children.is_empty()
 	}
 
 	/// Clear the change set.
@@ -110,6 +133,10 @@ pub enum OverlayedValueResult<'a> {
 	NotFound,
 	/// The key has been deleted.
 	Deleted,
+	/// The keyspace for this has been deleted.
+	/// TODO EMCH consider replacing by a check on
+	/// merge between keyspace values.
+	KeySpaceDeleted,
 	/// Current value set in the overlay.
 	Modified(&'a[u8]),
 }
@@ -117,7 +144,8 @@ pub enum OverlayedValueResult<'a> {
 impl OverlayedChanges {
 	/// Whether the overlayed changes are empty.
 	pub fn is_empty(&self) -> bool {
-		self.prospective.is_empty() && self.committed.is_empty()
+		self.prospective.is_empty()
+			&& self.committed.is_empty()
 	}
 
 	/// Sets the changes trie configuration.
@@ -148,7 +176,18 @@ impl OverlayedChanges {
 	/// Get the `OverlayedValueResult` for a given child key.
 	pub fn child_storage(&self, child_trie: ChildTrieReadRef, key: &[u8]) -> OverlayedValueResult {
 		let keyspace = child_trie.keyspace();
-		match self.prospective.children.get(keyspace).and_then(|map| map.values.get(key)) {
+
+		let mut former_keyspace_deleted = false;
+		match self.prospective.children.get(keyspace).and_then(|map| {
+			match map.status {
+				ChildStatus::Deleted
+				| ChildStatus::KeySpaceOnly => {
+					former_keyspace_deleted = true;
+					None
+				},
+				ChildStatus::Untouched => map.values.get(key),
+			}
+		}) {
 			Some(Some(val)) =>
 				return OverlayedValueResult::Modified(val.as_ref()),
 			Some(None) =>
@@ -156,43 +195,67 @@ impl OverlayedChanges {
 			None => (),
 		}
 
-		match self.committed.children.get(keyspace).and_then(|map| map.values.get(key)) {
+		if former_keyspace_deleted {
+			return OverlayedValueResult::KeySpaceDeleted;
+		}
+
+		match self.committed.children.get(keyspace).and_then(|map| {
+			match map.status {
+				ChildStatus::Deleted
+				| ChildStatus::KeySpaceOnly => {
+					former_keyspace_deleted = true;
+					None
+				},
+				ChildStatus::Untouched => map.values.get(key),
+			}
+		}) {
 			Some(Some(val)) =>
 				return OverlayedValueResult::Modified(val.as_ref()),
 			Some(None) =>
 				return OverlayedValueResult::Deleted,
-			None => OverlayedValueResult::NotFound,
+			None => (),
+		}
+
+		if former_keyspace_deleted {
+			return OverlayedValueResult::KeySpaceDeleted;
+		} else {
+			return OverlayedValueResult::NotFound;
 		}
 
 	}
 
 	/// returns a child trie if present
 	pub fn child_trie(&self, storage_key: &[u8]) -> Option<Option<ChildTrie>> {
-
+		// no check for keyspace to delete as the child trie keyspace if child trie
+		// is still here shall be updated.
 		match self.prospective.pending_child.get(storage_key) {
-			Some(Some(keyspace)) => {
+			Some(keyspace) => {
 				let map = self.prospective.children.get(keyspace)
 					.expect("pending entry always have a children association; qed");
-				return Some(Some(map.child_trie.clone()));
+				if map.status == ChildStatus::Deleted {
+					return Some(None);
+				} else {
+					return Some(Some(map.child_trie.clone()));
+				}
 			},
-			Some(None) => return Some(None),
 			None => (),
 		}
 
 		match self.committed.pending_child.get(storage_key) {
-			Some(Some(keyspace)) => {
+			Some(keyspace) => {
 				let map = self.committed.children.get(keyspace)
 					.expect("pending entry always have a children association; qed");
-				return Some(Some(map.child_trie.clone()));
+				if map.status == ChildStatus::Deleted {
+					return Some(None);
+				} else {
+					return Some(Some(map.child_trie.clone()));
+				}
 			},
-			Some(None) => return Some(None),
 			None => (),
 		}
 
 		None
 	}
-
-
 
 	/// Inserts the given key-value pair into the prospective change set.
 	///
@@ -212,21 +275,28 @@ impl OverlayedChanges {
 	///
 	/// `None` can be used to delete a value specified by the given key.
 	pub(crate) fn set_child_storage(&mut self, child_trie: &ChildTrie, key: Vec<u8>, val: Option<Vec<u8>>) {
+		// Note that we do not check keyspace_to_delete and using a cloned child trie can lead
+		// to recreate an child trie that was delete. User shall therefore be attentive to not
+		// use cloned trie (except for technical reason).
 		let extrinsic_index = self.extrinsic_index();
 		let p = &mut self.prospective.children;
 		let pc = &mut self.prospective.pending_child;
 		let map_entry = p.entry(child_trie.keyspace().clone())
 			.or_insert_with(|| {
 				let parent = child_trie.parent_slice().to_vec();
-				pc.insert(parent, Some(child_trie.keyspace().clone()));
+				pc.insert(parent, child_trie.keyspace().clone());
 				ChildOverlayChangeSet {
 					extrinsics: None,
 					values: Default::default(),
 					child_trie: child_trie.clone(),
+					status: ChildStatus::Untouched,
 				}
 			});
-		map_entry.values.insert(key, val);
+		// if deleted then we used a child trie with incorrect keyspace
+		// so code is incorrect.
+		debug_assert!(map_entry.status == ChildStatus::Untouched);
 
+		map_entry.values.insert(key, val);
 		if let Some(extrinsic) = extrinsic_index {
 			map_entry.extrinsics.get_or_insert_with(Default::default)
 				.insert(extrinsic);
@@ -239,13 +309,15 @@ impl OverlayedChanges {
 	/// - parent path
 	pub(crate) fn set_child_trie(&mut self, child_trie: ChildTrie) -> bool {
 		let extrinsic_index = self.extrinsic_index();
-		if let Some(Some(old_ct)) = self.prospective.pending_child
+
+		if let Some(old_ct) = self.prospective.pending_child
 			.get(child_trie.parent_slice()) {
 			let old_ct = self.prospective.children.get_mut(old_ct)
 				.expect("pending entry always have a children association; qed");
 			let exts = &mut old_ct.extrinsics;
+			let status = old_ct.status;
 			let old_ct = &mut old_ct.child_trie;
-			if old_ct.is_updatable_with(&child_trie) {
+			if old_ct.is_updatable_with(&child_trie) && status == ChildStatus::Untouched {
 				*old_ct = child_trie;
 				if let Some(extrinsic) = extrinsic_index {
 					exts.get_or_insert_with(Default::default)
@@ -256,18 +328,16 @@ impl OverlayedChanges {
 			}
 		} else {
 			let mut exts = if let Some(old_ct) = self.committed.pending_child
-				.get(child_trie.parent_slice()).and_then(|k|
-					k.as_ref().and_then(|k| self.committed.children.get(k))) {
-				if old_ct.child_trie.root_initial_value() != child_trie.root_initial_value()
-					|| old_ct.child_trie.keyspace() != child_trie.keyspace()
-					|| old_ct.child_trie.parent_slice() != child_trie.parent_slice() {
-					return false;
-				} else {
+				.get(child_trie.parent_slice()).and_then(|k| self.committed.children.get(k)) {
+				if old_ct.child_trie.is_updatable_with(&child_trie)
+					&& old_ct.status == ChildStatus::Untouched {
 					old_ct.extrinsics.clone()
+				} else {
+					return false;
 				}
 			} else { Default::default() };
 			self.prospective.pending_child
-				.insert(child_trie.parent_slice().to_vec(), Some(child_trie.keyspace().clone()));
+				.insert(child_trie.parent_slice().to_vec(), child_trie.keyspace().clone());
 			if let Some(extrinsic) = extrinsic_index {
 				exts.get_or_insert_with(Default::default)
 					.insert(extrinsic);
@@ -278,42 +348,94 @@ impl OverlayedChanges {
 					extrinsics: exts,
 					values: Default::default(),
 					child_trie: child_trie.clone(),
+					status: ChildStatus::Untouched,
 				}
 			);
 		}
 		true
 	}
 
-
-
 	/// Clear child storage of given storage key.
+	/// This is a global operation over a full keyspace.
+	/// We can still keep the child trie info but with a new keyspace.
 	///
 	/// NOTE that this doesn't take place immediately but written into the prospective
 	/// change set, and still can be reverted by [`discard_prospective`].
 	///
 	/// [`discard_prospective`]: #method.discard_prospective
-	pub(crate) fn clear_child_storage(&mut self, child_trie: &ChildTrie) {
+	pub(crate) fn kill_child_storage(
+		&mut self,
+		child_trie: ChildTrie,
+		keep_trie: Option<KeySpace>,
+	) -> (Option<ChildTrie>, bool) {
 		let extrinsic_index = self.extrinsic_index();
-		let map_entry = self.prospective.children.entry(child_trie.keyspace().clone())
-			.or_insert_with(|| ChildOverlayChangeSet {
-				extrinsics: None,
-				values: Default::default(),
-				child_trie: child_trie.clone(),
-			});
 
-		if let Some(extrinsic) = extrinsic_index {
-			map_entry.extrinsics.get_or_insert_with(Default::default)
-				.insert(extrinsic);
-		}
+		if let Some(new_keyspace) = keep_trie {
+			if let Some(ct) = self.prospective.children.get(child_trie.keyspace())
+				.or_else(|| self.committed.children.get(child_trie.keyspace())) {
+				let old_is_new = ct.child_trie.is_new();
+				let (old_ks, new_ct) = ct.child_trie.clone().remove_or_replace_keyspace(Some(new_keyspace));
 
-		map_entry.values.values_mut().for_each(|e| *e = None);
-
-		if let Some(ChildOverlayChangeSet {values: committed_map, ..}) =
-			self.committed.children.get(child_trie.keyspace()) {
-			for (key, _) in committed_map.iter() {
-				map_entry.values.insert(key.clone(), None);
+				if !old_is_new {
+					old_ks.map(|ks| self.prospective.keyspace_to_delete.insert(ks));
+				}
+				let new_ct = new_ct.expect("a new keyspace in parameter");
+				let extrinsics = if let Some(extrinsic) = extrinsic_index {
+					let extrinsics = ct.extrinsics.clone();
+					extrinsics.get_or_insert_with(Default::default)
+						.insert(extrinsic);
+					extrinsics
+				} else { None };
+	
+				// only usefull if ct is from committed
+				self.prospective.pending_child.insert(new_ct.parent_slice().to_vec(), new_ct.keyspace().clone());
+				self.prospective.children.insert(new_ct.keyspace().clone(), ChildOverlayChangeSet {
+					child_trie: new_ct,
+					values: Default::default(),
+					extrinsics,
+					status: ChildStatus::KeySpaceOnly,
+				});
+				return (Some(new_ct), false);
+			} else {
+				// no such child trie in overlay
+				// still need to drop keyspace and update keyspace from
+				// a possible backend: returning true in second result.
+				return (None, true);
 			}
 		}
+
+		// not keeping trie node
+		self.prospective.pending_child.remove(child_trie.parent_slice());
+
+		let mut clear_child = |v: &mut ChildOverlayChangeSet, k_to_delete: &mut BTreeSet<Vec<u8>>| {
+			v.status = ChildStatus::Deleted;
+			v.values.clear();
+			if let Some(extrinsic) = extrinsic_index {
+				v.extrinsics.get_or_insert_with(Default::default).insert(extrinsic);
+			}
+			let (old_ks, new_ct) = v.child_trie.remove_or_replace_keyspace(None);
+			debug_assert!(new_ct.is_none());
+			if !v.child_trie.is_new() {
+				old_ks.map(|ks| k_to_delete.insert(ks));
+			}
+		};
+		if let Some(v) = self.prospective.children.get_mut(child_trie.keyspace()) {
+			clear_child(v, &mut self.prospective.keyspace_to_delete);
+		} else if let Some(v) = self.committed.children.get(child_trie.keyspace()) {
+			let mut v = v.clone();
+			clear_child(&mut v, &mut self.prospective.keyspace_to_delete);
+			self.prospective.pending_child.insert(
+				v.child_trie.parent_slice().to_vec(),
+				v.child_trie.keyspace().clone(),
+			);
+			self.prospective.children.insert(v.child_trie.keyspace().clone(), v);
+		} else {
+			// no such child trie in overlay
+			// still need to drop keyspace and update keyspace from
+			// a possible backend: returning true in second result.
+			return (None, true);
+		}
+		(None, false)
 	}
 
 	/// Removes all key-value pairs which keys share the given prefix.
@@ -372,14 +494,32 @@ impl OverlayedChanges {
 						.extend(prospective_extrinsics);
 				}
 			}
-			for (storage_key, ChildOverlayChangeSet {extrinsics, values, child_trie}) in self.prospective.children.drain() {
+			for (storage_key, ChildOverlayChangeSet {extrinsics, values, child_trie, status})
+				in self.prospective.children.drain() {
 				let entry = self.committed.children.entry(storage_key)
 					.or_insert_with(|| ChildOverlayChangeSet {
 						extrinsics: None,
 						values: Default::default(),
 						child_trie: child_trie.clone(),
+						status: ChildStatus::Untouched,
 					});
-				entry.values.extend(values.iter().map(|(k, v)| (k.clone(), v.clone())));
+
+				match status {
+					ChildStatus::KeySpaceOnly => {
+						entry.values.clear();
+						entry.values.extend(values.iter().map(|(k, v)| (k.clone(), v.clone())));
+						entry.status = ChildStatus::Untouched; // no need to know keyspace deleted here
+						debug_assert!(entry.child_trie.keyspace() != child_trie.keyspace());
+					},
+					ChildStatus::Deleted => {
+						entry.values.clear();
+						entry.status = ChildStatus::Deleted;
+					},
+					ChildStatus::Untouched => {
+						entry.values.extend(values.iter().map(|(k, v)| (k.clone(), v.clone())));
+						entry.status = ChildStatus::Untouched;
+					}
+				}
 				entry.child_trie = child_trie;
 
 				if let Some(prospective_extrinsics) = extrinsics {
@@ -388,9 +528,13 @@ impl OverlayedChanges {
 				}
 			}
 			self.committed.pending_child.extend(self.prospective.pending_child.drain());
+			let p_keyspace_to_delete = ::std::mem::replace(&mut self.prospective.keyspace_to_delete, BTreeSet::new());
+			self.committed.keyspace_to_delete.extend(p_keyspace_to_delete.into_iter());
 		}
 	}
 
+	// TODO EMCH need to check where it is used, it obviously lack child node
+	// specific operation : Update, delete...
 	/// Consume `OverlayedChanges` and take committed set.
 	///
 	/// Panics:
@@ -398,10 +542,14 @@ impl OverlayedChanges {
 	pub fn into_committed(self) -> (
 		impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		impl Iterator<Item=(Vec<u8>, impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>)>,
+		impl Iterator<Item=Vec<u8>>,
 	){
 		assert!(self.prospective.is_empty());
-		(self.committed.top.into_iter().map(|(k, v)| (k, v.value)),
-			self.committed.children.into_iter().map(|(sk, v)| (sk, v.values.into_iter())))
+		(
+			self.committed.top.into_iter().map(|(k, v)| (k, v.value)),
+			self.committed.children.into_iter().map(|(sk, v)| (sk, v.values.into_iter())),
+			self.committed.keyspace_to_delete.into_iter(),
+		)
 	}
 
 	/// Inserts storage entry responsible for current extrinsic index.
@@ -427,6 +575,7 @@ impl OverlayedChanges {
 					OverlayedValueResult::Modified(idx) => Decode::decode(&mut &*idx)
 						.unwrap_or(NO_EXTRINSIC_INDEX),
 					OverlayedValueResult::Deleted
+					| OverlayedValueResult::KeySpaceDeleted
 					| OverlayedValueResult::NotFound => NO_EXTRINSIC_INDEX,
 				}
 			),

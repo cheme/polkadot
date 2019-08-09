@@ -369,10 +369,14 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		this.ext.clear_prefix(&prefix);
 		Ok(())
 	},
-	ext_kill_child_storage(storage_key_data: *const u8, storage_key_len: u32) => {
+	ext_kill_child_storage(storage_key_data: *const u8, storage_key_len: u32, keep_root: u8) => {
+		let keep_root = keep_root > 0;
 		let storage_key = this.memory.get(storage_key_data, storage_key_len as usize)
 			.map_err(|_| "Invalid attempt to determine storage_key in ext_kill_child_storage")?;
-		this.with_child_trie(&storage_key[..], |this, child_trie| this.ext.kill_child_storage(&child_trie))?;
+		this.with_child_trie(
+			&storage_key[..],
+			|this, child_trie| this.ext.kill_child_storage(&child_trie, keep_root),
+		)?;
 		Ok(())
 	},
 	// return 0 and place u32::max_value() into written_out if no value exists for the key.

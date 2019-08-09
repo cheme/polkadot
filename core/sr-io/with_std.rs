@@ -117,9 +117,9 @@ impl StorageApi for () {
 		});
 	}
 
-	fn kill_child_storage(child_trie: &ChildTrie) {
+	fn kill_child_storage(child_trie: &ChildTrie, keep_root: bool) {
 		ext::with(|ext| {
-			ext.kill_child_storage(child_trie)
+			ext.kill_child_storage(child_trie, keep_root)
 		});
 	}
 

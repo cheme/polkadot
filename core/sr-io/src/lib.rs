@@ -149,7 +149,7 @@ export_api! {
 		fn clear_child_storage(child_trie: &ChildTrie, key: &[u8]);
 
 		/// Clear an entire child storage.
-		fn kill_child_storage(child_trie: &ChildTrie);
+		fn kill_child_storage(child_trie: &ChildTrie, keep_root: bool);
 
 		/// Check whether a given `key` exists in storage.
 		fn exists_storage(key: &[u8]) -> bool;

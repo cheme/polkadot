@@ -16,7 +16,7 @@
 
 //! Basic implementation for Externalities.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use crate::backend::{Backend, InMemory, MapTransaction};
 use hash_db::Hasher;
@@ -34,7 +34,9 @@ use log::warn;
 pub struct BasicExternalities {
 	top: HashMap<Vec<u8>, Vec<u8>>,
 	children: HashMap<KeySpace, (HashMap<Vec<u8>, Vec<u8>>, ChildTrie)>,
+  // TODO EMCH pending child with none is unused (we use keyspace to delete)
 	pending_child: HashMap<Vec<u8>, Option<KeySpace>>,
+	keyspace_to_delete: HashSet<KeySpace>,
 }
 
 impl BasicExternalities {
@@ -54,6 +56,7 @@ impl BasicExternalities {
 			top: map.top,
 			children: map.children,
 			pending_child,
+			keyspace_to_delete: Default::default(),
 		}
 	}
 
@@ -92,6 +95,7 @@ impl From<HashMap<Vec<u8>, Vec<u8>>> for BasicExternalities {
 			top: hashmap,
 			children: Default::default(),
 			pending_child: Default::default(),
+			keyspace_to_delete: Default::default(),
 		}
 	}
 }
@@ -156,11 +160,36 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 		}
 	}
 
-	fn kill_child_storage(&mut self, child_trie: &ChildTrie) {
+	fn kill_child_storage(
+		&mut self,
+		child_trie: ChildTrie,
+		keep_root: Option<KeySpace>,
+	) -> Option<ChildTrie> {
+		let mut result = None;
 		let keyspace = child_trie.keyspace();
-		if let Some((map_val, _ct)) = self.children.get_mut(keyspace) {
-			map_val.clear();
+		if keep_root.is_some() {
+			if let Some((map_val, ct)) = self.children.get_mut(keyspace) {
+				if ct.is_new() {
+					// nothing to do already no root
+				} else {
+					let (old_ks, o_ct) = ct.clone().remove_or_replace_keyspace(keep_root);
+					let v = o_ct.expect("keep_root used");
+					*ct = v.clone();
+          self.pending_child.insert(v.parent_slice().to_vec(), Some(v.keyspace().clone()));
+					result = Some(v);
+					old_ks.map(|ks| self.keyspace_to_delete.insert(ks));
+				}
+				map_val.clear();
+			}
+		} else {
+			self.pending_child.remove(child_trie.parent_slice());
+			if let Some((_, ct)) = self.children.remove(keyspace) {
+				let (old_ks, o_ct) = ct.remove_or_replace_keyspace(None);
+				debug_assert!(o_ct.is_none());
+				old_ks.map(|ks| self.keyspace_to_delete.insert(ks));
+			}
 		}
+		result
 	}
 
 	fn set_child_trie(&mut self, child_trie: ChildTrie) -> bool {
@@ -272,7 +301,7 @@ mod tests {
 		ext.clear_child_storage(&child_trie, b"dog");
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"dog"), None);
 
-		ext.kill_child_storage(&child_trie);
+		ext.kill_child_storage(child_trie.clone(), None);
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"doe"), None);
 	}
 

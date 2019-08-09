@@ -27,7 +27,7 @@ use crate::changes_trie::{
 };
 use primitives::offchain;
 use primitives::storage::well_known_keys::{CHANGES_TRIE_CONFIG, CODE, HEAP_PAGES};
-use primitives::child_trie::{ChildTrie, ChildTrieReadRef};
+use primitives::child_trie::{ChildTrie, ChildTrieReadRef, KeySpace};
 use parity_codec::Encode;
 use super::{Externalities, OverlayedChanges, OverlayedValueResult};
 
@@ -223,14 +223,27 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 		self.overlay.set_child_storage(child_trie, key, value);
 	}
 
-	fn kill_child_storage(&mut self, child_trie: &ChildTrie) {
-		let backend = &self.backend;
-		let overlay = &mut self.overlay;
+	fn kill_child_storage(
+		&mut self,
+		child_trie: ChildTrie,
+		keep_root: Option<KeySpace>,
+	) -> Option<ChildTrie> {
+		let (mut result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root.clone());
+		if need_check {
+			// try update backend value
+			if let Some(child_trie) = self.backend.child_trie(child_trie.parent_slice())
+				.expect(EXT_NOT_ALLOWED_TO_FAIL) {
 
-		overlay.clear_child_storage(child_trie);
-		backend.for_keys_in_child_storage(child_trie.node_ref(), |key| {
-			overlay.set_child_storage(child_trie, key.to_vec(), None);
-		});
+				let (old_ks, new_ct) = child_trie.remove_or_replace_keyspace(keep_root);
+				if let Some(new_ct) = new_ct {
+					self.overlay.set_child_trie(new_ct.clone());
+					result = Some(new_ct);
+				}
+				old_ks.map(|ks| self.overlay.prospective.keyspace_to_delete.insert(ks));
+			}
+		}
+
+		result
 	}
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {
