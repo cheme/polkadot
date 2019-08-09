@@ -79,6 +79,7 @@ fn prepare_extrinsics_input<'a, B, H, Number>(
 					// AND are not in storage at the beginning of operation
 					match changes.storage(k) {
 						OverlayedValueResult::NotFound
+						| OverlayedValueResult::KeySpaceDeleted
 						| OverlayedValueResult::Deleted => {
 							if !backend.exists_storage(k).map_err(|e| format!("{}", e))? {
 								return Ok(map)

@@ -179,7 +179,8 @@ where
 		match self.overlay.storage(key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::KeySpaceDeleted
+			| OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some(value.to_vec()),
 		}
 	}
@@ -189,7 +190,8 @@ where
 		match self.overlay.storage(key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::KeySpaceDeleted
+			| OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some( H::hash(value)),
 		}
 	}
@@ -215,7 +217,8 @@ where
 		match self.overlay.child_storage(child_trie.clone(), key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.child_storage(child_trie, key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::KeySpaceDeleted
+			| OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some( value.to_vec()),
 		}
 	}
@@ -225,7 +228,8 @@ where
 		match self.overlay.storage(key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.exists_storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::Deleted => false,
+			OverlayedValueResult::KeySpaceDeleted
+			| OverlayedValueResult::Deleted => false,
 			OverlayedValueResult::Modified(_value) => true,
 		}
 	}
@@ -235,7 +239,8 @@ where
 		match self.overlay.child_storage(child_trie.clone(), key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.exists_child_storage(child_trie, key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::Deleted => false,
+			OverlayedValueResult::KeySpaceDeleted
+			| OverlayedValueResult::Deleted => false,
 			OverlayedValueResult::Modified(_value) => true,
 		}
 	}
@@ -287,10 +292,11 @@ where
 		let _guard = panic_handler::AbortGuard::force_abort();
 		self.mark_dirty();
 
+    let parent = child_trie.parent_slice().to_vec();
 		let (result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root.clone());
 		if need_check {
 			// try update backend value
-			if let Some(child_trie) = self.backend.child_trie(child_trie.parent_slice())
+			if let Some(child_trie) = self.backend.child_trie(parent.as_slice())
 				.expect(EXT_NOT_ALLOWED_TO_FAIL) {
 				self.overlay.set_child_trie(child_trie.clone());
 

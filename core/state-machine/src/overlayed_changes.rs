@@ -65,7 +65,7 @@ pub struct ChildOverlayChangeSet {
 }
 
 /// Child status.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ChildStatus {
 	/// keyspace dropped and node to be removed.
 	Deleted,
@@ -135,7 +135,9 @@ pub enum OverlayedValueResult<'a> {
 	Deleted,
 	/// The keyspace for this has been deleted.
 	/// TODO EMCH consider replacing by a check on
-	/// merge between keyspace values.
+	/// merge between keyspace values. (not sure it is
+	/// totally relevant (most of the time is the
+	/// same as Deleted)).
 	KeySpaceDeleted,
 	/// Current value set in the overlay.
 	Modified(&'a[u8]),
@@ -371,17 +373,19 @@ impl OverlayedChanges {
 		let extrinsic_index = self.extrinsic_index();
 
 		if let Some(new_keyspace) = keep_trie {
+			let keyspace_to_delete = &mut self.prospective.keyspace_to_delete;
+			let committed_children = &self.committed.children;
 			if let Some(ct) = self.prospective.children.get(child_trie.keyspace())
-				.or_else(|| self.committed.children.get(child_trie.keyspace())) {
+				.or_else(|| committed_children.get(child_trie.keyspace())) {
 				let old_is_new = ct.child_trie.is_new();
 				let (old_ks, new_ct) = ct.child_trie.clone().remove_or_replace_keyspace(Some(new_keyspace));
 
 				if !old_is_new {
-					old_ks.map(|ks| self.prospective.keyspace_to_delete.insert(ks));
+					old_ks.map(|ks| keyspace_to_delete.insert(ks));
 				}
 				let new_ct = new_ct.expect("a new keyspace in parameter");
 				let extrinsics = if let Some(extrinsic) = extrinsic_index {
-					let extrinsics = ct.extrinsics.clone();
+					let mut extrinsics = ct.extrinsics.clone();
 					extrinsics.get_or_insert_with(Default::default)
 						.insert(extrinsic);
 					extrinsics
@@ -390,7 +394,7 @@ impl OverlayedChanges {
 				// only usefull if ct is from committed
 				self.prospective.pending_child.insert(new_ct.parent_slice().to_vec(), new_ct.keyspace().clone());
 				self.prospective.children.insert(new_ct.keyspace().clone(), ChildOverlayChangeSet {
-					child_trie: new_ct,
+					child_trie: new_ct.clone(),
 					values: Default::default(),
 					extrinsics,
 					status: ChildStatus::KeySpaceOnly,
@@ -407,13 +411,13 @@ impl OverlayedChanges {
 		// not keeping trie node
 		self.prospective.pending_child.remove(child_trie.parent_slice());
 
-		let mut clear_child = |v: &mut ChildOverlayChangeSet, k_to_delete: &mut BTreeSet<Vec<u8>>| {
+		let clear_child = |v: &mut ChildOverlayChangeSet, k_to_delete: &mut BTreeSet<Vec<u8>>| {
 			v.status = ChildStatus::Deleted;
 			v.values.clear();
 			if let Some(extrinsic) = extrinsic_index {
 				v.extrinsics.get_or_insert_with(Default::default).insert(extrinsic);
 			}
-			let (old_ks, new_ct) = v.child_trie.remove_or_replace_keyspace(None);
+			let (old_ks, new_ct) = v.child_trie.clone().remove_or_replace_keyspace(None);
 			debug_assert!(new_ct.is_none());
 			if !v.child_trie.is_new() {
 				old_ks.map(|ks| k_to_delete.insert(ks));

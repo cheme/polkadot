@@ -932,7 +932,8 @@ where
 	match overlay.storage(key) {
 		OverlayedValueResult::NotFound => backend.storage(key)
 			.map_err(|err| Box::new(ExecutionError::Backend(format!("{}", err))) as Box<dyn Error>),
-		OverlayedValueResult::Deleted => Ok(None),
+		OverlayedValueResult::KeySpaceDeleted
+		| OverlayedValueResult::Deleted => Ok(None),
 		OverlayedValueResult::Modified(value) => Ok(Some(value.to_vec())),
 	}
 }

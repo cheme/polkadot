@@ -166,7 +166,8 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 		match self.overlay.storage(key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::KeySpaceDeleted
+			| OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some(value.to_vec()),
 		}
 	}
@@ -179,7 +180,8 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 		match self.overlay.child_storage(child_trie.clone(), key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.child_storage(child_trie, key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::KeySpaceDeleted
+			| OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some( value.to_vec()),
 		}
 	}
@@ -228,10 +230,11 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 		child_trie: ChildTrie,
 		keep_root: Option<KeySpace>,
 	) -> Option<ChildTrie> {
+		let parent = child_trie.parent_slice().to_vec();
 		let (mut result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root.clone());
 		if need_check {
 			// try update backend value
-			if let Some(child_trie) = self.backend.child_trie(child_trie.parent_slice())
+			if let Some(child_trie) = self.backend.child_trie(parent.as_slice())
 				.expect(EXT_NOT_ALLOWED_TO_FAIL) {
 
 				let (old_ks, new_ct) = child_trie.remove_or_replace_keyspace(keep_root);

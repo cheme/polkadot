@@ -234,6 +234,9 @@ impl ChildTrie {
 	/// in another context) and the optional new trie.
 	///
 	/// It is important that both returned value are used.
+	/// TODO EMCH interesting api but in practice I clone the value,
+	/// alternative would be to destruct the struct containing the child trie
+	/// TODO try a rewrite this way first
 	pub fn remove_or_replace_keyspace(
 		mut self,
 		keep_trie: Option<KeySpace>,

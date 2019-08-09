@@ -34,7 +34,7 @@ use log::warn;
 pub struct BasicExternalities {
 	top: HashMap<Vec<u8>, Vec<u8>>,
 	children: HashMap<KeySpace, (HashMap<Vec<u8>, Vec<u8>>, ChildTrie)>,
-  // TODO EMCH pending child with none is unused (we use keyspace to delete)
+	// TODO EMCH pending child with none is unused (we use keyspace to delete)
 	pending_child: HashMap<Vec<u8>, Option<KeySpace>>,
 	keyspace_to_delete: HashSet<KeySpace>,
 }
@@ -168,6 +168,7 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 		let mut result = None;
 		let keyspace = child_trie.keyspace();
 		if keep_root.is_some() {
+			let keyspace_to_delete = &mut self.keyspace_to_delete;
 			if let Some((map_val, ct)) = self.children.get_mut(keyspace) {
 				if ct.is_new() {
 					// nothing to do already no root
@@ -175,9 +176,9 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 					let (old_ks, o_ct) = ct.clone().remove_or_replace_keyspace(keep_root);
 					let v = o_ct.expect("keep_root used");
 					*ct = v.clone();
-          self.pending_child.insert(v.parent_slice().to_vec(), Some(v.keyspace().clone()));
+					self.pending_child.insert(v.parent_slice().to_vec(), Some(v.keyspace().clone()));
 					result = Some(v);
-					old_ks.map(|ks| self.keyspace_to_delete.insert(ks));
+					old_ks.map(|ks| keyspace_to_delete.insert(ks));
 				}
 				map_val.clear();
 			}
