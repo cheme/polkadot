@@ -830,7 +830,7 @@ impl<T: Trait> OnFreeBalanceZero<T::AccountId> for Module<T> {
 	fn on_free_balance_zero(who: &T::AccountId) {
 		if let Some(ContractInfo::Alive(info)) = <ContractInfoOf<T>>::get(who) {
 			contract_child_trie(&info.trie_id)
-				.map(|child_trie| child::kill_storage(&child_trie));
+				.map(|child_trie| child::kill_storage(child_trie, None));
 		}
 		<ContractInfoOf<T>>::remove(who);
 	}

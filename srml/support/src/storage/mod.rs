@@ -18,8 +18,7 @@
 
 use crate::rstd::prelude::*;
 use crate::rstd::borrow::Borrow;
-use primitives::child_trie::ChildTrie;
-use primitives::child_trie::ChildTrieReadRef;
+use primitives::child_trie::{ChildTrie, KeySpace, ChildTrieReadRef};
 use primitives::storage::well_known_keys;
 use codec::{Codec, Encode, Decode, KeyedVec, EncodeAppend};
 use hashed::generator::{HashedStorage, StorageHasher};
@@ -498,7 +497,7 @@ where
 /// avoid collision from a resistant hash function (which unique implies)).
 pub mod child {
 	use super::{runtime_io, Codec, Decode, Vec, ChildTrie,
-		ChildTrieReadRef, well_known_keys};
+		ChildTrieReadRef, well_known_keys, KeySpace};
 
 	/// Method for fetching or initiating a new child trie.
 	pub fn next_keyspace() -> u128 {
@@ -614,8 +613,8 @@ pub mod child {
 	}
 
 	/// Remove all `child_trie` key/values
-	pub fn kill_storage(child_trie: &ChildTrie) {
-		runtime_io::kill_child_storage(child_trie)
+	pub fn kill_storage(child_trie: ChildTrie, keep_root: Option<KeySpace>) -> Option<ChildTrie> {
+		runtime_io::kill_child_storage(child_trie, keep_root)
 	}
 
 	/// Ensure `key` has no explicit entry in storage.

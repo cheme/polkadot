@@ -1180,7 +1180,7 @@ mod tests {
 		);
 		ext.set_child_storage(&child_trie, b"abc".to_vec(), b"def".to_vec());
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"abc"), Some(b"def".to_vec()));
-		ext.kill_child_storage(child_trie.clone(), None);
+		let _ = ext.kill_child_storage(child_trie.clone(), None);
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"abc"), None);
 	}
 

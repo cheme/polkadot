@@ -302,7 +302,7 @@ mod tests {
 		ext.clear_child_storage(&child_trie, b"dog");
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"dog"), None);
 
-		ext.kill_child_storage(child_trie.clone(), None);
+		let _ = ext.kill_child_storage(child_trie.clone(), None);
 		assert_eq!(ext.child_storage(child_trie.node_ref(), b"doe"), None);
 	}
 

@@ -117,10 +117,11 @@ impl StorageApi for () {
 		});
 	}
 
-	fn kill_child_storage(child_trie: &ChildTrie, keep_root: bool) {
+	fn kill_child_storage(child_trie: ChildTrie, keep_root: Option<KeySpace>) -> Option<ChildTrie> {
 		ext::with(|ext| {
 			ext.kill_child_storage(child_trie, keep_root)
-		});
+		})
+		.expect("kill_child_storage cannot be called outside of an Externalities-provided environment.")
 	}
 
 	fn exists_storage(key: &[u8]) -> bool {

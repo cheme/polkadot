@@ -326,11 +326,14 @@ pub mod ext {
 		/// See [`ext_kill_storage`] for details.
 		///
 		/// A child storage is used e.g. by a contract.
+		///
+		/// Return 1 if a child trie can be use after.
 		fn ext_kill_child_storage(
 			prefix_storage_key_data: *const u8,
 			storage_key_len: u32,
-			keep_root: u8,
-		);
+			keep_root_data: *const u8,
+			keep_root_len: u32
+		) -> u32;
 		/// A child storage function.
 		///
 		/// See [`ext_get_allocated_storage`] for details.
@@ -864,14 +867,25 @@ impl StorageApi for () {
 		}
 	}
 
-	fn kill_child_storage(child_trie: &ChildTrie, keep_root: bool) {
-		let storage_key = child_trie.parent_slice();
-		unsafe {
+	fn kill_child_storage(child_trie_input: ChildTrie, keep_root: Option<KeySpace>) -> Option<ChildTrie> {
+		let storage_key = child_trie_input.parent_slice();
+		let keep_root = if let Some(kr) = keep_root {
+			kr
+		} else {
+			Vec::new()
+		};
+		if unsafe {
 			ext_kill_child_storage.get()(
 				storage_key.as_ptr(),
 				storage_key.len() as u32,
-				keep_root as u8,
-			);
+				keep_root.as_ptr(),
+				keep_root.len() as u32,
+			)
+		} == 1 {
+			// TODO EMCH we can also return directly from ext_kill_storage
+			child_trie(storage_key)
+		} else {
+			None
 		}
 	}
 

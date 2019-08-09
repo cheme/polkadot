@@ -33,7 +33,7 @@ use rstd::vec::Vec;
 pub use codec;
 
 pub use primitives::Blake2Hasher;
-pub use primitives::child_trie::{ChildTrie, ChildTrieReadRef};
+pub use primitives::child_trie::{ChildTrie, ChildTrieReadRef, KeySpace};
 use primitives::offchain::{
 	Timestamp,
 	HttpRequestId, HttpRequestStatus, HttpError,
@@ -149,7 +149,7 @@ export_api! {
 		fn clear_child_storage(child_trie: &ChildTrie, key: &[u8]);
 
 		/// Clear an entire child storage.
-		fn kill_child_storage(child_trie: &ChildTrie, keep_root: bool);
+		fn kill_child_storage(child_trie: ChildTrie, keep_root: Option<KeySpace>) -> Option<ChildTrie>;
 
 		/// Check whether a given `key` exists in storage.
 		fn exists_storage(key: &[u8]) -> bool;

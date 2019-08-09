@@ -369,15 +369,28 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		this.ext.clear_prefix(&prefix);
 		Ok(())
 	},
-	ext_kill_child_storage(storage_key_data: *const u8, storage_key_len: u32, keep_root: u8) => {
-		let keep_root = keep_root > 0;
+	ext_kill_child_storage(
+		storage_key_data: *const u8,
+		storage_key_len: u32,
+		keep_root_data: *const u8,
+		keep_root_len: u32
+	) -> u32 => {
+		let keep_root = if keep_root_len > 0 {
+			Some(this.memory.get(keep_root_data, keep_root_len as usize)
+				.map_err(|_| "Invalid attempt to determine keep_root in ext_kill_child_storage")?)
+		} else {
+			None
+		};
 		let storage_key = this.memory.get(storage_key_data, storage_key_len as usize)
 			.map_err(|_| "Invalid attempt to determine storage_key in ext_kill_child_storage")?;
-		this.with_child_trie(
+		if this.with_child_trie(
 			&storage_key[..],
-			|this, child_trie| this.ext.kill_child_storage(&child_trie, keep_root),
-		)?;
-		Ok(())
+			|this, child_trie| this.ext.kill_child_storage(child_trie, keep_root),
+		)?.is_some() {
+			Ok(1)
+		} else {
+			Ok(0)
+		}
 	},
 	// return 0 and place u32::max_value() into written_out if no value exists for the key.
 	ext_get_allocated_storage(key_data: *const u8, key_len: u32, written_out: *mut u32) -> *mut u8 => {

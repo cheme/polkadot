@@ -1038,7 +1038,9 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 				overlay.commit_prospective();
 
-				let (top, children) = overlay.into_committed();
+        // TODO EMCH here there are the keyspace break and we will need the child
+        // trie updates too.
+				let (top, children, _todo) = overlay.into_committed();
 				let children = children.map(|(sk, it)| (sk, it.collect())).collect();
 				if import_headers.post().state_root() != &storage_update.1 {
 					return Err(error::Error::InvalidStateRoot);

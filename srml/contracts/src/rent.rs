@@ -102,7 +102,8 @@ fn try_evict_or_and_pay_rent<T: Trait>(
 		<ContractInfoOf<T>>::remove(account);
 
 		if let Some(child_trie) = contract_child_trie(&contract.trie_id) {
-			runtime_io::kill_child_storage(&child_trie);
+			// TODO EMCH None would be incorrect when fuzzing nodes.
+			let _ = runtime_io::kill_child_storage(child_trie, None);
 		}
 		return (RentOutcome::Evicted, None);
 	}
@@ -165,7 +166,7 @@ fn try_evict_or_and_pay_rent<T: Trait>(
 		);
 		let tombstone_info = ContractInfo::Tombstone(tombstone);
 		<ContractInfoOf<T>>::insert(account, &tombstone_info);
-		o_ct.map(|child_trie| runtime_io::kill_child_storage(&child_trie));
+		o_ct.map(|child_trie| { let _ = runtime_io::kill_child_storage(child_trie, None); });
 
 		return (RentOutcome::Evicted, Some(tombstone_info));
 	}

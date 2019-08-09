@@ -292,7 +292,7 @@ where
 		let _guard = panic_handler::AbortGuard::force_abort();
 		self.mark_dirty();
 
-    let parent = child_trie.parent_slice().to_vec();
+		let parent = child_trie.parent_slice().to_vec();
 		let (result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root.clone());
 		if need_check {
 			// try update backend value
@@ -301,8 +301,8 @@ where
 				self.overlay.set_child_trie(child_trie.clone());
 
 				let (result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root);
-        debug_assert!(need_check == false);
-        return result;
+				debug_assert!(need_check == false);
+				return result;
 			}
 		}
 
