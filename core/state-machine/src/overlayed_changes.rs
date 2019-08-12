@@ -537,8 +537,6 @@ impl OverlayedChanges {
 		}
 	}
 
-	// TODO EMCH need to check where it is used, it obviously lack child node
-	// specific operation : Update, delete...
 	/// Consume `OverlayedChanges` and take committed set.
 	///
 	/// Panics:

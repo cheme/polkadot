@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use client::backend::NewBlockState;
 use client::blockchain::HeaderBackend;
 use client::ExecutionStrategies;
-use client::backend::{StorageCollection, ChildStorageCollection};
+use client::backend::{StorageCollection, ChildStorageCollection, DeletedKeySpaceCollection};
 use parity_codec::{Decode, Encode};
 use hash_db::{Hasher, Prefix};
 use kvdb::{KeyValueDB, DBTransaction};
@@ -389,6 +389,7 @@ pub struct BlockImportOperation<Block: BlockT, H: Hasher> {
 	db_updates: PrefixedMemoryDB<H>,
 	storage_updates: StorageCollection,
 	child_storage_updates: ChildStorageCollection,
+	deleted_keyspace: DeletedKeySpaceCollection,
 	changes_trie_updates: MemoryDB<H>,
 	pending_block: Option<PendingBlock<Block>>,
 	aux_ops: Vec<(Vec<u8>, Option<Vec<u8>>)>,
@@ -483,9 +484,11 @@ where Block: BlockT<Hash=H256>,
 		&mut self,
 		update: StorageCollection,
 		child_update: ChildStorageCollection,
+		deleted_keyspace: DeletedKeySpaceCollection,
 	) -> Result<(), client::error::Error> {
 		self.storage_updates = update;
 		self.child_storage_updates = child_update;
+		self.deleted_keyspace = deleted_keyspace;
 		Ok(())
 	}
 
@@ -1151,6 +1154,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 				&retracted,
 				operation.storage_updates,
 				operation.child_storage_updates,
+				operation.deleted_keyspace,
 				Some(hash),
 				Some(number),
 				|| is_best,
@@ -1263,6 +1267,7 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 			db_updates: PrefixedMemoryDB::default(),
 			storage_updates: Default::default(),
 			child_storage_updates: Default::default(),
+			deleted_keyspace: Default::default(),
 			changes_trie_updates: MemoryDB::default(),
 			aux_ops: Vec::new(),
 			finalized_blocks: Vec::new(),
@@ -1415,7 +1420,7 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 	fn destroy_state(&self, state: Self::State) -> Result<(), client::error::Error> {
 		if let Some(hash) = state.cache.parent_hash.clone() {
 			let is_best = || self.blockchain.meta.read().best_hash == hash;
-			state.release().sync_cache(&[], &[], vec![], vec![], None, None, is_best);
+			state.release().sync_cache(&[], &[], vec![], vec![], vec![], None, None, is_best);
 		}
 		Ok(())
 	}

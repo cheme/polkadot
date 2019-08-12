@@ -30,7 +30,8 @@ use trie::MemoryDB;
 use consensus::well_known_cache_keys::Id as CacheKeyId;
 
 use crate::error;
-use crate::backend::{self, NewBlockState, StorageCollection, ChildStorageCollection};
+use crate::backend::{self, NewBlockState, StorageCollection, ChildStorageCollection,
+	DeletedKeySpaceCollection};
 use crate::light;
 use crate::leaves::LeafSet;
 use crate::blockchain::{self, BlockStatus, HeaderBackend};
@@ -516,6 +517,7 @@ where
 		&mut self,
 		_update: StorageCollection,
 		_child_update: ChildStorageCollection,
+		_deleted_keyspace: DeletedKeySpaceCollection,
 	) -> error::Result<()> {
 		Ok(())
 	}

@@ -104,6 +104,7 @@ impl<'a> ChildTrieReadRef<'a> {
 		}
 	}
 }
+
 /// Current codec version of a child trie definition.
 const LAST_SUBTRIE_CODEC_VERSION: u16 = 1u16;
 

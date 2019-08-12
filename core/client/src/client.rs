@@ -62,7 +62,7 @@ use hash_db::{Hasher, Prefix};
 
 use crate::backend::{
 	self, BlockImportOperation, PrunableStateChangesTrieStorage,
-	StorageCollection, ChildStorageCollection
+	StorageCollection, ChildStorageCollection, DeletedKeySpaceCollection,
 };
 use crate::blockchain::{
 	self, Info as ChainInfo, Backend as ChainBackend,
@@ -146,6 +146,7 @@ pub struct ClientImportOperation<Block: BlockT, H: Hasher<Out=Block::Hash>, B: b
 		Option<(
 			StorageCollection,
 			ChildStorageCollection,
+			DeletedKeySpaceCollection,
 		)>)>,
 	notify_finalized: Vec<Block::Hash>,
 }
@@ -963,7 +964,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			operation.op.update_db_storage(storage_update)?;
 		}
 		if let Some(storage_changes) = storage_changes.clone() {
-			operation.op.update_storage(storage_changes.0, storage_changes.1)?;
+			operation.op.update_storage(storage_changes.0, storage_changes.1, storage_changes.2)?;
 		}
 		if let Some(Some(changes_update)) = changes_update {
 			operation.op.update_changes_trie(changes_update)?;
@@ -994,7 +995,8 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		Option<Option<ChangesUpdate>>,
 		Option<(
 			Vec<(Vec<u8>, Option<Vec<u8>>)>,
-			Vec<(Vec<u8>, Vec<(Vec<u8>, Option<Vec<u8>>)>)>
+			Vec<(Vec<u8>, Vec<(Vec<u8>, Option<Vec<u8>>)>)>,
+			Vec<Vec<u8>>,
 		)>
 	)>
 		where
@@ -1038,15 +1040,17 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 
 				overlay.commit_prospective();
 
-        // TODO EMCH here there are the keyspace break and we will need the child
-        // trie updates too.
-				let (top, children, _todo) = overlay.into_committed();
+				let (top, children, keyspace_deleted) = overlay.into_committed();
 				let children = children.map(|(sk, it)| (sk, it.collect())).collect();
 				if import_headers.post().state_root() != &storage_update.1 {
 					return Err(error::Error::InvalidStateRoot);
 				}
 
-				Ok((Some(storage_update.0), Some(changes_update), Some((top.collect(), children))))
+				Ok((
+					Some(storage_update.0),
+					Some(changes_update),
+					Some((top.collect(), children, keyspace_deleted.collect())),
+				))
 			},
 			None => Ok((None, None, None))
 		}
@@ -1157,8 +1161,8 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			Option<(
 				Vec<(Vec<u8>, Option<Vec<u8>>)>,
 				Vec<(Vec<u8>, Vec<(Vec<u8>, Option<Vec<u8>>)>)>,
-				)
-			>),
+				Vec<Vec<u8>>,
+			)>),
 	) -> error::Result<()> {
 		let (hash, origin, header, is_new_best, storage_changes) = notify_import;
 

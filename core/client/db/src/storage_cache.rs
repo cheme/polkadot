@@ -27,7 +27,7 @@ use log::trace;
 use primitives::child_trie::ChildTrie;
 use primitives::child_trie::ChildTrieReadRef;
 
-use super::{StorageCollection, ChildStorageCollection};
+use super::{StorageCollection, ChildStorageCollection, DeletedKeySpaceCollection};
 use std::hash::Hash as StdHash;
 const STATE_CACHE_BLOCKS: usize = 12;
 
@@ -87,6 +87,20 @@ impl<T: AsRef<[u8]>> EstimateSize for OptionHOut<T> {
 impl<T: EstimateSize> EstimateSize for (T, T) {
 	fn estimate_size(&self) -> usize {
 		self.0.estimate_size() + self.1.estimate_size()
+	}
+}
+
+impl<V: EstimateSize> LRUMap<(Vec<u8>, Vec<u8>), V> {
+	fn remove_keyspace(&mut self, ks: &[u8]) {
+		let map = &mut self.0;
+		let storage_used_size = &mut self.1;
+		map.entries().for_each(|entry| {
+			if entry.key().0.starts_with(ks) {
+				*storage_used_size -= entry.key().estimate_size();
+				*storage_used_size -= entry.get().estimate_size();
+				let _ = entry.remove();
+			}
+		});
 	}
 }
 
@@ -179,6 +193,10 @@ impl<B: BlockT, H: Hasher> Cache<B, H> {
 						trace!("Reverting enacted child key {:?}", a);
 						self.lru_child_storage.remove(a);
 					}
+					for a in &m.deleted_keyspace {
+						trace!("Reverting enacted child key of keyspace {:?}", a);
+						self.lru_child_storage.remove_keyspace(a.as_slice());
+					}
 					false
 				} else {
 					true
@@ -198,6 +216,10 @@ impl<B: BlockT, H: Hasher> Cache<B, H> {
 					for a in &m.child_storage {
 						trace!("Retracted child key {:?}", a);
 						self.lru_child_storage.remove(a);
+					}
+					for a in &m.deleted_keyspace {
+						trace!("Retracted keyspace {:?}", a);
+						self.lru_child_storage.remove_keyspace(a.as_slice());
 					}
 					false
 				} else {
@@ -250,6 +272,8 @@ struct BlockChanges<B: Header> {
 	storage: HashSet<StorageKey>,
 	/// A set of modified child storage keys.
 	child_storage: HashSet<ChildStorageKey>,
+	/// A collection of removed keyspace.
+	deleted_keyspace: HashSet<Vec<u8>>,
 	/// Block is part of the canonical chain.
 	is_canon: bool,
 }
@@ -262,6 +286,8 @@ struct LocalCache<H: Hasher> {
 	hashes: HashMap<StorageKey, Option<H::Out>>,
 	/// Child storage cache. `None` indicates that key is known to be missing.
 	child_storage: HashMap<ChildStorageKey, Option<StorageValue>>,
+	/// A collection of removed keyspace.
+	deleted_keyspace: HashSet<Vec<u8>>,
 }
 
 /// Cache changes.
@@ -302,6 +328,7 @@ impl<H: Hasher, B: BlockT> CacheChanges<H, B> {
 		retracted: &[B::Hash],
 		changes: StorageCollection,
 		child_changes: ChildStorageCollection,
+		deleted_keyspace: DeletedKeySpaceCollection,
 		commit_hash: Option<B::Hash>,
 		commit_number: Option<<B::Header as Header>::Number>,
 		is_best: F,
@@ -335,14 +362,16 @@ impl<H: Hasher, B: BlockT> CacheChanges<H, B> {
 				for (k, v) in local_cache.child_storage.drain() {
 					cache.lru_child_storage.add(k, v);
 				}
+				for k in local_cache.deleted_keyspace.drain() {
+					cache.lru_child_storage.remove_keyspace(k.as_slice());
+				}
 				for (k, v) in local_cache.hashes.drain() {
 					cache.lru_hashes.add(k, OptionHOut(v));
 				}
 			}
 		}
 
-		if let (
-			Some(ref number), Some(ref hash), Some(ref parent))
+		if let (Some(ref number), Some(ref hash), Some(ref parent))
 				= (commit_number, commit_hash, self.parent_hash)
 		{
 			if cache.modifications.len() == STATE_CACHE_BLOCKS {
@@ -366,11 +395,12 @@ impl<H: Hasher, B: BlockT> CacheChanges<H, B> {
 				}
 				modifications.insert(k);
 			}
-
+			let deleted_keyspace_modifications = deleted_keyspace.into_iter().collect();
 			// Save modified storage. These are ordered by the block number.
 			let block_changes = BlockChanges {
 				storage: modifications,
 				child_storage: child_modifications,
+				deleted_keyspace: deleted_keyspace_modifications,
 				number: *number,
 				hash: hash.clone(),
 				is_canon: is_best,
@@ -402,6 +432,7 @@ impl<H: Hasher, S: StateBackend<H>, B: BlockT> CachingState<H, S, B> {
 					storage: Default::default(),
 					hashes: Default::default(),
 					child_storage: Default::default(),
+					deleted_keyspace: Default::default(),
 				}),
 				parent_hash: parent_hash,
 			},
@@ -607,22 +638,22 @@ mod tests {
 		// blocks  [ 3a(c) 2a(c) 2b 1b 1a(c) 0 ]
 		// state   [ 5     5     4  3  2     2 ]
 		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(root_parent.clone()));
-		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![2]))], vec![], Some(h0.clone()), Some(0), || true);
+		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![2]))], vec![], vec![], Some(h0.clone()), Some(0), || true);
 
 		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h0.clone()));
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h1a.clone()), Some(1), || true);
+		s.cache.sync_cache(&[], &[], vec![], vec![], vec![], Some(h1a.clone()), Some(1), || true);
 
 		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h0.clone()));
-		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![3]))], vec![], Some(h1b.clone()), Some(1), || false);
+		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![3]))], vec![], vec![], Some(h1b.clone()), Some(1), || false);
 
 		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h1b.clone()));
-		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![4]))], vec![], Some(h2b.clone()), Some(2), || false);
+		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![4]))], vec![], vec![], Some(h2b.clone()), Some(2), || false);
 
 		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h1a.clone()));
-		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![5]))], vec![], Some(h2a.clone()), Some(2), || true);
+		s.cache.sync_cache(&[], &[], vec![(key.clone(), Some(vec![5]))], vec![], vec![], Some(h2a.clone()), Some(2), || true);
 
 		let mut s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h2a.clone()));
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h3a.clone()), Some(3), || true);
+		s.cache.sync_cache(&[], &[], vec![], vec![], vec![], Some(h3a.clone()), Some(3), || true);
 
 		let s = CachingState::new(InMemory::<Blake2Hasher>::default(), shared.clone(), Some(h3a.clone()));
 		assert_eq!(s.storage(&key).unwrap().unwrap(), vec![5]);
@@ -642,6 +673,7 @@ mod tests {
 		s.cache.sync_cache(
 			&[h1b.clone(), h2b.clone(), h3b.clone()],
 			&[h1a.clone(), h2a.clone(), h3a.clone()],
+			vec![],
 			vec![],
 			vec![],
 			Some(h3b.clone()),
@@ -667,6 +699,7 @@ mod tests {
 			&[],
 			vec![(key.clone(), Some(vec![1, 2, 3]))],
 			vec![],
+			vec![],
 			Some(h0.clone()),
 			Some(0),
 			|| true,
@@ -680,6 +713,7 @@ mod tests {
 			&[],
 			vec![],
 			vec![(s_key.clone(), vec![(key.clone(), Some(vec![1, 2]))])],
+			vec![],
 			Some(h0.clone()),
 			Some(0),
 			|| true,
@@ -702,6 +736,7 @@ mod tests {
 			&[],
 			vec![(key.clone(), Some(vec![1, 2, 3, 4]))],
 			vec![],
+			vec![],
 			Some(h0.clone()),
 			Some(0),
 			|| true,
@@ -714,6 +749,7 @@ mod tests {
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![1, 2]))],
+			vec![],
 			vec![],
 			Some(h0.clone()),
 			Some(0),

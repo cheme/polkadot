@@ -19,6 +19,7 @@
 use std::{error, fmt, cmp::Ord};
 use log::warn;
 use crate::backend::Backend;
+use crate::overlayed_changes::ChildStatus;
 use crate::changes_trie::{Storage as ChangesTrieStorage, build_changes_trie};
 use crate::{Externalities, OverlayedChanges, OverlayedValueResult};
 use hash_db::Hasher;
@@ -368,20 +369,35 @@ where
 				.unwrap_or(default_child_trie_root::<Layout<H>>())
 		} else {
 			let keyspace = child_trie.keyspace();
+			let status = self.overlay.prospective.children.get(keyspace)
+				.map(|o| o.status)
+				.unwrap_or_else(|| self.overlay.committed.children.get(keyspace)
+					.map(|o| o.status)
+					.unwrap_or(ChildStatus::Untouched));
 			let delta = self.overlay.committed.children.get(keyspace)
 				.into_iter()
 				.flat_map(|map| map.values.iter().map(|(k, v)| (k.clone(), v.clone())))
 				.chain(self.overlay.prospective.children.get(keyspace)
 					.into_iter()
 					.flat_map(|map| map.values.clone().into_iter()));
-			let root = self.backend.child_storage_root(child_trie, delta).0;
 
-			self.overlay.set_storage(
-				child_trie.parent_trie().clone(),
-				Some(child_trie.encoded_with_root(&root[..]))
-			);
+			if status == ChildStatus::Deleted {
+				self.overlay.set_storage(
+					child_trie.parent_trie().clone(),
+					None
+				);
 
-			root
+				default_child_trie_root::<Layout<H>>()
+			} else {
+				let root = self.backend.child_storage_root(child_trie, delta).0;
+
+				self.overlay.set_storage(
+					child_trie.parent_trie().clone(),
+					Some(child_trie.encoded_with_root(&root[..]))
+				);
+
+				root
+			}
 		}
 	}
 

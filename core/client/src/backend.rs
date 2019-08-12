@@ -34,6 +34,9 @@ pub type StorageCollection = Vec<(Vec<u8>, Option<Vec<u8>>)>;
 /// In memory arrays of storage values for multiple child tries.
 pub type ChildStorageCollection = Vec<(Vec<u8>, StorageCollection)>;
 
+/// In memory array of keyspace to be deleted.
+pub type DeletedKeySpaceCollection = Vec<Vec<u8>>;
+
 /// State of a new block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NewBlockState {
@@ -93,6 +96,7 @@ pub trait BlockImportOperation<Block, H> where
 		&mut self,
 		update: StorageCollection,
 		child_update: ChildStorageCollection,
+		keyspace_deleted: DeletedKeySpaceCollection,
 	) -> error::Result<()>;
 	/// Inject changes trie data into the database.
 	fn update_changes_trie(&mut self, update: MemoryDB<H>) -> error::Result<()>;

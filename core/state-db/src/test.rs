@@ -70,6 +70,8 @@ pub fn make_changeset(inserted: &[u64], deleted: &[u64]) -> ChangeSet<H256> {
 			})
 			.collect(),
 		deleted: deleted.iter().map(|v| H256::from_low_u64_be(*v)).collect(),
+		// TODO EMCH keyspace in some tests.
+		deleted_keyspace: Default::default(),
 	}
 }
 

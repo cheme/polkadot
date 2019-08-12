@@ -102,10 +102,13 @@ pub struct ChangeSet<H: Hash> {
 	pub inserted: Vec<(H, DBValue)>,
 	/// Deleted nodes.
 	pub deleted: Vec<H>,
+	/// Deleted keyspace.
+	pub deleted_keyspace: Vec<Vec<u8>>,
 }
 
 
 /// A set of changes to the backing database.
+/// TODO EMCH add keyspace delete!!!!
 #[derive(Default, Debug, Clone)]
 pub struct CommitSet<H: Hash> {
 	/// State node changes.
