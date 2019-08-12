@@ -49,7 +49,7 @@ use primitives::{
 	Blake2Hasher, H256, ChangesTrieConfiguration, convert_hash,
 	NeverNativeValue, ExecutionContext
 };
-use primitives::storage::{StorageKey, StorageData};
+use primitives::storage::{StorageKey, StorageData, StorageKeySpace};
 use primitives::storage::well_known_keys;
 use parity_codec::{Encode, Decode};
 use state_machine::{
@@ -167,7 +167,7 @@ pub trait BlockchainEvents<Block: BlockT> {
 	fn storage_changes_notification_stream(
 		&self,
 		filter_keys: Option<&[StorageKey]>,
-		child_filter_keys: Option<&[(StorageKey, Option<Vec<StorageKey>>)]>,
+		child_filter_keys: Option<&[(StorageKeySpace, Option<Vec<StorageKey>>)]>,
 	) -> error::Result<StorageEventStream<Block::Hash>>;
 }
 
@@ -1173,6 +1173,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 					&hash,
 					storage_changes.0.into_iter(),
 					storage_changes.1.into_iter().map(|(sk, v)| (sk, v.into_iter())),
+					storage_changes.2.into_iter(),
 				);
 		}
 
@@ -1562,7 +1563,7 @@ where
 	fn storage_changes_notification_stream(
 		&self,
 		filter_keys: Option<&[StorageKey]>,
-		child_filter_keys: Option<&[(StorageKey, Option<Vec<StorageKey>>)]>,
+		child_filter_keys: Option<&[(StorageKeySpace, Option<Vec<StorageKey>>)]>,
 	) -> error::Result<StorageEventStream<Block::Hash>> {
 		Ok(self.storage_notifications.lock().listen(filter_keys, child_filter_keys))
 	}

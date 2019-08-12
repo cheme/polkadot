@@ -1226,6 +1226,7 @@ fn apply_state_commit(transaction: &mut DBTransaction, commit: state_db::CommitS
 	for key in commit.meta.deleted.into_iter() {
 		transaction.delete(columns::STATE_META, &key[..]);
 	}
+  // TODO EMCH here delete the keyspace!!
 }
 
 impl<Block> client::backend::AuxStore for Backend<Block> where Block: BlockT<Hash=H256> {
