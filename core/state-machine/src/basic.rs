@@ -34,8 +34,7 @@ use log::warn;
 pub struct BasicExternalities {
 	top: HashMap<Vec<u8>, Vec<u8>>,
 	children: HashMap<KeySpace, (HashMap<Vec<u8>, Vec<u8>>, ChildTrie)>,
-	// TODO EMCH pending child with none is unused (we use keyspace to delete)
-	pending_child: HashMap<Vec<u8>, Option<KeySpace>>,
+	pending_child: HashMap<Vec<u8>, KeySpace>,
 	keyspace_to_delete: HashSet<KeySpace>,
 }
 
@@ -50,7 +49,7 @@ impl BasicExternalities {
 		let pending_child = map.children.values()
 			.map(|(_, child_trie)| (
 					child_trie.parent_slice().to_vec(),
-					Some(child_trie.keyspace().clone())
+					child_trie.keyspace().clone()
 			)).collect();
 		BasicExternalities {
 			top: map.top,
@@ -67,7 +66,16 @@ impl BasicExternalities {
 
 	/// Consume self and returns inner storages
 	pub fn into_storages(self) -> MapTransaction {
-		MapTransaction {top: self.top, children: self.children}
+		let BasicExternalities { top, children, pending_child, keyspace_to_delete } = self;
+		MapTransaction {
+			top,
+			children: children.into_iter().filter(|(_keyspace, (_map, child_trie))| {
+				// Could be replace by per a child status as in testing or ext.
+				// In this case we could also consider using overlay in basic.
+				pending_child.get(child_trie.parent_slice()).is_some()
+				&& !keyspace_to_delete.contains(child_trie.keyspace())
+			}).collect(),
+		}
 	}
 }
 
@@ -116,12 +124,11 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 
 	fn child_trie(&self, storage_key: &[u8]) -> Option<ChildTrie> {
 		match self.pending_child.get(storage_key) {
-			Some(Some(keyspace)) => {
+			Some(keyspace) => {
 				let map = self.children.get(keyspace)
 					.expect("pending entry always have a children association; qed");
 				return Some(map.1.clone());
 			},
-			Some(None) => None,
 			None => None,
 		}
 	}
@@ -149,7 +156,7 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 		let child_map = p.entry(child_trie.keyspace().clone())
 			.or_insert_with(|| {
 				let parent = child_trie.parent_slice().to_vec();
-				pc.insert(parent, Some(child_trie.keyspace().clone()));
+				pc.insert(parent, child_trie.keyspace().clone());
 				(Default::default(), child_trie.clone())
 			});
 
@@ -176,7 +183,7 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 					let (old_ks, o_ct) = ct.clone().remove_or_replace_keyspace(keep_root);
 					let v = o_ct.expect("keep_root used");
 					*ct = v.clone();
-					self.pending_child.insert(v.parent_slice().to_vec(), Some(v.keyspace().clone()));
+					self.pending_child.insert(v.parent_slice().to_vec(), v.keyspace().clone());
 					result = Some(v);
 					old_ks.map(|ks| keyspace_to_delete.insert(ks));
 				}
@@ -202,7 +209,7 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 				return false;
 			}
 		} else {
-			self.pending_child.insert(child_trie.parent_slice().to_vec(), Some(child_trie.keyspace().clone()));
+			self.pending_child.insert(child_trie.parent_slice().to_vec(), child_trie.keyspace().clone());
 			self.children.insert(keyspace.to_vec(), (Default::default(), child_trie));
 		}
 		true

@@ -229,18 +229,16 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 		keep_root: Option<KeySpace>,
 	) -> Option<ChildTrie> {
 		let parent = child_trie.parent_slice().to_vec();
-		let (mut result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root.clone());
+		let (result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root.clone());
 		if need_check {
 			// try update backend value
 			if let Some(child_trie) = self.backend.child_trie(parent.as_slice())
 				.expect(EXT_NOT_ALLOWED_TO_FAIL) {
+				self.overlay.set_child_trie(child_trie.clone());
 
-				let (old_ks, new_ct) = child_trie.remove_or_replace_keyspace(keep_root);
-				if let Some(new_ct) = new_ct {
-					self.overlay.set_child_trie(new_ct.clone());
-					result = Some(new_ct);
-				}
-				old_ks.map(|ks| self.overlay.prospective.keyspace_to_delete.insert(ks));
+				let (result, need_check) = self.overlay.kill_child_storage(child_trie, keep_root);
+				debug_assert!(need_check == false);
+				return result;
 			}
 		}
 
