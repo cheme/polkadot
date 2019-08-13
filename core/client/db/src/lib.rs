@@ -36,7 +36,7 @@ mod utils;
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::io;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeSet};
 
 use client::backend::NewBlockState;
 use client::blockchain::HeaderBackend;
@@ -66,7 +66,7 @@ use client::children;
 use state_db::StateDb;
 use consensus_common::well_known_cache_keys;
 use crate::storage_cache::{CachingState, SharedCache, new_shared_cache};
-use log::{trace, debug, warn};
+use log::{trace, debug, warn, error};
 pub use state_db::PruningMode;
 
 #[cfg(feature = "test-helpers")]
@@ -113,7 +113,7 @@ impl<B: BlockT> Drop for RefTrackingState<B> {
 }
 
 impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
-	type Error =  <DbState as StateBackend<Blake2Hasher>>::Error;
+	type Error = <DbState as StateBackend<Blake2Hasher>>::Error;
 	type Transaction = <DbState as StateBackend<Blake2Hasher>>::Transaction;
 	type TrieBackendStorage = <DbState as StateBackend<Blake2Hasher>>::TrieBackendStorage;
 
@@ -932,6 +932,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 	fn finalize_block_with_transaction(
 		&self,
 		transaction: &mut DBTransaction,
+		deleted_keyspace: &mut BTreeSet<(Option<u32>, Vec<u8>)>,
 		hash: &Block::Hash,
 		header: &Block::Header,
 		last_finalized: Option<Block::Hash>,
@@ -943,6 +944,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		self.ensure_sequential_finalization(header, last_finalized)?;
 		self.note_finalized(
 			transaction,
+			deleted_keyspace,
 			header,
 			*hash,
 			finalization_displaced,
@@ -962,6 +964,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 	fn force_delayed_canonicalize(
 		&self,
 		transaction: &mut DBTransaction,
+		deleted_keyspace: &mut BTreeSet<(Option<u32>, Vec<u8>)>,
 		hash: Block::Hash,
 		number: NumberFor<Block>,
 	)
@@ -986,7 +989,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			trace!(target: "db", "Canonicalize block #{} ({:?})", new_canonical, hash);
 			let commit = self.storage.state_db.canonicalize_block(&hash)
 				.map_err(|e: state_db::Error<io::Error>| client::error::Error::from(format!("State database error: {:?}", e)))?;
-			apply_state_commit(transaction, commit);
+			apply_state_commit(transaction, deleted_keyspace, commit);
 		};
 
 		Ok(())
@@ -996,6 +999,12 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		-> Result<(), client::error::Error>
 	{
 		let mut transaction = DBTransaction::new();
+		// Note ordered property of BTree is important here.
+		// (in case of keyspace containing another keyspace,
+		// this should not happen for child trie, but can
+		// be a thing when considering keyspace deletion as
+		// a prefix deletion).
+		let mut deleted_keyspace = BTreeSet::new();
 		let mut finalization_displaced_leaves = None;
 
 		operation.apply_aux(&mut transaction);
@@ -1010,6 +1019,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 				meta_updates.push(self.finalize_block_with_transaction(
 					&mut transaction,
+					&mut deleted_keyspace,
 					&block_hash,
 					&block_header,
 					Some(last_finalized_hash),
@@ -1065,7 +1075,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			let number_u64 = number.saturated_into::<u64>();
 			let commit = self.storage.state_db.insert_block(&hash, number_u64, &pending_block.header.parent_hash(), changeset)
 				.map_err(|e: state_db::Error<io::Error>| client::error::Error::from(format!("State database error: {:?}", e)))?;
-			apply_state_commit(&mut transaction, commit);
+			apply_state_commit(&mut transaction, &mut deleted_keyspace, commit);
 
 			// Check if need to finalize. Genesis is always finalized instantly.
 			let finalized = number_u64 == 0 || pending_block.leaf_state.is_final();
@@ -1083,13 +1093,14 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 				self.ensure_sequential_finalization(header, Some(last_finalized_hash))?;
 				self.note_finalized(
 					&mut transaction,
+					&mut deleted_keyspace,
 					header,
 					hash,
 					&mut finalization_displaced_leaves,
 				)?;
 			} else {
 				// canonicalize blocks which are old enough, regardless of finality.
-				self.force_delayed_canonicalize(&mut transaction, hash, *header.number())?
+				self.force_delayed_canonicalize(&mut transaction, &mut deleted_keyspace, hash, *header.number())?
 			}
 
 			debug!(target: "db", "DB Commit {:?} ({}), best = {}", hash, number, is_best);
@@ -1133,6 +1144,26 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		};
 
 		let write_result = self.storage.db.write(transaction).map_err(db_err);
+		if write_result.is_ok() {
+			// TODO EMCH here this is only for canonicalize or finalize,
+			// something seems off with this function calls. Shouldn't it be
+      // only in the imported condition?? well no as inpult tx or delks would be empty.
+			for (col, keyspace) in deleted_keyspace {
+				// warning this is not atomical so if it fails we do not want to be
+				// in a wrong state, and rather keep trying cleaning keyspace.
+				// Unclean keyspace is of no consequence (exept unused db), because
+				// keyspace shall never be use again.
+				if let Err(e) = self.storage.db.delete_prefix(col, keyspace) {
+					error!(
+						target: "db",
+						"DB delete keyspace on canonicalize {:?} {:?} failed with {:?}",
+						col,
+						keyspace,
+						e,
+					);
+				}
+			}
+		}
 
 		if let Some((number, hash, enacted, retracted, displaced_leaf, is_best, mut cache)) = imported {
 			if let Err(e) = write_result {
@@ -1179,6 +1210,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 	fn note_finalized(
 		&self,
 		transaction: &mut DBTransaction,
+		deleted_keyspace: &mut BTreeSet<(Option<u32>, Vec<u8>)>,
 		f_header: &Block::Header,
 		f_hash: Block::Hash,
 		displaced: &mut Option<FinalizationDisplaced<Block::Hash, NumberFor<Block>>>
@@ -1195,7 +1227,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 			let commit = self.storage.state_db.canonicalize_block(&f_hash)
 				.map_err(|e: state_db::Error<io::Error>| client::error::Error::from(format!("State database error: {:?}", e)))?;
-			apply_state_commit(transaction, commit);
+			apply_state_commit(transaction, deleted_keyspace, commit);
 
 			let changes_trie_config = self.changes_trie_config(parent_hash)?;
 			if let Some(changes_trie_config) = changes_trie_config {
@@ -1213,7 +1245,11 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 	}
 }
 
-fn apply_state_commit(transaction: &mut DBTransaction, commit: state_db::CommitSet<Vec<u8>>) {
+fn apply_state_commit(
+	transaction: &mut DBTransaction,
+	deleted_keyspace: &mut BTreeSet<(Option<u32>, Vec<u8>)>,
+	commit: state_db::CommitSet<Vec<u8>>,
+) {
 	for (key, val) in commit.data.inserted.into_iter() {
 		transaction.put(columns::STATE, &key[..], &val);
 	}
@@ -1223,10 +1259,12 @@ fn apply_state_commit(transaction: &mut DBTransaction, commit: state_db::CommitS
 	for (key, val) in commit.meta.inserted.into_iter() {
 		transaction.put(columns::STATE_META, &key[..], &val);
 	}
-	for key in commit.meta.deleted.into_iter() {
-		transaction.delete(columns::STATE_META, &key[..]);
+	for keyspace in commit.data.deleted_keyspace.into_iter() {
+		deleted_keyspace.insert((columns::STATE, keyspace));
 	}
-  // TODO EMCH here delete the keyspace!!
+	for keyspace in commit.meta.deleted_keyspace.into_iter() {
+		deleted_keyspace.insert((columns::STATE_META, keyspace));
+	}
 }
 
 impl<Block> client::backend::AuxStore for Backend<Block> where Block: BlockT<Hash=H256> {
@@ -1300,12 +1338,14 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 		-> Result<(), client::error::Error>
 	{
 		let mut transaction = DBTransaction::new();
+		let mut deleted_keyspace = BTreeSet::new();
 		let hash = self.blockchain.expect_block_hash_from_id(&block)?;
 		let header = self.blockchain.expect_header(block)?;
 		let mut displaced = None;
 		let commit = |displaced| {
 			let (hash, number, is_best, is_finalized) = self.finalize_block_with_transaction(
 				&mut transaction,
+				&mut deleted_keyspace,
 				&hash,
 				&header,
 				None,
@@ -1313,6 +1353,26 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 				displaced,
 			)?;
 			self.storage.db.write(transaction).map_err(db_err)?;
+			// TODO EMCH put to clean keyspace list with finalized block number in a meta, to be able
+			// to post process in case of some failure (doing it after a failure seems like an awkward
+			// choice (not much space spared and possibility to not being able to write.
+			// List could be in previous transaction: there is already the journal record, but it 
+      // get deleted on canonicalize -> writing in some meta list shall be enough.
+			for (col, keyspace) in deleted_keyspace {
+				// warning this is not atomical so if it fails we do not want to be
+				// in a wrong state, and rather keep trying cleaning keyspace.
+				// Unclean keyspace is of no consequence (exept unused db), because
+				// keyspace shall never be use again.
+				if let Err(e) = self.storage.db.delete_prefix(col, keyspace) {
+					error!(
+						target: "db",
+						"DB delete keyspace on finalize {:?} {:?} failed with {:?}",
+						col,
+						keyspace,
+						e,
+					);
+				}
+			}
 			self.blockchain.update_meta(hash, number, is_best, is_finalized);
 			Ok(())
 		};
@@ -1348,9 +1408,10 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 				return Ok(c.saturated_into::<NumberFor<Block>>())
 			}
 			let mut transaction = DBTransaction::new();
+			let mut deleted_keyspace = BTreeSet::new();
 			match self.storage.state_db.revert_one() {
 				Some(commit) => {
-					apply_state_commit(&mut transaction, commit);
+					apply_state_commit(&mut transaction, &mut deleted_keyspace, commit);
 					let removed = self.blockchain.header(BlockId::Number(best))?.ok_or_else(
 						|| client::error::Error::UnknownBlock(
 							format!("Error reverting to {}. Block hash not found.", best)))?;
