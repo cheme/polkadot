@@ -8,12 +8,12 @@ edition = "2018"
 parking_lot = "0.8"
 log = "0.4"
 #kvdb = { git = "https://github.com/paritytech/parity-common", rev="b0317f649ab2c665b7987b8475878fc4d2e1f81d" }
-kvdb = { git = "https://github.com/cheme/parity-common", optional = true, branch="del_range" }
+kvdb = { git = "https://github.com/cheme/parity-common", branch="del_range" }
 # FIXME replace with release as soon as our rocksdb changes are released upstream https://github.com/paritytech/parity-common/issues/88
 #kvdb-rocksdb = { git = "https://github.com/paritytech/parity-common", rev="b0317f649ab2c665b7987b8475878fc4d2e1f81d", optional = true }
 kvdb-rocksdb = { git = "https://github.com/cheme/parity-common", optional = true, branch="del_range" }
 #kvdb-memorydb = { git = "https://github.com/paritytech/parity-common", rev="b0317f649ab2c665b7987b8475878fc4d2e1f81d" }
-kvdb-memorydb = { git = "https://github.com/cheme/parity-common", optional = true, branch="del_range" }
+kvdb-memorydb = { git = "https://github.com/cheme/parity-common", branch="del_range" }
 linked-hash-map = "0.5"
 hash-db = { version = "0.15.0" }
 primitives = { package = "substrate-primitives", path = "../../primitives" }
