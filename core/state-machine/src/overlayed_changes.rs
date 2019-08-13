@@ -133,12 +133,6 @@ pub enum OverlayedValueResult<'a> {
 	NotFound,
 	/// The key has been deleted.
 	Deleted,
-	/// The keyspace for this has been deleted.
-	/// TODO EMCH consider replacing by a check on
-	/// merge between keyspace values. (not sure it is
-	/// totally relevant (most of the time is the
-	/// same as Deleted)).
-	KeySpaceDeleted,
 	/// Current value set in the overlay.
 	Modified(&'a[u8]),
 }
@@ -198,7 +192,7 @@ impl OverlayedChanges {
 		}
 
 		if former_keyspace_deleted {
-			return OverlayedValueResult::KeySpaceDeleted;
+			return OverlayedValueResult::Deleted;
 		}
 
 		match self.committed.children.get(keyspace).and_then(|map| {
@@ -219,7 +213,7 @@ impl OverlayedChanges {
 		}
 
 		if former_keyspace_deleted {
-			return OverlayedValueResult::KeySpaceDeleted;
+			return OverlayedValueResult::Deleted;
 		} else {
 			return OverlayedValueResult::NotFound;
 		}
@@ -577,7 +571,6 @@ impl OverlayedChanges {
 					OverlayedValueResult::Modified(idx) => Decode::decode(&mut &*idx)
 						.unwrap_or(NO_EXTRINSIC_INDEX),
 					OverlayedValueResult::Deleted
-					| OverlayedValueResult::KeySpaceDeleted
 					| OverlayedValueResult::NotFound => NO_EXTRINSIC_INDEX,
 				}
 			),

@@ -180,8 +180,7 @@ where
 		match self.overlay.storage(key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::KeySpaceDeleted
-			| OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some(value.to_vec()),
 		}
 	}
@@ -191,8 +190,7 @@ where
 		match self.overlay.storage(key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::KeySpaceDeleted
-			| OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some( H::hash(value)),
 		}
 	}
@@ -218,8 +216,7 @@ where
 		match self.overlay.child_storage(child_trie.clone(), key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.child_storage(child_trie, key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::KeySpaceDeleted
-			| OverlayedValueResult::Deleted => None,
+			OverlayedValueResult::Deleted => None,
 			OverlayedValueResult::Modified(value) => Some( value.to_vec()),
 		}
 	}
@@ -229,8 +226,7 @@ where
 		match self.overlay.storage(key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.exists_storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::KeySpaceDeleted
-			| OverlayedValueResult::Deleted => false,
+			OverlayedValueResult::Deleted => false,
 			OverlayedValueResult::Modified(_value) => true,
 		}
 	}
@@ -240,8 +236,7 @@ where
 		match self.overlay.child_storage(child_trie.clone(), key) {
 			OverlayedValueResult::NotFound =>
 				self.backend.exists_child_storage(child_trie, key).expect(EXT_NOT_ALLOWED_TO_FAIL),
-			OverlayedValueResult::KeySpaceDeleted
-			| OverlayedValueResult::Deleted => false,
+			OverlayedValueResult::Deleted => false,
 			OverlayedValueResult::Modified(_value) => true,
 		}
 	}
