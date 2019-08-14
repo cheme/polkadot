@@ -19,7 +19,7 @@ trie = { package = "substrate-trie", path = "../trie", optional = true }
 substrate-telemetry = { path = "../telemetry", optional = true }
 hash-db = { version = "0.15.0", default-features = false }
 #kvdb = { git = "https://github.com/paritytech/parity-common", optional = true, rev="b0317f649ab2c665b7987b8475878fc4d2e1f81d" }
-kvdb = { git = "https://github.com/cheme/parity-common", optional = true, branch="del_range" }
+kvdb = { git = "https://github.com/cheme/parity-common", optional = true, branch="upgraded_del_range" }
 parity-codec = { version = "4.1.1", default-features = false, features = ["derive"] }
 primitives = { package = "substrate-primitives", path = "../primitives", default-features = false }
 sr-primitives = { path = "../sr-primitives", default-features = false }
@@ -32,7 +32,7 @@ sr-api-macros = { path = "../sr-api-macros" }
 env_logger = "0.6"
 test-client = { package = "substrate-test-runtime-client", path = "../test-runtime/client" }
 #kvdb-memorydb = { git = "https://github.com/paritytech/parity-common", rev="b0317f649ab2c665b7987b8475878fc4d2e1f81d" }
-kvdb-memorydb = { git = "https://github.com/cheme/parity-common", branch="del_range" }
+kvdb-memorydb = { git = "https://github.com/cheme/parity-common", branch="upgraded_del_range" }
 
 [features]
 default = ["std"]
