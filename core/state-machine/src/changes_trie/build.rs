@@ -16,7 +16,7 @@
 
 //! Structures and functions required to build changes trie for given block.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::collections::btree_map::Entry;
 use codec::Decode;
 use hash_db::Hasher;
@@ -123,8 +123,11 @@ fn prepare_digest_input<'a, S, H, Number>(
 		H::Out: 'a,
 		Number: BlockNumber,
 {
-	digest_build_iterator(config, block.clone())
-		.try_fold(BTreeMap::new(), move |mut map, digest_build_block| {
+  type CacheType<Number> = Vec<(Number, std::collections::btree_set::IntoIter<Vec<u8>>, Option<Vec<u8>>)>;
+  let cache_init: CacheType<Number> = Vec::with_capacity(30);
+  let mut dig_iter: crate::changes_trie::build_iterator::DigestBuildIterator<Number> = digest_build_iterator::<Number>(config, block.clone());
+	let mut cache: CacheType<Number> = dig_iter
+		.try_fold::<CacheType<Number>,_, Result<_, String>>(cache_init, move |mut cache, digest_build_block| {
 			let trie_root = storage.root(parent, digest_build_block.clone())?;
 			let trie_root = trie_root.ok_or_else(|| format!("No changes trie root for block {}", digest_build_block.clone()))?;
 			let trie_storage = TrieBackendEssence::<_, H>::new(
@@ -132,7 +135,7 @@ fn prepare_digest_input<'a, S, H, Number>(
 				trie_root,
 			);
 
-			let mut insert_to_map = |key: Vec<u8>| {
+/*			let mut insert_to_map = |key: Vec<u8>| {
 				match map.entry(key.clone()) {
 					Entry::Vacant(entry) => {
 						entry.insert((DigestIndex {
@@ -152,23 +155,80 @@ fn prepare_digest_input<'a, S, H, Number>(
 						}
 					},
 				}
-			};
+			};*/
 
+      let mut cache_map = BTreeSet::<Vec<u8>>::new();
 			let extrinsic_prefix = ExtrinsicIndex::key_neutral_prefix(digest_build_block.clone());
 			trie_storage.for_keys_with_prefix(&extrinsic_prefix, |key|
 				if let Ok(InputKey::ExtrinsicIndex::<Number>(trie_key)) = Decode::decode(&mut &key[..]) {
-					insert_to_map(trie_key.key);
+          cache_map.insert(trie_key.key);
 				});
 
 			let digest_prefix = DigestIndex::key_neutral_prefix(digest_build_block.clone());
 			trie_storage.for_keys_with_prefix(&digest_prefix, |key|
 				if let Ok(InputKey::DigestIndex::<Number>(trie_key)) = Decode::decode(&mut &key[..]) {
-					insert_to_map(trie_key.key);
+          cache_map.insert(trie_key.key);
 				});
 
-			Ok(map)
-		})
-		.map(|pairs| pairs.into_iter().map(|(_, (k, v))| InputPair::DigestIndex(k, v)))
+      cache.push((digest_build_block, cache_map.into_iter(), None));
+			Ok(cache)
+		})?;
+/*entry.insert((DigestIndex {
+							block: block.clone(),
+							key,
+						}, vec![digest_build_block.clone()]));*/
+
+    let mut map = BTreeMap::<Vec<u8>, (DigestIndex<Number>, Vec<Number>)>::new();
+      let mut previous_first_key = None;
+      let mut first_key = None;
+    loop {
+      let mut first_key_blocks = Vec::new();
+      let mut state_change = false;
+      //println!("l");
+      for i in 0..cache.len() {
+        if let (Some(c), Some(f)) = (cache[i].2.as_ref(), previous_first_key.as_ref()) {
+          if c == f {
+            cache[i].2 = None;
+          //  state_change = true;
+          }
+        }
+        if cache[i].2.is_none() {
+          cache[i].2 = cache[i].1.next();
+          state_change |= cache[i].2.is_some();
+        }
+        // TODO optimize condition logic
+        if first_key.is_none() {
+          first_key = cache[i].2.clone();
+        }
+        if let (Some(c), Some(f)) = (cache[i].2.as_ref(), first_key.as_ref()) {
+          if c < f {
+            let n = cache[i].1.next();
+            state_change = true;
+            first_key = std::mem::replace(&mut cache[i].2, n);
+            first_key_blocks.clear();
+            first_key_blocks.push(cache[i].0.clone());
+          } else if c == f {
+            first_key_blocks.push(cache[i].0.clone());
+          }
+        }
+      }
+      previous_first_key = first_key.clone();
+      if let Some(first_key) = std::mem::replace(&mut first_key, None) {
+        let di = DigestIndex {
+					block: block.clone(),
+					key: first_key.clone(),
+				};
+       // println!("{:?}", &first_key);
+        map.insert(first_key, (di, std::mem::replace(&mut first_key_blocks, Vec::new())));
+      } else {
+        break;
+      }
+      if !state_change {
+        //println!("no stc");
+        break;
+      }
+    }
+		Ok(map.into_iter().map(|(_, (k, v))| InputPair::DigestIndex(k, v)))
 }
 
 #[cfg(test)]
@@ -354,3 +414,129 @@ mod test {
 		]);
 	}
 }
+
+/*
+EXPERIMENT:
+130 unique updates per block
+20 unique fake updates per block
+50 non-unique updates per block
+10 non-unique fake updates per block
+4x child TRIES
+regular top trie has 214 input pairs
+digest top trie has 153724 input pairs
+4x regular child tries have 840 input pairs in total
+4x digest child tries have 614880 input pairs in total
+SEPARATE TRIES:
+avg regular: (0.002389469807459151 + 0.0023679805445758614 + 0.002390984337303955) / 3 = 0.00238281156
+avg digest: (5.17195862600056 + 4.973148314002174 + 4.912790390997543) / 3 = 5.01929911033
+SINGLE TRIE:
+avg regular: (0.0034223068689522677 + 0.0033906207614974493 + 0.003398153110404903) / 3 = 0.00340369358
+avg digest: (5.682988865999505 + 5.730828843999916 + 5.707480465000117) / 3 = 5.70709939167
+*/
+  #[test]
+	fn my_test() {
+    use crate::changes_trie::RootsStorage;
+		use primitives::Blake2Hasher;
+
+		const DIGEST_INTERVAL: u32 = 1024;
+
+		let config = Configuration {
+			digest_interval: DIGEST_INTERVAL,
+			digest_levels: 1,
+		};
+
+		let mut total_regular_build_time = 0f64;
+		let mut total_digest_build_time = 0f64;
+
+		let backend = crate::backend::InMemory::default();
+		let storage = crate::changes_trie::storage::InMemoryStorage::new();
+		storage.insert(0u32, Default::default(), Default::default());
+
+		// prepare 1024 blocks
+		for block in 1u32..DIGEST_INTERVAL+1 {
+			let mut changes = OverlayedChanges::default();
+			changes.set_changes_trie_config(config.clone());
+
+			fn insert_changes(changes: &mut OverlayedChanges, block: u32) {
+				for unique_key in 0u32..130u32 {
+					changes.set_extrinsic_index(unique_key);
+
+					let key = unique_key.to_le_bytes().iter().cloned()
+						.chain(block.to_le_bytes().iter().cloned())
+						.collect::<Vec<_>>();
+
+					let value = Some(block.to_le_bytes().to_vec());
+					changes.set_storage(key, value);
+				}
+
+				for unique_fake_key in 0u32..20u32 {
+					changes.set_extrinsic_index(unique_fake_key);
+
+					let key = (1_000u32 + unique_fake_key).to_le_bytes().iter().cloned()
+						.chain(block.to_le_bytes().iter().cloned())
+						.collect::<Vec<_>>();
+					let value = Some(vec![1]);
+				  changes.set_storage(key, value);
+				}
+
+				for nonunique_key in 0u32..50u32 {
+					changes.set_extrinsic_index(nonunique_key);
+
+					let key = (2_000u32 + nonunique_key).to_le_bytes().iter().cloned()
+						.collect::<Vec<_>>();
+					let value = Some(block.to_le_bytes().to_vec());
+				  changes.set_storage(key, value);
+				}
+
+				for nonunique_fake_key in 0u32..10u32 {
+					changes.set_extrinsic_index(nonunique_fake_key);
+
+					let key = (3_000u32 + nonunique_fake_key).to_le_bytes().iter().cloned()
+						.collect::<Vec<_>>();
+					let value = Some(vec![1]);
+					changes.set_storage(key, value);
+				}
+			}
+
+			insert_changes(&mut changes, block);
+
+			// prepare changes trie
+			let parent_hash = if block == 1 {
+				Default::default()
+			} else {
+				storage.root(&AnchorBlockId { hash: Default::default(), number: 0u32 }, block - 1).unwrap().unwrap()
+			};
+			let begin = time::precise_time_s();
+			let (trie, root) = crate::changes_trie::build_changes_trie::<_, _, Blake2Hasher, u32>(
+				&backend,
+				Some(&storage),
+				&changes,
+				parent_hash,
+			).unwrap().unwrap();
+			let end = time::precise_time_s();
+			if block == DIGEST_INTERVAL {
+				total_digest_build_time += end - begin;
+			} else {
+				total_regular_build_time += end - begin;
+			}
+
+			// update state storage
+			backend.update(changes.prospective.top.into_iter()
+				.map(|(key, value)| (None, key, value.value))
+				.collect());
+
+			// update changes trie storage
+			storage.insert(block, root, trie);
+		}
+
+		println!("avg regular: {}s", total_regular_build_time / (DIGEST_INTERVAL - 1) as f64);
+		println!("avg digest: {}s", total_digest_build_time);
+		panic!("disp");
+//---- changes_trie::build::my_test stdout ----
+//avg regular: 0.007651980696013169s
+//avg digest: 0.17544950299998163s
+    // 
+//avg regular: 0.007324433772260864s
+//avg digest: 0.17298311499871488s
+// 
+	}

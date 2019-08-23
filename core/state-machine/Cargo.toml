@@ -19,6 +19,7 @@ num-traits = "0.2"
 
 [dev-dependencies]
 hex-literal = "0.2.0"
+time = "0.1.42"
 
 [features]
 default = []
