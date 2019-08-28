@@ -248,6 +248,16 @@ pub trait Externalities<H: Hasher> {
 	/// Returns offchain externalities extension if present.
 	fn offchain(&mut self) -> Option<&mut dyn offchain::Externalities>;
 
+	/// Create a new transactional layer.
+	fn storage_start_transaction(&mut self);
+
+	/// Discard a transactional layer, pending changes of every trasaction below this layer are
+	/// dropped (including committed changes) .
+	fn storage_discard_transaction(&mut self);
+
+	/// Commit a transactional layer. The changes stay attached to parent transaction layer.
+	fn storage_commit_transaction(&mut self);
+	
 	/// Returns the keystore.
 	fn keystore(&self) -> Option<BareCryptoStorePtr>;
 }
@@ -568,7 +578,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		&mut self,
 		compute_tx: bool,
 		mut native_call: Option<NC>,
-		orig_prospective: OverlayedChangeSet,
+		orig_changes: OverlayedChangeSet,
 		on_consensus_failure: Handler,
 	) -> (CallResult<R, Exec::Error>, Option<(B::Transaction, H::Out)>, Option<MemoryDB<H>>) where
 		R: Decode + Encode + PartialEq,
@@ -581,7 +591,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		let (result, was_native, storage_delta, changes_delta) = self.execute_aux(compute_tx, true, native_call.take());
 
 		if was_native {
-			self.overlay.prospective = orig_prospective.clone();
+			self.overlay.changes = orig_changes.clone();
 			let (wasm_result, _, wasm_storage_delta, wasm_changes_delta) = self.execute_aux(compute_tx, false, native_call);
 
 			if (result.is_ok() && wasm_result.is_ok()
@@ -600,7 +610,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		&mut self,
 		compute_tx: bool,
 		mut native_call: Option<NC>,
-		orig_prospective: OverlayedChangeSet,
+		orig_changes: OverlayedChangeSet,
 	) -> (CallResult<R, Exec::Error>, Option<(B::Transaction, H::Out)>, Option<MemoryDB<H>>) where
 		R: Decode + Encode + PartialEq,
 		NC: FnOnce() -> result::Result<R, &'static str> + UnwindSafe,
@@ -610,7 +620,7 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		if !was_native || result.is_ok() {
 			(result, storage_delta, changes_delta)
 		} else {
-			self.overlay.prospective = orig_prospective.clone();
+			self.overlay.changes = orig_changes.clone();
 			let (wasm_result, _, wasm_storage_delta, wasm_changes_delta) = self.execute_aux(compute_tx, false, native_call);
 			(wasm_result, wasm_storage_delta, wasm_changes_delta)
 		}
@@ -658,14 +668,14 @@ impl<'a, H, N, B, T, O, Exec> StateMachine<'a, H, N, B, T, O, Exec> where
 		init_overlay(self.overlay, false)?;
 
 		let result = {
-			let orig_prospective = self.overlay.prospective.clone();
+			let orig_changes = self.overlay.changes.clone();
 
 			let (result, storage_delta, changes_delta) = match manager {
 				ExecutionManager::Both(on_consensus_failure) => {
-					self.execute_call_with_both_strategy(compute_tx, native_call.take(), orig_prospective, on_consensus_failure)
+					self.execute_call_with_both_strategy(compute_tx, native_call.take(), orig_changes, on_consensus_failure)
 				},
 				ExecutionManager::NativeElseWasm => {
-					self.execute_call_with_native_else_wasm_strategy(compute_tx, native_call.take(), orig_prospective)
+					self.execute_call_with_native_else_wasm_strategy(compute_tx, native_call.take(), orig_changes)
 				},
 				ExecutionManager::AlwaysWasm => {
 					let (result, _, storage_delta, changes_delta) = self.execute_aux(compute_tx, false, native_call);
@@ -966,7 +976,6 @@ where
 mod tests {
 	use std::collections::HashMap;
 	use codec::Encode;
-	use overlayed_changes::OverlayedValue;
 	use super::*;
 	use super::backend::InMemory;
 	use super::ext::Ext;
@@ -1146,17 +1155,14 @@ mod tests {
 		];
 		let mut state = InMemory::<Blake2Hasher>::from(initial);
 		let backend = state.as_trie_backend().unwrap();
-		let mut overlay = OverlayedChanges {
-			committed: map![
-				b"aba".to_vec() => OverlayedValue::from(Some(b"1312".to_vec())),
-				b"bab".to_vec() => OverlayedValue::from(Some(b"228".to_vec()))
+		let mut overlay = OverlayedChanges::new_from_top(vec![
+				(b"aba".to_vec(), Some(b"1312".to_vec())),
+				(b"bab".to_vec(), Some(b"228".to_vec())),
 			],
-			prospective: map![
-				b"abd".to_vec() => OverlayedValue::from(Some(b"69".to_vec())),
-				b"bbd".to_vec() => OverlayedValue::from(Some(b"42".to_vec()))
-			],
-			..Default::default()
-		};
+			vec![
+				(b"abd".to_vec(), Some(b"69".to_vec())),
+				(b"bbd".to_vec(), Some(b"42".to_vec())),
+			], None);
 
 		{
 			let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
@@ -1171,8 +1177,11 @@ mod tests {
 		}
 		overlay.commit_prospective();
 
+		overlay.discard_prospective();
+		let values: HashMap<_, _>	= overlay.changes.top_iter()
+			.map(|(k, v)| (k.to_vec(), v.map(|s| s.to_vec()))).collect();
 		assert_eq!(
-			overlay.committed,
+			values,
 			map![
 				b"abc".to_vec() => None.into(),
 				b"abb".to_vec() => None.into(),

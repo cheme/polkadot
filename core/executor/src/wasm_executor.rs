@@ -1314,6 +1314,18 @@ impl_function_executor!(this: FunctionExecutor<'e, E>,
 		this.sandbox_store.memory_teardown(memory_idx)?;
 		Ok(())
 	},
+	ext_storage_start_transaction() => {
+		this.ext.storage_start_transaction();
+		Ok(())
+	},
+	ext_storage_discard_transaction() => {
+		this.ext.storage_discard_transaction();
+		Ok(())
+	},
+	ext_storage_commit_transaction() => {
+		this.ext.storage_commit_transaction();
+		Ok(())
+	},
 	=> <'e, E: Externalities<Blake2Hasher> + 'e>
 );
 

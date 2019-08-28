@@ -27,6 +27,26 @@ pub mod storage_items;
 pub mod unhashed;
 pub mod hashed;
 
+/// Execute under a transactional layer.
+///
+///
+/// If the result of execution is an error,
+/// the transactional layer get reverted; otherwhise
+/// it is committed.
+pub fn with_transaction<R, E>(f: impl FnOnce() -> Result<R, E>) -> Result<R, E> {
+	runtime_io::storage_start_transaction();
+	match f() {
+		Ok(r) => {
+			runtime_io::storage_commit_transaction();
+			Ok(r)
+		},
+		Err(e) => {
+			runtime_io::storage_discard_transaction();
+			Err(e)
+		}
+	}
+}
+
 /// The underlying runtime storage.
 pub struct RuntimeStorage;
 

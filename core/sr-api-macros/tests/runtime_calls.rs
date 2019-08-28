@@ -103,7 +103,6 @@ fn calling_with_both_strategy_and_fail_on_native_should_work() {
 	assert_eq!(runtime_api.fail_on_native(&block_id).unwrap(), 1);
 }
 
-
 #[test]
 fn calling_with_native_else_wasm_and_fail_on_wasm_should_work() {
 	let client = TestClientBuilder::new().set_execution_strategy(ExecutionStrategy::NativeElseWasm).build();
@@ -127,6 +126,23 @@ fn use_trie_function() {
 	let block_id = BlockId::Number(client.info().chain.best_number);
 	assert_eq!(runtime_api.use_trie(&block_id).unwrap(), 2);
 }
+
+#[test]
+fn use_history_data() {
+	let client = TestClientBuilder::new().set_execution_strategy(ExecutionStrategy::AlwaysWasm).build();
+	let runtime_api = client.runtime_api();
+	let block_id = BlockId::Number(client.info().chain.best_number);
+	assert_eq!(runtime_api.use_history_data(&block_id).unwrap(), 0);
+}
+
+#[test]
+fn test_transactions() {
+	let client = TestClientBuilder::new().set_execution_strategy(ExecutionStrategy::AlwaysWasm).build();
+	let runtime_api = client.runtime_api();
+	let block_id = BlockId::Number(client.info().chain.best_number);
+	assert_eq!(runtime_api.use_transactions(&block_id).unwrap(), 1);
+}
+
 
 #[test]
 fn initialize_block_works() {

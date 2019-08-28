@@ -153,6 +153,15 @@ export_api! {
 		/// "Commit" all existing operations and get the resultant storage change root.
 		fn storage_changes_root(parent_hash: [u8; 32]) -> Option<[u8; 32]>;
 
+		/// Start a new transaction.
+		fn storage_start_transaction();
+
+		/// Discard a transactional layer.
+		fn storage_discard_transaction();
+
+		/// Commit a transactional layer.
+		fn storage_commit_transaction();
+	
 		/// A trie root formed from the iterated items.
 		fn trie_root<H, I, A, B>(input: I) -> H::Out
 		where

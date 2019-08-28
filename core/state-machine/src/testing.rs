@@ -101,17 +101,14 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 
 	/// Return a new backend with all pending value.
 	pub fn commit_all(&self) -> InMemory<H> {
-		let top = self.overlay.committed.top.clone().into_iter()
-			.chain(self.overlay.prospective.top.clone().into_iter())
-			.map(|(k, v)| (None, k, v.value));
+		let top = self.overlay.changes.top_iter_overlay()
+			.map(|(k, v)| (None, k.to_vec(), v.value.clone()));
 
-		let children = self.overlay.committed.children.clone().into_iter()
-			.chain(self.overlay.prospective.children.clone().into_iter())
-			.flat_map(|(keyspace, map)| {
-				map.1.into_iter()
-					.map(|(k, v)| (Some(keyspace.clone()), k, v))
-					.collect::<Vec<_>>()
-			});
+		let children = self.overlay.changes.children_iter_overlay()
+			.flat_map(|(keyspace, map)| map
+				.map(|(k, v)| (Some(keyspace.to_vec()), k.to_vec(), v.value.clone()))
+				.collect::<Vec<_>>()
+			);
 
 		self.backend.update(top.chain(children).collect())
 	}
@@ -229,22 +226,10 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 
 	fn storage_root(&mut self) -> H::Out {
 
-		let child_storage_keys =
-			self.overlay.prospective.children.keys()
-				.chain(self.overlay.committed.children.keys());
-
-		let child_delta_iter = child_storage_keys.map(|storage_key|
-			(storage_key.clone(), self.overlay.committed.children.get(storage_key)
-				.into_iter()
-				.flat_map(|map| map.1.iter().map(|(k, v)| (k.clone(), v.clone())))
-				.chain(self.overlay.prospective.children.get(storage_key)
-					.into_iter()
-					.flat_map(|map| map.1.iter().map(|(k, v)| (k.clone(), v.clone()))))));
-
+		let child_delta_iter = self.overlay.changes.owned_children_iter();
 
 		// compute and memoize
-		let delta = self.overlay.committed.top.iter().map(|(k, v)| (k.clone(), v.value.clone()))
-			.chain(self.overlay.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())));
+		let delta = self.overlay.changes.top_iter().map(|(k, v)| (k.to_vec(), v.map(|s| s.to_vec())));
 		self.backend.full_storage_root(delta, child_delta_iter).0
 
 	}
@@ -253,12 +238,8 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 		let storage_key = storage_key.as_ref();
 
 		let (root, is_empty, _) = {
-			let delta = self.overlay.committed.children.get(storage_key)
-				.into_iter()
-				.flat_map(|map| map.1.iter().map(|(k, v)| (k.clone(), v.clone())))
-				.chain(self.overlay.prospective.children.get(storage_key)
-						.into_iter()
-						.flat_map(|map| map.1.clone().into_iter()));
+			let delta = self.overlay.changes.child_iter(storage_key)
+				.map(|(k, v)| (k.to_vec(), v.map(|s| s.to_vec())));
 
 			self.backend.child_storage_root(storage_key, delta)
 		};
@@ -285,6 +266,18 @@ impl<H, N> Externalities<H> for TestExternalities<H, N>
 			.map(|x| &mut **x as _)
 	}
 
+	fn storage_start_transaction(&mut self) {
+		self.overlay.start_transaction()
+	}
+
+	fn storage_discard_transaction(&mut self) {
+		self.overlay.discard_transaction()
+	}
+
+	fn storage_commit_transaction(&mut self) {
+		self.overlay.commit_transaction()
+	}
+	
 	fn keystore(&self) -> Option<BareCryptoStorePtr> {
 		self.keystore.clone()
 	}

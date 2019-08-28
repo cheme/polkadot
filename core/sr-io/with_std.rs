@@ -167,6 +167,18 @@ impl StorageApi for () {
 		).unwrap_or(Ok(None)).expect("Invalid parent hash passed to storage_changes_root")
 	}
 
+	fn storage_start_transaction() {
+		ext::with(|ext| ext.storage_start_transaction());
+	}
+
+	fn storage_discard_transaction() {
+		ext::with(|ext| ext.storage_discard_transaction());
+	}
+
+	fn storage_commit_transaction() {
+		ext::with(|ext| ext.storage_commit_transaction());
+	}
+	
 	fn trie_root<H, I, A, B>(input: I) -> H::Out
 	where
 		I: IntoIterator<Item = (A, B)>,

@@ -91,7 +91,7 @@ pub mod ext {
 		/// # Returns
 		///
 		/// Returns the original implementation wrapped in [`RestoreImplementation`].
-		pub fn replace_implementation(&'static self, new_impl: T)  -> RestoreImplementation<T> {
+		pub fn replace_implementation(&'static self, new_impl: T) -> RestoreImplementation<T> {
 			if let ExchangeableFunctionState::Replaced = self.0.get().1 {
 				panic!("Trying to replace an already replaced implementation!")
 			}
@@ -607,7 +607,22 @@ pub mod ext {
 			buffer_len: u32,
 			deadline: u64
 		) -> u32;
+
+		//================================
+		// Transactional Context
+		//================================
+
+		/// Open a new transactional storage layer.
+		fn ext_storage_start_transaction();
+
+		/// Close and dismiss current transactional storage layer.
+		fn ext_storage_discard_transaction();
+
+		/// Close and commit current transactional storage layer.
+		fn ext_storage_commit_transaction();
+
 	}
+
 }
 
 pub use self::ext::*;
@@ -793,6 +808,25 @@ impl StorageApi for () {
 	>(values: I) -> H::Out {
 		H::ordered_trie_root(values)
 	}
+
+	fn storage_start_transaction() {
+		unsafe {
+			ext_storage_start_transaction.get()()
+		}
+	}
+
+	fn storage_discard_transaction() {
+		unsafe {
+			ext_storage_discard_transaction.get()()
+		}
+	}
+
+	fn storage_commit_transaction() {
+		unsafe {
+			ext_storage_commit_transaction.get()()
+		}
+	}
+
 }
 
 impl OtherApi for () {

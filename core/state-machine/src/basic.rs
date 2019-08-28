@@ -199,6 +199,19 @@ impl<H: Hasher> Externalities<H> for BasicExternalities where H::Out: Ord {
 		warn!("Call to non-existent keystore.");
 		None
 	}
+
+	fn storage_start_transaction(&mut self) {
+		warn!("No support for storage transaction");
+	}
+
+	fn storage_discard_transaction(&mut self) {
+		panic!("No support for storage transaction");
+	}
+
+	fn storage_commit_transaction(&mut self) {
+		// no need to fail in this case
+	}
+
 }
 
 #[cfg(test)]
