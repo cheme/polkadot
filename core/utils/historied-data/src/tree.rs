@@ -18,6 +18,21 @@
 //!
 //! General structur is an array of linear, each linear originating
 //! from another array at designated index.
+//!
+//! Only support commited and prospective states.
+
+// memo:
+// - for linear
+// transaction = new block number (new block new tx)
+// commit transaction = fusioning two blocks (should never be use)
+// discard transaction = removing a block (latest one in branch).
+// - for tree
+// commit prospective = 
+// put commit counter to prospective counter +1, then recurse branch in path to this value. 
+// primitive spawn two new branches and end the previous one)
+// New branches uses a + 1 commmited counter (meaning prospective).
+// Also on commit we branch an new prospective one (counter +1).
+// discard prospective = increase prospective counter.
 
 use crate::{
 	State as TransactionState,
@@ -53,6 +68,21 @@ pub struct Serialized<'a>(Cow<'a, [u8]>);
 pub struct States {
 	branches: BTreeMap<usize, StatesBranch>,
 	last_branch_ix: usize,
+	committed_ix: usize,
+	prospective_ix: usize,
+}
+
+impl StatesBranch {
+  pub fn is_committed(&self, states: &States) -> bool {
+    self.state_ix == states.committed_ix
+  }
+  pub fn is_prospective(&self, states: &States) -> bool {
+    self.state_ix > states.prospective_ix
+  }
+  pub fn is_dropped(&self, states: &States) -> bool {
+    self.state_ix != states.committed_ix
+    && self.state_ix < states.prospective_ix
+  }
 }
 
 impl Default for States {
@@ -60,6 +90,8 @@ impl Default for States {
 		States {
 			branches: Default::default(),
 			last_branch_ix: 0,
+			committed_ix: 0,
+			prospective_ix: 1,
 		}
 	}
 }
@@ -70,9 +102,17 @@ pub struct StatesBranch {
 	// content pointing to it even if it seems safe to reuse a previously
 	// use ix).
 	branch_ix: usize,
+  // status of the branch, if the index is less than
+  // states committed_ix, then the full branch is not in
+  // the committed path, and seen as dropped.
+  // in between committed and prospective ix it is also a dropped prospective index.
+	state_ix: usize,
 
 	origin_branch_ix: usize,
-	origin_linear_ix: usize,
+
+  // when a branch has children it cannot be change (get_mut return none
+  // when get return something).
+	has_children: bool,
 
 	state: LinearStates,
 }
@@ -96,25 +136,30 @@ impl States {
 		unimplemented!();
 	}
 
-	// create a branch in branch_ix, return new branch_ix
+	// create a branches. End current branch.
+  // Return first created index (next branch are sequential indexed)
+  // or None if origin branch does not allow branch creation (commited branch or non existing).
 	pub fn create_branch(
 		&mut self,
 		branch_ix: usize,
-		linear_ix: Option<usize>,
-		branch_initial_state: Option<LinearStates>,
+		nb_branch: usize,
 	) -> Option<usize> {
 		// empty case
 		if self.last_branch_ix == 0 {
-			debug_assert!(linear_ix.is_none());
 			self.last_branch_ix = 1;
-			self.branches.insert(1, StatesBranch {
-				branch_ix: 1,
-				origin_branch_ix: 0,
-				origin_linear_ix: 0,
-				state: branch_initial_state.unwrap_or_else(Default::default),
-			});
+      for i in 1..nb_branch + 1 {
+        self.branches.insert(1, StatesBranch {
+          branch_ix: i,
+          origin_branch_ix: 0,
+          state_ix: self.prospective_ix,
+          has_children: false,
+          state: Default::default(),
+        });
+      }
 			Some(1)
 		} else {
+      // TODO get linear state mut mapped over commitedix > commitedix (lazy clear)
+      // then check linear ix opt.
 			unimplemented!()
 		}
 	}
@@ -128,6 +173,7 @@ impl States {
 	}
 
 	pub fn linear_state_mut (&mut self, branch_ix: usize) -> Option<&mut LinearStates> {
+    // TODO return state prospective, not commited, not branched
 		unimplemented!();
 	}
 
@@ -141,10 +187,23 @@ pub fn ref_get(s: &StatesRef, branch_ix: usize, linear_ix: usize) -> Transaction
 mod test {
 	use super::*;
 
-	fn test_state() -> States {
+	fn test_states() -> States {
 		let mut states = States::default();
-		assert_eq!(states.create_branch(0, None, None), Some(1));
+		assert_eq!(states.create_branch(0, 1), Some(1));
+    // root branching.
+		assert_eq!(states.create_branch(0, 1), Some(2));
+    // new txs
+    for _ in 0..3 {
+      states.linear_state_mut(1).map(|ls| ls.start_transaction());
+    }
+		assert_eq!(states.create_branch(1, 2), Some(3));
+    assert_eq!(states.linear_state_mut(1), None);
+    assert!(states.linear_state(1).is_some());
 		states
 	}
 
+	#[test]
+  fn test_to_define() {
+    let states = test_states();
+  }
 }

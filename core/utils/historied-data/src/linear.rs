@@ -689,7 +689,6 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 			return self.get_mut(history);
 		}
 	}
-
 });
 
 impl<'a> Serialized<'a> {
