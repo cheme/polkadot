@@ -20,6 +20,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod tree;
 pub mod linear;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
