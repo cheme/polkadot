@@ -14,18 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with Substrate.	If not, see <http://www.gnu.org/licenses/>.
 
-//! Data store acyclic directed graph as trie.
+//! Data store acyclic directed graph as tree.
 //!
-//! General structur is an array of linear, each linear originating
+//! General structure is an array of linear, each linear originating
 //! from another array at designated index.
 //!
 //! Only support commited and prospective states.
 
 // memo:
 // - for linear
-// transaction = new block number (new block new tx)
-// commit transaction = fusioning two blocks (should never be use)
-// discard transaction = removing a block (latest one in branch).
+// in or out only, state is parent state for in (out can always get gc).
 // - for tree
 // commit prospective = 
 // put commit counter to prospective counter +1, then recurse branch in path to this value. 
@@ -43,10 +41,17 @@
 // For branch case: some pruning is done over those indexed value (so by commit_ix (similar to
 // a block nb) -> therefore we do not use a boolean value).
 //
+// In fact committed can be a simple boolean: keeping index can help for gc (but there will
+// probably need to manage a collection of branch_ix to gc: when linear state is reduced).
+// 
+// TODO consider removing this committed (not strictly needed (except to avoid gc)
+//
 // - prospective : this is only valid for latest prospective value, is before commited. 
 //   - on drop prospective: +1 counter prospective meaning no prospective valid anymore
 //   - on commit: prospective = commited index + 1 and update commited index of commited branch (so the commited
 //   value remain).
+//
+//-> only to avoid update on btree.
 //
 
 use crate::{
