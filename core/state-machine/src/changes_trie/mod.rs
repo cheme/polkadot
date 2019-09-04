@@ -67,6 +67,7 @@ pub use self::prune::{prune, oldest_non_pruned_trie};
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
+use std::sync::Arc;
 use hash_db::{Hasher, Prefix};
 use crate::backend::Backend;
 use num_traits::{One, Zero};
@@ -134,13 +135,11 @@ pub trait RootsStorage<H: Hasher, Number: BlockNumber>: Send + Sync {
 pub trait Storage<H: Hasher, Number: BlockNumber>: RootsStorage<H, Number> {
 	/// Casts from self reference to RootsStorage reference.
 	fn as_roots_storage(&self) -> &dyn RootsStorage<H, Number>;
-	/// Execute given functor with cached entry for given trie root.
-	/// Returns true if the functor has been called (cache entry exists) and false otherwise.
-	fn with_cached_changed_keys(
+	/// Get cached changed keys at trie with given root. Returns None if entry is missing from the cache.
+	fn cached_changed_keys(
 		&self,
 		root: &H::Out,
-		functor: &mut dyn FnMut(&HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>),
-	) -> bool;
+	) -> Option<Arc<HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>>>;
 	/// Get a trie node.
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String>;
 }

@@ -23,6 +23,7 @@ use trie::MemoryDB;
 use parking_lot::RwLock;
 use crate::changes_trie::{BuildCache, RootsStorage, Storage, AnchorBlockId, BlockNumber};
 use crate::trie_backend_essence::TrieBackendStorage;
+use std::sync::Arc;
 
 #[cfg(test)]
 use crate::backend::insert_into_memory_db;
@@ -176,12 +177,11 @@ impl<H: Hasher, Number: BlockNumber> Storage<H, Number> for InMemoryStorage<H, N
 		self
 	}
 
-	fn with_cached_changed_keys(
+	fn cached_changed_keys(
 		&self,
 		root: &H::Out,
-		functor: &mut dyn FnMut(&HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>),
-	) -> bool {
-		self.cache.with_changed_keys(root, functor)
+	) -> Option<Arc<HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>>> {
+		self.cache.get(root).clone()
 	}
 
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {

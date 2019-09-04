@@ -17,6 +17,7 @@
 //! Changes tries build cache.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Changes trie build cache.
 ///
@@ -36,7 +37,7 @@ pub struct BuildCache<H, N> {
 	/// The `Option<Vec<u8>>` in inner `HashMap` stands for the child storage key.
 	/// If it is `None`, then the `HashSet` contains keys changed in top-level storage.
 	/// If it is `Some`, then the `HashSet` contains keys changed in child storage, identified by the key.
-	changed_keys: HashMap<H, HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>>,
+	changed_keys: HashMap<H, Arc<HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>>>,
 }
 
 /// The action to perform when block-with-changes-trie is imported.
@@ -87,24 +88,8 @@ impl<H, N> BuildCache<H, N>
 	}
 
 	/// Get cached changed keys for changes trie with given root.
-	pub fn get(&self, root: &H) -> Option<&HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>> {
-		self.changed_keys.get(&root)
-	}
-
-	/// Execute given functor with cached entry for given block.
-	/// Returns true if the functor has been called and false otherwise.
-	pub fn with_changed_keys(
-		&self,
-		root: &H,
-		functor: &mut dyn FnMut(&HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>),
-	) -> bool {
-		match self.changed_keys.get(&root) {
-			Some(changed_keys) => {
-				functor(changed_keys);
-				true
-			},
-			None => false,
-		}
+	pub fn get(&self, root: &H) -> Option<Arc::<HashMap<Option<Vec<u8>>, HashSet<Vec<u8>>>>> {
+		self.changed_keys.get(&root).cloned()
 	}
 
 	/// Insert data into cache.
@@ -112,7 +97,7 @@ impl<H, N> BuildCache<H, N>
 		match action {
 			CacheAction::CacheBuildData(data) => {
 				self.roots_by_number.insert(data.block, data.trie_root.clone());
-				self.changed_keys.insert(data.trie_root, data.changed_keys);
+				self.changed_keys.insert(data.trie_root, Arc::new(data.changed_keys));
 
 				for digest_input_block in data.digest_input_blocks {
 					let digest_input_block_hash = self.roots_by_number.remove(&digest_input_block);
@@ -221,7 +206,7 @@ mod tests {
 		assert_eq!(cache.changed_keys.len(), 1);
 		assert_eq!(
 			cache.get(&1).unwrap().clone(),
-			vec![(None, vec![vec![1]].into_iter().collect())].into_iter().collect(),
+			Arc::new(vec![(None, vec![vec![1]].into_iter().collect())].into_iter().collect()),
 		);
 	}
 
