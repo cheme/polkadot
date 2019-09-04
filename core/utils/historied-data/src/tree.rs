@@ -53,14 +53,75 @@ use crate::{
 	State as TransactionState,
 };
 use crate::linear::{
-	History as LinearHistory,
-	Serialized as LinearSerialized,
-	States as LinearStates,
+	MemoryOnly as LinearHistory,
 };
 use rstd::borrow::Cow;
 use rstd::vec::Vec;
 use rstd::collections::btree_map::BTreeMap;
 
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct LinearStates {
+	/// number of elements: all elements equal or bellow
+	/// this index are valid, over this index they are not.
+	len: usize,
+	/// Indicates if the state is modifiable (when an element is dropped
+	/// we cannot append and need to create a new branch).
+	has_deleted_index: bool,
+}
+
+impl Default for LinearStates {
+	fn default() -> Self {
+		LinearStates {
+			len: 1,
+			has_deleted_index: false,
+		}
+	}
+}
+
+impl LinearStates {
+	pub fn add_state(&mut self) -> bool {
+		if !self.has_deleted_index {
+			self.len += 1;
+			true
+		} else {
+			false
+		}
+	}
+
+	pub fn drop_state(&mut self) {
+		if self.len > 0 {
+			self.len -= 1;
+			self.has_deleted_index = true;
+			// TODO add ix to a to be gc collection
+		}
+	}
+
+	/// act as a truncate
+	pub fn keep_state(&mut self, index: usize) {
+		if self.len > index {
+			self.len = index;
+			self.has_deleted_index = true;
+			// TODO add ix to a to be gc collection
+		}
+	}
+
+	/// get state
+	/// simply return true if exists (there is no specific state).
+	pub fn get_state(&self, index: usize) -> bool {
+		self.len > index
+	}
+
+	pub fn latest_ix(&self) -> Option<usize> {
+		if self.len > 0 {
+			Some(self.len - 1)
+		} else {
+			None
+		}
+	}
+
+
+}
 // TODO could benefit from smallvec!! need an estimation
 // of number of node (it still stores a usize + a smallvec) 
 #[derive(Debug, Clone)]
@@ -131,10 +192,7 @@ pub struct StatesBranch {
 	branch_ix: usize,
 	
 	origin_branch_ix: usize,
-
-	// when a branch has children it cannot be change (get_mut return none
-	// when get return something).
-	has_children: bool,
+	origin_linear_ix: usize,
 
 	prospective_ix: usize,
 
@@ -169,29 +227,32 @@ impl States {
 	// or None if origin branch does not allow branch creation (commited branch or non existing).
 	pub fn create_branch(
 		&mut self,
-		branch_ix: usize,
 		nb_branch: usize,
+		branch_ix: usize,
+		linear_ix: Option<usize>,
 	) -> Option<usize> {
 		if nb_branch == 0 {
 			return None;
 		}
 
 		// for 0 is the first branch creation case
-		if branch_ix != 0 {
-			// branch should not be dropped.
-			if let Some(branch) = self.access_branch_mut(branch_ix) {
-				branch.has_children = true;
+		let linear_ix = if branch_ix == 0 {
+			debug_assert!(linear_ix.is_none());
+			0
+		} else {
+			if let Some(linear_ix) = self.get_node(branch_ix, linear_ix) {
+				linear_ix
 			} else {
 				return None;
 			}
-		}
+		};
 
 		let result_ix = self.last_branch_ix + 1;
 		for i in result_ix .. result_ix + nb_branch {
 			self.branches.insert(i, StatesBranch {
 				branch_ix: i,
 				origin_branch_ix: branch_ix,
-				has_children: false,
+				origin_linear_ix: linear_ix,
 				committed_ix: usize::max_value(),
 				prospective_ix: self.prospective_ix,
 				state: Default::default(),
@@ -202,6 +263,30 @@ impl States {
 		Some(result_ix)
 	}
 
+	/// check if node is valid for given index.
+	/// return linear_ix.
+	/// TODO consider renaming?
+	pub fn get_node(
+		&self,
+		branch_ix: usize,
+		linear_ix: Option<usize>,
+	) -> Option<usize> {
+		if let Some(branch) = self.branches.get(&branch_ix) {
+			if let Some(linear_ix) = linear_ix {
+				if branch.state.get_state(linear_ix) {
+					Some(linear_ix)
+				} else {
+					None
+				}
+			} else {
+				branch.state.latest_ix()
+			}
+		} else {
+			None
+		}
+	}
+
+	/// get node without index checks, can panick.
 	pub fn get(&self, branch_ix: usize, linear_ix: usize) -> TransactionState {
 		unimplemented!();
 	}
@@ -228,7 +313,7 @@ impl States {
 
 	pub fn linear_state_mut (&mut self, branch_ix: usize) -> Option<&mut LinearStates> {
 		self.access_branch_mut(branch_ix)
-			.filter(|b| !b.has_children)
+//			.filter(|b| !b.has_children)
 			.map(|b| &mut b.state)
 	}
 
@@ -244,13 +329,26 @@ mod test {
 
 	fn test_states() -> States {
 		let mut states = States::default();
-		assert_eq!(states.create_branch(0, 1), Some(1));
+		assert_eq!(states.create_branch(1, 0, None), Some(1));
 		// root branching.
-		assert_eq!(states.create_branch(0, 1), Some(2));
-		assert_eq!(states.create_branch(1, 2), Some(3));
+		assert_eq!(states.create_branch(1, 0, None), Some(2));
+		states.linear_state_mut(1).map(|ls| ls.add_state());
+		assert_eq!(states.create_branch(2, 1, None), Some(3));
+		assert_eq!(states.create_branch(1, 1, Some(0)), Some(5));
+		assert_eq!(states.create_branch(1, 1, Some(2)), None);
+		assert_eq!(Some(true), states.linear_state_mut(1).map(|ls| ls.add_state()));
+		states.linear_state_mut(1).map(|ls| ls.drop_state());
+		// cannot create when dropped happen on branch
+		assert_eq!(Some(false), states.linear_state_mut(1).map(|ls| ls.add_state()));
+		// TODO add content through branching
 		assert!(states.linear_state(1).is_some());
-		// new txs
-		states.linear_state_mut(1).map(|ls| ls.start_transaction());
+		// 0> 1: _ _
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+
+		panic!("{:?}", states);
 		states
 	}
 

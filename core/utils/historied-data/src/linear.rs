@@ -31,13 +31,13 @@ use rstd::borrow::Cow;
 /// By in memory we expect that this will
 /// not required persistence and is not serialized.
 #[cfg(not(feature = "std"))]
-type MemoryOnly<V> = Vec<(V, usize)>;
+pub(crate) type MemoryOnly<V> = Vec<(V, usize)>;
 
 /// Array like buffer for in memory storage.
 /// By in memory we expect that this will
 /// not required persistence and is not serialized.
 #[cfg(feature = "std")]
-type MemoryOnly<V> = smallvec::SmallVec<[(V, usize); ALLOCATED_HISTORY]>;
+pub(crate) type MemoryOnly<V> = smallvec::SmallVec<[(V, usize); ALLOCATED_HISTORY]>;
 
 /// Size of preallocated history per element.
 /// Currently at two for committed and prospective only.
