@@ -111,6 +111,7 @@ fn tx_drop_get_1(b: &mut Bencher, input: &Vec<u8>) {
 			black_box(overlayed.storage(&i.0));
 		}
 		overlayed.commit_transaction();
+		overlayed.gc(true);
 		for i in key_vals.iter() {
 			black_box(overlayed.storage(&i.0));
 		}
@@ -137,6 +138,7 @@ fn tx_drop_get_2(b: &mut Bencher, input: &Vec<u8>) {
 		for i in 0..nb_layer {
 			overlayed.commit_transaction();
 		}
+		overlayed.gc(true);
 		for i in key_vals.iter() {
 			black_box(overlayed.storage(&i.0));
 		}
@@ -164,6 +166,7 @@ fn tx_drop_get_3(b: &mut Bencher, input: &Vec<u8>) {
 		for i in 0..nb_layer {
 			overlayed.discard_transaction();
 		}
+		overlayed.gc(true);
 		for i in key_vals.iter() {
 			black_box(overlayed.storage(&i.0));
 		}
@@ -184,6 +187,7 @@ fn tx_drop_get_4(b: &mut Bencher, input: &Vec<u8>) {
 		for i in 0..nb_layer {
 			overlayed.discard_transaction();
 		}
+		overlayed.gc(true);
 		for i in key_vals.iter() {
 			black_box(overlayed.storage(&i.0));
 		}
