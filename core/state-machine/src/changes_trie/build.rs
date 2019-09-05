@@ -306,129 +306,7 @@ mod test {
 		InMemoryStorage<Blake2Hasher, u64>,
 		OverlayedChanges,
 		Configuration,
-	) {
-		let config = Configuration { digest_interval: 4, digest_levels: 2 };
-		let backend: InMemory<_> = vec![
-			(vec![100], vec![255]),
-			(vec![101], vec![255]),
-			(vec![102], vec![255]),
-			(vec![103], vec![255]),
-			(vec![104], vec![255]),
-			(vec![105], vec![255]),
-		].into_iter().collect::<::std::collections::HashMap<_, _>>().into();
-		let child_trie_key1 = b"1".to_vec();
-		let child_trie_key2 = b"2".to_vec();
-		let storage = InMemoryStorage::with_inputs(vec![
-			(zero + 1, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 1, key: vec![100] }, vec![1, 3]),
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 1, key: vec![101] }, vec![0, 2]),
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 1, key: vec![105] }, vec![0, 2, 4]),
-			]),
-			(zero + 2, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 2, key: vec![102] }, vec![0]),
-			]),
-			(zero + 3, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 3, key: vec![100] }, vec![0]),
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 3, key: vec![105] }, vec![1]),
-			]),
-			(zero + 4, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 4, key: vec![100] }, vec![0, 2, 3]),
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 4, key: vec![101] }, vec![1]),
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 4, key: vec![103] }, vec![0, 1]),
-
-				InputPair::DigestIndex(DigestIndex { block: zero + 4, key: vec![100] }, vec![zero + 1, zero + 3]),
-				InputPair::DigestIndex(DigestIndex { block: zero + 4, key: vec![101] }, vec![zero + 1]),
-				InputPair::DigestIndex(DigestIndex { block: zero + 4, key: vec![102] }, vec![zero + 2]),
-				InputPair::DigestIndex(DigestIndex { block: zero + 4, key: vec![105] }, vec![zero + 1, zero + 3]),
-			]),
-			(zero + 5, Vec::new()),
-			(zero + 6, vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 6, key: vec![105] }, vec![2]),
-			]),
-			(zero + 7, Vec::new()),
-			(zero + 8, vec![
-				InputPair::DigestIndex(DigestIndex { block: zero + 8, key: vec![105] }, vec![zero + 6]),
-			]),
-			(zero + 9, Vec::new()), (zero + 10, Vec::new()), (zero + 11, Vec::new()), (zero + 12, Vec::new()),
-			(zero + 13, Vec::new()), (zero + 14, Vec::new()), (zero + 15, Vec::new()),
-		], vec![(child_trie_key1.clone(), vec![
-				(zero + 1, vec![
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 1, key: vec![100] }, vec![1, 3]),
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 1, key: vec![101] }, vec![0, 2]),
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 1, key: vec![105] }, vec![0, 2, 4]),
-				]),
-				(zero + 2, vec![
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 2, key: vec![102] }, vec![0]),
-				]),
-				(zero + 4, vec![
-					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 2, key: vec![102] }, vec![0, 3]),
-
-					InputPair::DigestIndex(DigestIndex { block: zero + 4, key: vec![102] }, vec![zero + 2]),
-				]),
-			]),
-		]);
-		let changes = OverlayedChanges {
-			changes: OverlayedChangeSet {
-				history: States::test_vector(vec![TransactionState::Committed, TransactionState::Pending]),
-				top: vec![
-					(EXTRINSIC_INDEX.to_vec(), History::from_iter(vec![
-						(OverlayedValue {
-							value: Some(3u32.encode()),
-							extrinsics: None,
-						}, 0),
-					])),
-					(vec![100], History::from_iter(vec![
-						(OverlayedValue {
-							value: Some(vec![202]),
-							extrinsics: Some(vec![3].into_iter().collect())
-						}, 0),
-						(OverlayedValue {
-							value: Some(vec![200]),
-							extrinsics: Some(vec![3, 0, 2].into_iter().collect())
-						}, 1),
-					])),
-					(vec![101], History::from_iter(vec![
-						(OverlayedValue {
-						value: Some(vec![203]),
-						extrinsics: Some(vec![1].into_iter().collect())
-						}, 0),
-					])),
-					(vec![103], History::from_iter(vec![
-						(OverlayedValue {
-						value: None,
-						extrinsics: Some(vec![0, 1].into_iter().collect())
-						}, 1),
-					])),
-				].into_iter().collect(),
-				children: vec![
-					(child_trie_key1, vec![
-						(vec![100], History::from_iter(vec![
-							(OverlayedValue {
-								value: Some(vec![202]),
-								extrinsics: Some(vec![3].into_iter().collect())
-							}, 0),
-							(OverlayedValue {
-								value: Some(vec![200]),
-								extrinsics: Some(vec![3, 0, 2].into_iter().collect())
-							}, 1),
-						])),
-					].into_iter().collect()),
-					(child_trie_key2, vec![
-						(vec![100], History::from_iter(vec![
-							(OverlayedValue {
-								value: Some(vec![200]),
-								extrinsics: Some(vec![0, 2].into_iter().collect())
-							}, 1),
-						])),
-					].into_iter().collect()),
-				].into_iter().collect(),
-			},
-			operation_from_last_gc: 0,
-			changes_trie_config: Some(config.clone()),
-		};
-
-		(backend, storage, changes, config)
-	}
+	) { unimplemented!() }
 
 	fn configuration_range<'a>(config: &'a Configuration, zero: u64) -> ConfigurationRange<'a, u64> {
 		ConfigurationRange {
@@ -615,13 +493,14 @@ mod test {
 		fn test_with_zero(zero: u64) {
 			let (backend, storage, mut changes, config) = prepare_for_build(zero);
 
-			// 110: missing from backend, set to None in overlay
+      unimplemented!();
+/*			// 110: missing from backend, set to None in overlay
 			changes.changes.top.insert(vec![110], History::from_iter(vec![
 				(OverlayedValue {
 					value: None,
 					extrinsics: Some(vec![1].into_iter().collect()),
 				}, 1),
-			]));
+			]));*/
 
 			let parent = AnchorBlockId { hash: Default::default(), number: zero + 3 };
 			let changes_trie_nodes = prepare_input(

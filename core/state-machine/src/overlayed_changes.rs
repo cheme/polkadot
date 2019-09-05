@@ -21,9 +21,6 @@ use std::collections::{HashMap, BTreeSet};
 use codec::Decode;
 use crate::changes_trie::{NO_EXTRINSIC_INDEX, Configuration as ChangesTrieConfig};
 use primitives::storage::well_known_keys::EXTRINSIC_INDEX;
-use historied_data::linear::{States, History};
-use historied_data::State as TransactionState;
-use historied_data::DEFAULT_GC_CONF;
 
 /// The overlayed changes to state to be queried on top of the backend.
 ///
@@ -31,15 +28,12 @@ use historied_data::DEFAULT_GC_CONF;
 /// that can be cleared.
 #[derive(Debug, Default, Clone)]
 pub struct OverlayedChanges {
-	/// Changes with their history.
+	/// Changes that are not yet committed.
 	pub(crate) changes: OverlayedChangeSet,
+	
 	/// Changes trie configuration. None by default, but could be installed by the
 	/// runtime if it supports change tries.
 	pub(crate) changes_trie_config: Option<ChangesTrieConfig>,
-	/// Counter of number of operation between garbage collection.
-	/// Add or delete cost one, additional cost per size by counting a fix size
-	/// as a unit.
-	pub(crate) operation_from_last_gc: usize,
 }
 
 /// The storage value, used inside OverlayedChanges.
@@ -53,148 +47,133 @@ pub struct OverlayedValue {
 	pub extrinsics: Option<BTreeSet<u32>>,
 }
 
-/// Overlayed change set, keep history of values.
-///
-/// This does not work by stacking hashmap for transaction,
-/// but store history of value instead.
-/// Value validity is given by a global indexed state history.
-/// When dropping or committing a layer of transaction,
-/// history for each values is kept until
-/// next mutable access to the value.
-#[derive(Debug, Clone, Default)]
+/// Prospective or committed overlayed change set.
+#[derive(Debug, Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct OverlayedChangeSet {
-	/// Indexed state history.
-	pub(crate) history: States,
-	/// Top level storage changes.
-	pub(crate) top: HashMap<Vec<u8>, History<OverlayedValue>>,
-	/// Child storage changes.
-	pub(crate) children: HashMap<Vec<u8>, (HashMap<Vec<u8>, History<OverlayedValue>>)>,
+	/// Changes that are not yet committed.
+	pub(crate) prospective: OverlayedChangeSetInner,
+	/// Committed changes.
+	pub(crate) committed: OverlayedChangeSetInner,
+	/// Transactions changes, used as a stack.
+	pub(crate) transactions: Vec<OverlayedChangeSetInner>,
 }
 
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
+ pub struct OverlayedChangeSetInner {
+	/// Top level storage changes.
+	pub top: HashMap<Vec<u8>, OverlayedValue>,
+	/// Child storage changes.
+	pub children: HashMap<Vec<u8>, HashMap<Vec<u8>, OverlayedValue>>,
+}
+
+ impl OverlayedChangeSetInner {
+   fn clear(&mut self) {
+     self.top.clear();
+     self.children.clear();
+   }
+ }
 #[cfg(test)]
 impl FromIterator<(Vec<u8>, OverlayedValue)> for OverlayedChangeSet {
 	fn from_iter<T: IntoIterator<Item = (Vec<u8>, OverlayedValue)>>(iter: T) -> Self {
 
-		let mut result = OverlayedChangeSet::default();
+    unimplemented!()
+/*		let mut result = OverlayedChangeSet::default();
 		result.top = iter.into_iter().map(|(k, v)| (k, {
 			let mut history = History::default();
 			history.unsafe_push(v, 0);
 			history
 		})).collect();
-		result
+		result*/
 	}
 }
 
 /// Variant of `set` value that update extrinsics.
 /// It does remove latest dropped values.
 fn set_with_extrinsic_overlayed_value(
-	h_value: &mut History<OverlayedValue>,
-	history: &[TransactionState],
+	h_value: &mut OverlayedValue,
 	value: Option<Vec<u8>>,
 	extrinsic_index: Option<u32>,
 ) {
 	if let Some(extrinsic) = extrinsic_index {
-		set_with_extrinsic_inner_overlayed_value(h_value, history, value, extrinsic)
+		set_with_extrinsic_inner_overlayed_value(h_value, value, extrinsic)
 	} else {
-		h_value.set(history, OverlayedValue {
-			value,
-			extrinsics: None,
-		})
+		h_value.value = value;
 	}
 }
 
 fn set_with_extrinsic_inner_overlayed_value(
-	h_value: &mut History<OverlayedValue>,
-	history: &[TransactionState],
+	h_value: &mut OverlayedValue,
 	value: Option<Vec<u8>>,
 	extrinsic_index: u32,
 ) {
-	let state = history.len() - 1;
-	if let Some((mut current, current_index)) = h_value.get_mut(history) {
-
-		if current_index == state {
-			current.value = value;
-			current.extrinsics.get_or_insert_with(Default::default)
-				.insert(extrinsic_index);
-
-		} else {
-			let mut extrinsics = current.extrinsics.clone();
-			extrinsics.get_or_insert_with(Default::default)
-				.insert(extrinsic_index);
-			h_value.unsafe_push(OverlayedValue {
-				value,
-				extrinsics,
-			}, state);
-		}
-	} else {
-		let mut extrinsics: Option<BTreeSet<u32>> = None;
-		extrinsics.get_or_insert_with(Default::default)
-			.insert(extrinsic_index);
-
-		h_value.unsafe_push(OverlayedValue {
-			 value,
-			 extrinsics,
-		}, state);
-
-	}
+  h_value.value = value;
+	h_value.extrinsics.get_or_insert_with(Default::default)
+		.insert(extrinsic_index);
 }
 
 impl OverlayedChangeSet {
-	/// Garbage collect.
-	fn gc(&mut self, eager: bool) {
-		let eager = if eager {
-			let transaction_index = self.history.transaction_indexes();
-			Some(transaction_index)
-		} else {
-			None
-		};
-		let history = self.history.as_ref();
-		let eager = || eager.as_ref().map(|t| t.as_slice());
-		// retain does change values
-		self.top.retain(|_, h_value| h_value.gc(history, eager()).is_some());
-		self.children.retain(|_, m| {
-			m.retain(|_, h_value| h_value.gc(history, eager()).is_some());
-			m.len() > 0
-		});
-	}
 
 	/// Whether the change set is empty.
 	pub fn is_empty(&self) -> bool {
-		self.top.is_empty() && self.children.is_empty()
+//		self.top.is_empty() && self.children.is_empty()
+unimplemented!("TODO")
 	}
 
 	/// Discard prospective changes to state.
 	pub fn discard_prospective(&mut self) {
-		self.history.discard_prospective();
+		self.transactions.clear();
+		self.prospective.clear();
 	}
 
 	/// Commit prospective changes to state.
 	pub fn commit_prospective(&mut self) {
-		self.history.commit_prospective();
+		for _ in 0 .. self.transactions.len() {
+			self.commit_transaction();
+		}
+		self.committed.top.extend(self.prospective.top.drain());
+    // TODO this is incomplete (miss children)
 	}
 
 	/// Create a new transactional layer.
 	pub fn start_transaction(&mut self) {
-		self.history.start_transaction();
+		self.transactions.push(Default::default());
 	}
 
 	/// Discard a transactional layer.
 	/// A transaction is always running (history always end with pending).
 	pub fn discard_transaction(&mut self) {
-		self.history.discard_transaction();
+		if self.transactions.len() == 0 {
+			// clear prospective on no transaction started. TODO Children
+			self.prospective.top.clear();
+		} else {
+			let _ = self.transactions.pop();
+		}
 	}
 
 	/// Commit a transactional layer.
 	pub fn commit_transaction(&mut self) {
-		self.history.commit_transaction();
+    // TODO miss children
+		match self.transactions.len() {
+			0 => (),
+			1 => self.prospective.top.extend(
+				self.transactions.pop().expect("length just checked").top.into_iter()
+			),
+			_ => {
+				let t = self.transactions.pop().expect("length just checked");
+				self.transactions.last_mut().expect("length just checked").top
+					.extend(t.top.into_iter());
+			}
+		}
 	}
 
 	/// Iterator over current state of the overlay.
 	pub fn top_iter_overlay(&self) -> impl Iterator<Item = (&[u8], &OverlayedValue)> {
-		self.top.iter()
-			.filter_map(move |(k, v)|
-				v.get(self.history.as_ref()).map(|v| (k.as_slice(), v)))
+		self.committed.top.iter()
+		  .chain(self.prospective.top.iter())
+		  .chain(self.transactions.iter().rev().flat_map(|t| t.top.iter()))
+			.map(|(k, v)| (k.as_slice(), v))
 	}
 
 	/// Iterator over current state of the overlay.
@@ -202,17 +181,24 @@ impl OverlayedChangeSet {
 		&self,
 		storage_key: Option<&[u8]>,
 	) -> impl Iterator<Item = (&[u8], &OverlayedValue)> {
-		let option_map = if let Some(storage_key) = storage_key.as_ref() {
-			self.children.get(*storage_key)
+
+		if let Some(storage_key) = storage_key.as_ref() {
+    unimplemented!("following commented code is implementation with need for some additional cloning")
+/*
+      let storage_key_owned = storage_key.to_vec();
+      self.committed.children.get(*storage_key).iter()
+			  .flat_map(move |map| map.iter())
+        .chain(self.prospective.children.get(*storage_key).iter()
+			    .flat_map(move |map| map.iter()))
+        .chain(self.transactions.iter().rev().flat_map(|t|
+            t.children.get(&storage_key_owned).iter()
+			        .flat_map(move |map| map.iter()))
+        )
+        .map(|(k, v)| (k.as_slice(), v))*/
 		} else {
-			Some(&self.top)
-		};
-		option_map
-			.into_iter()
-			.flat_map(move |map| map.iter()
-				.filter_map(move |(k, v)|
-					v.get(self.history.as_ref()).map(|v| (k.as_slice(), v)))
-			)
+      unimplemented!("TODO split this method back");
+		}
+    Vec::new().into_iter()
 	}
 
 	/// Iterator over current state of the overlay.
@@ -233,35 +219,27 @@ impl OverlayedChangeSet {
 	pub fn children_iter_overlay(
 		&self,
 	) -> impl Iterator<Item=(&[u8], impl Iterator<Item = (&[u8], &OverlayedValue)>)> {
-		self.children.iter()
-			.map(move |(keyspace, child)| (keyspace.as_slice(), child.iter()
-				.filter_map(move |(k, v)|
-					v.get(self.history.as_ref()).map(|v| (k.as_slice(), v)))
-			))
+    unimplemented!("need to bring back set of child_keys");
+    let a: Vec<(_, Vec<_>)> = Vec::new();
+    a.into_iter().map(|(k,v)| (k, v.into_iter()))
 	}
 
 	/// Iterator over current state of the overlay.
 	pub fn children_iter(
 		&self,
 	) -> impl Iterator<Item=(&[u8], impl Iterator<Item = (&[u8], Option<&[u8]>)>)> {
-		self.children.iter()
-			.map(move |(keyspace, child)| (keyspace.as_slice(), child.iter()
-				.filter_map(move |(k, v)|
-					v.get(self.history.as_ref())
-						.map(|v| (k.as_slice(), v.value.as_ref().map(|v| v.as_slice()))))
-			))
+    unimplemented!("need to bring back set of child_keys");
+    let a: Vec<(_, Vec<_>)> = Vec::new();
+    a.into_iter().map(|(k,v)| (k, v.into_iter()))
 	}
 
 	/// Iterator over current state of the overlay.
 	pub fn owned_children_iter<'a>(
 		&'a self,
 	) -> impl Iterator<Item=(Vec<u8>, impl Iterator<Item = (Vec<u8>, Option<Vec<u8>>)> + 'a)> + 'a {
-		self.children.iter()
-			.map(move |(keyspace, child)| (keyspace.to_vec(), child.iter()
-				.filter_map(move |(k, v)|
-					v.get(self.history.as_ref())
-						.map(|v| (k.to_vec(), v.value.as_ref().map(|v| v.to_vec()))))
-			))
+    unimplemented!("need to bring back set of child_keys");
+    let a: Vec<(_, Vec<_>)> = Vec::new();
+    a.into_iter().map(|(k,v)| (k, v.into_iter()))
 	}
 
 	/// Test only method to access current prospective changes.
@@ -269,26 +247,28 @@ impl OverlayedChangeSet {
 	/// avoid for new tests.
 	#[cfg(test)]
 	pub(crate) fn top_prospective(&self) -> HashMap<Vec<u8>, OverlayedValue> {
-		let mut result = HashMap::new();
+    unimplemented!()
+/*		let mut result = HashMap::new();
 		for (k, v) in self.top.iter() {
 			if let Some(v) = v.get_prospective(self.history.as_ref()) {
 				result.insert(k.clone(), v.clone());
 			}
 		}
-		result
+		result*/
 	}
 	/// Test only method to access current commited changes.
 	/// It is here to keep old test compatibility and should be
 	/// avoid for new tests.
 	#[cfg(test)]
 	pub(crate) fn top_committed(&self) -> HashMap<Vec<u8>, OverlayedValue> {
-		let mut result = HashMap::new();
+    unimplemented!()
+		/*let mut result = HashMap::new();
 		for (k, v) in self.top.iter() {
 			if let Some(v) = v.get_committed(self.history.as_ref()) {
 				result.insert(k.clone(), v.clone());
 			}
 		}
-		result
+		result*/
 	}
 
 }
@@ -326,36 +306,40 @@ impl OverlayedChanges {
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
 	pub fn storage(&self, key: &[u8]) -> Option<Option<&[u8]>> {
-		if let Some(overlay_value) = self.changes.top.get(key) {
-			if let Some(o_value) = overlay_value.get(self.changes.history.as_ref()) {
-				return Some(o_value.value.as_ref().map(|v| v.as_slice()))
-			}
-		}
-		None
+
+    for transaction in self.changes.transactions.iter().rev() {
+      if let Some(r) = transaction.top.get(key) {
+        return Some(r.value.as_ref().map(AsRef::as_ref))
+      }
+    }
+		self.changes.prospective.top.get(key)
+			.or_else(|| self.changes.committed.top.get(key))
+			.map(|x| x.value.as_ref().map(AsRef::as_ref))
 	}
 
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be refered
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
 	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Option<Option<&[u8]>> {
-		if let Some(map) = self.changes.children.get(storage_key) {
-			if let Some(overlay_value) = map.get(key) {
-				if let Some(o_value) = overlay_value.get(self.changes.history.as_ref()) {
-					return Some(o_value.value.as_ref().map(|v| v.as_slice()))
-				}
-			}
-		}
-		None
+    unimplemented!()
 	}
 
 	/// Inserts the given key-value pair into the prospective change set.
 	///
 	/// `None` can be used to delete a value specified by the given key.
-	pub fn set_storage(&mut self, key: Vec<u8>, value: Option<Vec<u8>>) {
-		self.operation_from_last_gc += DEFAULT_GC_CONF.operation_cost(value.as_ref());
+	pub fn set_storage(&mut self, key: Vec<u8>, val: Option<Vec<u8>>) {
 		let extrinsic_index = self.extrinsic_index();
-		let entry = self.changes.top.entry(key).or_default();
-		set_with_extrinsic_overlayed_value(entry, self.changes.history.as_ref(), value, extrinsic_index);
+		let entry = if self.changes.transactions.len() > 0 {
+      self.changes.transactions.last_mut().expect("just checked").top.entry(key).or_default()
+    } else {
+      self.changes.prospective.top.entry(key).or_default()
+    };
+		entry.value = val;
+
+		if let Some(extrinsic) = extrinsic_index {
+			entry.extrinsics.get_or_insert_with(Default::default)
+				.insert(extrinsic);
+		}
 	}
 
 	/// Inserts the given key-value pair into the prospective child change set.
@@ -367,16 +351,7 @@ impl OverlayedChanges {
 		key: Vec<u8>,
 		value: Option<Vec<u8>>,
 	) {
-		self.operation_from_last_gc += DEFAULT_GC_CONF.operation_cost(value.as_ref());
-		let extrinsic_index = self.extrinsic_index();
-		let map_entry = self.changes.children.entry(storage_key).or_default();
-		let entry = map_entry.entry(key).or_default();
-		set_with_extrinsic_overlayed_value(
-			entry,
-			self.changes.history.as_ref(),
-			value,
-			extrinsic_index,
-		);
+    unimplemented!()
 	}
 
 	/// Clear child storage of given storage key.
@@ -386,13 +361,8 @@ impl OverlayedChanges {
 	///
 	/// [`discard_prospective`]: #method.discard_prospective
 	pub(crate) fn clear_child_storage(&mut self, storage_key: &[u8]) {
-		let extrinsic_index = self.extrinsic_index();
-		let history = self.changes.history.as_ref();
-		let map_entry = self.changes.children.entry(storage_key.to_vec()).or_default();
-
-		self.operation_from_last_gc += map_entry.len();
-		map_entry.values_mut().for_each(|e| set_with_extrinsic_overlayed_value(e, history, None, extrinsic_index));
-	}
+    unimplemented!()
+  }
 
 	/// Removes all key-value pairs which keys share the given prefix.
 	///
@@ -401,78 +371,37 @@ impl OverlayedChanges {
 	///
 	/// [`discard_prospective`]: #method.discard_prospective
 	pub(crate) fn clear_prefix(&mut self, prefix: &[u8]) {
-		let extrinsic_index = self.extrinsic_index();
-
-		let mut number_removed = 0;
-		for (key, entry) in self.changes.top.iter_mut() {
-			if key.starts_with(prefix) {
-				number_removed += 1;
-				set_with_extrinsic_overlayed_value(entry, self.changes.history.as_ref(), None, extrinsic_index);
-			}
-		}
-
-		self.operation_from_last_gc += number_removed;
+    unimplemented!()
 	}
 
 	pub(crate) fn clear_child_prefix(&mut self, storage_key: &[u8], prefix: &[u8]) {
-		let extrinsic_index = self.extrinsic_index();
-		if let Some(child_change) = self.changes.children.get_mut(storage_key) {
-			let mut number_removed = 0;
-			for (key, entry) in child_change.iter_mut() {
-				if key.starts_with(prefix) {
-					number_removed += 1;
-					set_with_extrinsic_overlayed_value(entry, self.changes.history.as_ref(), None, extrinsic_index);
-				}
-			}
-
-			self.operation_from_last_gc += number_removed;
-		}
+    unimplemented!()
 	}
 
 	/// Discard prospective changes to state.
 	pub fn discard_prospective(&mut self) {
 		self.changes.discard_prospective();
-		if self.operation_from_last_gc > DEFAULT_GC_CONF.trigger_commit_gc {
-			self.operation_from_last_gc = 0;
-			self.gc(true);
-		}
 	}
 
 	/// Commit prospective changes to state.
 	pub fn commit_prospective(&mut self) {
 		self.changes.commit_prospective();
-		if self.operation_from_last_gc > DEFAULT_GC_CONF.trigger_commit_gc {
-			self.operation_from_last_gc = 0;
-			self.gc(true);
-		}
 	}
 
 	/// Create a new transactional layer.
 	pub fn start_transaction(&mut self) {
 		self.changes.start_transaction();
-		if self.operation_from_last_gc > DEFAULT_GC_CONF.trigger_transaction_gc {
-			self.operation_from_last_gc = 0;
-			self.gc(true);
-		}
 	}
 
 	/// Discard a transactional layer.
 	/// A transaction is always running (history always end with pending).
 	pub fn discard_transaction(&mut self) {
 		self.changes.discard_transaction();
-		if self.operation_from_last_gc > DEFAULT_GC_CONF.trigger_transaction_gc {
-			self.operation_from_last_gc = 0;
-			self.gc(true);
-		}
 	}
 
 	/// Commit a transactional layer.
 	pub fn commit_transaction(&mut self) {
 		self.changes.commit_transaction();
-		if self.operation_from_last_gc > DEFAULT_GC_CONF.trigger_transaction_gc {
-			self.operation_from_last_gc = 0;
-			self.gc(true);
-		}
 	}
 	
 	/// Consume `OverlayedChanges` and take committed set.
@@ -480,19 +409,11 @@ impl OverlayedChanges {
 		impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		impl Iterator<Item=(Vec<u8>, impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>)>,
 	){
-		let top = self.changes.top;
-		let children = self.changes.children;
-		let history = self.changes.history.clone();
-		let history2 = self.changes.history;
-		(
-			top.into_iter()
-				.filter_map(move |(k, v)| v.into_committed(history.as_ref()).map(|v| (k, v.value))),
-			children.into_iter().map(move |(sk, v)| {
-				let history2 = history2.clone();
-				(sk, v.into_iter()
-					.filter_map(move |(k, v)| v.into_committed(history2.as_ref()).map(|v| (k, v.value))))
-			})
-		)
+    unimplemented!("branch for bench");
+
+    let b: Vec<_> = Vec::new();
+    let a: Vec<(_, Vec<_>)> = Vec::new();
+    (b.into_iter(), a.into_iter().map(|(k,v)| (k, v.into_iter())))
 	}
 
 	/// Inserts storage entry responsible for current extrinsic index.
@@ -510,7 +431,8 @@ impl OverlayedChanges {
 		prospective: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 		changes_trie_config: Option<ChangesTrieConfig>,
 	) -> Self {
-		let changes = OverlayedChangeSet::default();
+    unimplemented!()
+		/*let changes = OverlayedChangeSet::default();
 		let mut result = OverlayedChanges {
 			changes,
 			changes_trie_config,
@@ -519,7 +441,7 @@ impl OverlayedChanges {
 		committed.into_iter().for_each(|(k, v)| result.set_storage(k, v));
 		result.changes.commit_prospective();
 		prospective.into_iter().for_each(|(k, v)| result.set_storage(k, v));
-		result
+		result*/
 	}
 
 	/// Returns current extrinsic index to use in changes trie construction.
@@ -547,19 +469,14 @@ impl OverlayedChanges {
 	/// Count (slow) the number of key value, history included.
 	/// Only for debugging or testing usage.
 	pub fn top_count_keyvalue_pair(&self) -> usize {
-		let mut result = 0;
+    unimplemented!()
+		/*let mut result = 0;
 		for (_, v) in self.changes.top.iter() {
 			result += v.internal_item_counts()
 		}
-		result
+		result*/
 	}
 
-	/// costy garbage collection of unneeded memory from
-	/// key values. Eager set to true will remove more
-	/// key value but allows more costy memory changes.
-	pub fn gc(&mut self, eager: bool) {
-		self.changes.gc(eager);
-	}
 }
 
 #[cfg(test)]

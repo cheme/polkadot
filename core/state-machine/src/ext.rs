@@ -384,32 +384,7 @@ mod tests {
 	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend, TestChangesTrieStorage, crate::NeverOffchainExt>;
 
 	fn prepare_overlay_with_changes() -> OverlayedChanges {
-
-		OverlayedChanges {
-			changes_trie_config: Some(ChangesTrieConfiguration {
-				digest_interval: 0,
-				digest_levels: 0,
-			}),
-			changes: OverlayedChangeSet {
-				history: Default::default(),
-				children: Default::default(),
-				top: vec![
-					(EXTRINSIC_INDEX.to_vec(), History::from_iter(vec![
-						(OverlayedValue {
-							value: Some(3u32.encode()),
-							extrinsics: Some(vec![1].into_iter().collect())
-						}, 0),
-					])),
-					(vec![1], History::from_iter(vec![
-						(OverlayedValue {
-							value: Some(vec![100]),
-							extrinsics: Some(vec![1].into_iter().collect())
-						}, 0),
-					])),
-				].into_iter().collect(),
-			},
-			operation_from_last_gc: 0,
-		}
+unimplemented!()
 	}
 
 	#[test]
