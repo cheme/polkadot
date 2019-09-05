@@ -21,9 +21,6 @@
 //!
 //! Only support commited and prospective states.
 
-// memo:
-// - for linear
-// in or out only, state is parent state for in (out can always get gc).
 // - for tree
 // commit prospective = 
 // put commit counter to prospective counter +1, then recurse branch in path to this value. 
@@ -70,24 +67,30 @@ pub struct LinearStates {
 	/// number of elements: all elements equal or bellow
 	/// this index are valid, over this index they are not.
 	len: usize,
-	/// Indicates if the state is modifiable (when an element is dropped
+  /// Maximum index before first deletion, it indicates
+	/// if the state is modifiable (when an element is dropped
 	/// we cannot append and need to create a new branch).
-	has_deleted_index: bool,
+	max_len_ix: usize,
 }
 
 impl Default for LinearStates {
 	fn default() -> Self {
 		LinearStates {
 			len: 1,
-			has_deleted_index: false,
+			max_len_ix: 1,
 		}
 	}
 }
 
 impl LinearStates {
+	pub fn has_deleted_index(&self) -> bool {
+    self.max_len_ix > self.len
+  }
+
 	pub fn add_state(&mut self) -> bool {
-		if !self.has_deleted_index {
+		if !self.has_deleted_index() {
 			self.len += 1;
+			self.max_len_ix += 1;
 			true
 		} else {
 			false
@@ -97,8 +100,6 @@ impl LinearStates {
 	pub fn drop_state(&mut self) {
 		if self.len > 0 {
 			self.len -= 1;
-			self.has_deleted_index = true;
-			// TODO add ix to a to be gc collection
 		}
 	}
 
@@ -106,8 +107,6 @@ impl LinearStates {
 	pub fn keep_state(&mut self, index: usize) {
 		if self.len > index {
 			self.len = index;
-			self.has_deleted_index = true;
-			// TODO add ix to a to be gc collection
 		}
 	}
 
