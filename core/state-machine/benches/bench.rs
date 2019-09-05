@@ -93,10 +93,102 @@ fn commit_drop_commit_and_get(b: &mut Bencher, input: &Vec<u8>) {
 			overlayed.set_storage(i.0.clone(), Some(i.1.clone()));
 		}
 		overlayed.commit_prospective();
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
 	});
 }
 
+fn tx_drop_get_1(b: &mut Bencher, input: &Vec<u8>) {
+	let key_vals = key_val(&input[..], 32, 32);
+	b.iter(move || {
+		let mut overlayed = OverlayedChanges::default();
+		overlayed.start_transaction();
+		for i in key_vals.iter() {
+			overlayed.set_storage(i.0.clone(), Some(i.1.clone()));
+		}
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+		overlayed.commit_transaction();
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+	});
+}
 
+fn tx_drop_get_2(b: &mut Bencher, input: &Vec<u8>) {
+	let key_vals = key_val(&input[..], 32, 32);
+	b.iter(move || {
+		let nb_layer = 4;
+		let mut overlayed = OverlayedChanges::default();
+		for i in 0..nb_layer {
+			overlayed.start_transaction();
+			for i in key_vals.iter() {
+				overlayed.set_storage(i.0.clone(), Some(i.1.clone()));
+			}
+			for i in key_vals.iter() {
+				black_box(overlayed.storage(&i.0));
+			}
+		}
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+		for i in 0..nb_layer {
+			overlayed.commit_transaction();
+		}
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+
+	});
+}
+
+fn tx_drop_get_3(b: &mut Bencher, input: &Vec<u8>) {
+	let key_vals = key_val(&input[..], 32, 32);
+	b.iter(move || {
+		let nb_layer = 4;
+		let mut overlayed = OverlayedChanges::default();
+		for i in 0..nb_layer {
+			overlayed.start_transaction();
+			for i in key_vals.iter() {
+				overlayed.set_storage(i.0.clone(), Some(i.1.clone()));
+			}
+			for i in key_vals.iter() {
+				black_box(overlayed.storage(&i.0));
+			}
+		}
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+		for i in 0..nb_layer {
+			overlayed.discard_transaction();
+		}
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+	});
+}
+
+fn tx_drop_get_4(b: &mut Bencher, input: &Vec<u8>) {
+	let key_vals = key_val(&input[..], 32, 32);
+	b.iter(move || {
+		let nb_layer = 4;
+		let mut overlayed = OverlayedChanges::default();
+		for i in 0..nb_layer {
+			overlayed.start_transaction();
+		}
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+		for i in 0..nb_layer {
+			overlayed.discard_transaction();
+		}
+		for i in key_vals.iter() {
+			black_box(overlayed.storage(&i.0));
+		}
+	});
+}
 
 
 fn bench_overlay_commit_drop_commit(c: &mut Criterion) {
@@ -110,9 +202,36 @@ fn bench_overlay_commit_drop_commit_get(c: &mut Criterion) {
 	c.bench_function_over_inputs("commit_drop_commit_get", commit_drop_commit_and_get, inps);
 }
 
+fn bench_tx_drop_get_1(c: &mut Criterion) {
+	let inp = get_content(12, CONTENT_KEY_SIZE * 100);
+	let inps = vec![inp];
+	c.bench_function_over_inputs("tx_drop_get_1", tx_drop_get_1, inps);
+}
+fn bench_tx_drop_get_2(c: &mut Criterion) {
+	let inp = get_content(12, CONTENT_KEY_SIZE * 100);
+	let inps = vec![inp];
+	c.bench_function_over_inputs("tx_drop_get_2", tx_drop_get_2, inps);
+}
+fn bench_tx_drop_get_3(c: &mut Criterion) {
+	let inp = get_content(12, CONTENT_KEY_SIZE * 100);
+	let inps = vec![inp];
+	c.bench_function_over_inputs("tx_drop_get_3", tx_drop_get_3, inps);
+}
+fn bench_tx_drop_get_4(c: &mut Criterion) {
+	let inp = get_content(12, CONTENT_KEY_SIZE * 100);
+	let inps = vec![inp];
+	c.bench_function_over_inputs("tx_drop_get_4", tx_drop_get_4, inps);
+}
+
+
+
 
 criterion_group!(benches,
 	bench_overlay_commit_drop_commit,
 	bench_overlay_commit_drop_commit_get,
+	bench_tx_drop_get_1,
+	bench_tx_drop_get_2,
+	bench_tx_drop_get_3,
+	bench_tx_drop_get_4,
 );
 criterion_main!(benches);
