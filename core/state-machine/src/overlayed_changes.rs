@@ -17,10 +17,12 @@
 //! The overlayed changes to state.
 
 #[cfg(test)] use std::iter::FromIterator;
-use std::collections::{HashMap, BTreeSet};
+use std::collections::{BTreeSet};
+use hashbrown::{HashMap};
 use codec::Decode;
 use crate::changes_trie::{NO_EXTRINSIC_INDEX, Configuration as ChangesTrieConfig};
 use primitives::storage::well_known_keys::EXTRINSIC_INDEX;
+use std::marker::PhantomData;
 
 /// The overlayed changes to state to be queried on top of the backend.
 ///
@@ -170,10 +172,12 @@ unimplemented!("TODO")
 
 	/// Iterator over current state of the overlay.
 	pub fn top_iter_overlay(&self) -> impl Iterator<Item = (&[u8], &OverlayedValue)> {
-		self.committed.top.iter()
+    unimplemented!();
+    Vec::new().into_iter()
+/*		self.committed.top.iter()
 		  .chain(self.prospective.top.iter())
 		  .chain(self.transactions.iter().rev().flat_map(|t| t.top.iter()))
-			.map(|(k, v)| (k.as_slice(), v))
+			.map(|(k, v)| (k.as_slice(), v))*/
 	}
 
 	/// Iterator over current state of the overlay.
@@ -307,13 +311,14 @@ impl OverlayedChanges {
 	/// value has been set.
 	pub fn storage(&self, key: &[u8]) -> Option<Option<&[u8]>> {
 
+    let h = self.changes.committed.top.make_hash2(key);
     for transaction in self.changes.transactions.iter().rev() {
-      if let Some(r) = transaction.top.get(key) {
+      if let Some(r) = transaction.top.get2(key, h) {
         return Some(r.value.as_ref().map(AsRef::as_ref))
       }
     }
-		self.changes.prospective.top.get(key)
-			.or_else(|| self.changes.committed.top.get(key))
+		self.changes.prospective.top.get2(key, h)
+			.or_else(|| self.changes.committed.top.get2(key, h))
 			.map(|x| x.value.as_ref().map(AsRef::as_ref))
 	}
 
@@ -532,7 +537,8 @@ mod tests {
 
 	#[test]
 	fn overlayed_storage_root_works() {
-		let initial: HashMap<_, _> = vec![
+    unimplemented!();
+/*		let initial: HashMap<_, _> = vec![
 			(b"doe".to_vec(), b"reindeer".to_vec()),
 			(b"dog".to_vec(), b"puppyXXX".to_vec()),
 			(b"dogglesworth".to_vec(), b"catXXX".to_vec()),
@@ -560,7 +566,7 @@ mod tests {
 		);
 		const ROOT: [u8; 32] = hex!("39245109cef3758c2eed2ccba8d9b370a917850af3824bc8348d505df2c298fa");
 
-		assert_eq!(ext.storage_root(), H256::from(ROOT));
+		assert_eq!(ext.storage_root(), H256::from(ROOT));*/
 	}
 
 	#[test]
