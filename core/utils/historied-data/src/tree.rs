@@ -97,17 +97,23 @@ impl LinearStates {
 		}
 	}
 
-	pub fn drop_state(&mut self) {
+  /// return possible dropped state
+	pub fn drop_state(&mut self) -> Option<usize> {
 		if self.len > 0 {
 			self.len -= 1;
-		}
+      Some(self.len)
+		} else {
+      None
+    }
 	}
 
-	/// act as a truncate
-	pub fn keep_state(&mut self, index: usize) {
+	/// act as a truncate, returning range of deleted (end excluded)
+	pub fn keep_state(&mut self, index: usize) -> (usize, usize) {
 		if self.len > index {
+      let old_len = self.len;
 			self.len = index;
-		}
+      (index, old_len)
+		} else { (index, index) }
 	}
 
 	/// get state
@@ -123,7 +129,6 @@ impl LinearStates {
 			None
 		}
 	}
-
 
 }
 // TODO could benefit from smallvec!! need an estimation
@@ -336,17 +341,18 @@ mod test {
 		assert_eq!(states.create_branch(1, 0, None), Some(1));
 		// root branching.
 		assert_eq!(states.create_branch(1, 0, None), Some(2));
-		states.linear_state_mut(1).map(|ls| ls.add_state());
+		assert_eq!(Some(true), states.linear_state_mut(1).map(|ls| ls.add_state()));
 		assert_eq!(states.create_branch(2, 1, None), Some(3));
 		assert_eq!(states.create_branch(1, 1, Some(0)), Some(5));
 		assert_eq!(states.create_branch(1, 1, Some(2)), None);
 		assert_eq!(Some(true), states.linear_state_mut(1).map(|ls| ls.add_state()));
-		states.linear_state_mut(1).map(|ls| ls.drop_state());
+		assert_eq!(Some(Some(2)), states.linear_state_mut(1).map(|ls| ls.drop_state()));
 		// cannot create when dropped happen on branch
 		assert_eq!(Some(false), states.linear_state_mut(1).map(|ls| ls.add_state()));
+
 		// TODO add content through branching
 		assert!(states.linear_state(1).is_some());
-		// 0> 1: _ _
+		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
 		// |		 |> 5: 1
