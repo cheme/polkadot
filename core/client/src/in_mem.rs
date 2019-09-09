@@ -42,44 +42,51 @@ struct PendingBlock<B: BlockT> {
 
 #[derive(PartialEq, Eq, Clone)]
 enum StoredBlock<B: BlockT> {
-	Header(B::Header, Option<Justification>),
-	Full(B, Option<Justification>),
+	Header(B::Header, Option<Justification>, u64),
+	Full(B, Option<Justification>, u64),
 }
 
 impl<B: BlockT> StoredBlock<B> {
-	fn new(header: B::Header, body: Option<Vec<B::Extrinsic>>, just: Option<Justification>) -> Self {
+	fn new(header: B::Header, body: Option<Vec<B::Extrinsic>>, just: Option<Justification>, branch_index: u64) -> Self {
 		match body {
-			Some(body) => StoredBlock::Full(B::new(header, body), just),
-			None => StoredBlock::Header(header, just),
+			Some(body) => StoredBlock::Full(B::new(header, body), just, branch_index),
+			None => StoredBlock::Header(header, just, branch_index),
 		}
 	}
 
 	fn header(&self) -> &B::Header {
 		match *self {
-			StoredBlock::Header(ref h, _) => h,
-			StoredBlock::Full(ref b, _) => b.header(),
+			StoredBlock::Header(ref h, _, _) => h,
+			StoredBlock::Full(ref b, _, _) => b.header(),
+		}
+	}
+
+	fn branch_index(&self) -> u64 {
+		match *self {
+			StoredBlock::Header(_, _, i)
+			| StoredBlock::Full(_, _, i) => i
 		}
 	}
 
 	fn justification(&self) -> Option<&Justification> {
 		match *self {
-			StoredBlock::Header(_, ref j) | StoredBlock::Full(_, ref j) => j.as_ref()
+			StoredBlock::Header(_, ref j, _) | StoredBlock::Full(_, ref j, _) => j.as_ref()
 		}
 	}
 
 	fn extrinsics(&self) -> Option<&[B::Extrinsic]> {
 		match *self {
-			StoredBlock::Header(_, _) => None,
-			StoredBlock::Full(ref b, _) => Some(b.extrinsics()),
+			StoredBlock::Header(_, _, _) => None,
+			StoredBlock::Full(ref b, _, _) => Some(b.extrinsics()),
 		}
 	}
 
-	fn into_inner(self) -> (B::Header, Option<Vec<B::Extrinsic>>, Option<Justification>) {
+	fn into_inner(self) -> (B::Header, Option<Vec<B::Extrinsic>>, Option<Justification>, u64) {
 		match self {
-			StoredBlock::Header(header, just) => (header, None, just),
-			StoredBlock::Full(block, just) => {
+			StoredBlock::Header(header, just, b_index) => (header, None, just, b_index),
+			StoredBlock::Full(block, just, b_index) => {
 				let (header, body) = block.deconstruct();
-				(header, Some(body), just)
+				(header, Some(body), just, b_index)
 			}
 		}
 	}
@@ -98,6 +105,11 @@ struct BlockchainStorage<Block: BlockT> {
 	changes_trie_cht_roots: HashMap<NumberFor<Block>, Block::Hash>,
 	leaves: LeafSet<Block::Hash, NumberFor<Block>>,
 	aux: HashMap<Vec<u8>, Vec<u8>>,
+	// TODO EMCH not sure useful for in_mem
+	// TODO maybe set of appendable could be better?? TODO check usage
+	// TODO BTreeset ??
+	not_appendable_branch_index: HashSet<u64>,
+	last_branch_index: u64,
 }
 
 /// In-memory blockchain. Supports concurrent reads.
@@ -138,6 +150,8 @@ impl<Block: BlockT> Blockchain<Block> {
 				changes_trie_cht_roots: HashMap::new(),
 				leaves: LeafSet::new(),
 				aux: HashMap::new(),
+				last_branch_index: 0,
+				not_appendable_branch_index: HashSet::new(),
 			}));
 		Blockchain {
 			storage: storage.clone(),
@@ -152,6 +166,7 @@ impl<Block: BlockT> Blockchain<Block> {
 		justification: Option<Justification>,
 		body: Option<Vec<<Block as BlockT>::Extrinsic>>,
 		new_state: NewBlockState,
+		branch_index: u64,
 	) -> crate::error::Result<()> {
 		let number = header.number().clone();
 		if new_state.is_best() {
@@ -160,8 +175,16 @@ impl<Block: BlockT> Blockchain<Block> {
 
 		{
 			let mut storage = self.storage.write();
-			storage.leaves.import(hash.clone(), number.clone(), header.parent_hash().clone());
-			storage.blocks.insert(hash.clone(), StoredBlock::new(header, body, justification));
+			storage.leaves.import(
+				hash.clone(),
+				number.clone(),
+				header.parent_hash().clone(),
+				branch_index,
+			);
+			storage.blocks.insert(
+				hash.clone(),
+				StoredBlock::new(header, body, justification, branch_index),
+			);
 
 			if let NewBlockState::Final = new_state {
 				storage.finalized_hash = hash;
@@ -267,7 +290,7 @@ impl<Block: BlockT> Blockchain<Block> {
 				.expect("hash was fetched from a block in the db; qed");
 
 			let block_justification = match block {
-				StoredBlock::Header(_, ref mut j) | StoredBlock::Full(_, ref mut j) => j
+				StoredBlock::Header(_, ref mut j, _) | StoredBlock::Full(_, ref mut j, _) => j
 			};
 
 			*block_justification = justification;
@@ -314,6 +337,24 @@ impl<Block: BlockT> HeaderBackend<Block> for Blockchain<Block> {
 
 	fn number(&self, hash: Block::Hash) -> error::Result<Option<NumberFor<Block>>> {
 		Ok(self.storage.read().blocks.get(&hash).map(|b| *b.header().number()))
+	}
+
+	fn branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
+		Ok(self.storage.read().blocks.get(&hash).map(|b| b.branch_index()))
+	}
+
+	fn appendable_branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
+		let storage = self.storage.read();
+		Ok(
+			storage.blocks.get(&hash).map(|b| b.branch_index())
+				.filter(|index| !storage.not_appendable_branch_index.contains(index))
+		)
+	}
+
+	fn next_branch_index(&self) -> error::Result<u64> {
+		let mut storage = self.storage.write();
+		storage.last_branch_index += 1;
+		Ok(storage.last_branch_index)
 	}
 
 	fn hash(&self, number: <<Block as BlockT>::Header as HeaderT>::Number) -> error::Result<Option<Block::Hash>> {
@@ -391,10 +432,11 @@ impl<Block: BlockT> light::blockchain::Storage<Block> for Blockchain<Block>
 		header: Block::Header,
 		_cache: HashMap<CacheKeyId, Vec<u8>>,
 		state: NewBlockState,
+		branch_index: u64,
 		aux_ops: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	) -> error::Result<()> {
 		let hash = header.hash();
-		self.insert(hash, header, None, None, state)?;
+		self.insert(hash, header, None, None, state, branch_index)?;
 
 		self.write_aux(aux_ops);
 		Ok(())
@@ -466,10 +508,11 @@ where
 		body: Option<Vec<<Block as BlockT>::Extrinsic>>,
 		justification: Option<Justification>,
 		state: NewBlockState,
+		branch_index: u64,
 	) -> error::Result<()> {
 		assert!(self.pending_block.is_none(), "Only one block per operation is allowed");
 		self.pending_block = Some(PendingBlock {
-			block: StoredBlock::new(header, body, justification),
+			block: StoredBlock::new(header, body, justification, branch_index),
 			state,
 		});
 		Ok(())
@@ -626,7 +669,7 @@ where
 
 		if let Some(pending_block) = operation.pending_block {
 			let old_state = &operation.old_state;
-			let (header, body, justification) = pending_block.block.into_inner();
+			let (header, body, justification, branch_index) = pending_block.block.into_inner();
 
 			let hash = header.hash();
 
@@ -643,7 +686,7 @@ where
 				}
 			}
 
-			self.blockchain.insert(hash, header, justification, body, pending_block.state)?;
+			self.blockchain.insert(hash, header, justification, body, pending_block.state, branch_index)?;
 		}
 
 		if !operation.aux.is_empty() {

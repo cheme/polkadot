@@ -153,6 +153,7 @@ impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, H> where
 				header,
 				operation.cache,
 				operation.leaf_state,
+				0, // no branch index needed for light client.
 				operation.aux_ops,
 			)?;
 
@@ -269,6 +270,7 @@ where
 		_body: Option<Vec<Block::Extrinsic>>,
 		_justification: Option<Justification>,
 		state: NewBlockState,
+		_branch_index: u64,
 	) -> ClientResult<()> {
 		self.leaf_state = state;
 		self.header = Some(header);

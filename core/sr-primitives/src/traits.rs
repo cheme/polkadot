@@ -731,6 +731,11 @@ pub trait Block: Clone + Send + Sync + Codec + Eq + MaybeSerializeDebugButNotDes
 	fn hash(&self) -> Self::Hash {
 		<<Self::Header as Header>::Hashing as Hash>::hash_of(self.header())
 	}
+	/// TODO is it relevant. TODO even consider removal as it is just a
+	/// short for two meth call.
+	fn block_number(&self) -> &<Self::Header as Header>::Number {
+		self.header().number()
+	}
 }
 
 /// Something that acts like an `Extrinsic`.

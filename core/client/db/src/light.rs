@@ -188,6 +188,23 @@ impl<Block> BlockchainHeaderBackend<Block> for LightStorage<Block>
 	fn hash(&self, number: NumberFor<Block>) -> ClientResult<Option<Block::Hash>> {
 		Ok(self.header(BlockId::Number(number))?.map(|header| header.hash().clone()))
 	}
+
+	fn branch_index(&self, _hash: Block::Hash) -> ClientResult<Option<u64>> {
+		// no support for light.
+		Ok(Some(0))
+	}
+
+	fn appendable_branch_index(&self, _hash: Block::Hash) -> ClientResult<Option<u64>> {
+		// no support for light.
+		Ok(Some(0))
+	}
+
+	fn next_branch_index(&self) -> ClientResult<u64> {
+		// no support for light.
+		Ok(0)
+	}
+
+
 }
 
 impl<Block: BlockT> LightStorage<Block> {
@@ -386,6 +403,7 @@ impl<Block> LightBlockchainStorage<Block> for LightStorage<Block>
 		header: Block::Header,
 		cache_at: HashMap<well_known_cache_keys::Id, Vec<u8>>,
 		leaf_state: NewBlockState,
+		_branch_index: u64,
 		aux_ops: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	) -> ClientResult<()> {
 		let mut transaction = DBTransaction::new();

@@ -59,6 +59,8 @@ pub mod meta_keys {
 	pub const LEAF_PREFIX: &[u8; 4] = b"leaf";
 	/// Children prefix list key.
 	pub const CHILDREN_PREFIX: &[u8; 8] = b"children";
+	/// Last returned branch index.
+	pub const BRANCH_INDEX: &[u8; 8] = b"branchix";
 }
 
 /// Database metadata.
@@ -74,6 +76,8 @@ pub struct Meta<N, H> {
 	pub finalized_number: N,
 	/// Hash of the genesis block.
 	pub genesis_hash: H,
+	/// Latest used branch index.
+	pub current_branch_index: u64,
 }
 
 /// A block lookup key: used for canonical lookup from block number to hash
@@ -200,6 +204,47 @@ pub fn block_id_to_lookup_key<Block>(
 	res.map(|v| v.map(|v| v.into_vec())).map_err(db_err)
 }
 
+/// Read a stored branch index for a block hash.
+pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
+	db: &dyn KeyValueDB,
+	key_lookup_col: Option<u32>,
+	id: H,
+) -> Result<Option<(u64, bool)>, client::error::Error> {
+	if let Some(buffer) = db.get(
+		key_lookup_col,
+		id.as_ref(),
+	).map_err(db_err)? {
+		match Decode::decode(&mut &buffer[..]) {
+			Ok(v) => Ok(v),
+			Err(err) => Err(client::error::Error::Backend(
+				format!("Error decoding block branch index: {}", err)
+			)),
+		}
+	} else {
+		Ok(None)
+	}
+}
+
+/// Increase and return current branch index.
+pub fn read_current_branch_index(
+	db: &dyn KeyValueDB,
+	key_lookup_col: Option<u32>,
+) -> Result<u64, client::error::Error> {
+	if let Some(buffer) = db.get(
+		key_lookup_col,
+		meta_keys::BRANCH_INDEX,
+	).map_err(db_err)? {
+		match Decode::decode(&mut &buffer[..]) {
+			Ok(i) => Ok(i),
+			Err(err) => Err(client::error::Error::Backend(
+				format!("Error decoding genesis hash: {}", err)
+			)),
+		}
+	} else {
+		Ok(0)
+	}
+}
+
 /// Maps database error to client error
 pub fn db_err(err: io::Error) -> client::error::Error {
 	client::error::Error::Backend(format!("{}", err))
@@ -301,8 +346,11 @@ pub fn read_meta<Block>(db: &dyn KeyValueDB, col_meta: Option<u32>, col_header: 
 			finalized_hash: Default::default(),
 			finalized_number: Zero::zero(),
 			genesis_hash: Default::default(),
+			current_branch_index: 0,
 		}),
 	};
+
+	let current_branch_index = read_current_branch_index(db, col_meta)?;
 
 	let load_meta_block = |desc, key| -> Result<_, client::error::Error> {
 		if let Some(Some(header)) = db.get(col_meta, key).and_then(|id|
@@ -328,6 +376,7 @@ pub fn read_meta<Block>(db: &dyn KeyValueDB, col_meta: Option<u32>, col_header: 
 		finalized_hash,
 		finalized_number,
 		genesis_hash,
+		current_branch_index,
 	})
 }
 

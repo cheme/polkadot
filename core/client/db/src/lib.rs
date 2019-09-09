@@ -238,6 +238,8 @@ pub(crate) mod columns {
 	pub const AUX: Option<u32> = Some(8);
 	/// Offchain workers local storage
 	pub const OFFCHAIN: Option<u32> = Some(9);
+	// TODO EMCH also consider putting in meta with a prefix
+	pub const BRANCH_INDEX: Option<u32> = Some(10);
 }
 
 struct PendingBlock<Block: BlockT> {
@@ -245,6 +247,7 @@ struct PendingBlock<Block: BlockT> {
 	justification: Option<Justification>,
 	body: Option<Vec<Block::Extrinsic>>,
 	leaf_state: NewBlockState,
+	branch_index: u64,
 }
 
 // wrapper that implements trait required for state_db
@@ -281,7 +284,7 @@ impl<Block: BlockT> BlockchainDb<Block> {
 		hash: Block::Hash,
 		number: <Block::Header as HeaderT>::Number,
 		is_best: bool,
-		is_finalized: bool
+		is_finalized: bool,
 	) {
 		let mut meta = self.meta.write();
 		if number.is_zero() {
@@ -340,6 +343,25 @@ impl<Block: BlockT> client::blockchain::HeaderBackend<Block> for BlockchainDb<Bl
 		} else {
 			Ok(None)
 		}
+	}
+
+	fn branch_index(&self, hash: Block::Hash) -> Result<Option<u64>, client::error::Error> {
+		// TODO EMCH not using key lookup, is that fine
+		Ok(utils::read_branch_index(&*self.db, columns::BRANCH_INDEX, hash)?.map(|b| b.0))
+	}
+
+	fn appendable_branch_index(&self, hash: Block::Hash) -> Result<Option<u64>, client::error::Error> {
+		// TODO EMCH not using key lookup, is that fine
+		Ok(utils::read_branch_index(&*self.db, columns::BRANCH_INDEX, hash)?
+			.filter(|b| b.1)
+			.map(|b| b.0)
+		)
+	}
+
+	fn next_branch_index(&self) -> Result<u64, client::error::Error> {
+		let mut meta = self.meta.write();
+		meta.current_branch_index += 1;
+		Ok(meta.current_branch_index)
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> Result<Option<Block::Hash>, client::error::Error> {
@@ -439,6 +461,7 @@ where Block: BlockT<Hash=H256>,
 		body: Option<Vec<Block::Extrinsic>>,
 		justification: Option<Justification>,
 		leaf_state: NewBlockState,
+		branch_index: u64,
 	) -> Result<(), client::error::Error> {
 		assert!(self.pending_block.is_none(), "Only one block per operation is allowed");
 		self.pending_block = Some(PendingBlock {
@@ -446,6 +469,7 @@ where Block: BlockT<Hash=H256>,
 			body,
 			justification,
 			leaf_state,
+			branch_index,
 		});
 		Ok(())
 	}
@@ -830,21 +854,22 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		let inmem = InMemoryBackend::<Block, Blake2Hasher>::new();
 
 		// get all headers hashes && sort them by number (could be duplicate)
-		let mut headers: Vec<(NumberFor<Block>, Block::Hash, Block::Header)> = Vec::new();
+		let mut headers: Vec<(NumberFor<Block>, Block::Hash, Block::Header, u64)> = Vec::new();
 		for (_, header) in self.blockchain.db.iter(columns::HEADER) {
 			let header = Block::Header::decode(&mut &header[..]).unwrap();
 			let hash = header.hash();
 			let number = *header.number();
 			let pos = headers.binary_search_by(|item| item.0.cmp(&number));
+      let branch_index = self.blockchain.branch_index(hash).unwrap().unwrap();
 			match pos {
-				Ok(pos) => headers.insert(pos, (number, hash, header)),
-				Err(pos) => headers.insert(pos, (number, hash, header)),
+				Ok(pos) => headers.insert(pos, (number, hash, header, branch_index)),
+				Err(pos) => headers.insert(pos, (number, hash, header, branch_index)),
 			}
 		}
 
 		// insert all other headers + bodies + justifications
 		let info = self.blockchain.info();
-		for (number, hash, header) in headers {
+		for (number, hash, header, branch_index) in headers {
 			let id = BlockId::Hash(hash);
 			let justification = self.blockchain.justification(id).unwrap();
 			let body = self.blockchain.body(id).unwrap();
@@ -858,7 +883,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 				NewBlockState::Normal
 			};
 			let mut op = inmem.begin_operation().unwrap();
-			op.set_block_data(header, body, justification, new_block_state).unwrap();
+			op.set_block_data(header, body, justification, new_block_state, branch_index).unwrap();
 			op.update_db_storage(state.into_iter().map(|(k, v)| (None, k, Some(v))).collect()).unwrap();
 			inmem.commit_operation(op).unwrap();
 		}
@@ -1042,6 +1067,9 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		operation.apply_aux(&mut transaction);
 
 		let mut meta_updates = Vec::new();
+		let current_branch_index = self.blockchain.meta.read().current_branch_index;
+		// branch index can be commited at any point.
+		transaction.put(columns::META, meta_keys::BRANCH_INDEX, &current_branch_index.encode());
 		let mut last_finalized_hash = self.blockchain.meta.read().finalized_hash;
 
 		if !operation.finalized_blocks.is_empty() {
@@ -1136,7 +1164,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 			let displaced_leaf = {
 				let mut leaves = self.blockchain.leaves.write();
-				let displaced_leaf = leaves.import(hash, number, parent_hash);
+				let displaced_leaf = leaves.import(hash, number, parent_hash, pending_block.branch_index);
 				leaves.prepare_transaction(&mut transaction, columns::META, meta_keys::LEAF_PREFIX);
 
 				displaced_leaf
@@ -1407,7 +1435,11 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 					children::remove_children(&mut transaction, columns::META, meta_keys::CHILDREN_PREFIX, hash);
 					self.storage.db.write(transaction).map_err(db_err)?;
 					self.blockchain.update_meta(hash, best, true, false);
-					self.blockchain.leaves.write().revert(removed.hash().clone(), removed.number().clone(), removed.parent_hash().clone());
+					let parent_hash = removed.parent_hash().clone();
+					let parent_branch_index = self.blockchain.branch_index(parent_hash)?
+						.expect("Parent node not remove before child"); // TODO manage return None??
+					self.blockchain.leaves.write()
+						.revert(removed.hash().clone(), removed.number().clone(), parent_hash, parent_branch_index);
 				}
 				None => return Ok(c.saturated_into::<NumberFor<Block>>())
 			}

@@ -27,6 +27,7 @@ use crate::error;
 struct LeafSetItem<H, N> {
 	hash: H,
 	number: Reverse<N>,
+	branch_index: u64,
 }
 
 /// A displaced leaf after import.
@@ -39,7 +40,7 @@ pub struct ImportDisplaced<H, N> {
 /// Displaced leaves after finalization.
 #[must_use = "Displaced items from the leaf set must be handled."]
 pub struct FinalizationDisplaced<H, N> {
-	leaves: BTreeMap<Reverse<N>, Vec<H>>,
+	leaves: BTreeMap<Reverse<N>, Vec<(H, u64)>>,
 }
 
 impl<H, N: Ord> FinalizationDisplaced<H, N> {
@@ -58,9 +59,9 @@ impl<H, N: Ord> FinalizationDisplaced<H, N> {
 /// this allows very fast checking and modification of active leaves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeafSet<H, N> {
-	storage: BTreeMap<Reverse<N>, Vec<H>>,
+	storage: BTreeMap<Reverse<N>, Vec<(H, u64)>>,
 	pending_added: Vec<LeafSetItem<H, N>>,
-	pending_removed: Vec<H>,
+	pending_removed: Vec<(H, u64)>,
 }
 
 impl<H, N> LeafSet<H, N> where
@@ -87,11 +88,13 @@ impl<H, N> LeafSet<H, N> where
 				Ok(hash) => hash,
 				Err(_) => return Err(error::Error::Backend("Error decoding hash".into())),
 			};
-			let number = match Decode::decode(&mut &value[..]) {
-				Ok(number) => number,
+      // TODO EMCH this is breaking: need some portability code: if < such block then 'let number ='
+      // and use 0 as branch_ix.
+			let (number, branch_index) = match Decode::decode(&mut &value[..]) {
+				Ok(tuple) => tuple,
 				Err(_) => return Err(error::Error::Backend("Error decoding number".into())),
 			};
-			storage.entry(Reverse(number)).or_insert_with(Vec::new).push(hash);
+			storage.entry(Reverse(number)).or_insert_with(Vec::new).push((hash, branch_index));
 		}
 		Ok(Self {
 			storage,
@@ -101,19 +104,20 @@ impl<H, N> LeafSet<H, N> where
 	}
 
 	/// update the leaf list on import. returns a displaced leaf if there was one.
-	pub fn import(&mut self, hash: H, number: N, parent_hash: H) -> Option<ImportDisplaced<H, N>> {
+	pub fn import(&mut self, hash: H, number: N, parent_hash: H, branch_index: u64) -> Option<ImportDisplaced<H, N>> {
 		// avoid underflow for genesis.
 		let displaced = if number != N::zero() {
 			let new_number = Reverse(number.clone() - N::one());
 			let was_displaced = self.remove_leaf(&new_number, &parent_hash);
 
-			if was_displaced {
-				self.pending_removed.push(parent_hash.clone());
+			if let Some(parent_branch_index) = was_displaced {
+				self.pending_removed.push((parent_hash.clone(), parent_branch_index));
 				Some(ImportDisplaced {
 					new_hash: hash.clone(),
 					displaced: LeafSetItem {
 						hash: parent_hash,
 						number: new_number,
+						branch_index: parent_branch_index,
 					},
 				})
 			} else {
@@ -123,8 +127,8 @@ impl<H, N> LeafSet<H, N> where
 			None
 		};
 
-		self.insert_leaf(Reverse(number.clone()), hash.clone());
-		self.pending_added.push(LeafSetItem { hash, number: Reverse(number) });
+		self.insert_leaf(Reverse(number.clone()), hash.clone(), branch_index);
+		self.pending_added.push(LeafSetItem { hash, number: Reverse(number), branch_index });
 		displaced
 	}
 
@@ -161,23 +165,24 @@ impl<H, N> LeafSet<H, N> where
 	/// currently since revert only affects the canonical chain
 	/// we assume that parent has no further children
 	/// and we add it as leaf again
-	pub fn revert(&mut self, hash: H, number: N, parent_hash: H) {
-		self.insert_leaf(Reverse(number.clone() - N::one()), parent_hash);
+	pub fn revert(&mut self, hash: H, number: N, parent_hash: H, parent_branch_index: u64) {
+		self.insert_leaf(Reverse(number.clone() - N::one()), parent_hash, parent_branch_index);
 		self.remove_leaf(&Reverse(number), &hash);
 	}
 
 	/// returns an iterator over all hashes in the leaf set
 	/// ordered by their block number descending.
 	pub fn hashes(&self) -> Vec<H> {
-		self.storage.iter().flat_map(|(_, hashes)| hashes.iter()).cloned().collect()
+		self.storage.iter().flat_map(|(_, hashes)| hashes.iter().map(|(h, _)| h)).cloned().collect()
 	}
 
 	/// Write the leaf list to the database transaction.
 	pub fn prepare_transaction(&mut self, tx: &mut DBTransaction, column: Option<u32>, prefix: &[u8]) {
 		let mut buf = prefix.to_vec();
-		for LeafSetItem { hash, number } in self.pending_added.drain(..) {
+    // TODO EMCH no need for portablility here always write new version.
+		for LeafSetItem { hash, number, branch_index } in self.pending_added.drain(..) {
 			hash.using_encoded(|s| buf.extend(s));
-			tx.put_vec(column, &buf[..], number.0.encode());
+			tx.put_vec(column, &buf[..], (number.0, branch_index).encode());
 			buf.truncate(prefix.len()); // reuse allocation.
 		}
 		for hash in self.pending_removed.drain(..) {
@@ -192,17 +197,17 @@ impl<H, N> LeafSet<H, N> where
 		self.storage.get(&Reverse(number)).map_or(false, |hashes| hashes.contains(&hash))
 	}
 
-	fn insert_leaf(&mut self, number: Reverse<N>, hash: H) {
-		self.storage.entry(number).or_insert_with(Vec::new).push(hash);
+	fn insert_leaf(&mut self, number: Reverse<N>, hash: H, branch_index: u64) {
+		self.storage.entry(number).or_insert_with(Vec::new).push((hash, branch_index));
 	}
 
-	// returns true if this leaf was contained, false otherwise.
-	fn remove_leaf(&mut self, number: &Reverse<N>, hash: &H) -> bool {
+	// returns a branch index if this leaf was contained, nothing otherwise.
+	fn remove_leaf(&mut self, number: &Reverse<N>, hash: &H) -> Option<u64> {
 		let mut empty = false;
-		let removed = self.storage.get_mut(number).map_or(false, |leaves| {
-			let mut found = false;
-			leaves.retain(|h| if h == hash {
-				found = true;
+		let removed = self.storage.get_mut(number).map_or(None, |leaves| {
+			let mut found = None;
+			leaves.retain(|(h, b)| if h == hash {
+				found = Some(*b);
 				false
 			} else {
 				true
@@ -213,7 +218,7 @@ impl<H, N> LeafSet<H, N> where
 			found
 		});
 
-		if removed && empty {
+		if removed.is_some() && empty {
 			self.storage.remove(number);
 		}
 
@@ -233,8 +238,13 @@ impl<'a, H: 'a, N: 'a> Undo<'a, H, N> where
 	/// Undo an imported block by providing the displaced leaf.
 	pub fn undo_import(&mut self, displaced: ImportDisplaced<H, N>) {
 		let new_number = Reverse(displaced.displaced.number.0.clone() + N::one());
+		// recursively remove next leaves
 		self.inner.remove_leaf(&new_number, &displaced.new_hash);
-		self.inner.insert_leaf(new_number, displaced.displaced.hash);
+		self.inner.insert_leaf(
+			new_number,
+			displaced.displaced.hash,
+			displaced.displaced.branch_index,
+		);
 	}
 
 	/// Undo a finalization operation by providing the displaced leaves.
