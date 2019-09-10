@@ -262,6 +262,10 @@ pub struct Serialized<'a>(Cow<'a, [u8]>);
 // Those function requires checked index.
 impl<'a> Serialized<'a> {
 
+	fn into_owned(self) -> Serialized<'static> {
+    Serialized(Cow::from(self.0.into_owned()))
+  }
+
 	fn len(&self) -> usize {
 		let len = self.0.len();
 		self.read_le_usize(len - 4)

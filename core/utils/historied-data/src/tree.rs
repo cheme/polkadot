@@ -51,9 +51,6 @@
 //-> only to avoid update on btree.
 //
 
-use crate::{
-	State as TransactionState,
-};
 use crate::linear::{
 	MemoryOnly as LinearHistory,
 };
@@ -61,31 +58,57 @@ use rstd::borrow::Cow;
 use rstd::vec::Vec;
 use rstd::collections::btree_map::BTreeMap;
 
+
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 pub struct LinearStates {
+	/// Index of first element (only use for indexed access).
+	/// Element before offset are not in state.
+	offset: usize,
 	/// number of elements: all elements equal or bellow
 	/// this index are valid, over this index they are not.
 	len: usize,
-  /// Maximum index before first deletion, it indicates
+	/// Maximum index before first deletion, it indicates
 	/// if the state is modifiable (when an element is dropped
 	/// we cannot append and need to create a new branch).
 	max_len_ix: usize,
 }
 
+/// This is a simple range, end non inclusive.
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct LinearStatesRef {
+	start: usize,
+	end: usize,
+}
+
+
 impl Default for LinearStates {
+	// initialize with one element
 	fn default() -> Self {
-		LinearStates {
-			len: 1,
-			max_len_ix: 1,
-		}
+		Self::new_from(0)
 	}
 }
 
 impl LinearStates {
+	pub fn new_from(offset: usize) -> Self {
+		LinearStates {
+			offset,
+			len: 1,
+			max_len_ix: offset,
+		}
+	}
+
+	pub fn state_ref(&self) -> LinearStatesRef {
+		LinearStatesRef {
+			start: self.offset,
+			end: self.offset + self.len,
+		}
+	}
+
 	pub fn has_deleted_index(&self) -> bool {
-    self.max_len_ix > self.len
-  }
+		self.max_len_ix >= self.offset + self.len
+	}
 
 	pub fn add_state(&mut self) -> bool {
 		if !self.has_deleted_index() {
@@ -97,34 +120,42 @@ impl LinearStates {
 		}
 	}
 
-  /// return possible dropped state
+	/// return possible dropped state
 	pub fn drop_state(&mut self) -> Option<usize> {
 		if self.len > 0 {
 			self.len -= 1;
-      Some(self.len)
+			Some(self.len)
 		} else {
-      None
-    }
+			None
+		}
 	}
 
 	/// act as a truncate, returning range of deleted (end excluded)
+	/// TODO consider removal
 	pub fn keep_state(&mut self, index: usize) -> (usize, usize) {
-		if self.len > index {
-      let old_len = self.len;
-			self.len = index;
-      (index, old_len)
-		} else { (index, index) }
+		if index < self.offset {
+			return (self.offset, self.offset);
+		}
+		if self.len > (index - self.offset) {
+			let old_len = self.len;
+			self.len = index - self.offset;
+			(index, old_len)
+		} else { 
+			(index, index)
+		}
 	}
 
-	/// get state
-	/// simply return true if exists (there is no specific state).
+	/// Return true if state exists.
 	pub fn get_state(&self, index: usize) -> bool {
-		self.len > index
+		if index < self.offset {
+			return false;
+		}
+		self.len > index + self.offset
 	}
 
 	pub fn latest_ix(&self) -> Option<usize> {
 		if self.len > 0 {
-			Some(self.len - 1)
+			Some(self.offset + self.len - 1)
 		} else {
 			None
 		}
@@ -132,26 +163,20 @@ impl LinearStates {
 
 }
 
-// TODO could benefit from smallvec!! need an estimation
-// of number of node (it still stores a usize + a smallvec) 
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct History<V>(Vec<HistoryBranch<V>>);
-
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct HistoryBranch<V> {
-	branch_index: usize,
-	history: LinearHistory<V>,
+impl LinearStatesRef {
+	/// Return true if the state exists, false otherwhise.
+	pub fn get_state(&self, index: usize) -> bool {
+		index < self.end && index >= self.start
+	}
 }
 
+/// At this point this is only use for testing and as an example
+/// implementation.
+/// It keeps trace of dropped value, and have some costy recursive
+/// deletion.
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct Serialized<'a>(Cow<'a, [u8]>);
-
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct States {
+pub struct TestStates {
 	branches: BTreeMap<u64, StatesBranch>,
 	last_branch_ix: u64,
 	committed_ix: usize,
@@ -159,32 +184,37 @@ pub struct States {
 }
 
 impl StatesBranch {
-	pub fn is_committed(&self, states: &States) -> bool {
+	pub fn branch_ref(&self) -> StatesBranchRef {
+		StatesBranchRef {
+			branch_ix: self.branch_ix,
+			state: self.state.state_ref(),
+		}
+	}
+	pub fn is_committed(&self, states: &TestStates) -> bool {
 		self.is_committed_internal(states.committed_ix)
 	}
 	fn is_committed_internal(&self, committed_ix: usize) -> bool {
 		self.committed_ix <= committed_ix
 	}
 	
-	pub fn is_prospective(&self, states: &States) -> bool {
+	pub fn is_prospective(&self, states: &TestStates) -> bool {
 		self.is_prospective_internal(states.prospective_ix)
 	}
 	fn is_prospective_internal(&self, prospective_ix: usize) -> bool {
 		self.prospective_ix >= prospective_ix
 	}
-
 	fn is_dropped_internal(&self, prospective_ix: usize, committed_ix: usize) -> bool {
 		!self.is_committed_internal(committed_ix)
 			&& !self.is_prospective_internal(prospective_ix)
 	}
-	pub fn is_dropped(&self, states: &States) -> bool {
+	pub fn is_dropped(&self, states: &TestStates) -> bool {
 		self.is_dropped_internal(states.prospective_ix, states.committed_ix)
 	}
 }
 
-impl Default for States {
+impl Default for TestStates {
 	fn default() -> Self {
-		States {
+		TestStates {
 			branches: Default::default(),
 			last_branch_ix: 0,
 			committed_ix: 0,
@@ -211,15 +241,27 @@ pub struct StatesBranch {
 	state: LinearStates,
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct StatesBranchRef {
+	branch_ix: u64,
+	state: LinearStatesRef,
+}
+
+
 // TODO could benefit from smallvec!!
 // of number of node (it still stores a few usize & a vec ptr)
 /// Reference to state that is enough for query updates, but not
 /// for gc.
 /// Values are ordered by branch_ix,
 /// and only a logic branch path should be present.
-pub type StatesRef = Vec<StatesBranch>;
+///
+/// Note that an alternative could be a pointer to a full state
+/// branch for a given branch index, here we use an in memory
+/// copied representation in relation to an actual use case.
+pub type StatesRef = Vec<StatesBranchRef>;
 
-impl States {
+impl TestStates {
 
 	/// clear state but keep existing branch values (can be call after a full gc:
 	/// enforcing no commited containing dropped values).
@@ -228,8 +270,20 @@ impl States {
 		self.last_branch_ix = 0;
 	}
 
-	pub fn as_ref(&self, branch_ix: usize) -> StatesRef {
-		unimplemented!();
+	/// warning it should be the index of the leaf, otherwhise the ref will be incomplete.
+	/// (which is fine as long as we use this state to query something that refer to this state.
+	pub fn state_ref(&self, mut branch_ix: u64) -> StatesRef {
+		let mut result = Vec::new();
+		while branch_ix != 0 {
+			if let Some(branch) = self.branches.get(&branch_ix)
+				.filter(|b| !b.is_dropped_internal(self.prospective_ix, self.committed_ix)) {
+				result.push(branch.branch_ref());
+				branch_ix = branch.origin_branch_ix;
+			} else {
+				break;
+			}
+		}
+		result
 	}
 
 	// create a branches. End current branch.
@@ -281,7 +335,8 @@ impl States {
 		branch_ix: u64,
 		linear_ix: Option<usize>,
 	) -> Option<usize> {
-		if let Some(branch) = self.branches.get(&branch_ix) {
+		if let Some(branch) = self.branches.get(&branch_ix)
+			.filter(|b| !b.is_dropped_internal(self.prospective_ix, self.committed_ix)) {
 			if let Some(linear_ix) = linear_ix {
 				if branch.state.get_state(linear_ix) {
 					Some(linear_ix)
@@ -296,9 +351,9 @@ impl States {
 		}
 	}
 
-	/// get node without index checks, can panick.
-	pub fn get(&self, branch_ix: usize, linear_ix: usize) -> TransactionState {
-		unimplemented!();
+	/// Do node exist (return state (being true or false only)).
+	pub fn get(&self, branch_ix: u64, linear_ix: usize) -> bool {
+		self.get_node(branch_ix, Some(linear_ix)).is_some()
 	}
 
 	pub fn linear_state(&self, branch_ix: u64) -> Option<&LinearStates> {
@@ -320,25 +375,112 @@ impl States {
 		None
 	}
 
-
-	pub fn linear_state_mut (&mut self, branch_ix: u64) -> Option<&mut LinearStates> {
+	pub fn linear_state_mut(&mut self, branch_ix: u64) -> Option<&mut LinearStates> {
 		self.access_branch_mut(branch_ix)
-//			.filter(|b| !b.has_children)
 			.map(|b| &mut b.state)
 	}
 
+	/// this function can go into deep recursion with full scan, it indicates
+	/// that the in memory model use here should only be use for small data or
+	/// tests.
+	pub fn apply_drop_state(&mut self, branch_ix: u64, linear_ix: usize) {
+		let mut to_delete = Vec::new();
+		for (i, s) in self.branches.iter() {
+			if s.origin_branch_ix == branch_ix && s.origin_linear_ix == linear_ix {
+				to_delete.push(*i);
+			}
+		}
+		for i in to_delete.into_iter() {
+			loop {
+				match self.linear_state_mut(i).map(|ls| ls.drop_state()) {
+					Some(Some(li)) => self.apply_drop_state(i, li),
+					Some(None) => break, // we keep empty branch
+					None => break,
+				}
+			}
+		}
+	}
 }
 
-pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: usize) -> TransactionState {
-	unimplemented!();
+pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: usize) -> bool {
+	s.iter()
+		.find(|s| s.branch_ix == branch_ix)
+		.map(|s| s.state.get_state(linear_ix))
+		.unwrap_or(false)
 }
+
+// TODO could benefit from smallvec!! need an estimation
+// of number of node (it still stores a usize + a smallvec) 
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct History<V>(Vec<HistoryBranch<V>>);
+
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct HistoryBranch<V> {
+	branch_index: u64,
+	history: LinearHistory<V>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct Serialized<'a>(Cow<'a, [u8]>);
+
+impl<V> History<V> {
+	/// Access to last valid value (non dropped state in history).
+	/// When possible please use `get_mut` as it can free some memory.
+	pub fn get(&self, state: &StatesRef) -> Option<&V> {
+		let mut index = self.0.len();
+		let mut index_state = state.len() - 1;
+
+		// note that we expect branch index to be linearily set
+		// along a branch (no state containing unordered branch_index
+		// and no history containing unorderd branch_index).
+		if index == 0 || index_state == 0 {
+			return None;
+		}
+		while index > 0 && index_state > 0 {
+			index -= 1;
+			let branch_ix = self.0[index].branch_index;
+
+			while index_state > 0 && state[index_state].branch_ix > branch_ix {
+				index_state -= 1;
+			}
+			if state[index_state].branch_ix == branch_ix {
+				if let Some(result) = self.linear_get(branch_ix, &state[index_state]) {
+					return Some(result)
+				}
+			}
+		}
+		None
+	}
+
+	fn linear_get(&self, branch_ix: u64, state: &StatesBranchRef) -> Option<&V> {
+		let history = &self.0[branch_ix as usize];
+		let mut index = history.history.len();
+		if index == 0 {
+			return None;
+		}
+		while index > 0 {
+			index -= 1;
+			if let Some(&(value, history_index)) = history.history.get(index).as_ref() {
+				if history_index < &state.state.end {
+					return Some(&value);
+				}
+			}
+		}
+		None
+	}
+	
+}
+
 
 #[cfg(test)]
 mod test {
 	use super::*;
 
-	fn test_states() -> States {
-		let mut states = States::default();
+	fn test_states() -> TestStates {
+		let mut states = TestStates::default();
 		assert_eq!(states.create_branch(1, 0, None), Some(1));
 		// root branching.
 		assert_eq!(states.create_branch(1, 0, None), Some(2));
@@ -352,19 +494,43 @@ mod test {
 		assert_eq!(Some(false), states.linear_state_mut(1).map(|ls| ls.add_state()));
 
 		// TODO add content through branching
-		assert!(states.linear_state(1).is_some());
+		assert!(states.get(1, 1));
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _
 
-		panic!("{:?}", states);
 		states
 	}
 
 	#[test]
-	fn test_to_define() {
-		let states = test_states();
+	fn test_remove_attached() {
+		let mut states = test_states();
+		assert_eq!(Some(Some(1)), states.linear_state_mut(1).map(|ls| ls.drop_state()));
+		assert!(states.get(3, 0));
+		assert!(states.get(4, 0));
+		states.apply_drop_state(1, 1);
+		assert!(!states.get(3, 0));
+		assert!(!states.get(4, 0));
 	}
+
+	#[test]
+	fn test_state_refs() {
+		let states = test_states();
+		let ref_3 = vec![
+			StatesBranchRef {
+				branch_ix: 3,
+				state: LinearStatesRef { start: 0, end: 1 },
+			},
+			StatesBranchRef {
+				branch_ix: 1,
+				state: LinearStatesRef { start: 0, end: 2 },
+			},
+		];
+		assert_eq!(states.state_ref(3), ref_3);
+	}
+
+
+//		panic!("{:?}", states);
 }
