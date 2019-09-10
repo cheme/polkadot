@@ -185,7 +185,7 @@ impl<H, N> LeafSet<H, N> where
 			tx.put_vec(column, &buf[..], (number.0, branch_index).encode());
 			buf.truncate(prefix.len()); // reuse allocation.
 		}
-		for hash in self.pending_removed.drain(..) {
+		for (hash, _) in self.pending_removed.drain(..) {
 			hash.using_encoded(|s| buf.extend(s));
 			tx.delete(column, &buf[..]);
 			buf.truncate(prefix.len()); // reuse allocation.
