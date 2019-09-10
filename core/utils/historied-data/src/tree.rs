@@ -131,6 +131,7 @@ impl LinearStates {
 	}
 
 }
+
 // TODO could benefit from smallvec!! need an estimation
 // of number of node (it still stores a usize + a smallvec) 
 #[derive(Debug, Clone)]
@@ -151,8 +152,8 @@ pub struct Serialized<'a>(Cow<'a, [u8]>);
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 pub struct States {
-	branches: BTreeMap<usize, StatesBranch>,
-	last_branch_ix: usize,
+	branches: BTreeMap<u64, StatesBranch>,
+	last_branch_ix: u64,
 	committed_ix: usize,
 	prospective_ix: usize,
 }
@@ -198,9 +199,9 @@ pub struct StatesBranch {
 	// this is the key (need to growth unless full gc (can still have
 	// content pointing to it even if it seems safe to reuse a previously
 	// use ix).
-	branch_ix: usize,
+	branch_ix: u64,
 	
-	origin_branch_ix: usize,
+	origin_branch_ix: u64,
 	origin_linear_ix: usize,
 
 	prospective_ix: usize,
@@ -214,9 +215,9 @@ pub struct StatesBranch {
 // of number of node (it still stores a few usize & a vec ptr)
 /// Reference to state that is enough for query updates, but not
 /// for gc.
-/// Values are ordered by branch_ix (first value of tuple),
-/// and only a logich branch path should be present.
-pub type StatesRef = Vec<(usize, StatesBranch)>;
+/// Values are ordered by branch_ix,
+/// and only a logic branch path should be present.
+pub type StatesRef = Vec<StatesBranch>;
 
 impl States {
 
@@ -237,9 +238,9 @@ impl States {
 	pub fn create_branch(
 		&mut self,
 		nb_branch: usize,
-		branch_ix: usize,
+		branch_ix: u64,
 		linear_ix: Option<usize>,
-	) -> Option<usize> {
+	) -> Option<u64> {
 		if nb_branch == 0 {
 			return None;
 		}
@@ -257,7 +258,7 @@ impl States {
 		};
 
 		let result_ix = self.last_branch_ix + 1;
-		for i in result_ix .. result_ix + nb_branch {
+		for i in result_ix .. result_ix + (nb_branch as u64) {
 			self.branches.insert(i, StatesBranch {
 				branch_ix: i,
 				origin_branch_ix: branch_ix,
@@ -267,7 +268,7 @@ impl States {
 				state: Default::default(),
 			});
 		}
-		self.last_branch_ix += nb_branch;
+		self.last_branch_ix += nb_branch as u64;
 
 		Some(result_ix)
 	}
@@ -277,7 +278,7 @@ impl States {
 	/// TODO consider renaming?
 	pub fn get_node(
 		&self,
-		branch_ix: usize,
+		branch_ix: u64,
 		linear_ix: Option<usize>,
 	) -> Option<usize> {
 		if let Some(branch) = self.branches.get(&branch_ix) {
@@ -300,14 +301,14 @@ impl States {
 		unimplemented!();
 	}
 
-	pub fn linear_state(&self, branch_ix: usize) -> Option<&LinearStates> {
+	pub fn linear_state(&self, branch_ix: u64) -> Option<&LinearStates> {
 		self.branches.get(&branch_ix)
 			.filter(|b| !b.is_dropped_internal(self.prospective_ix, self.committed_ix))
 			.map(|b| &b.state)
 	}
 
 	// does remove branch if dropped.
-	fn access_branch_mut(&mut self, branch_ix: usize) -> Option<&mut StatesBranch> {
+	fn access_branch_mut(&mut self, branch_ix: u64) -> Option<&mut StatesBranch> {
 		if let Some(branch) = self.branches.get(&branch_ix) {
 			if branch.is_dropped_internal(self.prospective_ix, self.committed_ix) {
 				let _ = self.branches.remove(&branch_ix);
@@ -320,7 +321,7 @@ impl States {
 	}
 
 
-	pub fn linear_state_mut (&mut self, branch_ix: usize) -> Option<&mut LinearStates> {
+	pub fn linear_state_mut (&mut self, branch_ix: u64) -> Option<&mut LinearStates> {
 		self.access_branch_mut(branch_ix)
 //			.filter(|b| !b.has_children)
 			.map(|b| &mut b.state)
@@ -328,7 +329,7 @@ impl States {
 
 }
 
-pub fn ref_get(s: &StatesRef, branch_ix: usize, linear_ix: usize) -> TransactionState {
+pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: usize) -> TransactionState {
 	unimplemented!();
 }
 
