@@ -860,7 +860,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			let hash = header.hash();
 			let number = *header.number();
 			let pos = headers.binary_search_by(|item| item.0.cmp(&number));
-      let branch_index = self.blockchain.branch_index(hash).unwrap().unwrap();
+			let branch_index = self.blockchain.branch_index(hash).unwrap().unwrap();
 			match pos {
 				Ok(pos) => headers.insert(pos, (number, hash, header, branch_index)),
 				Err(pos) => headers.insert(pos, (number, hash, header, branch_index)),
@@ -1523,6 +1523,8 @@ mod tests {
 
 	type Block = RawBlock<ExtrinsicWrapper<u64>>;
 
+	const DEFAULT_BRANCH_INDEX: u64 = 1;
+
 	fn prepare_changes(changes: Vec<(Vec<u8>, Vec<u8>)>) -> (H256, MemoryDB<Blake2Hasher>) {
 		let mut changes_root = H256::default();
 		let mut changes_trie_update = MemoryDB::<Blake2Hasher>::default();
@@ -1546,6 +1548,25 @@ mod tests {
 		changes: Vec<(Vec<u8>, Vec<u8>)>,
 		extrinsics_root: H256,
 	) -> H256 {
+		insert_header_with_branch_index(
+			backend,
+			number,
+			parent_hash,
+			changes,
+			extrinsics_root,
+			DEFAULT_BRANCH_INDEX,
+		)
+	}
+
+	fn insert_header_with_branch_index(
+		backend: &Backend<Block>,
+		number: u64,
+		parent_hash: H256,
+		changes: Vec<(Vec<u8>, Vec<u8>)>,
+		extrinsics_root: H256,
+		branch_index: u64,
+	) -> H256 {
+	
 		use sr_primitives::testing::Digest;
 
 		let (changes_root, changes_trie_update) = prepare_changes(changes);
@@ -1570,7 +1591,7 @@ mod tests {
 		};
 		let mut op = backend.begin_operation().unwrap();
 		backend.begin_state_operation(&mut op, block_id).unwrap();
-		op.set_block_data(header, None, None, NewBlockState::Best).unwrap();
+		op.set_block_data(header, None, None, NewBlockState::Best, branch_index).unwrap();
 		op.update_changes_trie((changes_trie_update, ChangesTrieCacheAction::Clear)).unwrap();
 		backend.commit_operation(op).unwrap();
 
@@ -1610,6 +1631,7 @@ mod tests {
 						Some(vec![]),
 						None,
 						NewBlockState::Best,
+						DEFAULT_BRANCH_INDEX,
 					).unwrap();
 					db.commit_operation(op).unwrap();
 				}
@@ -1658,6 +1680,7 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
+				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			db.commit_operation(op).unwrap();
@@ -1696,6 +1719,7 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
+				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			db.commit_operation(op).unwrap();
@@ -1742,6 +1766,7 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
+				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1779,6 +1804,7 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
+				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1815,6 +1841,7 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
+				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1851,6 +1878,7 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
+				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1918,13 +1946,41 @@ mod tests {
 
 		let changes2_1_0 = vec![(b"k3".to_vec(), b"v3".to_vec())];
 		let changes2_1_1 = vec![(b"k4".to_vec(), b"v4".to_vec())];
-		let block2_1_0 = insert_header(&backend, 3, block2, changes2_1_0.clone(), Default::default());
-		let block2_1_1 = insert_header(&backend, 4, block2_1_0, changes2_1_1.clone(), Default::default());
+		let block2_1_0 = insert_header_with_branch_index(
+			&backend,
+			3,
+			block2,
+			changes2_1_0.clone(),
+			Default::default(),
+			2,
+		);
+		let block2_1_1 = insert_header_with_branch_index(
+			&backend,
+			4,
+			block2_1_0,
+			changes2_1_1.clone(),
+			Default::default(),
+			2,
+		);
 
 		let changes2_2_0 = vec![(b"k5".to_vec(), b"v5".to_vec())];
 		let changes2_2_1 = vec![(b"k6".to_vec(), b"v6".to_vec())];
-		let block2_2_0 = insert_header(&backend, 3, block2, changes2_2_0.clone(), Default::default());
-		let block2_2_1 = insert_header(&backend, 4, block2_2_0, changes2_2_1.clone(), Default::default());
+		let block2_2_0 = insert_header_with_branch_index(
+			&backend,
+			3,
+			block2,
+			changes2_2_0.clone(),
+			Default::default(),
+			3,
+		);
+		let block2_2_1 = insert_header_with_branch_index(
+			&backend,
+			4,
+			block2_2_0,
+			changes2_2_1.clone(),
+			Default::default(),
+			3,
+		);
 
 		// finalize block1
 		backend.changes_tries_storage.meta.write().finalized_number = 1;

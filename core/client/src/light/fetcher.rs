@@ -590,6 +590,7 @@ pub mod tests {
 			None,
 			None,
 			crate::backend::NewBlockState::Final,
+			0,
 		).unwrap();
 		let local_executor = NativeExecutor::<test_client::LocalExecutor>::new(None);
 		let local_checker = LightDataChecker::new(Arc::new(DummyBlockchain::new(DummyStorage::new())), local_executor);
@@ -630,6 +631,7 @@ pub mod tests {
 			None,
 			None,
 			crate::backend::NewBlockState::Final,
+			0,
 		).unwrap();
 		let local_executor = NativeExecutor::<test_client::LocalExecutor>::new(None);
 		let local_checker = LightDataChecker::new(Arc::new(DummyBlockchain::new(DummyStorage::new())), local_executor);

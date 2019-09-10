@@ -52,6 +52,9 @@ const HEADER_CHT_PREFIX: u8 = 0;
 /// Prefix for changes tries roots CHT.
 const CHANGES_TRIE_CHT_PREFIX: u8 = 1;
 
+/// light do not manage branch index, all index are 0.
+const NO_BRANCH_INDEX: u64 = 0;
+
 /// Light blockchain storage. Stores most recent headers + CHTs for older headers.
 /// Locks order: meta, cache.
 pub struct LightStorage<Block: BlockT> {
@@ -191,19 +194,18 @@ impl<Block> BlockchainHeaderBackend<Block> for LightStorage<Block>
 
 	fn branch_index(&self, _hash: Block::Hash) -> ClientResult<Option<u64>> {
 		// no support for light.
-		Ok(Some(0))
+		Ok(Some(NO_BRANCH_INDEX))
 	}
 
 	fn appendable_branch_index(&self, _hash: Block::Hash) -> ClientResult<Option<u64>> {
 		// no support for light.
-		Ok(Some(0))
+		Ok(Some(NO_BRANCH_INDEX))
 	}
 
 	fn next_branch_index(&self) -> ClientResult<u64> {
 		// no support for light.
-		Ok(0)
+		Ok(NO_BRANCH_INDEX)
 	}
-
 
 }
 
@@ -587,7 +589,7 @@ pub(crate) mod tests {
 	) -> Hash {
 		let header = header();
 		let hash = header.hash();
-		db.import_header(header, cache, NewBlockState::Best, Vec::new()).unwrap();
+		db.import_header(header, cache, NewBlockState::Best, NO_BRANCH_INDEX, Vec::new()).unwrap();
 		hash
 	}
 
@@ -598,7 +600,7 @@ pub(crate) mod tests {
 	) -> Hash {
 		let header = header();
 		let hash = header.hash();
-		db.import_header(header, cache, NewBlockState::Final, Vec::new()).unwrap();
+		db.import_header(header, cache, NewBlockState::Final, NO_BRANCH_INDEX, Vec::new()).unwrap();
 		hash
 	}
 
@@ -609,7 +611,7 @@ pub(crate) mod tests {
 	) -> Hash {
 		let header = header();
 		let hash = header.hash();
-		db.import_header(header, cache, NewBlockState::Normal, Vec::new()).unwrap();
+		db.import_header(header, cache, NewBlockState::Normal, NO_BRANCH_INDEX, Vec::new()).unwrap();
 		hash
 	}
 
@@ -1035,7 +1037,7 @@ pub(crate) mod tests {
 		assert_eq!(db.get_aux(&[3]).unwrap(), None);
 
 		// delete aux1 + insert aux3 using import operation
-		db.import_header(default_header(&Default::default(), 0), HashMap::new(), NewBlockState::Best, vec![
+		db.import_header(default_header(&Default::default(), 0), HashMap::new(), NewBlockState::Best, NO_BRANCH_INDEX, vec![
 			(vec![3], Some(vec![103])),
 			(vec![1], None),
 		]).unwrap();

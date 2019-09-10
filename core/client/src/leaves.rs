@@ -194,7 +194,8 @@ impl<H, N> LeafSet<H, N> where
 
 	#[cfg(test)]
 	fn contains(&self, number: N, hash: H) -> bool {
-		self.storage.get(&Reverse(number)).map_or(false, |hashes| hashes.contains(&hash))
+		self.storage.get(&Reverse(number))
+			.map_or(false, |hashes| hashes.iter().find(|(h, _)| h == &hash).is_some())
 	}
 
 	fn insert_leaf(&mut self, number: Reverse<N>, hash: H, branch_index: u64) {
@@ -267,18 +268,18 @@ mod tests {
 	#[test]
 	fn it_works() {
 		let mut set = LeafSet::new();
-		set.import(0u32, 0u32, 0u32);
+		set.import(0u32, 0u32, 0u32, 1);
 
-		set.import(1_1, 1, 0);
-		set.import(2_1, 2, 1_1);
-		set.import(3_1, 3, 2_1);
+		set.import(1_1, 1, 0, 1);
+		set.import(2_1, 2, 1_1, 1);
+		set.import(3_1, 3, 2_1, 1);
 
 		assert!(set.contains(3, 3_1));
 		assert!(!set.contains(2, 2_1));
 		assert!(!set.contains(1, 1_1));
 		assert!(!set.contains(0, 0));
 
-		set.import(2_2, 2, 1_1);
+		set.import(2_2, 2, 1_1, 2);
 
 		assert!(set.contains(3, 3_1));
 		assert!(set.contains(2, 2_2));
@@ -290,11 +291,11 @@ mod tests {
 		let db = ::kvdb_memorydb::create(0);
 
 		let mut set = LeafSet::new();
-		set.import(0u32, 0u32, 0u32);
+		set.import(0u32, 0u32, 0u32, 1);
 
-		set.import(1_1, 1, 0);
-		set.import(2_1, 2, 1_1);
-		set.import(3_1, 3, 2_1);
+		set.import(1_1, 1, 0, 1);
+		set.import(2_1, 2, 1_1, 1);
+		set.import(3_1, 3, 2_1, 1);
 
 		let mut tx = DBTransaction::new();
 
@@ -309,8 +310,8 @@ mod tests {
 	fn two_leaves_same_height_can_be_included() {
 		let mut set = LeafSet::new();
 
-		set.import(1_1u32, 10u32,0u32);
-		set.import(1_2, 10, 0);
+		set.import(1_1u32, 10u32, 0u32, 1);
+		set.import(1_2, 10, 0, 2);
 
 		assert!(set.storage.contains_key(&Reverse(10)));
 		assert!(set.contains(10, 1_1));
@@ -324,10 +325,10 @@ mod tests {
 		let db = ::kvdb_memorydb::create(0);
 
 		let mut set = LeafSet::new();
-		set.import(10_1u32, 10u32, 0u32);
-		set.import(11_1, 11, 10_2);
-		set.import(11_2, 11, 10_2);
-		set.import(12_1, 12, 11_123);
+		set.import(10_1u32, 10u32, 0u32, 1);
+		set.import(11_1, 11, 10_2, 2);
+		set.import(11_2, 11, 10_2, 3);
+		set.import(12_1, 12, 11_123, 4);
 
 		assert!(set.contains(10, 10_1));
 
@@ -352,10 +353,10 @@ mod tests {
 	#[test]
 	fn undo_finalization() {
 		let mut set = LeafSet::new();
-		set.import(10_1u32, 10u32, 0u32);
-		set.import(11_1, 11, 10_2);
-		set.import(11_2, 11, 10_2);
-		set.import(12_1, 12, 11_123);
+		set.import(10_1u32, 10u32, 0u32, 1);
+		set.import(11_1, 11, 10_2, 2);
+		set.import(11_2, 11, 10_2, 3);
+		set.import(12_1, 12, 11_123, 4);
 
 		let displaced = set.finalize_height(11);
 		assert!(!set.contains(10, 10_1));

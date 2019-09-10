@@ -565,7 +565,7 @@ mod tests {
 
 		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 		let mut op = backend.begin_operation().unwrap();
-		op.set_block_data(header0, None, None, NewBlockState::Final).unwrap();
+		op.set_block_data(header0, None, None, NewBlockState::Final, 0).unwrap();
 		op.reset_storage(Default::default(), Default::default()).unwrap();
 		backend.commit_operation(op).unwrap();
 

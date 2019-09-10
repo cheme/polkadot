@@ -314,6 +314,18 @@ pub mod tests {
 			}
 		}
 
+		fn branch_index(&self, _hash: Hash) -> ClientResult<Option<u64>> {
+			Ok(Some(0))
+		}
+
+		fn appendable_branch_index(&self, _hash: Hash) -> ClientResult<Option<u64>> {
+			Ok(Some(0))
+		}
+
+		fn next_branch_index(&self) -> ClientResult<u64> {
+			Ok(0)
+		}
+
 		fn hash(&self, number: u64) -> ClientResult<Option<Hash>> {
 			if number == 0 {
 				Ok(Some(Default::default()))
