@@ -1165,7 +1165,12 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			let displaced_leaf = {
 				let mut leaves = self.blockchain.leaves.write();
 				let displaced_leaf = leaves.import(hash, number, parent_hash, pending_block.branch_index);
-				leaves.prepare_transaction(&mut transaction, columns::META, meta_keys::LEAF_PREFIX);
+				leaves.prepare_transaction(
+					&mut transaction,
+					columns::META,
+					meta_keys::LEAF_PREFIX,
+					columns::BRANCH_INDEX,
+				);
 
 				displaced_leaf
 			};

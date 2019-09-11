@@ -215,7 +215,7 @@ pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
 		id.as_ref(),
 	).map_err(db_err)? {
 		match Decode::decode(&mut &buffer[..]) {
-			Ok(v) => Ok(v),
+			Ok(v) => Ok(Some(v)),
 			Err(err) => Err(client::error::Error::Backend(
 				format!("Error decoding block branch index: {}", err)
 			)),
@@ -237,7 +237,7 @@ pub fn read_current_branch_index(
 		match Decode::decode(&mut &buffer[..]) {
 			Ok(i) => Ok(i),
 			Err(err) => Err(client::error::Error::Backend(
-				format!("Error decoding genesis hash: {}", err)
+				format!("Error decoding block branch index counter: {}", err)
 			)),
 		}
 	} else {

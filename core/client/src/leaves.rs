@@ -65,7 +65,7 @@ pub struct LeafSet<H, N> {
 }
 
 impl<H, N> LeafSet<H, N> where
-	H: Clone + PartialEq + Decode + Encode,
+	H: Clone + PartialEq + Decode + Encode + AsRef<[u8]>,
 	N: std::fmt::Debug + Clone + SimpleArithmetic + Decode + Encode,
 {
 	/// Construct a new, blank leaf set.
@@ -177,11 +177,26 @@ impl<H, N> LeafSet<H, N> where
 	}
 
 	/// Write the leaf list to the database transaction.
-	pub fn prepare_transaction(&mut self, tx: &mut DBTransaction, column: Option<u32>, prefix: &[u8]) {
+	pub fn prepare_transaction(
+		&mut self,
+		tx: &mut DBTransaction,
+		column: Option<u32>,
+		prefix: &[u8],
+		column_block_numbers: Option<u32>,
+	) {
 		let mut buf = prefix.to_vec();
     // TODO EMCH no need for portablility here always write new version.
 		for LeafSetItem { hash, number, branch_index } in self.pending_added.drain(..) {
 			hash.using_encoded(|s| buf.extend(s));
+			// TODO EMCH this need some implementation: stored per block does not seems fine.
+			// Branch are ultimately in leaf (restoring in case of leaf broken,
+			// would be done by simply setting to non appendable).
+			let is_appendable = false;
+			// TODO EMCH consider storing in a prefix ?
+			tx.put_vec(column_block_numbers, hash.as_ref(), (branch_index, is_appendable).encode());
+			// TODO EMCH also consider using value stored in previous place.
+			// still need a default behavior when undefined -> would be branch_ix 0
+			// which with future treshold of valid value will be always valid.
 			tx.put_vec(column, &buf[..], (number.0, branch_index).encode());
 			buf.truncate(prefix.len()); // reuse allocation.
 		}
@@ -233,7 +248,7 @@ pub struct Undo<'a, H: 'a, N: 'a> {
 }
 
 impl<'a, H: 'a, N: 'a> Undo<'a, H, N> where
-	H: Clone + PartialEq + Decode + Encode,
+	H: Clone + PartialEq + Decode + Encode + AsRef<[u8]>,
 	N: std::fmt::Debug + Clone + SimpleArithmetic + Decode + Encode,
 {
 	/// Undo an imported block by providing the displaced leaf.
@@ -268,38 +283,38 @@ mod tests {
 	#[test]
 	fn it_works() {
 		let mut set = LeafSet::new();
-		set.import(0u32, 0u32, 0u32, 1);
+		set.import([0u8], 0u32, [0u8], 1);
 
-		set.import(1_1, 1, 0, 1);
-		set.import(2_1, 2, 1_1, 1);
-		set.import(3_1, 3, 2_1, 1);
+		set.import([1_1], 1, [0], 1);
+		set.import([2_1], 2, [1_1], 1);
+		set.import([3_1], 3, [2_1], 1);
 
-		assert!(set.contains(3, 3_1));
-		assert!(!set.contains(2, 2_1));
-		assert!(!set.contains(1, 1_1));
-		assert!(!set.contains(0, 0));
+		assert!(set.contains(3, [3_1]));
+		assert!(!set.contains(2, [2_1]));
+		assert!(!set.contains(1, [1_1]));
+		assert!(!set.contains(0, [0]));
 
-		set.import(2_2, 2, 1_1, 2);
+		set.import([2_2], 2, [1_1], 2);
 
-		assert!(set.contains(3, 3_1));
-		assert!(set.contains(2, 2_2));
+		assert!(set.contains(3, [3_1]));
+		assert!(set.contains(2, [2_2]));
 	}
 
 	#[test]
 	fn flush_to_disk() {
 		const PREFIX: &[u8] = b"abcdefg";
-		let db = ::kvdb_memorydb::create(0);
+		let db = ::kvdb_memorydb::create(1);
 
 		let mut set = LeafSet::new();
-		set.import(0u32, 0u32, 0u32, 1);
+		set.import([0u8], 0u32, [0u8], 1);
 
-		set.import(1_1, 1, 0, 1);
-		set.import(2_1, 2, 1_1, 1);
-		set.import(3_1, 3, 2_1, 1);
+		set.import([1_1], 1, [0], 1);
+		set.import([2_1], 2, [1_1], 1);
+		set.import([3_1], 3, [2_1], 1);
 
 		let mut tx = DBTransaction::new();
 
-		set.prepare_transaction(&mut tx, None, PREFIX);
+		set.prepare_transaction(&mut tx, None, PREFIX, Some(1));
 		db.write(tx).unwrap();
 
 		let set2 = LeafSet::read_from_db(&db, None, PREFIX).unwrap();
@@ -310,41 +325,41 @@ mod tests {
 	fn two_leaves_same_height_can_be_included() {
 		let mut set = LeafSet::new();
 
-		set.import(1_1u32, 10u32, 0u32, 1);
-		set.import(1_2, 10, 0, 2);
+		set.import([1_1u8], 10u32, [0u8], 1);
+		set.import([1_2], 10, [0], 2);
 
 		assert!(set.storage.contains_key(&Reverse(10)));
-		assert!(set.contains(10, 1_1));
-		assert!(set.contains(10, 1_2));
-		assert!(!set.contains(10, 1_3));
+		assert!(set.contains(10, [1_1]));
+		assert!(set.contains(10, [1_2]));
+		assert!(!set.contains(10, [1_3]));
 	}
 
 	#[test]
 	fn finalization_consistent_with_disk() {
 		const PREFIX: &[u8] = b"prefix";
-		let db = ::kvdb_memorydb::create(0);
+		let db = ::kvdb_memorydb::create(1);
 
 		let mut set = LeafSet::new();
-		set.import(10_1u32, 10u32, 0u32, 1);
-		set.import(11_1, 11, 10_2, 2);
-		set.import(11_2, 11, 10_2, 3);
-		set.import(12_1, 12, 11_123, 4);
+		set.import([10u8, 1u8], 10u32, [0u8, 0u8], 1);
+		set.import([11, 1], 11, [10, 2], 2);
+		set.import([11, 2], 11, [10, 2], 3);
+		set.import([12, 1], 12, [11, 123], 4);
 
-		assert!(set.contains(10, 10_1));
+		assert!(set.contains(10, [10, 1]));
 
 		let mut tx = DBTransaction::new();
-		set.prepare_transaction(&mut tx, None, PREFIX);
+		set.prepare_transaction(&mut tx, None, PREFIX, Some(1));
 		db.write(tx).unwrap();
 
 		let _ = set.finalize_height(11);
 		let mut tx = DBTransaction::new();
-		set.prepare_transaction(&mut tx, None, PREFIX);
+		set.prepare_transaction(&mut tx, None, PREFIX, Some(1));
 		db.write(tx).unwrap();
 
-		assert!(set.contains(11, 11_1));
-		assert!(set.contains(11, 11_2));
-		assert!(set.contains(12, 12_1));
-		assert!(!set.contains(10, 10_1));
+		assert!(set.contains(11, [11, 1]));
+		assert!(set.contains(11, [11, 2]));
+		assert!(set.contains(12, [12, 1]));
+		assert!(!set.contains(10, [10, 1]));
 
 		let set2 = LeafSet::read_from_db(&db, None, PREFIX).unwrap();
 		assert_eq!(set, set2);
@@ -353,15 +368,15 @@ mod tests {
 	#[test]
 	fn undo_finalization() {
 		let mut set = LeafSet::new();
-		set.import(10_1u32, 10u32, 0u32, 1);
-		set.import(11_1, 11, 10_2, 2);
-		set.import(11_2, 11, 10_2, 3);
-		set.import(12_1, 12, 11_123, 4);
+		set.import([10u8, 1], 10u32, [0u8, 0u8], 1);
+		set.import([11, 1], 11, [10, 2], 2);
+		set.import([11, 2], 11, [10, 2], 3);
+		set.import([12, 1], 12, [11, 123], 4);
 
 		let displaced = set.finalize_height(11);
-		assert!(!set.contains(10, 10_1));
+		assert!(!set.contains(10, [10, 1]));
 
 		set.undo().undo_finalization(displaced);
-		assert!(set.contains(10, 10_1));
+		assert!(set.contains(10, [10, 1]));
 	}
 }
