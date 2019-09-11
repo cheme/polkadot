@@ -240,6 +240,7 @@ pub(crate) mod columns {
 	pub const OFFCHAIN: Option<u32> = Some(9);
 	// TODO EMCH also consider putting in meta with a prefix
 	pub const BRANCH_INDEX: Option<u32> = Some(10);
+	pub const BRANCH_RANGES: Option<u32> = Some(11);
 }
 
 struct PendingBlock<Block: BlockT> {
@@ -274,7 +275,9 @@ impl<Block: BlockT> BlockchainDb<Block> {
 		let leaves = LeafSet::read_from_db(
 			&*db, columns::META,
 			meta_keys::LEAF_PREFIX,
+			meta_keys::BRANCH_INDEX_TRESHOLD,
 			columns::BRANCH_INDEX,
+			columns::BRANCH_RANGES,
 		)?;
 		Ok(BlockchainDb {
 			db,

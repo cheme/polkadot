@@ -39,7 +39,7 @@ use crate::DatabaseSettings;
 
 /// Number of columns in the db. Must be the same for both full && light dbs.
 /// Otherwise RocksDb will fail to open database && check its type.
-pub const NUM_COLUMNS: u32 = 11;
+pub const NUM_COLUMNS: u32 = 12;
 /// Meta column. The set of keys in the column is shared by full && light storages.
 pub const COLUMN_META: Option<u32> = Some(0);
 
@@ -60,7 +60,9 @@ pub mod meta_keys {
 	/// Children prefix list key.
 	pub const CHILDREN_PREFIX: &[u8; 8] = b"children";
 	/// Last returned branch index.
-	pub const BRANCH_INDEX: &[u8; 8] = b"branchix";
+	pub const BRANCH_INDEX: &[u8; 12] = b"branch_index";
+	/// Treshold under which there is no invalid values.
+	pub const BRANCH_INDEX_TRESHOLD: &[u8; 15] = b"branch_treshold";
 }
 
 /// Database metadata.
@@ -213,7 +215,7 @@ pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
 	client::leaves::read_branch_index(db, key_lookup_col, id)
 }
 
-/// Increase and return current branch index.
+/// Return current branch index.
 pub fn read_current_branch_index(
 	db: &dyn KeyValueDB,
 	key_lookup_col: Option<u32>,

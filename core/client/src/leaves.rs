@@ -27,7 +27,7 @@ use crate::error;
 struct LeafSetItem<H, N> {
 	hash: H,
 	number: Reverse<N>,
-	branch_index: u64,
+	branch_ranges: StatesRef,
 }
 
 /// A displaced leaf after import.
@@ -40,7 +40,7 @@ pub struct ImportDisplaced<H, N> {
 /// Displaced leaves after finalization.
 #[must_use = "Displaced items from the leaf set must be handled."]
 pub struct FinalizationDisplaced<H, N> {
-	leaves: BTreeMap<Reverse<N>, Vec<(H, u64)>>,
+	leaves: BTreeMap<Reverse<N>, Vec<(H, StatesRef)>>,
 }
 
 impl<H, N: Ord> FinalizationDisplaced<H, N> {
@@ -59,9 +59,13 @@ impl<H, N: Ord> FinalizationDisplaced<H, N> {
 /// this allows very fast checking and modification of active leaves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeafSet<H, N> {
-	storage: BTreeMap<Reverse<N>, Vec<(H, u64)>>,
+	storage: BTreeMap<Reverse<N>, Vec<(H, StatesRef)>>,
 	pending_added: Vec<LeafSetItem<H, N>>,
-	pending_removed: Vec<(H, u64)>,
+	pending_removed: Vec<H>,
+	branch_range_cache: BTreeMap<u64, LinearStates>,
+	branch_range_treshold: u64,
+	branch_range_changed: Vec<u64>,
+	branch_range_removed: Vec<u64>,
 }
 
 impl<H, N> LeafSet<H, N> where
@@ -74,6 +78,10 @@ impl<H, N> LeafSet<H, N> where
 			storage: BTreeMap::new(),
 			pending_added: Vec::new(),
 			pending_removed: Vec::new(),
+			branch_range_cache: BTreeMap::new(),
+			branch_range_treshold: DEFAULT_START_TRESHOLD,
+			branch_range_changed: Vec::new(),
+			branch_range_removed: Vec::new(),
 		}
 	}
 
@@ -82,10 +90,14 @@ impl<H, N> LeafSet<H, N> where
 		db: &dyn KeyValueDB,
 		column: Option<u32>,
 		prefix: &[u8],
+		treshold_key: &[u8],
 		column_block_numbers: Option<u32>,
+		column_branch_range: Option<u32>,
 	) -> error::Result<Self> {
 		let mut storage = BTreeMap::new();
 
+		let branch_range_treshold = read_branch_state_treshold(db, column, treshold_key)?
+			.unwrap_or(DEFAULT_START_TRESHOLD);
 		for (key, value) in db.iter_from_prefix(column, prefix) {
 			if !key.starts_with(prefix) { break }
 			let raw_hash = &mut &key[prefix.len()..];
@@ -101,15 +113,34 @@ impl<H, N> LeafSet<H, N> where
 			// default to 0 for existing content (no associated data) so a branch that do
 			// not exist is fine.
 			let branch_index = branch_index.map(|t| t.0).unwrap_or(0);
-			storage.entry(Reverse(number)).or_insert_with(Vec::new).push((hash, branch_index));
+			let state_ref = Self::read_state_ref(
+				db,
+				column_branch_range,
+				branch_index,
+			)?;
+			storage.entry(Reverse(number)).or_insert_with(Vec::new).push((hash, state_ref));
 		}
 		Ok(Self {
 			storage,
 			pending_added: Vec::new(),
 			pending_removed: Vec::new(),
+			branch_range_cache: BTreeMap::new(),
+			branch_range_treshold,
+			branch_range_changed: Vec::new(),
+			branch_range_removed: Vec::new(),
 		})
 	}
 
+	/// Get history of branch for branch index, up to a given treshold.
+	/// TODO EMCH move to trait and db
+	pub fn read_state_ref(
+		db: &dyn KeyValueDB,
+		column_branch_range: Option<u32>,
+		branch_index: u64,
+	) -> error::Result<StatesRef> {
+		unimplemented!()
+	}
+	
 	/// update the leaf list on import. returns a displaced leaf if there was one.
 	pub fn import(&mut self, hash: H, number: N, parent_hash: H, branch_index: u64) -> Option<ImportDisplaced<H, N>> {
 		// avoid underflow for genesis.
@@ -117,14 +148,14 @@ impl<H, N> LeafSet<H, N> where
 			let new_number = Reverse(number.clone() - N::one());
 			let was_displaced = self.remove_leaf(&new_number, &parent_hash);
 
-			if let Some(parent_branch_index) = was_displaced {
-				self.pending_removed.push((parent_hash.clone(), parent_branch_index));
+			if let Some(parent_branch_ranges) = was_displaced {
+				self.pending_removed.push(parent_hash.clone());
 				Some(ImportDisplaced {
 					new_hash: hash.clone(),
 					displaced: LeafSetItem {
 						hash: parent_hash,
 						number: new_number,
-						branch_index: parent_branch_index,
+						branch_ranges: parent_branch_ranges,
 					},
 				})
 			} else {
@@ -134,8 +165,9 @@ impl<H, N> LeafSet<H, N> where
 			None
 		};
 
-		self.insert_leaf(Reverse(number.clone()), hash.clone(), branch_index);
-		self.pending_added.push(LeafSetItem { hash, number: Reverse(number), branch_index });
+		let branch_ranges = unimplemented!("TODO EMCH cat branch inde xinto parent ranges");
+		self.insert_leaf(Reverse(number.clone()), hash.clone(), branch_ranges);
+		self.pending_added.push(LeafSetItem { hash, number: Reverse(number), branch_ranges });
 		displaced
 	}
 
@@ -153,7 +185,11 @@ impl<H, N> LeafSet<H, N> where
 		};
 
 		let below_boundary = self.storage.split_off(&Reverse(boundary));
-		self.pending_removed.extend(below_boundary.values().flat_map(|h| h.iter()).cloned());
+		// TODO EMCH here we also do add branch range update/delete and revert content
+		// (happening in cache only).
+		self.pending_removed.extend(
+			below_boundary.values().flat_map(|h| h.iter().map(|(h, _)| h)).cloned()
+		);
 		FinalizationDisplaced {
 			leaves: below_boundary,
 		}
@@ -181,8 +217,9 @@ impl<H, N> LeafSet<H, N> where
 		tx: &mut DBTransaction,
 		column_block_numbers: Option<u32>,
 	) {
-		self.insert_leaf(Reverse(number.clone() - N::one()), parent_hash, parent_branch_index);
 		self.remove_leaf(&Reverse(number), &hash);
+		let parent_branch_ranges = unimplemented!("TODO EMCH get ranges from removed parent then drop last, with hard assertion on parent presence");
+		self.insert_leaf(Reverse(number.clone() - N::one()), parent_hash, parent_branch_ranges);
 		tx.delete(column_block_numbers, hash.as_ref());
 	}
 
@@ -202,8 +239,10 @@ impl<H, N> LeafSet<H, N> where
 	) {
 		let mut buf = prefix.to_vec();
     // TODO EMCH no need for portablility here always write new version.
-		for LeafSetItem { hash, number, branch_index } in self.pending_added.drain(..) {
+		for LeafSetItem { hash, number, branch_ranges } in self.pending_added.drain(..) {
 			hash.using_encoded(|s| buf.extend(s));
+			debug_assert!(branch_ranges.0.len() > 0, "no leaf set item with empty branches range");
+			let branch_index = branch_ranges.0[branch_ranges.0.len() - 1].branch_ix;
 			// TODO EMCH this need some implementation: stored per block does not seems fine.
 			// Branch are ultimately in leaf (restoring in case of leaf broken,
 			// would be done by simply setting to non appendable).
@@ -211,9 +250,10 @@ impl<H, N> LeafSet<H, N> where
 			// TODO EMCH consider storing in a prefix ?
 			tx.put_vec(column_block_numbers, hash.as_ref(), (branch_index, is_appendable).encode());
 			tx.put_vec(column, &buf[..], number.0.encode());
+
 			buf.truncate(prefix.len()); // reuse allocation.
 		}
-		for (hash, _) in self.pending_removed.drain(..) {
+		for hash in self.pending_removed.drain(..) {
 			hash.using_encoded(|s| buf.extend(s));
 			tx.delete(column, &buf[..]);
 			buf.truncate(prefix.len()); // reuse allocation.
@@ -226,17 +266,18 @@ impl<H, N> LeafSet<H, N> where
 			.map_or(false, |hashes| hashes.iter().find(|(h, _)| h == &hash).is_some())
 	}
 
-	fn insert_leaf(&mut self, number: Reverse<N>, hash: H, branch_index: u64) {
-		self.storage.entry(number).or_insert_with(Vec::new).push((hash, branch_index));
+	fn insert_leaf(&mut self, number: Reverse<N>, hash: H, branch_ranges: StatesRef) {
+		self.storage.entry(number).or_insert_with(Vec::new).push((hash, branch_ranges));
 	}
 
 	// returns a branch index if this leaf was contained, nothing otherwise.
-	fn remove_leaf(&mut self, number: &Reverse<N>, hash: &H) -> Option<u64> {
+	fn remove_leaf(&mut self, number: &Reverse<N>, hash: &H) -> Option<StatesRef> {
 		let mut empty = false;
 		let removed = self.storage.get_mut(number).map_or(None, |leaves| {
 			let mut found = None;
 			leaves.retain(|(h, b)| if h == hash {
-				found = Some(*b);
+				// TODO EMCH rewrite to avoid this clone
+				found = Some(b.clone());
 				false
 			} else {
 				true
@@ -272,7 +313,7 @@ impl<'a, H: 'a, N: 'a> Undo<'a, H, N> where
 		self.inner.insert_leaf(
 			new_number,
 			displaced.displaced.hash,
-			displaced.displaced.branch_index,
+			displaced.displaced.branch_ranges,
 		);
 	}
 
@@ -310,6 +351,29 @@ pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
 	}
 }
 
+/// Read a stored branch treshould corresponding to
+/// a branch index bellow which there is only valid values.
+/// TODO EMCH this should be in db: TODO create a BranchIndexBackend
+/// that db implements.
+pub fn read_branch_state_treshold(
+	db: &dyn KeyValueDB,
+	key_lookup_col: Option<u32>,
+	key: &[u8],
+) -> Result<Option<u64>, error::Error> {
+	if let Some(buffer) = db.get(
+		key_lookup_col,
+		key,
+	).map_err(|err| error::Error::Backend(format!("{}", err)))? {
+		match Decode::decode(&mut &buffer[..]) {
+			Ok(i) => Ok(i),
+			Err(err) => Err(error::Error::Backend(
+				format!("Error decoding branch index treshold: {}", err)
+			)),
+		}
+	} else {
+		Ok(None)
+	}
+}
 
 #[cfg(test)]
 mod tests {
@@ -338,7 +402,8 @@ mod tests {
 	#[test]
 	fn flush_to_disk() {
 		const PREFIX: &[u8] = b"abcdefg";
-		let db = ::kvdb_memorydb::create(2);
+		const TRESHOLD: &[u8] = b"hijkl";
+		let db = ::kvdb_memorydb::create(3);
 
 		let mut set = LeafSet::new();
 		set.import([0u8], 0u32, [0u8], 1);
@@ -352,7 +417,7 @@ mod tests {
 		set.prepare_transaction(&mut tx, None, PREFIX, Some(1));
 		db.write(tx).unwrap();
 
-		let set2 = LeafSet::read_from_db(&db, None, PREFIX, Some(1)).unwrap();
+		let set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, Some(1), Some(2)).unwrap();
 		assert_eq!(set, set2);
 	}
 
@@ -372,7 +437,8 @@ mod tests {
 	#[test]
 	fn finalization_consistent_with_disk() {
 		const PREFIX: &[u8] = b"prefix";
-		let db = ::kvdb_memorydb::create(2);
+		const TRESHOLD: &[u8] = b"hijkl";
+		let db = ::kvdb_memorydb::create(3);
 
 		let mut set = LeafSet::new();
 		set.import([10u8, 1u8], 10u32, [0u8, 0u8], 1);
@@ -396,7 +462,7 @@ mod tests {
 		assert!(set.contains(12, [12, 1]));
 		assert!(!set.contains(10, [10, 1]));
 
-		let set2 = LeafSet::read_from_db(&db, None, PREFIX, Some(1)).unwrap();
+		let set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, Some(1), Some(2)).unwrap();
 		assert_eq!(set, set2);
 	}
 
@@ -421,13 +487,11 @@ mod tests {
 // TODO EMCH temporary structs until merge with historied-data branch.
 
 /// This is a simple range, end non inclusive.
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearStatesRef {
 	start: usize,
 	end: usize,
 }
-
 
 impl LinearStatesRef {
 	/// Return true if the state exists, false otherwhise.
@@ -436,14 +500,11 @@ impl LinearStatesRef {
 	}
 }
 
-
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatesBranchRef {
 	branch_ix: u64,
 	state: LinearStatesRef,
 }
-
 
 /// Reference to state that is enough for query updates, but not
 /// for gc.
@@ -463,8 +524,7 @@ pub struct StatesBranchRef {
 pub type StatesRef = (Vec<StatesBranchRef>, u64);
 
 
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearStates {
 	/// Index of first element (only use for indexed access).
 	/// Element before offset are not in state.
@@ -557,5 +617,7 @@ impl LinearStates {
 	}
 
 }
+
+const DEFAULT_START_TRESHOLD: u64 = 1;
 
 // TODO EMCH end from historied - data
