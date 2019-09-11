@@ -415,3 +415,147 @@ mod tests {
 		assert!(set.contains(10, [10, 1]));
 	}
 }
+
+
+
+// TODO EMCH temporary structs until merge with historied-data branch.
+
+/// This is a simple range, end non inclusive.
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct LinearStatesRef {
+	start: usize,
+	end: usize,
+}
+
+
+impl LinearStatesRef {
+	/// Return true if the state exists, false otherwhise.
+	pub fn get_state(&self, index: usize) -> bool {
+		index < self.end && index >= self.start
+	}
+}
+
+
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct StatesBranchRef {
+	branch_ix: u64,
+	state: LinearStatesRef,
+}
+
+
+/// Reference to state that is enough for query updates, but not
+/// for gc.
+/// Values are ordered by branch_ix,
+/// and only a logic branch path should be present.
+///
+/// Note that an alternative could be a pointer to a full state
+/// branch for a given branch index, here we use an in memory
+/// copied representation in relation to an actual use case.
+///
+/// First value is an ordered array of valid branches, second value
+/// is a branch index treshold under which all branch are valid
+/// (expect all historied data state to be fully garbage collected
+/// upon a single trie path, for instance in case of a tree of block
+/// that would be at finalize (remove all non finalize data from this point
+/// so there is no need to track the single remaining path)).
+pub type StatesRef = (Vec<StatesBranchRef>, u64);
+
+
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct LinearStates {
+	/// Index of first element (only use for indexed access).
+	/// Element before offset are not in state.
+	offset: usize,
+	/// number of elements: all elements equal or bellow
+	/// this index are valid, over this index they are not.
+	len: usize,
+	/// Maximum index before first deletion, it indicates
+	/// if the state is modifiable (when an element is dropped
+	/// we cannot append and need to create a new branch).
+	max_len_ix: usize,
+}
+
+impl Default for LinearStates {
+	// initialize with one element
+	fn default() -> Self {
+		Self::new_from(0)
+	}
+}
+
+impl LinearStates {
+	pub fn new_from(offset: usize) -> Self {
+		LinearStates {
+			offset,
+			len: 1,
+			max_len_ix: offset,
+		}
+	}
+
+	pub fn state_ref(&self) -> LinearStatesRef {
+		LinearStatesRef {
+			start: self.offset,
+			end: self.offset + self.len,
+		}
+	}
+
+	pub fn has_deleted_index(&self) -> bool {
+		self.max_len_ix >= self.offset + self.len
+	}
+
+	pub fn add_state(&mut self) -> bool {
+		if !self.has_deleted_index() {
+			self.len += 1;
+			self.max_len_ix += 1;
+			true
+		} else {
+			false
+		}
+	}
+
+	/// return possible dropped state
+	pub fn drop_state(&mut self) -> Option<usize> {
+		if self.len > 0 {
+			self.len -= 1;
+			Some(self.len)
+		} else {
+			None
+		}
+	}
+
+	/// act as a truncate, returning range of deleted (end excluded)
+	/// TODO consider removal
+	pub fn keep_state(&mut self, index: usize) -> (usize, usize) {
+		if index < self.offset {
+			return (self.offset, self.offset);
+		}
+		if self.len > (index - self.offset) {
+			let old_len = self.len;
+			self.len = index - self.offset;
+			(index, old_len)
+		} else {
+			(index, index)
+		}
+	}
+
+	/// Return true if state exists.
+	pub fn get_state(&self, index: usize) -> bool {
+		if index < self.offset {
+			return false;
+		}
+		self.len > index + self.offset
+	}
+
+	pub fn latest_ix(&self) -> Option<usize> {
+		if self.len > 0 {
+			Some(self.offset + self.len - 1)
+		} else {
+			None
+		}
+	}
+
+}
+
+// TODO EMCH end from historied - data
