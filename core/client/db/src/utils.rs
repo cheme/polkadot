@@ -210,19 +210,7 @@ pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
 	key_lookup_col: Option<u32>,
 	id: H,
 ) -> Result<Option<(u64, bool)>, client::error::Error> {
-	if let Some(buffer) = db.get(
-		key_lookup_col,
-		id.as_ref(),
-	).map_err(db_err)? {
-		match Decode::decode(&mut &buffer[..]) {
-			Ok(v) => Ok(Some(v)),
-			Err(err) => Err(client::error::Error::Backend(
-				format!("Error decoding block branch index: {}", err)
-			)),
-		}
-	} else {
-		Ok(None)
-	}
+	client::leaves::read_branch_index(db, key_lookup_col, id)
 }
 
 /// Increase and return current branch index.

@@ -271,7 +271,11 @@ pub struct BlockchainDb<Block: BlockT> {
 impl<Block: BlockT> BlockchainDb<Block> {
 	fn new(db: Arc<dyn KeyValueDB>) -> Result<Self, client::error::Error> {
 		let meta = read_meta::<Block>(&*db, columns::META, columns::HEADER)?;
-		let leaves = LeafSet::read_from_db(&*db, columns::META, meta_keys::LEAF_PREFIX)?;
+		let leaves = LeafSet::read_from_db(
+			&*db, columns::META,
+			meta_keys::LEAF_PREFIX,
+			columns::BRANCH_INDEX,
+		)?;
 		Ok(BlockchainDb {
 			db,
 			leaves: RwLock::new(leaves),
@@ -1438,13 +1442,19 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 					transaction.put(columns::META, meta_keys::BEST_BLOCK, &key);
 					transaction.delete(columns::KEY_LOOKUP, removed.hash().as_ref());
 					children::remove_children(&mut transaction, columns::META, meta_keys::CHILDREN_PREFIX, hash);
-					self.storage.db.write(transaction).map_err(db_err)?;
-					self.blockchain.update_meta(hash, best, true, false);
 					let parent_hash = removed.parent_hash().clone();
 					let parent_branch_index = self.blockchain.branch_index(parent_hash)?
-						.expect("Parent node not remove before child"); // TODO manage return None??
-					self.blockchain.leaves.write()
-						.revert(removed.hash().clone(), removed.number().clone(), parent_hash, parent_branch_index);
+						.expect("Parent node not remove before child"); // TODO EMCH manage return None??
+					self.blockchain.leaves.write().revert(
+						removed.hash().clone(),
+						removed.number().clone(),
+						parent_hash,
+						parent_branch_index,
+						&mut transaction,
+						columns::BRANCH_INDEX,
+					);
+					self.storage.db.write(transaction).map_err(db_err)?;
+					self.blockchain.update_meta(hash, best, true, false);
 				}
 				None => return Ok(c.saturated_into::<NumberFor<Block>>())
 			}

@@ -78,7 +78,12 @@ impl<H, N> LeafSet<H, N> where
 	}
 
 	/// Read the leaf list from the DB, using given prefix for keys.
-	pub fn read_from_db(db: &dyn KeyValueDB, column: Option<u32>, prefix: &[u8]) -> error::Result<Self> {
+	pub fn read_from_db(
+		db: &dyn KeyValueDB,
+		column: Option<u32>,
+		prefix: &[u8],
+		column_block_numbers: Option<u32>,
+	) -> error::Result<Self> {
 		let mut storage = BTreeMap::new();
 
 		for (key, value) in db.iter_from_prefix(column, prefix) {
@@ -88,12 +93,14 @@ impl<H, N> LeafSet<H, N> where
 				Ok(hash) => hash,
 				Err(_) => return Err(error::Error::Backend("Error decoding hash".into())),
 			};
-      // TODO EMCH this is breaking: need some portability code: if < such block then 'let number ='
-      // and use 0 as branch_ix.
-			let (number, branch_index) = match Decode::decode(&mut &value[..]) {
+			let number = match Decode::decode(&mut &value[..]) {
 				Ok(tuple) => tuple,
 				Err(_) => return Err(error::Error::Backend("Error decoding number".into())),
 			};
+			let branch_index = read_branch_index(db, column_block_numbers, &hash)?;
+			// default to 0 for existing content (no associated data) so a branch that do
+			// not exist is fine.
+			let branch_index = branch_index.map(|t| t.0).unwrap_or(0);
 			storage.entry(Reverse(number)).or_insert_with(Vec::new).push((hash, branch_index));
 		}
 		Ok(Self {
@@ -165,9 +172,18 @@ impl<H, N> LeafSet<H, N> where
 	/// currently since revert only affects the canonical chain
 	/// we assume that parent has no further children
 	/// and we add it as leaf again
-	pub fn revert(&mut self, hash: H, number: N, parent_hash: H, parent_branch_index: u64) {
+	pub fn revert(
+		&mut self,
+		hash: H,
+		number: N,
+		parent_hash: H,
+		parent_branch_index: u64,
+		tx: &mut DBTransaction,
+		column_block_numbers: Option<u32>,
+	) {
 		self.insert_leaf(Reverse(number.clone() - N::one()), parent_hash, parent_branch_index);
 		self.remove_leaf(&Reverse(number), &hash);
+		tx.delete(column_block_numbers, hash.as_ref());
 	}
 
 	/// returns an iterator over all hashes in the leaf set
@@ -194,10 +210,7 @@ impl<H, N> LeafSet<H, N> where
 			let is_appendable = false;
 			// TODO EMCH consider storing in a prefix ?
 			tx.put_vec(column_block_numbers, hash.as_ref(), (branch_index, is_appendable).encode());
-			// TODO EMCH also consider using value stored in previous place.
-			// still need a default behavior when undefined -> would be branch_ix 0
-			// which with future treshold of valid value will be always valid.
-			tx.put_vec(column, &buf[..], (number.0, branch_index).encode());
+			tx.put_vec(column, &buf[..], number.0.encode());
 			buf.truncate(prefix.len()); // reuse allocation.
 		}
 		for (hash, _) in self.pending_removed.drain(..) {
@@ -276,6 +289,28 @@ impl<'a, H: 'a, N: 'a> Drop for Undo<'a, H, N> {
 	}
 }
 
+/// Read a stored branch index for a block hash.
+pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
+	db: &dyn KeyValueDB,
+	key_lookup_col: Option<u32>,
+	id: H,
+) -> Result<Option<(u64, bool)>, error::Error> {
+	if let Some(buffer) = db.get(
+		key_lookup_col,
+		id.as_ref(),
+	).map_err(|err| error::Error::Backend(format!("{}", err)))? {
+		match Decode::decode(&mut &buffer[..]) {
+			Ok(v) => Ok(Some(v)),
+			Err(err) => Err(error::Error::Backend(
+				format!("Error decoding block branch index: {}", err)
+			)),
+		}
+	} else {
+		Ok(None)
+	}
+}
+
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -303,7 +338,7 @@ mod tests {
 	#[test]
 	fn flush_to_disk() {
 		const PREFIX: &[u8] = b"abcdefg";
-		let db = ::kvdb_memorydb::create(1);
+		let db = ::kvdb_memorydb::create(2);
 
 		let mut set = LeafSet::new();
 		set.import([0u8], 0u32, [0u8], 1);
@@ -317,7 +352,7 @@ mod tests {
 		set.prepare_transaction(&mut tx, None, PREFIX, Some(1));
 		db.write(tx).unwrap();
 
-		let set2 = LeafSet::read_from_db(&db, None, PREFIX).unwrap();
+		let set2 = LeafSet::read_from_db(&db, None, PREFIX, Some(1)).unwrap();
 		assert_eq!(set, set2);
 	}
 
@@ -337,7 +372,7 @@ mod tests {
 	#[test]
 	fn finalization_consistent_with_disk() {
 		const PREFIX: &[u8] = b"prefix";
-		let db = ::kvdb_memorydb::create(1);
+		let db = ::kvdb_memorydb::create(2);
 
 		let mut set = LeafSet::new();
 		set.import([10u8, 1u8], 10u32, [0u8, 0u8], 1);
@@ -361,7 +396,7 @@ mod tests {
 		assert!(set.contains(12, [12, 1]));
 		assert!(!set.contains(10, [10, 1]));
 
-		let set2 = LeafSet::read_from_db(&db, None, PREFIX).unwrap();
+		let set2 = LeafSet::read_from_db(&db, None, PREFIX, Some(1)).unwrap();
 		assert_eq!(set, set2);
 	}
 
