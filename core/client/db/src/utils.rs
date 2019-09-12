@@ -215,26 +215,6 @@ pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
 	client::leaves::read_branch_index(db, key_lookup_col, id)
 }
 
-/// Return current branch index.
-pub fn read_current_branch_index(
-	db: &dyn KeyValueDB,
-	key_lookup_col: Option<u32>,
-) -> Result<u64, client::error::Error> {
-	if let Some(buffer) = db.get(
-		key_lookup_col,
-		meta_keys::BRANCH_INDEX,
-	).map_err(db_err)? {
-		match Decode::decode(&mut &buffer[..]) {
-			Ok(i) => Ok(i),
-			Err(err) => Err(client::error::Error::Backend(
-				format!("Error decoding block branch index counter: {}", err)
-			)),
-		}
-	} else {
-		Ok(0)
-	}
-}
-
 /// Maps database error to client error
 pub fn db_err(err: io::Error) -> client::error::Error {
 	client::error::Error::Backend(format!("{}", err))
@@ -340,7 +320,7 @@ pub fn read_meta<Block>(db: &dyn KeyValueDB, col_meta: Option<u32>, col_header: 
 		}),
 	};
 
-	let current_branch_index = read_current_branch_index(db, col_meta)?;
+	let current_branch_index = read_branch_last_index(db, col_meta)?;
 
 	let load_meta_block = |desc, key| -> Result<_, client::error::Error> {
 		if let Some(Some(header)) = db.get(col_meta, key).and_then(|id|

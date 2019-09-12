@@ -273,9 +273,11 @@ impl<Block: BlockT> BlockchainDb<Block> {
 	fn new(db: Arc<dyn KeyValueDB>) -> Result<Self, client::error::Error> {
 		let meta = read_meta::<Block>(&*db, columns::META, columns::HEADER)?;
 		let leaves = LeafSet::read_from_db(
-			&*db, columns::META,
+			&*db,
+			columns::META,
 			meta_keys::LEAF_PREFIX,
 			meta_keys::BRANCH_INDEX_TRESHOLD,
+			meta_keys::BRANCH_INDEX,
 			columns::BRANCH_INDEX,
 			columns::BRANCH_RANGES,
 		)?;
