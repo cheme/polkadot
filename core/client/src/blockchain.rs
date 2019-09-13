@@ -42,14 +42,9 @@ pub trait HeaderBackend<Block: BlockT>: Send + Sync {
 	/// TODO also consider putting that in another trait.
 	/// TODO also consider putting in Backend (especially if implementing for in_mem does not
 	/// make sense : light already does not).
-	fn branch_index(&self, hash: Block::Hash) -> Result<Option<u64>>;
-	/// Act as branch index but only return result in case the branch for this branch
-	/// index is still appendable.
-	/// A branch stop being appendable when one of its element is retracted.
-	fn appendable_branch_index(&self, hash: Block::Hash) -> Result<Option<u64>>;
-	/// Return next available branch index (for new branch).
-	/// TODO EMCH Note that this change state: this should realy move to another trait!!
-	fn next_branch_index(&self) -> Result<u64>;
+	/// TODO see if it can get removed (probably need to switch to branch_range ref for externalities
+	/// in fact).
+	fn branch_index(&self, hash: &Block::Hash) -> Result<Option<u64>>;
 	/// Get block hash by number. Returns `None` if the header is not in the chain.
 	fn hash(&self, number: NumberFor<Block>) -> Result<Option<Block::Hash>>;
 

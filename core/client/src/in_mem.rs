@@ -105,11 +105,6 @@ struct BlockchainStorage<Block: BlockT> {
 	changes_trie_cht_roots: HashMap<NumberFor<Block>, Block::Hash>,
 	leaves: LeafSet<Block::Hash, NumberFor<Block>>,
 	aux: HashMap<Vec<u8>, Vec<u8>>,
-	// TODO EMCH not sure useful for in_mem
-	// TODO maybe set of appendable could be better?? TODO check usage
-	// TODO BTreeset ??
-	not_appendable_branch_index: HashSet<u64>,
-	last_branch_index: u64,
 }
 
 /// In-memory blockchain. Supports concurrent reads.
@@ -150,8 +145,6 @@ impl<Block: BlockT> Blockchain<Block> {
 				changes_trie_cht_roots: HashMap::new(),
 				leaves: LeafSet::new(),
 				aux: HashMap::new(),
-				last_branch_index: 0,
-				not_appendable_branch_index: HashSet::new(),
 			}));
 		Blockchain {
 			storage: storage.clone(),
@@ -166,7 +159,6 @@ impl<Block: BlockT> Blockchain<Block> {
 		justification: Option<Justification>,
 		body: Option<Vec<<Block as BlockT>::Extrinsic>>,
 		new_state: NewBlockState,
-		branch_index: u64,
 	) -> crate::error::Result<()> {
 		let number = header.number().clone();
 		if new_state.is_best() {
@@ -174,12 +166,13 @@ impl<Block: BlockT> Blockchain<Block> {
 		}
 
 		{
+			let parent_branch_index = self.branch_index(header.parent_hash())?.unwrap_or(0);
 			let mut storage = self.storage.write();
-			storage.leaves.import(
+			let (_, branch_index) = storage.leaves.import(
 				hash.clone(),
 				number.clone(),
 				header.parent_hash().clone(),
-				branch_index,
+				parent_branch_index,
 			);
 			storage.blocks.insert(
 				hash.clone(),
@@ -339,22 +332,8 @@ impl<Block: BlockT> HeaderBackend<Block> for Blockchain<Block> {
 		Ok(self.storage.read().blocks.get(&hash).map(|b| *b.header().number()))
 	}
 
-	fn branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
-		Ok(self.storage.read().blocks.get(&hash).map(|b| b.branch_index()))
-	}
-
-	fn appendable_branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
-		let storage = self.storage.read();
-		Ok(
-			storage.blocks.get(&hash).map(|b| b.branch_index())
-				.filter(|index| !storage.not_appendable_branch_index.contains(index))
-		)
-	}
-
-	fn next_branch_index(&self) -> error::Result<u64> {
-		let mut storage = self.storage.write();
-		storage.last_branch_index += 1;
-		Ok(storage.last_branch_index)
+	fn branch_index(&self, hash: &Block::Hash) -> error::Result<Option<u64>> {
+		Ok(self.storage.read().blocks.get(hash).map(|b| b.branch_index()))
 	}
 
 	fn hash(&self, number: <<Block as BlockT>::Header as HeaderT>::Number) -> error::Result<Option<Block::Hash>> {
@@ -432,11 +411,10 @@ impl<Block: BlockT> light::blockchain::Storage<Block> for Blockchain<Block>
 		header: Block::Header,
 		_cache: HashMap<CacheKeyId, Vec<u8>>,
 		state: NewBlockState,
-		branch_index: u64,
 		aux_ops: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	) -> error::Result<()> {
 		let hash = header.hash();
-		self.insert(hash, header, None, None, state, branch_index)?;
+		self.insert(hash, header, None, None, state)?;
 
 		self.write_aux(aux_ops);
 		Ok(())
@@ -508,9 +486,9 @@ where
 		body: Option<Vec<<Block as BlockT>::Extrinsic>>,
 		justification: Option<Justification>,
 		state: NewBlockState,
-		branch_index: u64,
 	) -> error::Result<()> {
 		assert!(self.pending_block.is_none(), "Only one block per operation is allowed");
+		let branch_index = 0; // while pending the branch index is undefined
 		self.pending_block = Some(PendingBlock {
 			block: StoredBlock::new(header, body, justification, branch_index),
 			state,
@@ -669,7 +647,7 @@ where
 
 		if let Some(pending_block) = operation.pending_block {
 			let old_state = &operation.old_state;
-			let (header, body, justification, branch_index) = pending_block.block.into_inner();
+			let (header, body, justification, _branch_index) = pending_block.block.into_inner();
 
 			let hash = header.hash();
 
@@ -686,7 +664,7 @@ where
 				}
 			}
 
-			self.blockchain.insert(hash, header, justification, body, pending_block.state, branch_index)?;
+			self.blockchain.insert(hash, header, justification, body, pending_block.state)?;
 		}
 
 		if !operation.aux.is_empty() {

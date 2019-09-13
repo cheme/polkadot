@@ -324,7 +324,6 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 				Some(vec![]),
 				None,
 				crate::backend::NewBlockState::Final,
-				0,
 			)?;
 			backend.commit_operation(op)?;
 		}
@@ -863,12 +862,6 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			blockchain::BlockStatus::Unknown => return Ok(ImportResult::UnknownParent),
 		}
 
-		let branch_index: u64 = if let Some(index) = self.backend.blockchain().appendable_branch_index(parent_hash)? {
-			index
-		} else {
-			self.backend.blockchain().next_branch_index()?
-		};
-
 		let import_headers = if post_digests.is_empty() {
 			PrePostHeader::Same(header)
 		} else {
@@ -893,7 +886,6 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			body,
 			new_cache,
 			finalized,
-			branch_index,
 			auxiliary,
 			fork_choice,
 		);
@@ -921,7 +913,6 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		body: Option<Vec<Block::Extrinsic>>,
 		new_cache: HashMap<CacheKeyId, Vec<u8>>,
 		finalized: bool,
-		branch_index: u64,
 		aux: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 		fork_choice: ForkChoiceStrategy,
 	) -> error::Result<ImportResult> where
@@ -997,7 +988,6 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			body,
 			justification,
 			leaf_state,
-			branch_index,
 		)?;
 
 		operation.op.update_cache(new_cache);
@@ -1375,20 +1365,12 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> wher
 		self.backend.blockchain().number(hash)
 	}
 
-	fn branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
+	fn branch_index(&self, hash: &Block::Hash) -> error::Result<Option<u64>> {
 		self.backend.blockchain().branch_index(hash)
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> error::Result<Option<Block::Hash>> {
 		self.backend.blockchain().hash(number)
-	}
-
-	fn appendable_branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
-		self.backend.blockchain().appendable_branch_index(hash)
-	}
-
-	fn next_branch_index(&self) -> error::Result<u64> {
-		self.backend.blockchain().next_branch_index()
 	}
 
 }
@@ -1415,16 +1397,8 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for &Client<B, E, Block, RA> whe
 		(**self).number(hash)
 	}
 
-	fn branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
+	fn branch_index(&self, hash: &Block::Hash) -> error::Result<Option<u64>> {
 		(**self).branch_index(hash)
-	}
-
-	fn appendable_branch_index(&self, hash: Block::Hash) -> error::Result<Option<u64>> {
-		(**self).appendable_branch_index(hash)
-	}
-
-	fn next_branch_index(&self) -> error::Result<u64> {
-		(**self).next_branch_index()
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> error::Result<Option<Block::Hash>> {

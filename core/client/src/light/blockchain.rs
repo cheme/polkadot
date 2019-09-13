@@ -43,7 +43,6 @@ pub trait Storage<Block: BlockT>: AuxStore + BlockchainHeaderBackend<Block> {
 		header: Block::Header,
 		cache: HashMap<well_known_cache_keys::Id, Vec<u8>>,
 		state: NewBlockState,
-		branch_index: u64,
 		aux_ops: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	) -> ClientResult<()>;
 
@@ -147,22 +146,10 @@ impl<S, F, Block> BlockchainHeaderBackend<Block> for Blockchain<S, F> where Bloc
 		self.storage.number(hash)
 	}
 
-	fn branch_index(&self, _hash: Block::Hash) -> ClientResult<Option<u64>> {
+	fn branch_index(&self, _hash: &Block::Hash) -> ClientResult<Option<u64>> {
 		// TODO EMCH this does not make sense for light client, it is technical info
 		// for a storage that does not exists for light client.
 		Ok(Some(0))
-	}
-
-	fn appendable_branch_index(&self, _hash: Block::Hash) -> ClientResult<Option<u64>> {
-		// TODO EMCH this does not make sense for light client, it is technical info
-		// for a storage that does not exists for light client.
-		Ok(Some(0))
-	}
-
-	fn next_branch_index(&self) -> ClientResult<u64> {
-		// TODO EMCH this does not make sense for light client, it is technical info
-		// for a storage that does not exists for light client.
-		Ok(0)
 	}
 
 	fn hash(&self, number: <<Block as BlockT>::Header as HeaderT>::Number) -> ClientResult<Option<Block::Hash>> {
@@ -314,16 +301,8 @@ pub mod tests {
 			}
 		}
 
-		fn branch_index(&self, _hash: Hash) -> ClientResult<Option<u64>> {
+		fn branch_index(&self, _hash: &Hash) -> ClientResult<Option<u64>> {
 			Ok(Some(0))
-		}
-
-		fn appendable_branch_index(&self, _hash: Hash) -> ClientResult<Option<u64>> {
-			Ok(Some(0))
-		}
-
-		fn next_branch_index(&self) -> ClientResult<u64> {
-			Ok(0)
 		}
 
 		fn hash(&self, number: u64) -> ClientResult<Option<Hash>> {
@@ -360,7 +339,6 @@ pub mod tests {
 			_header: Header,
 			_cache: HashMap<well_known_cache_keys::Id, Vec<u8>>,
 			_state: NewBlockState,
-			_branch_index: u64,
 			_aux_ops: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 		) -> ClientResult<()> {
 			Ok(())

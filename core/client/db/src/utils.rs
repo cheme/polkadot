@@ -78,8 +78,6 @@ pub struct Meta<N, H> {
 	pub finalized_number: N,
 	/// Hash of the genesis block.
 	pub genesis_hash: H,
-	/// Latest used branch index.
-	pub current_branch_index: u64,
 }
 
 /// A block lookup key: used for canonical lookup from block number to hash
@@ -211,7 +209,7 @@ pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
 	db: &dyn KeyValueDB,
 	key_lookup_col: Option<u32>,
 	id: H,
-) -> Result<Option<(u64, bool)>, client::error::Error> {
+) -> Result<Option<u64>, client::error::Error> {
 	client::leaves::read_branch_index(db, key_lookup_col, id)
 }
 
@@ -316,11 +314,8 @@ pub fn read_meta<Block>(db: &dyn KeyValueDB, col_meta: Option<u32>, col_header: 
 			finalized_hash: Default::default(),
 			finalized_number: Zero::zero(),
 			genesis_hash: Default::default(),
-			current_branch_index: 0,
 		}),
 	};
-
-	let current_branch_index = read_branch_last_index(db, col_meta)?;
 
 	let load_meta_block = |desc, key| -> Result<_, client::error::Error> {
 		if let Some(Some(header)) = db.get(col_meta, key).and_then(|id|
@@ -346,7 +341,6 @@ pub fn read_meta<Block>(db: &dyn KeyValueDB, col_meta: Option<u32>, col_header: 
 		finalized_hash,
 		finalized_number,
 		genesis_hash,
-		current_branch_index,
 	})
 }
 

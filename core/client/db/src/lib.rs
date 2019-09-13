@@ -248,7 +248,6 @@ struct PendingBlock<Block: BlockT> {
 	justification: Option<Justification>,
 	body: Option<Vec<Block::Extrinsic>>,
 	leaf_state: NewBlockState,
-	branch_index: u64,
 }
 
 // wrapper that implements trait required for state_db
@@ -354,23 +353,10 @@ impl<Block: BlockT> client::blockchain::HeaderBackend<Block> for BlockchainDb<Bl
 		}
 	}
 
-	fn branch_index(&self, hash: Block::Hash) -> Result<Option<u64>, client::error::Error> {
-		// TODO EMCH not using key lookup, is that fine
-		Ok(utils::read_branch_index(&*self.db, columns::BRANCH_INDEX, hash)?.map(|b| b.0))
-	}
-
-	fn appendable_branch_index(&self, hash: Block::Hash) -> Result<Option<u64>, client::error::Error> {
-		// TODO EMCH not using key lookup, is that fine
-		Ok(utils::read_branch_index(&*self.db, columns::BRANCH_INDEX, hash)?
-			.filter(|b| b.1)
-			.map(|b| b.0)
-		)
-	}
-
-	fn next_branch_index(&self) -> Result<u64, client::error::Error> {
-		let mut meta = self.meta.write();
-		meta.current_branch_index += 1;
-		Ok(meta.current_branch_index)
+	fn branch_index(&self, hash: &Block::Hash) -> Result<Option<u64>, client::error::Error> {
+		// TODO EMCH not using key lookup, is that fine -> this more than need a cache, but
+		// it also need to be accessible from leaves (need crate refact)
+		Ok(utils::read_branch_index(&*self.db, columns::BRANCH_INDEX, hash)?)
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> Result<Option<Block::Hash>, client::error::Error> {
@@ -470,7 +456,6 @@ where Block: BlockT<Hash=H256>,
 		body: Option<Vec<Block::Extrinsic>>,
 		justification: Option<Justification>,
 		leaf_state: NewBlockState,
-		branch_index: u64,
 	) -> Result<(), client::error::Error> {
 		assert!(self.pending_block.is_none(), "Only one block per operation is allowed");
 		self.pending_block = Some(PendingBlock {
@@ -478,7 +463,6 @@ where Block: BlockT<Hash=H256>,
 			body,
 			justification,
 			leaf_state,
-			branch_index,
 		});
 		Ok(())
 	}
@@ -863,22 +847,21 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		let inmem = InMemoryBackend::<Block, Blake2Hasher>::new();
 
 		// get all headers hashes && sort them by number (could be duplicate)
-		let mut headers: Vec<(NumberFor<Block>, Block::Hash, Block::Header, u64)> = Vec::new();
+		let mut headers: Vec<(NumberFor<Block>, Block::Hash, Block::Header)> = Vec::new();
 		for (_, header) in self.blockchain.db.iter(columns::HEADER) {
 			let header = Block::Header::decode(&mut &header[..]).unwrap();
 			let hash = header.hash();
 			let number = *header.number();
 			let pos = headers.binary_search_by(|item| item.0.cmp(&number));
-			let branch_index = self.blockchain.branch_index(hash).unwrap().unwrap();
 			match pos {
-				Ok(pos) => headers.insert(pos, (number, hash, header, branch_index)),
-				Err(pos) => headers.insert(pos, (number, hash, header, branch_index)),
+				Ok(pos) => headers.insert(pos, (number, hash, header)),
+				Err(pos) => headers.insert(pos, (number, hash, header)),
 			}
 		}
 
 		// insert all other headers + bodies + justifications
 		let info = self.blockchain.info();
-		for (number, hash, header, branch_index) in headers {
+		for (number, hash, header) in headers {
 			let id = BlockId::Hash(hash);
 			let justification = self.blockchain.justification(id).unwrap();
 			let body = self.blockchain.body(id).unwrap();
@@ -892,7 +875,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 				NewBlockState::Normal
 			};
 			let mut op = inmem.begin_operation().unwrap();
-			op.set_block_data(header, body, justification, new_block_state, branch_index).unwrap();
+			op.set_block_data(header, body, justification, new_block_state).unwrap();
 			op.update_db_storage(state.into_iter().map(|(k, v)| (None, k, Some(v))).collect()).unwrap();
 			inmem.commit_operation(op).unwrap();
 		}
@@ -1076,9 +1059,6 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		operation.apply_aux(&mut transaction);
 
 		let mut meta_updates = Vec::new();
-		let current_branch_index = self.blockchain.meta.read().current_branch_index;
-		// branch index can be commited at any point.
-		transaction.put(columns::META, meta_keys::BRANCH_INDEX, &current_branch_index.encode());
 		let mut last_finalized_hash = self.blockchain.meta.read().finalized_hash;
 
 		if !operation.finalized_blocks.is_empty() {
@@ -1173,14 +1153,18 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 
 			let displaced_leaf = {
 				let mut leaves = self.blockchain.leaves.write();
-				let displaced_leaf = leaves.import(hash, number, parent_hash, pending_block.branch_index);
+				let parent_branch_index = self.blockchain.branch_index(&parent_hash)?.unwrap_or(0);
+				let (displaced_leaf, _branch_index) = leaves.import(hash, number, parent_hash, parent_branch_index);
 				leaves.prepare_transaction(
 					&mut transaction,
 					columns::META,
 					meta_keys::LEAF_PREFIX,
+					meta_keys::BRANCH_INDEX_TRESHOLD,
+					meta_keys::BRANCH_INDEX,
 					columns::BRANCH_INDEX,
+					columns::BRANCH_RANGES,
 				);
-
+	
 				displaced_leaf
 			};
 
@@ -1288,7 +1272,9 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			}
 		}
 
-		let new_displaced = self.blockchain.leaves.write().finalize_height(f_num);
+		let f_branch_index = self.blockchain.branch_index(&f_hash)?.unwrap_or(0);
+				
+		let new_displaced = self.blockchain.leaves.write().finalize_height(f_num, f_branch_index, true);
 		match displaced {
 			x @ &mut None => *x = Some(new_displaced),
 			&mut Some(ref mut displaced) => displaced.merge(new_displaced),
@@ -1448,15 +1434,17 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 					transaction.delete(columns::KEY_LOOKUP, removed.hash().as_ref());
 					children::remove_children(&mut transaction, columns::META, meta_keys::CHILDREN_PREFIX, hash);
 					let parent_hash = removed.parent_hash().clone();
-					let parent_branch_index = self.blockchain.branch_index(parent_hash)?
-						.expect("Parent node not remove before child"); // TODO EMCH manage return None??
+					let branch_index = self.blockchain.branch_index(&removed.hash())?
+						.unwrap_or(0);
+					let parent_branch_index = self.blockchain.branch_index(&parent_hash)?
+						.unwrap_or(0);
 					self.blockchain.leaves.write().revert(
 						removed.hash().clone(),
 						removed.number().clone(),
+						branch_index,
 						parent_hash,
 						parent_branch_index,
 						&mut transaction,
-						columns::BRANCH_INDEX,
 					);
 					self.storage.db.write(transaction).map_err(db_err)?;
 					self.blockchain.update_meta(hash, best, true, false);

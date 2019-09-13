@@ -153,7 +153,6 @@ impl<S, F, Block, H> ClientBackend<Block, H> for Backend<S, F, H> where
 				header,
 				operation.cache,
 				operation.leaf_state,
-				0, // no branch index needed for light client.
 				operation.aux_ops,
 			)?;
 
@@ -270,7 +269,6 @@ where
 		_body: Option<Vec<Block::Extrinsic>>,
 		_justification: Option<Justification>,
 		state: NewBlockState,
-		_branch_index: u64,
 	) -> ClientResult<()> {
 		self.leaf_state = state;
 		self.header = Some(header);
@@ -565,7 +563,7 @@ mod tests {
 
 		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 		let mut op = backend.begin_operation().unwrap();
-		op.set_block_data(header0, None, None, NewBlockState::Final, 0).unwrap();
+		op.set_block_data(header0, None, None, NewBlockState::Final).unwrap();
 		op.reset_storage(Default::default(), Default::default()).unwrap();
 		backend.commit_operation(op).unwrap();
 

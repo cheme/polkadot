@@ -101,7 +101,6 @@ pub trait BlockImportOperation<Block, H> where
 		body: Option<Vec<Block::Extrinsic>>,
 		justification: Option<Justification>,
 		state: NewBlockState,
-		branch_index: u64,
 	) -> error::Result<()>;
 
 	/// Update cached data.
