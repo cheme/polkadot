@@ -803,7 +803,9 @@ mod tests {
 		set.prepare_transaction(&mut tx, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2));
 		db.write(tx).unwrap();
 
-		let set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2)).unwrap();
+		let mut set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2)).unwrap();
+		// reset original value to be comparable with set
+		set2.ranges.last_index_original = 0;
 		assert_eq!(set, set2);
 
 	}
@@ -859,7 +861,7 @@ mod tests {
 			assert!(set.contains(12, [12, 1]));
 			assert!(!set.contains(10, [10, 2]));
 
-			let mut set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2)).unwrap();
+			let set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2)).unwrap();
 			assert_eq!(set, set2);
 		};
 		with_full_finalize(false); // TODO more targeted test as the branch refs differs due to treshold
