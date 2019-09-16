@@ -94,6 +94,8 @@ pub mod block_builder;
 #[cfg(feature = "std")]
 pub mod light;
 #[cfg(feature = "std")]
+pub mod branches;
+#[cfg(feature = "std")]
 pub mod leaves;
 #[cfg(feature = "std")]
 pub mod children;

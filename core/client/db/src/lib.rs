@@ -1438,16 +1438,13 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 					let parent_hash = removed.parent_hash().clone();
 					let branch_index = self.blockchain.branch_index(&removed.hash())?
 						.unwrap_or(0);
-					let parent_branch_index = self.blockchain.branch_index(&parent_hash)?
-						.unwrap_or(0);
 					self.blockchain.leaves.write().revert(
 						removed.hash().clone(),
 						removed.number().clone(),
 						branch_index,
 						parent_hash,
-						parent_branch_index,
-						&mut transaction,
 					);
+
 					self.storage.db.write(transaction).map_err(db_err)?;
 					self.blockchain.update_meta(hash, best, true, false);
 				}
