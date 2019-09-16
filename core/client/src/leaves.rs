@@ -373,11 +373,12 @@ impl<'a, H: 'a, N: 'a> Undo<'a, H, N> where
 
 	/// Undo a finalization operation by providing the displaced leaves.
 	pub fn undo_finalization(&mut self, mut displaced: FinalizationDisplaced<H, N>) {
-		self.inner.storage.append(&mut displaced.leaves);
+		displaced.leaves.append(&mut self.inner.storage);
+		std::mem::replace(&mut self.inner.storage, displaced.leaves);
 		for (reverse_number, hash, ranges) in displaced.leaves_final.into_iter() {
 			self.inner.storage.entry(reverse_number)
 				.or_insert_with(Default::default)
-				.push((hash, ranges))
+				.insert(0, (hash, ranges))
 		}
 	}
 
@@ -596,19 +597,23 @@ mod tests {
 		let with_full_finalize = |full: bool| {
 			let (mut set, finalize) = build_finalize_set();
 
+			let reference_set = set.clone();
+
 			let displaced = set.finalize_height(11, finalize, full);
 			assert!(!set.contains(10, [10, 1]));
 
 			set.undo().undo_finalization(displaced);
 			assert!(set.contains(10, [10, 1]));
+			assert_eq!(set.storage, reference_set.storage);
 
 			// test ranges changes
-			let _ = set.ranges.update_finalize_treshold(finalize, full);
+			let displaced = set.ranges.update_finalize_treshold(finalize, full);
+			set.undo().undo_ranges_treshold_update(displaced);
 
-			// TODO some actual tests.
+			assert_eq!(set.ranges.inner_storage(), reference_set.ranges.inner_storage());
 		};
 
-		with_full_finalize(false); // TODO more targeted test as the branch refs differs due to treshold
+		with_full_finalize(false);
 		with_full_finalize(true);
 	}
 }

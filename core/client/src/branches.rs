@@ -93,9 +93,17 @@ impl RangeSet {
 	}
 
 	#[cfg(test)]
+	/// test access to treshold.
 	pub fn range_treshold(&self) -> u64 {
 		self.treshold
 	}
+
+	#[cfg(test)]
+	/// test access to strage.
+	pub fn inner_storage(&self) -> &BTreeMap<u64, Option<LinearStates>> {
+		&self.storage
+	}
+
 
 	/// Construct a new range set
 	pub fn new(treshold: u64, last_index: u64) -> Self {
@@ -360,7 +368,13 @@ impl RangeSet {
 		for (index, state) in self.storage.iter_mut() {
 			if let Some(final_state) = finalize_branches_map.remove(&index) {
 				// update for case where end of range differs (see `branch_ranges_from_cache`).
-				state.as_mut().map(|state| state.state = final_state);
+				state.as_mut().map(|state| {
+					if state.state != final_state {
+						output.insert(*index, Some(state.clone()));
+						state.state = final_state;
+						state.can_append = false;
+					}
+				});
 			} else {
 				output.insert(*index, state.take());
 			}
