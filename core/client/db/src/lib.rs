@@ -63,6 +63,7 @@ use state_machine::{
 };
 use crate::utils::{Meta, db_err, meta_keys, read_db, block_id_to_lookup_key, read_meta};
 use client::leaves::{LeafSet, FinalizationDisplaced};
+use client::branches::TresholdUpdateDisplaced;
 use client::children;
 use state_db::StateDb;
 use consensus_common::well_known_cache_keys;
@@ -997,6 +998,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		last_finalized: Option<Block::Hash>,
 		justification: Option<Justification>,
 		finalization_displaced: &mut Option<FinalizationDisplaced<Block::Hash, NumberFor<Block>>>,
+		treshold_displaced: &mut Option<TresholdUpdateDisplaced>,
 	) -> Result<(Block::Hash, <Block::Header as HeaderT>::Number, bool, bool), client::error::Error> {
 		// TODO: ensure best chain contains this block.
 		let number = *header.number();
@@ -1006,6 +1008,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			header,
 			*hash,
 			finalization_displaced,
+			treshold_displaced,
 		)?;
 
 		if let Some(justification) = justification {
@@ -1057,6 +1060,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 	{
 		let mut transaction = DBTransaction::new();
 		let mut finalization_displaced_leaves = None;
+		let mut ranges_treshold_displaced = None;
 
 		operation.apply_aux(&mut transaction);
 
@@ -1075,6 +1079,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 					Some(last_finalized_hash),
 					justification,
 					&mut finalization_displaced_leaves,
+					&mut ranges_treshold_displaced,
 				)?);
 				last_finalized_hash = block_hash;
 			}
@@ -1145,6 +1150,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 					header,
 					hash,
 					&mut finalization_displaced_leaves,
+					&mut ranges_treshold_displaced,
 				)?;
 			} else {
 				// canonicalize blocks which are old enough, regardless of finality.
@@ -1252,7 +1258,8 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		transaction: &mut DBTransaction,
 		f_header: &Block::Header,
 		f_hash: Block::Hash,
-		displaced: &mut Option<FinalizationDisplaced<Block::Hash, NumberFor<Block>>>
+		displaced: &mut Option<FinalizationDisplaced<Block::Hash, NumberFor<Block>>>,
+		treshold: &mut Option<TresholdUpdateDisplaced>
 	) -> Result<(), client::error::Error> where
 		Block: BlockT<Hash=H256>,
 	{
@@ -1275,11 +1282,19 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 		}
 
 		let f_branch_index = self.blockchain.branch_index(&f_hash)?.unwrap_or(0);
-				
-		let new_displaced = self.blockchain.leaves.write().finalize_height(f_num, f_branch_index, true);
+
+		let full = true; // do more costy full finalize.
+
+		let new_displaced = self.blockchain.leaves.write().finalize_height(f_num, f_branch_index, full);
+		// TODO EMCH cleanse data (needide for following call!!)
+		let new_treshold = self.blockchain.leaves.write().update_finalize_treshold(f_branch_index, full);
 		match displaced {
 			x @ &mut None => *x = Some(new_displaced),
 			&mut Some(ref mut displaced) => displaced.merge(new_displaced),
+		}
+		match treshold {
+			x @ &mut None => *x = Some(new_treshold),
+			&mut Some(ref mut treshold) => treshold.merge(new_treshold),
 		}
 
 		Ok(())
@@ -1375,7 +1390,8 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 		let hash = self.blockchain.expect_block_hash_from_id(&block)?;
 		let header = self.blockchain.expect_header(block)?;
 		let mut displaced = None;
-		let commit = |displaced| {
+		let mut treshold_displaced = None;
+		let commit = |(displaced, treshold_displaced)| {
 			let (hash, number, is_best, is_finalized) = self.finalize_block_with_transaction(
 				&mut transaction,
 				&hash,
@@ -1383,17 +1399,21 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 				None,
 				justification,
 				displaced,
+				treshold_displaced,
 			)?;
 			self.storage.db.write(transaction).map_err(db_err)?;
 			self.blockchain.update_meta(hash, number, is_best, is_finalized);
 			Ok(())
 		};
-		match commit(&mut displaced) {
+		match commit((&mut displaced, &mut treshold_displaced)) {
 			Ok(()) => self.storage.state_db.apply_pending(),
 			e @ Err(_) => {
 				self.storage.state_db.revert_pending();
 				if let Some(displaced) = displaced {
 					self.blockchain.leaves.write().undo().undo_finalization(displaced);
+				}
+				if let Some(displaced) = treshold_displaced {
+					self.blockchain.leaves.write().undo().undo_ranges_treshold_update(displaced);
 				}
 				return e;
 			}

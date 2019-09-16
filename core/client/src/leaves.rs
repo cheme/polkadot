@@ -231,6 +231,17 @@ impl<H, N> LeafSet<H, N> where
 		}
 	}
 
+	/// Apply a post finalize update of treshold: requires
+	/// that values before new treshold are all clear (since
+	/// we stop maintaining branches for them).
+	pub fn update_finalize_treshold(
+		&mut self,
+		branch_index: u64,
+		full: bool,
+	) -> TresholdUpdateDisplaced {
+		self.ranges.update_finalize_treshold(branch_index, full)
+	}
+
 	/// Undo all pending operations.
 	///
 	/// This returns an `Undo` struct, where any
@@ -371,7 +382,7 @@ impl<'a, H: 'a, N: 'a> Undo<'a, H, N> where
 	}
 
 	/// Undo a branch treshold update operation by providing the delta.
-	pub fn undo_ranges_treshold_update(&mut self, mut displaced: TresholdUpdateDisplaced) {
+	pub fn undo_ranges_treshold_update(&mut self, displaced: TresholdUpdateDisplaced) {
 		self.inner.ranges.undo_ranges_treshold_update(displaced);
 	}
 
@@ -509,6 +520,11 @@ mod tests {
 
 			let set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2)).unwrap();
 			assert_eq!(set, set2);
+
+			// test ranges changes
+			let _ = set.ranges.update_finalize_treshold(finalize, full);
+
+			// TODO some actual tests.
 		};
 		with_full_finalize(false); // TODO more targeted test as the branch refs differs due to treshold
 		with_full_finalize(true);
@@ -524,7 +540,11 @@ mod tests {
 
 			set.undo().undo_finalization(displaced);
 			assert!(set.contains(10, [10, 1]));
-			set
+
+			// test ranges changes
+			let _ = set.ranges.update_finalize_treshold(finalize, full);
+
+			// TODO some actual tests.
 		};
 		with_full_finalize(false);
 		with_full_finalize(true);
