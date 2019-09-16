@@ -23,16 +23,15 @@ use std::future::Future;
 
 use hash_db::{HashDB, Hasher, EMPTY_PREFIX};
 use codec::{Decode, Encode};
-use primitives::{ChangesTrieConfiguration, convert_hash};
+use primitives::{ChangesTrieConfiguration, convert_hash, traits::CodeExecutor};
 use sr_primitives::traits::{
 	Block as BlockT, Header as HeaderT, Hash, HashFor, NumberFor,
 	SimpleArithmetic, CheckedConversion, Zero,
 };
 use state_machine::{
-	CodeExecutor, ChangesTrieRootsStorage,
-	ChangesTrieAnchorBlockId, ChangesTrieConfigurationRange,
-	TrieBackend, read_proof_check, key_changes_proof_check,
-	create_proof_check_backend_storage, read_child_proof_check,
+	ChangesTrieRootsStorage, ChangesTrieAnchorBlockId, ChangesTrieConfigurationRange,
+	TrieBackend, read_proof_check, key_changes_proof_check, create_proof_check_backend_storage,
+	read_child_proof_check,
 };
 
 use crate::cht;
@@ -222,15 +221,15 @@ pub trait FetchChecker<Block: BlockT>: Send + Sync {
 }
 
 /// Remote data checker.
-pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>, F> {
-	blockchain: Arc<Blockchain<S, F>>,
+pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>> {
+	blockchain: Arc<Blockchain<S>>,
 	executor: E,
 	_hasher: PhantomData<(B, H)>,
 }
 
-impl<E, H, B: BlockT, S: BlockchainStorage<B>, F> LightDataChecker<E, H, B, S, F> {
+impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 	/// Create new light data checker.
-	pub fn new(blockchain: Arc<Blockchain<S, F>>, executor: E) -> Self {
+	pub fn new(blockchain: Arc<Blockchain<S>>, executor: E) -> Self {
 		Self {
 			blockchain, executor, _hasher: PhantomData
 		}
@@ -368,14 +367,13 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>, F> LightDataChecker<E, H, B, S, F
 	}
 }
 
-impl<E, Block, H, S, F> FetchChecker<Block> for LightDataChecker<E, H, Block, S, F>
+impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 	where
 		Block: BlockT,
 		E: CodeExecutor<H>,
 		H: Hasher,
 		H::Out: Ord + 'static,
 		S: BlockchainStorage<Block>,
-		F: Send + Sync,
 {
 	fn check_header_proof(
 		&self,
@@ -438,7 +436,9 @@ impl<E, Block, H, S, F> FetchChecker<Block> for LightDataChecker<E, H, Block, S,
 		body: Vec<Block::Extrinsic>
 	) -> ClientResult<Vec<Block::Extrinsic>> {
 		// TODO: #2621
-		let	extrinsics_root = HashFor::<Block>::ordered_trie_root(body.iter().map(Encode::encode));
+		let	extrinsics_root = HashFor::<Block>::ordered_trie_root(
+			body.iter().map(Encode::encode).collect(),
+		);
 		if *request.header.extrinsics_root() == extrinsics_root {
 			Ok(body)
 		} else {
@@ -564,7 +564,6 @@ pub mod tests {
 		Blake2Hasher,
 		Block,
 		DummyStorage,
-		OkCallFetcher,
 	>;
 
 	fn prepare_for_read_proof_check() -> (TestChecker, Header, Vec<Vec<u8>>, u32) {
