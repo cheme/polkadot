@@ -480,6 +480,16 @@ mod tests {
 		assert!(!set.contains(10, [1_3]));
 	}
 
+	// set:
+	// 0
+	// |> 1: [10,1]
+	// |> 2: [10,2] [11,1]
+	//       |> 3:  [11,2]
+	//       |> 4:  [11,123] [12,1]
+	// full finalize: 3
+	// 0
+	// |> 2: [10,2]
+	//       |> 3:  [11,2]
 	fn build_finalize_set() ->  (LeafSet<[u8; 2], u32>, u64) {
 		let mut set = LeafSet::new();
 		set.import([10u8, 1u8], 10u32, [0u8, 0u8], 0);
@@ -488,6 +498,7 @@ mod tests {
 		let (_, finalize) = set.import([11, 2], 11, [10, 2], anchor_1);
 		let (_, anchor_2) = set.import([11, 123], 11, [10, 2], anchor_1);
 		set.import([12, 1], 12, [11, 123], anchor_2);
+
 		(set, finalize)
 	}
 
@@ -496,12 +507,20 @@ mod tests {
 		const PREFIX: &[u8] = b"prefix";
 		const TRESHOLD: &[u8] = b"hijkl";
 		const LAST_INDEX: &[u8] = b"mnopq";
-		let with_full_finalize = |full: bool| {
+		let with_full_finalize = |
+			full: bool,
+			nodes: &[(u32, [u8;2])],
+			not_nodes: &[(u32, [u8;2])],
+			ranges: &[(u64, u64)],
+			not_ranges: &[(u64, u64)],
+			ranges2: Option<&[(u64, u64)]>,
+		| {
 			let db = ::kvdb_memorydb::create(3);
 
 			let (mut set, finalize) = build_finalize_set();
 
 			assert!(set.contains(10, [10, 1]));
+			assert!(set.contains(11, [11, 2]));
 
 			let mut tx = DBTransaction::new();
 			set.prepare_transaction(&mut tx, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2));
@@ -513,21 +532,63 @@ mod tests {
 			set.prepare_transaction(&mut tx, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2));
 			db.write(tx).unwrap();
 
-			assert!(set.contains(11, [11, 1]));
-			assert!(set.contains(11, [11, 2]));
-			assert!(set.contains(12, [12, 1]));
-			assert!(!set.contains(10, [10, 2]));
+			let mut set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2))
+				.unwrap();
 
-			let set2 = LeafSet::read_from_db(&db, None, PREFIX, TRESHOLD, LAST_INDEX, Some(1), Some(2)).unwrap();
-			assert_eq!(set, set2);
-
+			for node in nodes {
+				assert!(set.contains(node.0, node.1), "contains {:?} {:?}", node.0, node.1);
+				assert!(set2.contains(node.0, node.1), "contains2 {:?} {:?}", node.0, node.1);
+			}
+			for node in not_nodes {
+				assert!(!set.contains(node.0, node.1), "contains {:?} {:?}", node.0, node.1);
+				assert!(!set2.contains(node.0, node.1), "not contains2 {:?} {:?}", node.0, node.1);
+			}
+	
 			// test ranges changes
-			let _ = set.ranges.update_finalize_treshold(finalize, full);
+			if let Some(range2) = ranges2 {
+				let mut ranges2 = set.ranges.clone();
+				let _ = ranges2.test_finalize_full(finalize);
+				for (range, size) in range2 {
+					assert!(ranges2.contains_range(*range, *size), "{} {}", range, size);
+				}
+			}
 
-			// TODO some actual tests.
+			let _ = set.ranges.update_finalize_treshold(finalize, full);
+			let _ = set2.ranges.update_finalize_treshold(finalize, full);
+
+			assert!(set.ranges.range_treshold() == 3);
+			assert!(set2.ranges.range_treshold() == 3);
+
+			for (node, (range, size)) in nodes.into_iter().zip(ranges) {
+				assert!(set.contains(node.0, node.1), "contains {:?} {:?}", node.0, node.1);
+				assert!(set2.contains(node.0, node.1), "contains2 {:?} {:?}", node.0, node.1);
+				assert!(set.ranges.contains_range(*range, *size), "contains {:?}", range);
+				assert!(set2.ranges.contains_range(*range, *size), "contains2 {:?}", range);
+			}
+			for (node, (range, size)) in not_nodes.into_iter().zip(not_ranges) {
+				assert!(!set.contains(node.0, node.1), "contains {:?} {:?}", node.0, node.1);
+				assert!(!set2.contains(node.0, node.1), "not contains2 {:?} {:?}", node.0, node.1);
+				assert!(!set.ranges.contains_range(*range, *size), "contains {:?}", range);
+				assert!(!set2.ranges.contains_range(*range, *size), "contains2 {:?}", range);
+			}
+	
 		};
-		with_full_finalize(false); // TODO more targeted test as the branch refs differs due to treshold
-		with_full_finalize(true);
+
+		with_full_finalize(false,
+			&[(11, [11, 1]), (11, [11,2]), (12, [12,1])][..],
+			&[(10, [10, 1]), (10, [10, 2]), (11, [11,123])][..],
+			&[(3, 1), (4, 2)][..],
+			&[(1, 1), (2, 2)][..],
+			None,
+		);
+		with_full_finalize(true,
+			&[(11, [11,2])][..],
+			&[(10, [10, 1]), (10, [10, 2]), (11, [11,1]), (11, [11,123]), (12, [12,1])][..],
+			&[(3, 1)][..],
+			&[(1, 1), (2, 2), (4, 2)][..],
+			// here 2, 1 test state removal from finalize branch
+			Some(&[(2, 1), (3, 1)][..]),
+		);
 	}
 
 	#[test]
@@ -546,7 +607,8 @@ mod tests {
 
 			// TODO some actual tests.
 		};
-		with_full_finalize(false);
+
+		with_full_finalize(false); // TODO more targeted test as the branch refs differs due to treshold
 		with_full_finalize(true);
 	}
 }

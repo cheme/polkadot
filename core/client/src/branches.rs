@@ -38,7 +38,7 @@ impl TresholdUpdateDisplaced {
 	/// Merge with another. This should only be used for displaced items that
 	/// are produced within one transaction of each other.
 	pub fn merge(&mut self, mut other: Self) {
-		debug_assert!(self.treshold < other.treshold);
+		debug_assert!(self.treshold <= other.treshold);
 		// this will ignore keys that are in duplicate, however
 		// if these are actually produced correctly via the leaf-set within
 		// one transaction, then there will be no overlap in the keys.
@@ -91,6 +91,12 @@ impl RangeSet {
 	pub fn last_index_original(&mut self) -> &mut u64 {
 		&mut self.last_index_original
 	}
+
+	#[cfg(test)]
+	pub fn range_treshold(&self) -> u64 {
+		self.treshold
+	}
+
 	/// Construct a new range set
 	pub fn new(treshold: u64, last_index: u64) -> Self {
 		RangeSet {
@@ -150,12 +156,22 @@ impl RangeSet {
 		if branch_index < self.treshold {
 			return result;
 		}
+		let mut previous_start = u64::max_value();
 		loop {
 			if let Some(Some(StatesBranch{ state, parent_branch_index, .. })) = self.storage.get(&branch_index) {
 				// TODO EMCH consider vecdeque ??
+				let state = if state.end > previous_start {
+					LinearStatesRef {
+						start: state.start,
+						end: previous_start,
+					}
+				} else { state.clone() };
+
+				previous_start = state.start;
+
 				result.insert(0, StatesBranchRef {
-					state: state.clone(),
-					branch_index: branch_index,
+					state,
+					branch_index,
 				});
 
 				branch_index = *parent_branch_index;
@@ -316,15 +332,9 @@ impl RangeSet {
 			let new_storage = self.storage.split_off(&(self.treshold));
 			std::mem::replace(&mut self.storage, new_storage)
 		} else {
-			let finalize_branches_set: BTreeSet<_> = self.branch_ranges_from_cache(branch_index)
-				.into_iter().map(|r| r.branch_index).collect();
 			let new_storage = self.storage.split_off(&(self.treshold));
 			let mut removed = std::mem::replace(&mut self.storage, new_storage);
-			for (index, state) in self.storage.iter_mut() {
-				if !finalize_branches_set.contains(&index) {
-					removed.insert(*index, state.take());
-				}
-			}
+			self.finalize_full(&mut removed, branch_index);
 			removed
 		};
 		self.removed.extend(removed_ranges.keys().cloned());
@@ -334,6 +344,40 @@ impl RangeSet {
 		TresholdUpdateDisplaced {
 			ranges: removed_ranges,
 			treshold: old_treshold,
+		}
+	}
+
+	/// Apply a post finalize without considering treshold.
+	fn finalize_full(
+		&mut self,
+		output: &mut BTreeMap<u64, Option<LinearStates>>,
+		branch_index: u64,
+	) {
+		// TODO EMCH consider working directly on ordered vec (should be fastest in most cases)
+		let mut finalize_branches_map: BTreeMap<_, _> = self.branch_ranges_from_cache(branch_index)
+			.into_iter().map(|r| (r.branch_index, r.state)).collect();
+
+		for (index, state) in self.storage.iter_mut() {
+			if let Some(final_state) = finalize_branches_map.remove(&index) {
+				// update for case where end of range differs (see `branch_ranges_from_cache`).
+				state.as_mut().map(|state| state.state = final_state);
+			} else {
+				output.insert(*index, state.take());
+			}
+		}
+	}
+
+	#[cfg(test)]
+	pub fn test_finalize_full(
+		&mut self,
+		branch_index: u64,
+	) -> TresholdUpdateDisplaced {
+		let mut removed_ranges = BTreeMap::new();
+		self.finalize_full(&mut removed_ranges, branch_index);
+		self.removed.extend(removed_ranges.keys().cloned());
+		TresholdUpdateDisplaced {
+			ranges: removed_ranges,
+			treshold: self.treshold,
 		}
 	}
 
@@ -390,6 +434,15 @@ impl RangeSet {
 			tx.delete(column_branch_range, &index_to_key(removed)[..]);
 		}
 
+	}
+
+	#[cfg(test)]
+	pub fn contains_range(&self, branch_index: u64, size: u64) -> bool {
+		if let Some(Some(s)) = self.storage.get(&branch_index) {
+			(s.state_ref().end - s.state_ref().start) == size
+		} else {
+			false
+		}
 	}
 
 }
