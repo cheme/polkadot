@@ -60,6 +60,7 @@ pub mod sr25519;
 pub mod hash;
 mod hasher;
 pub mod offchain;
+pub mod offstate;
 pub mod sandbox;
 pub mod storage;
 pub mod uint;

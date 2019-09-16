@@ -577,8 +577,6 @@ pub(crate) mod tests {
 	use super::*;
 	use primitives::crypto::Public;
 
-	const DEFAULT_BRANCH_INDEX: u64 = 1;
-
 	type FinalityProof = super::FinalityProof<Header>;
 
 	impl<GetAuthorities, ProveAuthorities> AuthoritySetForFinalityProver<Block> for (GetAuthorities, ProveAuthorities)
@@ -654,10 +652,10 @@ pub(crate) mod tests {
 
 	fn test_blockchain() -> InMemoryBlockchain<Block> {
 		let blockchain = InMemoryBlockchain::<Block>::new();
-		blockchain.insert(header(0).hash(), header(0), Some(vec![0]), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(1).hash(), header(1), Some(vec![1]), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(2).hash(), header(2), None, None, NewBlockState::Best, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(3).hash(), header(3), Some(vec![3]), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(0).hash(), header(0), Some(vec![0]), None, NewBlockState::Final).unwrap();
+		blockchain.insert(header(1).hash(), header(1), Some(vec![1]), None, NewBlockState::Final).unwrap();
+		blockchain.insert(header(2).hash(), header(2), None, None, NewBlockState::Best).unwrap();
+		blockchain.insert(header(3).hash(), header(3), Some(vec![3]), None, NewBlockState::Final).unwrap();
 		blockchain
 	}
 
@@ -683,7 +681,7 @@ pub(crate) mod tests {
 	#[test]
 	fn finality_proof_is_none_if_no_more_last_finalized_blocks() {
 		let blockchain = test_blockchain();
-		blockchain.insert(header(4).hash(), header(4), None, None, NewBlockState::Best, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(4).hash(), header(4), None, None, NewBlockState::Best).unwrap();
 
 		// our last finalized is: 3
 		// their last finalized is: 3
@@ -704,11 +702,11 @@ pub(crate) mod tests {
 	#[test]
 	fn finality_proof_fails_for_non_canonical_block() {
 		let blockchain = test_blockchain();
-		blockchain.insert(header(4).hash(), header(4), None, None, NewBlockState::Best, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(side_header(4).hash(), side_header(4), None, None, NewBlockState::Best, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(second_side_header(5).hash(), second_side_header(5), None, None, NewBlockState::Best, DEFAULT_BRANCH_INDEX)
+		blockchain.insert(header(4).hash(), header(4), None, None, NewBlockState::Best).unwrap();
+		blockchain.insert(side_header(4).hash(), side_header(4), None, None, NewBlockState::Best).unwrap();
+		blockchain.insert(second_side_header(5).hash(), second_side_header(5), None, None, NewBlockState::Best)
 			.unwrap();
-		blockchain.insert(header(5).hash(), header(5), Some(vec![5]), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(5).hash(), header(5), Some(vec![5]), None, NewBlockState::Final).unwrap();
 
 		// chain is 1 -> 2 -> 3 -> 4 -> 5
 		//                      \> 4' -> 5'
@@ -729,7 +727,7 @@ pub(crate) mod tests {
 	#[test]
 	fn finality_proof_is_none_if_no_justification_known() {
 		let blockchain = test_blockchain();
-		blockchain.insert(header(4).hash(), header(4), None, None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(4).hash(), header(4), None, None, NewBlockState::Final).unwrap();
 
 		// block 4 is finalized without justification
 		// => we can't prove finality
@@ -751,8 +749,8 @@ pub(crate) mod tests {
 		let blockchain = test_blockchain();
 		let just4 = TestJustification(true, vec![4]).encode();
 		let just5 = TestJustification(true, vec![5]).encode();
-		blockchain.insert(header(4).hash(), header(4), Some(just4), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(5).hash(), header(5), Some(just5.clone()), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(4).hash(), header(4), Some(just4), None, NewBlockState::Final).unwrap();
+		blockchain.insert(header(5).hash(), header(5), Some(just5.clone()), None, NewBlockState::Final).unwrap();
 
 		// blocks 4 && 5 are finalized with justification
 		// => since authorities are the same, we only need justification for 5
@@ -777,8 +775,8 @@ pub(crate) mod tests {
 	#[test]
 	fn finality_proof_finalized_earlier_block_if_no_justification_for_target_is_known() {
 		let blockchain = test_blockchain();
-		blockchain.insert(header(4).hash(), header(4), Some(vec![4]), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(5).hash(), header(5), None, None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(4).hash(), header(4), Some(vec![4]), None, NewBlockState::Final).unwrap();
+		blockchain.insert(header(5).hash(), header(5), None, None, NewBlockState::Final).unwrap();
 
 		// block 4 is finalized with justification + we request for finality of 5
 		// => we can't prove finality of 5, but providing finality for 4 is still useful for requester
@@ -806,10 +804,10 @@ pub(crate) mod tests {
 		let just4 = TestJustification(true, vec![4]).encode();
 		let just5 = TestJustification(true, vec![5]).encode();
 		let just7 = TestJustification(true, vec![7]).encode();
-		blockchain.insert(header(4).hash(), header(4), Some(just4), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(5).hash(), header(5), Some(just5.clone()), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(6).hash(), header(6), None, None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
-		blockchain.insert(header(7).hash(), header(7), Some(just7.clone()), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(4).hash(), header(4), Some(just4), None, NewBlockState::Final).unwrap();
+		blockchain.insert(header(5).hash(), header(5), Some(just5.clone()), None, NewBlockState::Final).unwrap();
+		blockchain.insert(header(6).hash(), header(6), None, None, NewBlockState::Final).unwrap();
+		blockchain.insert(header(7).hash(), header(7), Some(just7.clone()), None, NewBlockState::Final).unwrap();
 
 		// when querying for finality of 6, we assume that the #6 is the last block known to the requester
 		// => since we only have justification for #7, we provide #7
@@ -969,7 +967,7 @@ pub(crate) mod tests {
 		// finality proof at all
 		let blockchain = test_blockchain();
 		let just4 = TestJustification(false, vec![4]).encode(); // false makes verification fail
-		blockchain.insert(header(4).hash(), header(4), Some(just4), None, NewBlockState::Final, DEFAULT_BRANCH_INDEX).unwrap();
+		blockchain.insert(header(4).hash(), header(4), Some(just4), None, NewBlockState::Final).unwrap();
 
 		let proof_of_4 = prove_finality::<_, _, TestJustification>(
 			&blockchain,

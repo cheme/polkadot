@@ -63,6 +63,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
+	// TODO EMCH this does not make sens : split as a OffstateBackend from trait.
+	type OffstateBackendStorage = crate::offstate_backend::TODO;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.essence.storage(key)

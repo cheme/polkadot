@@ -24,7 +24,8 @@ use codec::{Encode, Decode};
 use crate::error;
 use std::hash::Hash as StdHash;
 use std::convert::TryInto;
-use crate::branches::{BranchRanges, RangeSet, TresholdUpdateDisplaced};
+use crate::branches::{RangeSet, TresholdUpdateDisplaced};
+use primitives::offstate::BranchRanges;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LeafSetItem<H, N> {

@@ -578,7 +578,7 @@ pub(crate) mod tests {
 	) -> Hash {
 		let header = header();
 		let hash = header.hash();
-		db.import_header(header, cache, NewBlockState::Best, NO_BRANCH_INDEX, Vec::new()).unwrap();
+		db.import_header(header, cache, NewBlockState::Best, Vec::new()).unwrap();
 		hash
 	}
 
@@ -589,7 +589,7 @@ pub(crate) mod tests {
 	) -> Hash {
 		let header = header();
 		let hash = header.hash();
-		db.import_header(header, cache, NewBlockState::Final, NO_BRANCH_INDEX, Vec::new()).unwrap();
+		db.import_header(header, cache, NewBlockState::Final, Vec::new()).unwrap();
 		hash
 	}
 
@@ -600,7 +600,7 @@ pub(crate) mod tests {
 	) -> Hash {
 		let header = header();
 		let hash = header.hash();
-		db.import_header(header, cache, NewBlockState::Normal, NO_BRANCH_INDEX, Vec::new()).unwrap();
+		db.import_header(header, cache, NewBlockState::Normal, Vec::new()).unwrap();
 		hash
 	}
 
@@ -1026,7 +1026,7 @@ pub(crate) mod tests {
 		assert_eq!(db.get_aux(&[3]).unwrap(), None);
 
 		// delete aux1 + insert aux3 using import operation
-		db.import_header(default_header(&Default::default(), 0), HashMap::new(), NewBlockState::Best, NO_BRANCH_INDEX, vec![
+		db.import_header(default_header(&Default::default(), 0), HashMap::new(), NewBlockState::Best, vec![
 			(vec![3], Some(vec![103])),
 			(vec![1], None),
 		]).unwrap();

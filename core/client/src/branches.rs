@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry};
 use std::cmp::Reverse;
 use kvdb::{KeyValueDB, DBTransaction};
 use sr_primitives::traits::SimpleArithmetic;
+use primitives::offstate::{BranchRanges, LinearStatesRef, StatesBranchRef};
 use codec::{Encode, Decode};
 use crate::error;
 use std::hash::Hash as StdHash;
@@ -558,15 +559,6 @@ fn index_to_key(index: u64) -> [u8; 8] {
 	index.to_be_bytes()
 }
 
-
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Encode, Decode)]
-pub struct StatesBranchRef {
-	pub branch_index: u64,
-	pub state: LinearStatesRef,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[derive(Encode, Decode)]
 pub struct StatesBranch {
@@ -577,24 +569,6 @@ pub struct StatesBranch {
 
 
 // TODO EMCH temporary structs until merge with historied-data branch.
-
-/// This is a simple range, end non inclusive.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Encode, Decode)]
-pub struct LinearStatesRef {
-	start: u64,
-	end: u64,
-}
-
-/// Reference to state that is enough for query updates, but not
-/// for gc.
-/// Values are ordered by branch_ix,
-/// and only a logic branch path should be present.
-///
-/// Note that an alternative could be a pointer to a full state
-/// branch for a given branch index, here we use an in memory
-/// copied representation in relation to an actual use case.
-pub type BranchRanges = Vec<StatesBranchRef>;
 
 type LinearStates = StatesBranch;
 

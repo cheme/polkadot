@@ -197,6 +197,7 @@ pub trait Backend<Block, H>: AuxStore + Send + Sync where
 	type Blockchain: crate::blockchain::Backend<Block>;
 	/// Associated state backend type.
 	type State: StateBackend<H>;
+	// TODO EMCH here put a aof state backend??
 	/// Changes trie storage.
 	type ChangesTrieStorage: PrunableStateChangesTrieStorage<Block, H>;
 	/// Offchain workers local storage.

@@ -21,6 +21,7 @@ use log::warn;
 use hash_db::Hasher;
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::TrieBackendStorage;
+use crate::offstate_backend::OffstateBackendStorage;
 use trie::{
 	TrieMut, MemoryDB, child_trie_root, default_child_trie_root, TrieConfiguration,
 	trie_types::{TrieDBMut, Layout},
@@ -39,6 +40,10 @@ pub trait Backend<H: Hasher> {
 
 	/// Type of trie backend storage.
 	type TrieBackendStorage: TrieBackendStorage<H>;
+
+	/// Type of trie backend storage. TODO EMCH move to OffstateBackend
+	/// after implementated.
+	type OffstateBackendStorage: OffstateBackendStorage;
 
 	/// Get keyed storage or None if there is nothing associated.
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
@@ -161,6 +166,7 @@ impl<'a, T: Backend<H>, H: Hasher> Backend<H> for &'a T {
 	type Error = T::Error;
 	type Transaction = T::Transaction;
 	type TrieBackendStorage = T::TrieBackendStorage;
+	type OffstateBackendStorage = T::OffstateBackendStorage;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		(*self).storage(key)
@@ -251,6 +257,7 @@ impl error::Error for Void {
 pub struct InMemory<H: Hasher> {
 	inner: HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>,
 	trie: Option<TrieBackend<MemoryDB<H>, H>>,
+	offstate: Option<crate::offstate_backend::TODO>,
 	_hasher: PhantomData<H>,
 }
 
@@ -259,6 +266,7 @@ impl<H: Hasher> Default for InMemory<H> {
 		InMemory {
 			inner: Default::default(),
 			trie: None,
+			offstate: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -269,6 +277,7 @@ impl<H: Hasher> Clone for InMemory<H> {
 		InMemory {
 			inner: self.inner.clone(),
 			trie: None,
+			offstate: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -300,6 +309,7 @@ impl<H: Hasher> From<HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>> for In
 		InMemory {
 			inner: inner,
 			trie: None,
+			offstate: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -319,6 +329,7 @@ impl<H: Hasher> From<(
 		InMemory {
 			inner: inner,
 			trie: None,
+			offstate: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -331,6 +342,7 @@ impl<H: Hasher> From<HashMap<Vec<u8>, Vec<u8>>> for InMemory<H> {
 		InMemory {
 			inner: expanded,
 			trie: None,
+			offstate: None,
 			_hasher: PhantomData,
 		}
 	}
@@ -359,6 +371,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 	type Error = Void;
 	type Transaction = Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>;
 	type TrieBackendStorage = MemoryDB<H>;
+	type OffstateBackendStorage = crate::offstate_backend::TODO;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		Ok(self.inner.get(&None).and_then(|map| map.get(key).map(Clone::clone)))

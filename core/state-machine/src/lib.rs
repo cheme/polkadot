@@ -37,6 +37,8 @@ mod overlayed_changes;
 mod proving_backend;
 mod trie_backend;
 mod trie_backend_essence;
+// TODO EMCH make it private
+pub mod offstate_backend;
 
 use overlayed_changes::OverlayedChangeSet;
 pub use trie::{TrieMut, DBValue, MemoryDB};

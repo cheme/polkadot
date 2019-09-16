@@ -115,6 +115,7 @@ impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
 	type Error =  <DbState as StateBackend<Blake2Hasher>>::Error;
 	type Transaction = <DbState as StateBackend<Blake2Hasher>>::Transaction;
 	type TrieBackendStorage = <DbState as StateBackend<Blake2Hasher>>::TrieBackendStorage;
+	type OffstateBackendStorage = state_machine::offstate_backend::TODO;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.state.storage(key)
@@ -1550,8 +1551,6 @@ mod tests {
 
 	type Block = RawBlock<ExtrinsicWrapper<u64>>;
 
-	const DEFAULT_BRANCH_INDEX: u64 = 1;
-
 	fn prepare_changes(changes: Vec<(Vec<u8>, Vec<u8>)>) -> (H256, MemoryDB<Blake2Hasher>) {
 		let mut changes_root = H256::default();
 		let mut changes_trie_update = MemoryDB::<Blake2Hasher>::default();
@@ -1581,7 +1580,6 @@ mod tests {
 			parent_hash,
 			changes,
 			extrinsics_root,
-			DEFAULT_BRANCH_INDEX,
 		)
 	}
 
@@ -1591,7 +1589,6 @@ mod tests {
 		parent_hash: H256,
 		changes: Vec<(Vec<u8>, Vec<u8>)>,
 		extrinsics_root: H256,
-		branch_index: u64,
 	) -> H256 {
 	
 		use sr_primitives::testing::Digest;
@@ -1618,7 +1615,7 @@ mod tests {
 		};
 		let mut op = backend.begin_operation().unwrap();
 		backend.begin_state_operation(&mut op, block_id).unwrap();
-		op.set_block_data(header, None, None, NewBlockState::Best, branch_index).unwrap();
+		op.set_block_data(header, None, None, NewBlockState::Best).unwrap();
 		op.update_changes_trie((changes_trie_update, ChangesTrieCacheAction::Clear)).unwrap();
 		backend.commit_operation(op).unwrap();
 
@@ -1658,7 +1655,6 @@ mod tests {
 						Some(vec![]),
 						None,
 						NewBlockState::Best,
-						DEFAULT_BRANCH_INDEX,
 					).unwrap();
 					db.commit_operation(op).unwrap();
 				}
@@ -1707,7 +1703,6 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
-				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			db.commit_operation(op).unwrap();
@@ -1746,7 +1741,6 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
-				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			db.commit_operation(op).unwrap();
@@ -1793,7 +1787,6 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
-				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1831,7 +1824,6 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
-				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1868,7 +1860,6 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
-				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1905,7 +1896,6 @@ mod tests {
 				Some(vec![]),
 				None,
 				NewBlockState::Best,
-				DEFAULT_BRANCH_INDEX,
 			).unwrap();
 
 			backend.commit_operation(op).unwrap();
@@ -1979,7 +1969,6 @@ mod tests {
 			block2,
 			changes2_1_0.clone(),
 			Default::default(),
-			2,
 		);
 		let block2_1_1 = insert_header_with_branch_index(
 			&backend,
@@ -1987,7 +1976,6 @@ mod tests {
 			block2_1_0,
 			changes2_1_1.clone(),
 			Default::default(),
-			2,
 		);
 
 		let changes2_2_0 = vec![(b"k5".to_vec(), b"v5".to_vec())];
@@ -1998,7 +1986,6 @@ mod tests {
 			block2,
 			changes2_2_0.clone(),
 			Default::default(),
-			3,
 		);
 		let block2_2_1 = insert_header_with_branch_index(
 			&backend,
@@ -2006,7 +1993,6 @@ mod tests {
 			block2_2_0,
 			changes2_2_1.clone(),
 			Default::default(),
-			3,
 		);
 
 		// finalize block1

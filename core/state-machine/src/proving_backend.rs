@@ -148,6 +148,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = PrefixedMemoryDB<H>;
+	type OffstateBackendStorage = crate::offstate_backend::TODO;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		ProvingBackendEssence {

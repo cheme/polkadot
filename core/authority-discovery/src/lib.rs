@@ -469,22 +469,9 @@ mod tests {
 
 		fn branch_index(
 			&self,
-			_hash: Block::Hash,
+			_hash: &Block::Hash,
 		) -> std::result::Result<Option<u64>, client::error::Error> {
 			Ok(Some(0))
-		}
-
-		fn appendable_branch_index(
-			&self,
-			_hash: Block::Hash,
-		) -> std::result::Result<Option<u64>, client::error::Error> {
-			Ok(Some(0))
-		}
-
-		fn next_branch_index(
-			&self,
-		) -> std::result::Result<u64, client::error::Error> {
-			Ok(0)
 		}
 
 		fn hash(
