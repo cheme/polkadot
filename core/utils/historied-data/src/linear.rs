@@ -26,39 +26,40 @@ use crate::State as TransactionState;
 use rstd::vec::Vec;
 use rstd::vec;
 use rstd::borrow::Cow;
+use rstd::convert::{TryFrom, TryInto};
 
 /// An entry at a given history height.
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct HistoriedValue<V> {
+pub struct HistoriedValue<V, I> {
 	/// The stored value.
 	pub value: V,
 	/// The moment in history when the value got set.
-	pub index: usize,
+	pub index: I,
 }
 
-impl<V> From<(V, usize)> for HistoriedValue<V> {
-	fn from(input: (V, usize)) -> HistoriedValue<V> {
+impl<V, I> From<(V, I)> for HistoriedValue<V, I> {
+	fn from(input: (V, I)) -> HistoriedValue<V, I> {
 		HistoriedValue { value: input.0, index: input.1 }
 	}
 }
 
-impl<V> HistoriedValue<V> {
-	fn as_ref(&self) -> HistoriedValue<&V> {
+impl<V, I: Copy> HistoriedValue<V, I> {
+	fn as_ref(&self) -> HistoriedValue<&V, I> {
 		HistoriedValue {
 			value: &self.value,
 			index: self.index,
 		}
 	}
 
-	fn as_mut(&mut self) -> HistoriedValue<&mut V> {
+	fn as_mut(&mut self) -> HistoriedValue<&mut V, I> {
 		HistoriedValue {
 			value: &mut self.value,
 			index: self.index,
 		}
 	}
 
-	fn map<R, F: FnOnce(V) -> R>(self, f: F) -> HistoriedValue<R> {
+	fn map<R, F: FnOnce(V) -> R>(self, f: F) -> HistoriedValue<R, I> {
 		HistoriedValue {
 			value: f(self.value),
 			index: self.index,
@@ -71,13 +72,13 @@ impl<V> HistoriedValue<V> {
 /// By in memory we expect that this will
 /// not required persistence and is not serialized.
 #[cfg(not(feature = "std"))]
-pub(crate) type MemoryOnly<V> = Vec<HistoriedValue<V>>;
+pub(crate) type MemoryOnly<V, I> = Vec<HistoriedValue<V, I>>;
 
 /// Array like buffer for in memory storage.
 /// By in memory we expect that this will
 /// not required persistence and is not serialized.
 #[cfg(feature = "std")]
-pub(crate) type MemoryOnly<V> = smallvec::SmallVec<[HistoriedValue<V>; ALLOCATED_HISTORY]>;
+pub(crate) type MemoryOnly<V, I> = smallvec::SmallVec<[HistoriedValue<V, I>; ALLOCATED_HISTORY]>;
 
 /// Size of preallocated history per element.
 /// Currently at two for committed and prospective only.
@@ -91,9 +92,9 @@ const ALLOCATED_HISTORY: usize = 2;
 /// Values are always paired with a state history index.
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct History<V>(MemoryOnly<V>);
+pub struct History<V, I>(MemoryOnly<V, I>);
 
-impl<V> Default for History<V> {
+impl<V, I> Default for History<V, I> {
 	fn default() -> Self {
 		History(Default::default())
 	}
@@ -101,15 +102,15 @@ impl<V> Default for History<V> {
 
 // Following implementation are here to isolate
 // buffer specific functions.
-impl<V> History<V> {
+impl<V, I: Copy + Eq + TryFrom<usize> + TryInto<usize>> History<V, I> {
 
-	fn get_state(&self, index: usize) -> HistoriedValue<&V> {
+	fn get_state(&self, index: usize) -> HistoriedValue<&V, I> {
 		self.0[index].as_ref()
 	}
 
 	#[cfg(any(test, feature = "test"))]
 	/// Create an history from an existing history.
-	pub fn from_iter(input: impl IntoIterator<Item = HistoriedValue<V>>) -> Self {
+	pub fn from_iter(input: impl IntoIterator<Item = HistoriedValue<V, I>>) -> Self {
 		let mut history = History::default();
 		for v in input {
 			history.push_unchecked(v);
@@ -131,7 +132,7 @@ impl<V> History<V> {
 		self.0.truncate(index)
 	}
 
-	fn pop(&mut self) -> Option<HistoriedValue<V>> {
+	fn pop(&mut self) -> Option<HistoriedValue<V, I>> {
 		self.0.pop()
 	}
 
@@ -144,7 +145,7 @@ impl<V> History<V> {
 	/// This method shall only be call after a `get_mut` where
 	/// the returned index indicate that a `set` will result
 	/// in appending a value.
-	pub fn push_unchecked(&mut self, value: HistoriedValue<V>) {
+	pub fn push_unchecked(&mut self, value: HistoriedValue<V, I>) {
 		self.0.push(value)
 	}
 
@@ -153,14 +154,14 @@ impl<V> History<V> {
 	/// dropped value.
 	pub fn set(&mut self, history: &[TransactionState], value: V) {
 		if let Some(v) = self.get_mut(history) {
-			if v.index == history.len() - 1 {
+			if v.index.try_into().map(|i| i == history.len()).unwrap_or(false) {
 				*v.value = value;
 				return;
 			}
 		}
 		self.push_unchecked(HistoriedValue {
 			value,
-			index: history.len() - 1,
+			index: as_i((history.len() - 1)),
 		});
 	}
 
@@ -298,6 +299,8 @@ impl States {
 /// Could be use for direct access memory to.
 pub struct Serialized<'a>(Cow<'a, [u8]>);
 
+// encoding size as u64
+const SIZE_BYTE_LEN: usize = 8;
 
 // Basis implementation to be on par with implementation using
 // vec like container. Those method could be move to a trait
@@ -305,18 +308,19 @@ pub struct Serialized<'a>(Cow<'a, [u8]>);
 // Those function requires checked index.
 impl<'a> Serialized<'a> {
 
+
 	fn into_owned(self) -> Serialized<'static> {
     Serialized(Cow::from(self.0.into_owned()))
   }
 
 	fn len(&self) -> usize {
 		let len = self.0.len();
-		self.read_le_usize(len - 4)
+		self.read_le_usize(len - SIZE_BYTE_LEN) as usize
 	}
 
 	fn clear(&mut self) {
 		self.write_le_usize(0, 0);
-		self.0.to_mut().truncate(4);
+		self.0.to_mut().truncate(SIZE_BYTE_LEN);
 	}
 
 	fn truncate(&mut self, index: usize) {
@@ -329,35 +333,35 @@ impl<'a> Serialized<'a> {
 			return;
 		}
 		let start_ix = self.index_start();
-		let new_start = self.index_element(index);
-		let len_ix = index * 4;
+		let new_start = self.index_element(index) as usize;
+		let len_ix = index * SIZE_BYTE_LEN;
 		self.slice_copy(start_ix, new_start, len_ix);
-		self.write_le_usize(new_start + len_ix - 4, index);
+		self.write_le_usize(new_start + len_ix - SIZE_BYTE_LEN, index);
 		self.0.to_mut().truncate(new_start + len_ix);
 	}
 
-	fn pop(&mut self) -> Option<HistoriedValue<Vec<u8>>> {
+	fn pop(&mut self) -> Option<HistoriedValue<Vec<u8>, u64>> {
 		let len = self.len();
 		if len == 0 {
 			return None;
 		}
 		let start_ix = self.index_element(len - 1);
 		let end_ix = self.index_start();
-		let state = self.read_le_usize(start_ix);
-		let value = self.0[start_ix + 4..end_ix].to_vec();
+		let state = self.read_le_u64(start_ix);
+		let value = self.0[start_ix + SIZE_BYTE_LEN..end_ix].to_vec();
 		if len - 1 == 0 {
 			self.clear();
 			return Some(HistoriedValue { value, index: state })	
 		} else {
-			self.write_le_usize(self.0.len() - 8, len - 1);
+			self.write_le_usize(self.0.len() - (SIZE_BYTE_LEN * 2), len - 1);
 		};
-		let ix_size = (len * 4) - 4;
+		let ix_size = (len * SIZE_BYTE_LEN) - SIZE_BYTE_LEN;
 		self.slice_copy(end_ix, start_ix, ix_size);
 		self.0.to_mut().truncate(start_ix + ix_size);
 		Some(HistoriedValue { value, index: state })
 	}
 
-	fn push(&mut self, val: (&[u8], usize)) {
+	fn push(&mut self, val: HistoriedValue<&[u8], u64>) {
 		let len = self.len();
 		let start_ix = self.index_start();
 		let end_ix = self.0.len();
@@ -365,15 +369,15 @@ impl<'a> Serialized<'a> {
 		// should be use here.
 		let mut new_ix = self.0[start_ix..end_ix].to_vec();
 		// truncate here can be bad
-		self.0.to_mut().truncate(start_ix + 4);
-		self.write_le_usize(start_ix, val.1);
-		self.0.to_mut().extend_from_slice(val.0);
+		self.0.to_mut().truncate(start_ix + SIZE_BYTE_LEN);
+		self.write_le_u64(start_ix, val.index);
+		self.0.to_mut().extend_from_slice(val.value);
 		self.0.to_mut().append(&mut new_ix);
 		if len > 0 {
-			self.write_le_usize(self.0.len() - 4, start_ix);
+			self.write_le_usize(self.0.len() - SIZE_BYTE_LEN, start_ix);
 			self.append_le_usize(len + 1);
 		} else {
-			self.write_le_usize(self.0.len() - 4, 1);
+			self.write_le_usize(self.0.len() - SIZE_BYTE_LEN, 1);
 		}
 	}
 
@@ -398,17 +402,17 @@ impl<'a> Serialized<'a> {
 		}
 		let start_ix = start_ix - delete_size;
 		for i in 1..len - index - 1 {
-			let old_value = self.read_le_usize(start_ix + i * 4);
-			self.write_le_usize(start_ix + (i - 1) * 4, old_value - delete_size);
+			let old_value = self.read_le_usize(start_ix + i * SIZE_BYTE_LEN);
+			self.write_le_usize(start_ix + (i - 1) * SIZE_BYTE_LEN, old_value - delete_size);
 		}
 		let len = len - 1;
-		let end_index = start_ix + len * 4;
-		self.write_le_usize(end_index - 4, len);
+		let end_index = start_ix + len * SIZE_BYTE_LEN;
+		self.write_le_usize(end_index - SIZE_BYTE_LEN, len);
 		self.0.to_mut().truncate(end_index);
 
 	}
 
-	fn get_state(&self, index: usize) -> HistoriedValue<&[u8]> {
+	fn get_state(&self, index: usize) -> HistoriedValue<&[u8], u64> {
 		let start_ix = self.index_element(index);
 		let len = self.len();
 		let end_ix = if index == len - 1 {
@@ -416,9 +420,9 @@ impl<'a> Serialized<'a> {
 		} else {
 			self.index_element(index + 1)
 		};
-		let state = self.read_le_usize(start_ix);
+		let state = self.read_le_u64(start_ix);
 		HistoriedValue {
-			value: &self.0[start_ix + 4..end_ix],
+			value: &self.0[start_ix + SIZE_BYTE_LEN..end_ix],
 			index: state,
 		}
 	}
@@ -427,7 +431,7 @@ impl<'a> Serialized<'a> {
 
 impl<'a> Default for Serialized<'a> {
 	fn default() -> Self {
-		Serialized(Cow::Borrowed(&[0u8; 4][..]))
+		Serialized(Cow::Borrowed(&[0u8; SIZE_BYTE_LEN][..]))
 	}
 }
 
@@ -439,14 +443,14 @@ impl<'a> Serialized<'a> {
 		let nb_ix = self.len();
 		if nb_ix ==0 { return 0; }
 		let end = self.0.len();
-		end - (nb_ix * 4)
+		end - (nb_ix * SIZE_BYTE_LEN)
 	}
 
 	fn index_element(&self, position: usize) -> usize {
 		if position == 0 {
 			return 0;
 		}
-		let i = self.index_start() + (position - 1) * 4;
+		let i = self.index_start() + (position - 1) * SIZE_BYTE_LEN;
 		self.read_le_usize(i)
 	}
 
@@ -457,24 +461,45 @@ impl<'a> Serialized<'a> {
 		self.0.to_mut()[start_to..start_to + size].copy_from_slice(&buffer[..]);
 	}
 
-	// Usize encoded as le u32.
+	// Usize encoded as le u64 (for historied value).
+	fn read_le_u64(&self, pos: usize) -> u64 {
+		let mut buffer = [0u8; SIZE_BYTE_LEN];
+		buffer.copy_from_slice(&self.0[pos..pos + SIZE_BYTE_LEN]);
+		u64::from_le_bytes(buffer)
+	}
+
+	// Usize encoded as le u64 (only for internal indexing).
+	// TODO EMCH change that to u32
 	fn read_le_usize(&self, pos: usize) -> usize {
-		let mut buffer = [0u8; 4];
-		buffer.copy_from_slice(&self.0[pos..pos + 4]);
-		u32::from_le_bytes(buffer) as usize
+		let mut buffer = [0u8; SIZE_BYTE_LEN];
+		buffer.copy_from_slice(&self.0[pos..pos + SIZE_BYTE_LEN]);
+		u64::from_le_bytes(buffer) as usize
 	}
 
-	// Usize encoded as le u32.
+	// Usize encoded as le u64.
 	fn write_le_usize(&mut self, pos: usize, value: usize) {
-		let buffer = (value as u32).to_le_bytes();
-		self.0.to_mut()[pos..pos + 4].copy_from_slice(&buffer[..]);
+		let buffer = (value as u64).to_le_bytes();
+		self.0.to_mut()[pos..pos + SIZE_BYTE_LEN].copy_from_slice(&buffer[..]);
 	}
 
-	// Usize encoded as le u32.
+	// Usize encoded as le u64.
 	fn append_le_usize(&mut self, value: usize) {
-		let buffer = (value as u32).to_le_bytes();
+		let buffer = (value as u64).to_le_bytes();
 		self.0.to_mut().extend_from_slice(&buffer[..]);
 	}
+
+	// Usize encoded as le u64.
+	fn write_le_u64(&mut self, pos: usize, value: u64) {
+		let buffer = (value as u64).to_le_bytes();
+		self.0.to_mut()[pos..pos + SIZE_BYTE_LEN].copy_from_slice(&buffer[..]);
+	}
+
+	// Usize encoded as le u64.
+	fn append_le_u64(&mut self, value: u64) {
+		let buffer = (value as u64).to_le_bytes();
+		self.0.to_mut().extend_from_slice(&buffer[..]);
+	}
+
 
 }
 
@@ -483,15 +508,15 @@ impl<'a> Serialized<'a> {
 	/// Set a value, it uses a state history as parameter.
 	/// This method uses `get_mut` and do remove pending
 	/// dropped value.
-	pub fn set(&mut self, history: &[TransactionState], val: &[u8]) {
+	pub fn set(&mut self, history: &[TransactionState], value: &[u8]) {
 		if let Some(v) = self.get_mut(history) {
-			if v.index == history.len() - 1 {
+			if v.index == history.len() as u64 - 1 {
 				self.pop();
-				self.push((val, v.index));
+				self.push(HistoriedValue {value, index: v.index});
 				return;
 			}
 		}
-		self.push((val, history.len() - 1));
+		self.push(HistoriedValue {value, index: history.len() as u64 - 1});
 	}
 
 	fn mut_ref(&mut self, _index: usize) -> () {
@@ -502,7 +527,7 @@ impl<'a> Serialized<'a> {
 
 
 // share implementation, trait would be better.
-macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
+macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty, $par: ty ) => {
 
 	/// Access to latest pending value (non dropped state in history).
 	/// When possible please prefer `get_mut` as it can free
@@ -517,7 +542,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		while index > 0 {
 			index -= 1;
 			let HistoriedValue { value, index: history_index } = self.get_state(index);
-			match history[history_index] {
+			match history[as_usize(history_index)] {
 				TransactionState::Dropped => (),
 				TransactionState::Pending
 				| TransactionState::TxPending
@@ -539,7 +564,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		while index > 0 {
 			index -= 1;
 			let history_index = self.get_state(index).index;
-			match history[history_index] {
+			match history[as_usize(history_index)] {
 				TransactionState::Dropped => (),
 				TransactionState::Pending
 				| TransactionState::TxPending
@@ -564,7 +589,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		while index > 0 {
 			index -= 1;
 			let HistoriedValue { value, index: history_index } = self.get_state(index);
-			match history[history_index] {
+			match history[as_usize(history_index)] {
 				TransactionState::Pending
 				| TransactionState::TxPending
 				| TransactionState::Prospective =>
@@ -587,7 +612,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		while index > 0 {
 			index -= 1;
 			let HistoriedValue { value, index: history_index } = self.get_state(index);
-			match history[history_index] {
+			match history[as_usize(history_index)] {
 				TransactionState::Committed => return Some(value),
 				TransactionState::Pending
 				| TransactionState::TxPending
@@ -611,7 +636,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		while index > 0 {
 			index -= 1;
 			let history_index = self.get_state(index).index;
-			match history[history_index] {
+			match history[as_usize(history_index)] {
 				TransactionState::Committed => {
 					self.truncate(index + 1);
 					return self.pop().map(|v| v.value);
@@ -628,7 +653,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 	/// Access to latest pending value (non dropped state in history).
 	///
 	/// This method removes latest dropped values up to the latest valid value.
-	pub fn get_mut(&mut self, history: &[TransactionState]) -> Option<HistoriedValue<$mut>> {
+	pub fn get_mut(&mut self, history: &[TransactionState]) -> Option<HistoriedValue<$mut, $par>> {
 
 		let mut index = self.len();
 		if index == 0 {
@@ -641,7 +666,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		while index > 0 {
 			index -= 1;
 			let history_index = self.get_state(index).index;
-			match history[history_index] {
+			match history[as_usize(history_index)] {
 				TransactionState::Committed => {
 					// here we could gc all preceding values but that is additional cost
 					// and get_mut should stop at pending following committed.
@@ -668,7 +693,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		&mut self,
 		history: &[TransactionState],
 		transaction_index: Option<&[usize]>,
-	) -> Option<HistoriedValue<$mut>> {
+	) -> Option<HistoriedValue<$mut, $par>> {
 		if let Some(mut transaction_index) = transaction_index {
 			let mut index = self.len();
 			if index == 0 {
@@ -685,6 +710,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 			while index > 0 {
 				index -= 1;
 				let history_index = self.get_state(index).index;
+				let history_index = as_usize(history_index);
 				match history[history_index] {
 					TransactionState::Committed => {
 						for _ in 0..index {
@@ -731,7 +757,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 				}
 			}
 			if let Some((index, history_index)) = result {
-				Some((self.mut_ref(index), history_index).into())
+				Some((self.mut_ref(index), as_i(history_index)).into())
 			} else { None }
 
 		} else {
@@ -741,12 +767,29 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 });
 
 impl<'a> Serialized<'a> {
-	history_impl!(&[u8], Vec<u8>, ());
+	history_impl!(&[u8], Vec<u8>, (), u64);
 }
 
-impl<V> History<V> {
-	history_impl!(&V, V, &mut V);
+impl<V, I: Copy + Eq + TryFrom<usize> + TryInto<usize>> History<V, I> {
+	history_impl!(&V, V, &mut V, I);
 }
+
+
+// utility function for panicking cast (similar as `as` cas with number
+fn as_usize<I: TryInto<usize>>(i: I) -> usize {
+	match i.try_into() {
+		Ok(index) => index,
+		Err(_) => panic!("historied value index overflow"),
+	}
+}
+// utility function for panicking cast (similar as `as` cas with number
+fn as_i<I: TryFrom<usize>>(i: usize) -> I {
+	match i.try_into() {
+		Ok(index) => index,
+		Err(_) => panic!("historied value index underflow"),
+	}
+}
+
 
 #[cfg(test)]
 mod test {
@@ -762,30 +805,30 @@ mod test {
 		let mut ser = Serialized::default();
 		assert_eq!(ser.len(), 0);
 		assert_eq!(ser.pop(), None);
-		ser.push((v1, 1));
+		ser.push((v1, 1).into());
 		assert_eq!(ser.get_state(0), (v1, 1).into());
 		assert_eq!(ser.pop(), Some((v1.to_vec(), 1).into()));
 		assert_eq!(ser.len(), 0);
-		ser.push((v1, 1));
-		ser.push((v2, 2));
-		ser.push((v3, 3));
+		ser.push((v1, 1).into());
+		ser.push((v2, 2).into());
+		ser.push((v3, 3).into());
  		assert_eq!(ser.get_state(0), (v1, 1).into());
 		assert_eq!(ser.get_state(1), (v2, 2).into());
 		assert_eq!(ser.get_state(2), (v3, 3).into());
 		assert_eq!(ser.pop(), Some((v3.to_vec(), 3).into()));
 		assert_eq!(ser.len(), 2);
-		ser.push((v3, 3));
+		ser.push((v3, 3).into());
 		assert_eq!(ser.get_state(2), (v3, 3).into());
 		ser.remove(0);
 		assert_eq!(ser.len(), 2);
 		assert_eq!(ser.get_state(0), (v2, 2).into());
 		assert_eq!(ser.get_state(1), (v3, 3).into());
-		ser.push((v1, 1));
+		ser.push((v1, 1).into());
 		ser.remove(1);
 		assert_eq!(ser.len(), 2);
 		assert_eq!(ser.get_state(0), (v2, 2).into());
 		assert_eq!(ser.get_state(1), (v1, 1).into());
-		ser.push((v1, 1));
+		ser.push((v1, 1).into());
 		ser.truncate(1);
 		assert_eq!(ser.len(), 1);
 		assert_eq!(ser.get_state(0), (v2, 2).into());

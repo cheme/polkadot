@@ -65,22 +65,22 @@ use rstd::collections::btree_map::BTreeMap;
 pub struct LinearStates {
 	/// Index of first element (only use for indexed access).
 	/// Element before offset are not in state.
-	offset: usize,
+	offset: u64,
 	/// number of elements: all elements equal or bellow
 	/// this index are valid, over this index they are not.
-	len: usize,
+	len: u64,
 	/// Maximum index before first deletion, it indicates
 	/// if the state is modifiable (when an element is dropped
 	/// we cannot append and need to create a new branch).
-	max_len_ix: usize,
+	max_len_ix: u64,
 }
 
 /// This is a simple range, end non inclusive.
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 pub struct LinearStatesRef {
-	start: usize,
-	end: usize,
+	start: u64,
+	end: u64,
 }
 
 
@@ -92,7 +92,7 @@ impl Default for LinearStates {
 }
 
 impl LinearStates {
-	pub fn new_from(offset: usize) -> Self {
+	pub fn new_from(offset: u64) -> Self {
 		LinearStates {
 			offset,
 			len: 1,
@@ -122,7 +122,7 @@ impl LinearStates {
 	}
 
 	/// return possible dropped state
-	pub fn drop_state(&mut self) -> Option<usize> {
+	pub fn drop_state(&mut self) -> Option<u64> {
 		if self.len > 0 {
 			self.len -= 1;
 			Some(self.offset + self.len)
@@ -133,7 +133,7 @@ impl LinearStates {
 
 	/// act as a truncate, returning range of deleted (end excluded)
 	/// TODO consider removal
-	pub fn keep_state(&mut self, index: usize) -> (usize, usize) {
+	pub fn keep_state(&mut self, index: u64) -> (u64, u64) {
 		if index < self.offset {
 			return (self.offset, self.offset);
 		}
@@ -147,14 +147,14 @@ impl LinearStates {
 	}
 
 	/// Return true if state exists.
-	pub fn get_state(&self, index: usize) -> bool {
+	pub fn get_state(&self, index: u64) -> bool {
 		if index < self.offset {
 			return false;
 		}
 		self.len > index + self.offset
 	}
 
-	pub fn latest_ix(&self) -> Option<usize> {
+	pub fn latest_ix(&self) -> Option<u64> {
 		if self.len > 0 {
 			Some(self.offset + self.len - 1)
 		} else {
@@ -166,7 +166,7 @@ impl LinearStates {
 
 impl LinearStatesRef {
 	/// Return true if the state exists, false otherwhise.
-	pub fn get_state(&self, index: usize) -> bool {
+	pub fn get_state(&self, index: u64) -> bool {
 		index < self.end && index >= self.start
 	}
 }
@@ -233,7 +233,7 @@ pub struct StatesBranch {
 	branch_ix: u64,
 	
 	origin_branch_ix: u64,
-	origin_linear_ix: usize,
+	origin_linear_ix: u64,
 
 	prospective_ix: usize,
 
@@ -252,14 +252,11 @@ pub struct StatesBranchRef {
 
 // TODO could benefit from smallvec!!
 // of number of node (it still stores a few usize & a vec ptr)
-/// Reference to state that is enough for query updates, but not
-/// for gc.
-/// Values are ordered by branch_ix,
-/// and only a logic branch path should be present.
+/// Reference to state to use for query updates.
+/// It is a single brannch path with branches ordered by branch_ix.
 ///
-/// Note that an alternative could be a pointer to a full state
-/// branch for a given branch index, here we use an in memory
-/// copied representation in relation to an actual use case.
+/// Note that an alternative representation could be a pointer to full
+/// tree state with a defined branch index implementing an iterator.
 pub type StatesRef = Vec<StatesBranchRef>;
 
 impl TestStates {
@@ -275,10 +272,16 @@ impl TestStates {
 	/// (which is fine as long as we use this state to query something that refer to this state.
 	pub fn state_ref(&self, mut branch_ix: u64) -> StatesRef {
 		let mut result = Vec::new();
+		let mut previous_origin_linear_index = u64::max_value() - 1;
 		while branch_ix != 0 {
 			if let Some(branch) = self.branches.get(&branch_ix)
 				.filter(|b| !b.is_dropped_internal(self.prospective_ix, self.committed_ix)) {
-				result.push(branch.branch_ref());
+				let mut branch_ref = branch.branch_ref();
+				if branch_ref.state.end > previous_origin_linear_index + 1 {
+					branch_ref.state.end = previous_origin_linear_index + 1;
+				}
+				previous_origin_linear_index = branch.origin_linear_ix;
+				result.push(branch_ref);
 				branch_ix = branch.origin_branch_ix;
 			} else {
 				break;
@@ -294,7 +297,7 @@ impl TestStates {
 		&mut self,
 		nb_branch: usize,
 		branch_ix: u64,
-		linear_ix: Option<usize>,
+		linear_ix: Option<u64>,
 	) -> Option<u64> {
 		if nb_branch == 0 {
 			return None;
@@ -334,8 +337,8 @@ impl TestStates {
 	pub fn get_node(
 		&self,
 		branch_ix: u64,
-		linear_ix: Option<usize>,
-	) -> Option<usize> {
+		linear_ix: Option<u64>,
+	) -> Option<u64> {
 		if let Some(branch) = self.branches.get(&branch_ix)
 			.filter(|b| !b.is_dropped_internal(self.prospective_ix, self.committed_ix)) {
 			if let Some(linear_ix) = linear_ix {
@@ -353,7 +356,7 @@ impl TestStates {
 	}
 
 	/// Do node exist (return state (being true or false only)).
-	pub fn get(&self, branch_ix: u64, linear_ix: usize) -> bool {
+	pub fn get(&self, branch_ix: u64, linear_ix: u64) -> bool {
 		self.get_node(branch_ix, Some(linear_ix)).is_some()
 	}
 
@@ -384,7 +387,7 @@ impl TestStates {
 	/// this function can go into deep recursion with full scan, it indicates
 	/// that the in memory model use here should only be use for small data or
 	/// tests.
-	pub fn apply_drop_state(&mut self, branch_ix: u64, linear_ix: usize) {
+	pub fn apply_drop_state(&mut self, branch_ix: u64, linear_ix: u64) {
 		let mut to_delete = Vec::new();
 		for (i, s) in self.branches.iter() {
 			if s.origin_branch_ix == branch_ix && s.origin_linear_ix == linear_ix {
@@ -403,7 +406,7 @@ impl TestStates {
 	}
 }
 
-pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: usize) -> bool {
+pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: u64) -> bool {
 	s.iter()
 		.find(|s| s.branch_ix == branch_ix)
 		.map(|s| s.state.get_state(linear_ix))
@@ -420,7 +423,7 @@ pub struct History<V>(Vec<HistoryBranch<V>>);
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 pub struct HistoryBranch<V> {
 	branch_index: u64,
-	history: LinearHistory<V>,
+	history: LinearHistory<V, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -448,7 +451,7 @@ impl<V> History<V> {
 				index_state -= 1;
 			}
 			if state[index_state].branch_ix == branch_ix {
-				if let Some(result) = self.linear_get(branch_ix, &state[index_state]) {
+				if let Some(result) = self.linear_get_unchecked(branch_ix, &state[index_state]) {
 					return Some(result)
 				}
 			}
@@ -456,7 +459,7 @@ impl<V> History<V> {
 		None
 	}
 
-	fn linear_get(&self, branch_ix: u64, state: &StatesBranchRef) -> Option<&V> {
+	fn linear_get_unchecked(&self, branch_ix: u64, state: &StatesBranchRef) -> Option<&V> {
 		let history = &self.0[branch_ix as usize];
 		let mut index = history.history.len();
 		if index == 0 {
@@ -464,9 +467,9 @@ impl<V> History<V> {
 		}
 		while index > 0 {
 			index -= 1;
-			if let Some(&HistoriedValueLinear { value, index: history_index }) = history.history.get(index).as_ref() {
-				if history_index < &state.state.end {
-					return Some(&value);
+			if let Some(&v) = history.history.get(index).as_ref() {
+				if v.index < state.state.end {
+					return Some(&v.value);
 				}
 			}
 		}
@@ -530,6 +533,21 @@ mod test {
 			},
 		];
 		assert_eq!(states.state_ref(3), ref_3);
+
+		let mut states = states;
+
+		assert_eq!(states.create_branch(1, 1, Some(0)), Some(6));
+		let ref_6 = vec![
+			StatesBranchRef {
+				branch_ix: 6,
+				state: LinearStatesRef { start: 0, end: 1 },
+			},
+			StatesBranchRef {
+				branch_ix: 1,
+				state: LinearStatesRef { start: 0, end: 1 },
+			},
+		];
+		assert_eq!(states.state_ref(6), ref_6);
 	}
 
 

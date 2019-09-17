@@ -21,9 +21,11 @@ use std::collections::{HashMap, BTreeSet};
 use codec::Decode;
 use crate::changes_trie::{NO_EXTRINSIC_INDEX, Configuration as ChangesTrieConfig};
 use primitives::storage::well_known_keys::EXTRINSIC_INDEX;
-use historied_data::linear::{States, History};
+use historied_data::linear::{States, History as HistoryInner};
 use historied_data::State as TransactionState;
 use historied_data::DEFAULT_GC_CONF;
+
+type History<V> = HistoryInner<V, usize>;
 
 /// The overlayed changes to state to be queried on top of the backend.
 ///
@@ -111,18 +113,18 @@ fn set_with_extrinsic_inner_overlayed_value(
 	extrinsic_index: u32,
 ) {
 	let state = history.len() - 1;
-	if let Some((mut current, current_index)) = h_value.get_mut(history) {
+	if let Some(mut current) = h_value.get_mut(history) {
 
-		if current_index == state {
-			current.value = value;
-			current.extrinsics.get_or_insert_with(Default::default)
+		if current.index == state {
+			current.value.value = value;
+			current.value.extrinsics.get_or_insert_with(Default::default)
 				.insert(extrinsic_index);
 
 		} else {
-			let mut extrinsics = current.extrinsics.clone();
+			let mut extrinsics = current.value.extrinsics.clone();
 			extrinsics.get_or_insert_with(Default::default)
 				.insert(extrinsic_index);
-			h_value.unsafe_push(OverlayedValue {
+			h_value.push_unchecked(OverlayedValue {
 				value,
 				extrinsics,
 			}, state);
@@ -132,7 +134,7 @@ fn set_with_extrinsic_inner_overlayed_value(
 		extrinsics.get_or_insert_with(Default::default)
 			.insert(extrinsic_index);
 
-		h_value.unsafe_push(OverlayedValue {
+		h_value.push_unchecked(OverlayedValue {
 			 value,
 			 extrinsics,
 		}, state);
