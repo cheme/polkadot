@@ -182,6 +182,10 @@ pub struct TestStates {
 	last_branch_ix: u64,
 	committed_ix: usize,
 	prospective_ix: usize,
+	/// a lower treshold under which every branch are seen
+	/// as containing only valid values.
+	/// This can only be updated after a full garbage collection.
+	valid_treshold: u64,
 }
 
 impl StatesBranch {
@@ -220,6 +224,7 @@ impl Default for TestStates {
 			last_branch_ix: 0,
 			committed_ix: 0,
 			prospective_ix: 0,
+			valid_treshold: 0,
 		}
 	}
 }
@@ -257,7 +262,30 @@ pub struct StatesBranchRef {
 ///
 /// Note that an alternative representation could be a pointer to full
 /// tree state with a defined branch index implementing an iterator.
-pub type StatesRef = Vec<StatesBranchRef>;
+pub struct StatesRef {
+	history: Vec<StatesBranchRef>,
+  upper_branch_index: Option<usize>,
+  upper_linear_index: Option<u64>,
+}
+
+impl StatesRef {
+	/// limit to a given branch (included).
+	/// Optionally limiting branch to a linear index (included).
+	fn limit_branch(&mut self, branch_index: u64, linear_index: Option<u64>) {
+		self.history.iter()
+			.position(|v| v.branch_ix == branch_index)
+			.map(|index| { self.upper_branch_index = Some(index); });
+
+		self.upper_linear_index = linear_index;
+	}
+
+	/// remove any limit.
+	fn clear_limit(&mut self, branch_index: u64, linear_index: u64) {
+		self.upper_branch_index = None;
+		self.upper_linear_index = None;
+	}
+
+}
 
 impl TestStates {
 
@@ -273,7 +301,7 @@ impl TestStates {
 	pub fn state_ref(&self, mut branch_ix: u64) -> StatesRef {
 		let mut result = Vec::new();
 		let mut previous_origin_linear_index = u64::max_value() - 1;
-		while branch_ix != 0 {
+		while branch_ix > self.valid_treshold {
 			if let Some(branch) = self.branches.get(&branch_ix)
 				.filter(|b| !b.is_dropped_internal(self.prospective_ix, self.committed_ix)) {
 				let mut branch_ref = branch.branch_ref();
@@ -287,7 +315,7 @@ impl TestStates {
 				break;
 			}
 		}
-		result
+		StatesRef { history: result, upper_branch_index: None, upper_linear_index: None }
 	}
 
 	// create a branches. End current branch.
@@ -406,8 +434,9 @@ impl TestStates {
 	}
 }
 
+// TODO EMCH unused function??
 pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: u64) -> bool {
-	s.iter()
+	s.history.iter()
 		.find(|s| s.branch_ix == branch_ix)
 		.map(|s| s.state.get_state(linear_ix))
 		.unwrap_or(false)
@@ -415,9 +444,14 @@ pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: u64) -> bool {
 
 // TODO could benefit from smallvec!! need an estimation
 // of number of node (it still stores a usize + a smallvec) 
+/// First field is the actual history against which we run
+/// the state.
+/// Second field is an optional value for when no match was
+/// find. For instance after a full garbage collection,
+/// this value makes it possible to shorten the state.
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct History<V>(Vec<HistoryBranch<V>>);
+pub struct History<V>(Vec<HistoryBranch<V>>, Option<V>);
 
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
@@ -430,33 +464,35 @@ pub struct HistoryBranch<V> {
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 pub struct Serialized<'a>(Cow<'a, [u8]>);
 
+
 impl<V> History<V> {
+
 	/// Access to last valid value (non dropped state in history).
 	/// When possible please use `get_mut` as it can free some memory.
 	pub fn get(&self, state: &StatesRef) -> Option<&V> {
 		let mut index = self.0.len();
-		let mut index_state = state.len() - 1;
+		let mut index_state = state.history.len() - 1;
 
 		// note that we expect branch index to be linearily set
 		// along a branch (no state containing unordered branch_index
 		// and no history containing unorderd branch_index).
 		if index == 0 || index_state == 0 {
-			return None;
+			return self.1.as_ref();
 		}
 		while index > 0 && index_state > 0 {
 			index -= 1;
 			let branch_ix = self.0[index].branch_index;
 
-			while index_state > 0 && state[index_state].branch_ix > branch_ix {
+			while index_state > 0 && state.history[index_state].branch_ix > branch_ix {
 				index_state -= 1;
 			}
-			if state[index_state].branch_ix == branch_ix {
-				if let Some(result) = self.linear_get_unchecked(branch_ix, &state[index_state]) {
+			if state.history[index_state].branch_ix == branch_ix {
+				if let Some(result) = self.linear_get_unchecked(branch_ix, &state.history[index_state]) {
 					return Some(result)
 				}
 			}
 		}
-		None
+		self.1.as_ref()
 	}
 
 	fn linear_get_unchecked(&self, branch_ix: u64, state: &StatesBranchRef) -> Option<&V> {
@@ -475,7 +511,52 @@ impl<V> History<V> {
 		}
 		None
 	}
-	
+/*
+	/// Access to last valid value (non dropped state in history).
+	/// When possible please use `get_mut` as it can free some memory.
+	pub fn get_mut(&mut self, state: &StatesRef) -> Option<&mut V> {
+		let mut index = self.0.len();
+		let mut index_state = state.history.len() - 1;
+
+		// note that we expect branch index to be linearily set
+		// along a branch (no state containing unordered branch_index
+		// and no history containing unorderd branch_index).
+		if index == 0 || index_state == 0 {
+			return self.1.as_mut();
+		}
+		while index > 0 && index_state > 0 {
+			index -= 1;
+			let branch_ix = self.0[index].branch_index;
+
+			while index_state > 0 && state.history[index_state].branch_ix > branch_ix {
+				index_state -= 1;
+			}
+			if state.history[index_state].branch_ix == branch_ix {
+				if let Some(result) = self.linear_get_unchecked_mut(branch_ix, &state.history[index_state]) {
+					return Some(result)
+				}
+			}
+		}
+		self.1.as_mut()
+	}
+
+	fn linear_get_unchecked_mut(&mut self, branch_ix: u64, state: &StatesBranchRef) -> Option<&mut V> {
+		let history = &mut self.0[branch_ix as usize];
+		let mut index = history.history.len();
+		if index == 0 {
+			return None;
+		}
+		while index > 0 {
+			index -= 1;
+			if let Some(&mut v) = history.history.get_mut(index).as_mut() {
+				if v.index < state.state.end {
+					return Some(&mut v.value);
+				}
+			}
+		}
+		None
+	}
+*/
 }
 
 
@@ -532,7 +613,7 @@ mod test {
 				state: LinearStatesRef { start: 0, end: 2 },
 			},
 		];
-		assert_eq!(states.state_ref(3), ref_3);
+		assert_eq!(states.state_ref(3).history, ref_3);
 
 		let mut states = states;
 
@@ -547,7 +628,12 @@ mod test {
 				state: LinearStatesRef { start: 0, end: 1 },
 			},
 		];
-		assert_eq!(states.state_ref(6), ref_6);
+		assert_eq!(states.state_ref(6).history, ref_6);
+
+		states.valid_treshold = 3;
+		let mut ref_6 = ref_6;
+		ref_6.pop();
+		assert_eq!(states.state_ref(6).history, ref_6);
 	}
 
 

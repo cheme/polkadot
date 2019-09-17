@@ -161,7 +161,7 @@ impl<V, I: Copy + Eq + TryFrom<usize> + TryInto<usize>> History<V, I> {
 		}
 		self.push_unchecked(HistoriedValue {
 			value,
-			index: as_i((history.len() - 1)),
+			index: as_i(history.len() - 1),
 		});
 	}
 
