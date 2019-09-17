@@ -8,11 +8,11 @@
 
 // Substrate is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	See the
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
 // You should have received a copy of the GNU General Public License
-// along with Substrate.	If not, see <http://www.gnu.org/licenses/>.
+// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Transactional overlay implementation.
 //!
@@ -27,17 +27,57 @@ use rstd::vec::Vec;
 use rstd::vec;
 use rstd::borrow::Cow;
 
+/// An entry at a given history height.
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct HistoriedValue<V> {
+	/// The stored value.
+	pub value: V,
+	/// The moment in history when the value got set.
+	pub index: usize,
+}
+
+impl<V> From<(V, usize)> for HistoriedValue<V> {
+	fn from(input: (V, usize)) -> HistoriedValue<V> {
+		HistoriedValue { value: input.0, index: input.1 }
+	}
+}
+
+impl<V> HistoriedValue<V> {
+	fn as_ref(&self) -> HistoriedValue<&V> {
+		HistoriedValue {
+			value: &self.value,
+			index: self.index,
+		}
+	}
+
+	fn as_mut(&mut self) -> HistoriedValue<&mut V> {
+		HistoriedValue {
+			value: &mut self.value,
+			index: self.index,
+		}
+	}
+
+	fn map<R, F: FnOnce(V) -> R>(self, f: F) -> HistoriedValue<R> {
+		HistoriedValue {
+			value: f(self.value),
+			index: self.index,
+		}
+	}
+
+}
+
 /// Array like buffer for in memory storage.
 /// By in memory we expect that this will
 /// not required persistence and is not serialized.
 #[cfg(not(feature = "std"))]
-pub(crate) type MemoryOnly<V> = Vec<(V, usize)>;
+pub(crate) type MemoryOnly<V> = Vec<HistoriedValue<V>>;
 
 /// Array like buffer for in memory storage.
 /// By in memory we expect that this will
 /// not required persistence and is not serialized.
 #[cfg(feature = "std")]
-pub(crate) type MemoryOnly<V> = smallvec::SmallVec<[(V, usize); ALLOCATED_HISTORY]>;
+pub(crate) type MemoryOnly<V> = smallvec::SmallVec<[HistoriedValue<V>; ALLOCATED_HISTORY]>;
 
 /// Size of preallocated history per element.
 /// Currently at two for committed and prospective only.
@@ -63,26 +103,26 @@ impl<V> Default for History<V> {
 // buffer specific functions.
 impl<V> History<V> {
 
-	fn get_state(&self, index: usize) -> (&V, usize) {
-		(&self.0[index].0, self.0[index].1)
+	fn get_state(&self, index: usize) -> HistoriedValue<&V> {
+		self.0[index].as_ref()
 	}
 
 	#[cfg(any(test, feature = "test"))]
 	/// Create an history from an existing history.
-	pub fn from_iter(input: impl IntoIterator<Item = (V, usize)>) -> Self {
+	pub fn from_iter(input: impl IntoIterator<Item = HistoriedValue<V>>) -> Self {
 		let mut history = History::default();
 		for v in input {
-			history.unsafe_push(v.0, v.1);
+			history.push_unchecked(v);
 		}
 		history
 	}
 
 	#[cfg(any(test, feature = "test"))]
-	/// Debugging function for test and fuzzing.
-	pub fn internal_item_counts(&self) -> usize {
+	pub fn len(&self) -> usize {
 		self.0.len()
 	}
 
+	#[cfg(not(any(test, feature = "test")))]
 	fn len(&self) -> usize {
 		self.0.len()
 	}
@@ -91,7 +131,7 @@ impl<V> History<V> {
 		self.0.truncate(index)
 	}
 
-	fn pop(&mut self) -> Option<(V, usize)> {
+	fn pop(&mut self) -> Option<HistoriedValue<V>> {
 		self.0.pop()
 	}
 
@@ -104,25 +144,28 @@ impl<V> History<V> {
 	/// This method shall only be call after a `get_mut` where
 	/// the returned index indicate that a `set` will result
 	/// in appending a value.
-	pub fn unsafe_push(&mut self, value: V, history_index: usize) {
-		self.0.push((value, history_index))
+	pub fn push_unchecked(&mut self, value: HistoriedValue<V>) {
+		self.0.push(value)
 	}
 
 	/// Set a value, it uses a state history as parameter.
 	/// This method uses `get_mut` and do remove pending
 	/// dropped value.
 	pub fn set(&mut self, history: &[TransactionState], value: V) {
-		if let Some((v, index)) = self.get_mut(history) {
-			if index == history.len() - 1 {
-				*v = value;
+		if let Some(v) = self.get_mut(history) {
+			if v.index == history.len() - 1 {
+				*v.value = value;
 				return;
 			}
 		}
-		self.unsafe_push(value, history.len() - 1);
+		self.push_unchecked(HistoriedValue {
+			value,
+			index: history.len() - 1,
+		});
 	}
 
 	fn mut_ref(&mut self, index: usize) -> &mut V {
-		&mut self.0[index].0
+		&mut self.0[index].value
 	}
 
 }
@@ -293,7 +336,7 @@ impl<'a> Serialized<'a> {
 		self.0.to_mut().truncate(new_start + len_ix);
 	}
 
-	fn pop(&mut self) -> Option<(Vec<u8>, usize)> {
+	fn pop(&mut self) -> Option<HistoriedValue<Vec<u8>>> {
 		let len = self.len();
 		if len == 0 {
 			return None;
@@ -304,14 +347,14 @@ impl<'a> Serialized<'a> {
 		let value = self.0[start_ix + 4..end_ix].to_vec();
 		if len - 1 == 0 {
 			self.clear();
-			return Some((value, state))	
+			return Some(HistoriedValue { value, index: state })	
 		} else {
 			self.write_le_usize(self.0.len() - 8, len - 1);
 		};
 		let ix_size = (len * 4) - 4;
 		self.slice_copy(end_ix, start_ix, ix_size);
 		self.0.to_mut().truncate(start_ix + ix_size);
-		Some((value, state))
+		Some(HistoriedValue { value, index: state })
 	}
 
 	fn push(&mut self, val: (&[u8], usize)) {
@@ -365,7 +408,7 @@ impl<'a> Serialized<'a> {
 
 	}
 
-	fn get_state(&self, index: usize) -> (&[u8], usize) {
+	fn get_state(&self, index: usize) -> HistoriedValue<&[u8]> {
 		let start_ix = self.index_element(index);
 		let len = self.len();
 		let end_ix = if index == len - 1 {
@@ -374,7 +417,10 @@ impl<'a> Serialized<'a> {
 			self.index_element(index + 1)
 		};
 		let state = self.read_le_usize(start_ix);
-		(&self.0[start_ix + 4..end_ix], state)
+		HistoriedValue {
+			value: &self.0[start_ix + 4..end_ix],
+			index: state,
+		}
 	}
 
 }
@@ -438,10 +484,10 @@ impl<'a> Serialized<'a> {
 	/// This method uses `get_mut` and do remove pending
 	/// dropped value.
 	pub fn set(&mut self, history: &[TransactionState], val: &[u8]) {
-		if let Some((_v, index)) = self.get_mut(history) {
-			if index == history.len() - 1 {
+		if let Some(v) = self.get_mut(history) {
+			if v.index == history.len() - 1 {
 				self.pop();
-				self.push((val, index));
+				self.push((val, v.index));
 				return;
 			}
 		}
@@ -470,14 +516,14 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		debug_assert!(history.len() >= index);
 		while index > 0 {
 			index -= 1;
-			let (v, history_index) = self.get_state(index);
+			let HistoriedValue { value, index: history_index } = self.get_state(index);
 			match history[history_index] {
 				TransactionState::Dropped => (),
 				TransactionState::Pending
 				| TransactionState::TxPending
 				| TransactionState::Prospective
 				| TransactionState::Committed =>
-					return Some(v),
+					return Some(value),
 			}
 		}
 		None
@@ -492,7 +538,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		debug_assert!(history.len() >= index);
 		while index > 0 {
 			index -= 1;
-			let history_index = self.get_state(index).1;
+			let history_index = self.get_state(index).index;
 			match history[history_index] {
 				TransactionState::Dropped => (),
 				TransactionState::Pending
@@ -500,7 +546,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 				| TransactionState::Prospective
 				| TransactionState::Committed => {
 					self.truncate(index + 1);
-					return self.pop().map(|v| v.0);
+					return self.pop().map(|v| v.value);
 				},
 			}
 		}
@@ -517,12 +563,12 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		debug_assert!(history.len() >= index);
 		while index > 0 {
 			index -= 1;
-			let (v, history_index) = self.get_state(index);
+			let HistoriedValue { value, index: history_index } = self.get_state(index);
 			match history[history_index] {
 				TransactionState::Pending
 				| TransactionState::TxPending
 				| TransactionState::Prospective =>
-					return Some(v),
+					return Some(value),
 				TransactionState::Committed
 				| TransactionState::Dropped => (),
 			}
@@ -540,9 +586,9 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		debug_assert!(history.len() >= index);
 		while index > 0 {
 			index -= 1;
-			let (v, history_index) = self.get_state(index);
+			let HistoriedValue { value, index: history_index } = self.get_state(index);
 			match history[history_index] {
-				TransactionState::Committed => return Some(v),
+				TransactionState::Committed => return Some(value),
 				TransactionState::Pending
 				| TransactionState::TxPending
 				| TransactionState::Prospective
@@ -564,11 +610,11 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		debug_assert!(history.len() >= index);
 		while index > 0 {
 			index -= 1;
-			let history_index = self.get_state(index).1;
+			let history_index = self.get_state(index).index;
 			match history[history_index] {
 				TransactionState::Committed => {
 					self.truncate(index + 1);
-					return self.pop().map(|v| v.0);
+					return self.pop().map(|v| v.value);
 				},
 				TransactionState::Pending
 				| TransactionState::TxPending
@@ -581,8 +627,8 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 
 	/// Access to latest pending value (non dropped state in history).
 	///
-	/// This method remove latest dropped value up to the latest valid value.
-	pub fn get_mut(&mut self, history: &[TransactionState]) -> Option<($mut, usize)> {
+	/// This method removes latest dropped values up to the latest valid value.
+	pub fn get_mut(&mut self, history: &[TransactionState]) -> Option<HistoriedValue<$mut>> {
 
 		let mut index = self.len();
 		if index == 0 {
@@ -594,17 +640,17 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 		debug_assert!(history.len() >= index);
 		while index > 0 {
 			index -= 1;
-			let history_index = self.get_state(index).1;
+			let history_index = self.get_state(index).index;
 			match history[history_index] {
 				TransactionState::Committed => {
 					// here we could gc all preceding values but that is additional cost
 					// and get_mut should stop at pending following committed.
-					return Some((self.mut_ref(index), history_index))
+					return Some((self.mut_ref(index), history_index).into())
 				},
 				TransactionState::Pending
 				| TransactionState::TxPending
 				| TransactionState::Prospective => {
-					return Some((self.mut_ref(index), history_index))
+					return Some((self.mut_ref(index), history_index).into())
 				},
 				TransactionState::Dropped => { let _ = self.pop(); },
 			}
@@ -613,25 +659,24 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 	}
 
 
-	/// Garbage collect a history, act as a `get_mut` with additional cost.
+	/// Garbage collect the history, act as a `get_mut` with additional cost.
 	/// To run `eager`, a `transaction_index` parameter of all `TxPending` states
 	/// must be provided, then all dropped value are removed even if it means shifting
 	/// array byte. Otherwhise we mainly garbage collect up to last Commit state
 	/// (truncate left size).
-	pub fn gc(
+	pub fn get_mut_pruning(
 		&mut self,
 		history: &[TransactionState],
 		transaction_index: Option<&[usize]>,
-	) -> Option<($mut, usize)> {
-		if let Some(transaction_index) = transaction_index {
-			let mut transaction_index = &transaction_index[..];
+	) -> Option<HistoriedValue<$mut>> {
+		if let Some(mut transaction_index) = transaction_index {
 			let mut index = self.len();
 			if index == 0 {
 				return None;
 			}
 			// indicates that we got a value to return up to previous
 			// `TxPending` so values in between can be dropped.
-			let mut bellow_value = usize::max_value();
+			let mut below_value = usize::max_value();
 			let mut result: Option<(usize, usize)> = None;
 			// internal method: should be use properly
 			// (history of the right overlay change set
@@ -639,7 +684,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 			debug_assert!(history.len() >= index);
 			while index > 0 {
 				index -= 1;
-				let history_index = self.get_state(index).1;
+				let history_index = self.get_state(index).index;
 				match history[history_index] {
 					TransactionState::Committed => {
 						for _ in 0..index {
@@ -651,7 +696,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 					},
 					TransactionState::Pending
 					| TransactionState::Prospective => {
-						if history_index >= bellow_value {
+						if history_index >= below_value {
 							self.remove(index);
 							result.as_mut().map(|(i, _)| *i = *i - 1);
 						} else {
@@ -659,18 +704,18 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 								result = Some((index, history_index));
 							}
 							// move to next previous `TxPending`
-							while bellow_value > history_index {
+							while below_value > history_index {
 								// mut slice pop
 								let split = transaction_index.split_last()
 									.map(|(v, sl)| (*v, sl))
 									.unwrap_or((0, &[]));
-								bellow_value = split.0;
+								below_value = split.0;
 								transaction_index = split.1;
 							}
 						}
 					},
 					TransactionState::TxPending => {
-						if history_index >= bellow_value {
+						if history_index >= below_value {
 							self.remove(index);
 							result.as_mut().map(|(i, _)| *i = *i - 1);
 						} else {
@@ -678,7 +723,7 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 								result = Some((index, history_index));
 							}
 						}
-						bellow_value = usize::max_value();
+						below_value = usize::max_value();
 					},
 					TransactionState::Dropped => {
 						self.remove(index);
@@ -686,11 +731,11 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 				}
 			}
 			if let Some((index, history_index)) = result {
-				Some((self.mut_ref(index), history_index))
+				Some((self.mut_ref(index), history_index).into())
 			} else { None }
 
 		} else {
-			return self.get_mut(history);
+			self.get_mut(history)
 		}
 	}
 });
@@ -718,31 +763,31 @@ mod test {
 		assert_eq!(ser.len(), 0);
 		assert_eq!(ser.pop(), None);
 		ser.push((v1, 1));
-		assert_eq!(ser.get_state(0), (v1, 1));
-		assert_eq!(ser.pop(), Some((v1.to_vec(), 1)));
+		assert_eq!(ser.get_state(0), (v1, 1).into());
+		assert_eq!(ser.pop(), Some((v1.to_vec(), 1).into()));
 		assert_eq!(ser.len(), 0);
 		ser.push((v1, 1));
 		ser.push((v2, 2));
 		ser.push((v3, 3));
- 		assert_eq!(ser.get_state(0), (v1, 1));
-		assert_eq!(ser.get_state(1), (v2, 2));
-		assert_eq!(ser.get_state(2), (v3, 3));
-		assert_eq!(ser.pop(), Some((v3.to_vec(), 3)));
+ 		assert_eq!(ser.get_state(0), (v1, 1).into());
+		assert_eq!(ser.get_state(1), (v2, 2).into());
+		assert_eq!(ser.get_state(2), (v3, 3).into());
+		assert_eq!(ser.pop(), Some((v3.to_vec(), 3).into()));
 		assert_eq!(ser.len(), 2);
 		ser.push((v3, 3));
-		assert_eq!(ser.get_state(2), (v3, 3));
+		assert_eq!(ser.get_state(2), (v3, 3).into());
 		ser.remove(0);
 		assert_eq!(ser.len(), 2);
-		assert_eq!(ser.get_state(0), (v2, 2));
-		assert_eq!(ser.get_state(1), (v3, 3));
+		assert_eq!(ser.get_state(0), (v2, 2).into());
+		assert_eq!(ser.get_state(1), (v3, 3).into());
 		ser.push((v1, 1));
 		ser.remove(1);
 		assert_eq!(ser.len(), 2);
-		assert_eq!(ser.get_state(0), (v2, 2));
-		assert_eq!(ser.get_state(1), (v1, 1));
+		assert_eq!(ser.get_state(0), (v2, 2).into());
+		assert_eq!(ser.get_state(1), (v1, 1).into());
 		ser.push((v1, 1));
 		ser.truncate(1);
 		assert_eq!(ser.len(), 1);
-		assert_eq!(ser.get_state(0), (v2, 2));
+		assert_eq!(ser.get_state(0), (v2, 2).into());
 	}
 }

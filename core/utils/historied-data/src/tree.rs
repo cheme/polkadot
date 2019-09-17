@@ -53,6 +53,7 @@
 
 use crate::linear::{
 	MemoryOnly as LinearHistory,
+	HistoriedValue as HistoriedValueLinear,
 };
 use rstd::borrow::Cow;
 use rstd::vec::Vec;
@@ -463,7 +464,7 @@ impl<V> History<V> {
 		}
 		while index > 0 {
 			index -= 1;
-			if let Some(&(value, history_index)) = history.history.get(index).as_ref() {
+			if let Some(&HistoriedValueLinear { value, index: history_index }) = history.history.get(index).as_ref() {
 				if history_index < &state.state.end {
 					return Some(&value);
 				}
