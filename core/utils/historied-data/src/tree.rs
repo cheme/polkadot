@@ -263,8 +263,11 @@ pub struct StatesBranchRef {
 /// Note that an alternative representation could be a pointer to full
 /// tree state with a defined branch index implementing an iterator.
 pub struct StatesRef {
+	/// Oredered by branch index linear branch states.
 	history: Vec<StatesBranchRef>,
+	/// Index is not include, acts as length of history.
   upper_branch_index: Option<usize>,
+	/// Index is not include, acts as a branch ref end value.
   upper_linear_index: Option<u64>,
 }
 
@@ -274,9 +277,9 @@ impl StatesRef {
 	fn limit_branch(&mut self, branch_index: u64, linear_index: Option<u64>) {
 		self.history.iter()
 			.position(|v| v.branch_ix == branch_index)
-			.map(|index| { self.upper_branch_index = Some(index); });
+			.map(|index| { self.upper_branch_index = Some(index + 1); });
 
-		self.upper_linear_index = linear_index;
+		self.upper_linear_index = linear_index.map(|v| v + 1);
 	}
 
 	/// remove any limit.
@@ -284,6 +287,17 @@ impl StatesRef {
 		self.upper_branch_index = None;
 		self.upper_linear_index = None;
 	}
+
+	// vec like function
+	
+	fn len(&self) -> usize {
+		self.upper_branch_index.unwrap_or(self.history.len())
+	}
+
+	fn linear_state(&self, index: usize) -> &StatesBranchRef {
+		&self.history[index]
+	}
+
 
 }
 
@@ -434,14 +448,6 @@ impl TestStates {
 	}
 }
 
-// TODO EMCH unused function??
-pub fn ref_get(s: &StatesRef, branch_ix: u64, linear_ix: u64) -> bool {
-	s.history.iter()
-		.find(|s| s.branch_ix == branch_ix)
-		.map(|s| s.state.get_state(linear_ix))
-		.unwrap_or(false)
-}
-
 // TODO could benefit from smallvec!! need an estimation
 // of number of node (it still stores a usize + a smallvec) 
 /// First field is the actual history against which we run
@@ -471,7 +477,7 @@ impl<V> History<V> {
 	/// When possible please use `get_mut` as it can free some memory.
 	pub fn get(&self, state: &StatesRef) -> Option<&V> {
 		let mut index = self.0.len();
-		let mut index_state = state.history.len() - 1;
+		let mut index_state = state.len() - 1;
 
 		// note that we expect branch index to be linearily set
 		// along a branch (no state containing unordered branch_index
@@ -479,15 +485,18 @@ impl<V> History<V> {
 		if index == 0 || index_state == 0 {
 			return self.1.as_ref();
 		}
+		let mut linear_index_bound = state.upper_linear_index;
 		while index > 0 && index_state > 0 {
 			index -= 1;
 			let branch_ix = self.0[index].branch_index;
 
-			while index_state > 0 && state.history[index_state].branch_ix > branch_ix {
+			let linear_state = state.linear_state(index_state);
+			while index_state > 0 && linear_state.branch_ix > branch_ix {
 				index_state -= 1;
+				linear_index_bound = None;
 			}
-			if state.history[index_state].branch_ix == branch_ix {
-				if let Some(result) = self.linear_get_unchecked(branch_ix, &state.history[index_state]) {
+			if linear_state.branch_ix == branch_ix {
+				if let Some(result) = self.linear_get(branch_ix, linear_state, linear_index_bound) {
 					return Some(result)
 				}
 			}
@@ -495,7 +504,8 @@ impl<V> History<V> {
 		self.1.as_ref()
 	}
 
-	fn linear_get_unchecked(&self, branch_ix: u64, state: &StatesBranchRef) -> Option<&V> {
+	fn linear_get(&self, branch_ix: u64, state: &StatesBranchRef, bound: Option<u64>) -> Option<&V> {
+		let bound = bound.unwrap_or(state.state.end);
 		let history = &self.0[branch_ix as usize];
 		let mut index = history.history.len();
 		if index == 0 {
@@ -504,7 +514,7 @@ impl<V> History<V> {
 		while index > 0 {
 			index -= 1;
 			if let Some(&v) = history.history.get(index).as_ref() {
-				if v.index < state.state.end {
+				if v.index < bound {
 					return Some(&v.value);
 				}
 			}
