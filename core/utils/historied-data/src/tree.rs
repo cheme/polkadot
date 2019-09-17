@@ -125,7 +125,7 @@ impl LinearStates {
 	pub fn drop_state(&mut self) -> Option<usize> {
 		if self.len > 0 {
 			self.len -= 1;
-			Some(self.len)
+			Some(self.offset + self.len)
 		} else {
 			None
 		}
