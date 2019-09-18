@@ -56,6 +56,7 @@ use crate::linear::{
 	HistoriedValue as HistoriedValueLinear,
 };
 use rstd::borrow::Cow;
+use rstd::rc::Rc;
 use rstd::vec::Vec;
 use rstd::collections::btree_map::BTreeMap;
 
@@ -255,6 +256,7 @@ pub struct StatesBranchRef {
 }
 
 
+#[derive(Clone)]
 // TODO could benefit from smallvec!!
 // of number of node (it still stores a few usize & a vec ptr)
 /// Reference to state to use for query updates.
@@ -264,7 +266,7 @@ pub struct StatesBranchRef {
 /// tree state with a defined branch index implementing an iterator.
 pub struct StatesRef {
 	/// Oredered by branch index linear branch states.
-	history: Vec<StatesBranchRef>,
+	history: Rc<Vec<StatesBranchRef>>,
 	/// Index is not include, acts as length of history.
   upper_branch_index: Option<usize>,
 	/// Index is not include, acts as a branch ref end value.
@@ -329,7 +331,7 @@ impl TestStates {
 				break;
 			}
 		}
-		StatesRef { history: result, upper_branch_index: None, upper_linear_index: None }
+		StatesRef { history: Rc::new(result), upper_branch_index: None, upper_linear_index: None }
 	}
 
 	// create a branches. End current branch.
@@ -623,7 +625,7 @@ mod test {
 				state: LinearStatesRef { start: 0, end: 2 },
 			},
 		];
-		assert_eq!(states.state_ref(3).history, ref_3);
+		assert_eq!(*states.state_ref(3).history, ref_3);
 
 		let mut states = states;
 
@@ -638,12 +640,12 @@ mod test {
 				state: LinearStatesRef { start: 0, end: 1 },
 			},
 		];
-		assert_eq!(states.state_ref(6).history, ref_6);
+		assert_eq!(*states.state_ref(6).history, ref_6);
 
 		states.valid_treshold = 3;
 		let mut ref_6 = ref_6;
 		ref_6.pop();
-		assert_eq!(states.state_ref(6).history, ref_6);
+		assert_eq!(*states.state_ref(6).history, ref_6);
 	}
 
 
