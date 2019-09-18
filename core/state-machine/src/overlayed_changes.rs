@@ -21,7 +21,7 @@ use std::collections::{HashMap, BTreeSet};
 use codec::Decode;
 use crate::changes_trie::{NO_EXTRINSIC_INDEX, Configuration as ChangesTrieConfig};
 use primitives::storage::well_known_keys::EXTRINSIC_INDEX;
-use historied_data::linear::{States, History as HistoryInner};
+use historied_data::linear::{States, History as HistoryInner, HistoriedValue};
 use historied_data::State as TransactionState;
 use historied_data::DEFAULT_GC_CONF;
 
@@ -79,9 +79,9 @@ impl FromIterator<(Vec<u8>, OverlayedValue)> for OverlayedChangeSet {
 	fn from_iter<T: IntoIterator<Item = (Vec<u8>, OverlayedValue)>>(iter: T) -> Self {
 
 		let mut result = OverlayedChangeSet::default();
-		result.top = iter.into_iter().map(|(k, v)| (k, {
+		result.top = iter.into_iter().map(|(k, value)| (k, {
 			let mut history = History::default();
-			history.unsafe_push(v, 0);
+			history.push_unchecked(HistoriedValue { value, index: 0 });
 			history
 		})).collect();
 		result
@@ -113,7 +113,7 @@ fn set_with_extrinsic_inner_overlayed_value(
 	extrinsic_index: u32,
 ) {
 	let state = history.len() - 1;
-	if let Some(mut current) = h_value.get_mut(history) {
+	if let Some(current) = h_value.get_mut(history) {
 
 		if current.index == state {
 			current.value.value = value;
@@ -124,20 +124,26 @@ fn set_with_extrinsic_inner_overlayed_value(
 			let mut extrinsics = current.value.extrinsics.clone();
 			extrinsics.get_or_insert_with(Default::default)
 				.insert(extrinsic_index);
-			h_value.push_unchecked(OverlayedValue {
-				value,
-				extrinsics,
-			}, state);
+			h_value.push_unchecked(HistoriedValue {
+				value: OverlayedValue {
+					value,
+					extrinsics,
+				},
+				index: state,
+			});
 		}
 	} else {
 		let mut extrinsics: Option<BTreeSet<u32>> = None;
 		extrinsics.get_or_insert_with(Default::default)
 			.insert(extrinsic_index);
 
-		h_value.push_unchecked(OverlayedValue {
-			 value,
-			 extrinsics,
-		}, state);
+		h_value.push_unchecked(HistoriedValue {
+			value: OverlayedValue {
+				value,
+				extrinsics,
+			},
+			index: state,
+		});
 
 	}
 }
@@ -154,9 +160,9 @@ impl OverlayedChangeSet {
 		let history = self.history.as_ref();
 		let eager = || eager.as_ref().map(|t| t.as_slice());
 		// retain does change values
-		self.top.retain(|_, h_value| h_value.gc(history, eager()).is_some());
+		self.top.retain(|_, h_value| h_value.get_mut_pruning(history, eager()).is_some());
 		self.children.retain(|_, m| {
-			m.retain(|_, h_value| h_value.gc(history, eager()).is_some());
+			m.retain(|_, h_value| h_value.get_mut_pruning(history, eager()).is_some());
 			m.len() > 0
 		});
 	}
@@ -545,7 +551,7 @@ impl OverlayedChanges {
 	pub fn top_count_keyvalue_pair(&self) -> usize {
 		let mut result = 0;
 		for (_, v) in self.changes.top.iter() {
-			result += v.internal_item_counts()
+			result += v.len()
 		}
 		result
 	}

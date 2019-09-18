@@ -186,7 +186,7 @@ mod test {
 	use crate::changes_trie::Configuration;
 	use crate::changes_trie::storage::InMemoryStorage;
 	use crate::overlayed_changes::{OverlayedValue, OverlayedChangeSet};
-	use historied_data::linear::{History, States};
+	use historied_data::linear::{History, States, HistoriedValue};
 	use historied_data::State as TransactionState;
 	use super::*;
 
@@ -205,6 +205,8 @@ mod test {
 			(vec![104], vec![255]),
 			(vec![105], vec![255]),
 		].into_iter().collect::<::std::collections::HashMap<_, _>>().into();
+		let child_trie_key1 = b"1".to_vec();
+		let child_trie_key2 = b"2".to_vec();
 		let storage = InMemoryStorage::with_inputs(vec![
 			(zero + 1, vec![
 				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 1, key: vec![100] }, vec![1, 3]),
@@ -250,7 +252,7 @@ mod test {
 							value: Some(3u32.encode()),
 							extrinsics: None,
 						}, 0),
-					])),
+					].into_iter().map(|(value, index)| HistoriedValue { value, index }))),
 					(vec![100], History::from_iter(vec![
 						(OverlayedValue {
 							value: Some(vec![202]),
@@ -260,19 +262,19 @@ mod test {
 							value: Some(vec![200]),
 							extrinsics: Some(vec![3, 0, 2].into_iter().collect())
 						}, 1),
-					])),
+					].into_iter().map(|(value, index)| HistoriedValue { value, index }))),
 					(vec![101], History::from_iter(vec![
 						(OverlayedValue {
 						value: Some(vec![203]),
 						extrinsics: Some(vec![1].into_iter().collect())
 						}, 0),
-					])),
+					].into_iter().map(|(value, index)| HistoriedValue { value, index }))),
 					(vec![103], History::from_iter(vec![
 						(OverlayedValue {
 						value: None,
 						extrinsics: Some(vec![0, 1].into_iter().collect())
 						}, 1),
-					])),
+					].into_iter().map(|(value, index)| HistoriedValue { value, index }))),
 				].into_iter().collect(),
 			},
 			operation_from_last_gc: 0,
@@ -429,7 +431,7 @@ mod test {
 					value: None,
 					extrinsics: Some(vec![1].into_iter().collect()),
 				}, 1),
-			]));
+			].into_iter().map(|(value, index)| HistoriedValue { value, index })));
 
 			let parent = AnchorBlockId { hash: Default::default(), number: zero + 3 };
 			let changes_trie_nodes = prepare_input(

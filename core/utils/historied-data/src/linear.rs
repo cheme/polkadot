@@ -154,7 +154,7 @@ impl<V, I: Copy + Eq + TryFrom<usize> + TryInto<usize>> History<V, I> {
 	/// dropped value.
 	pub fn set(&mut self, history: &[TransactionState], value: V) {
 		if let Some(v) = self.get_mut(history) {
-			if v.index.try_into().map(|i| i == history.len()).unwrap_or(false) {
+			if v.index.try_into().map(|i| i == history.len() - 1).unwrap_or(false) {
 				*v.value = value;
 				return;
 			}
