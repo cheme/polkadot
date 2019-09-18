@@ -643,7 +643,7 @@ mod test {
 		assert_eq!(*states.state_ref(6).history, ref_6);
 
 		states.valid_treshold = 3;
-		let mut ref_6 = ref_6.clone();
+		let mut ref_6 = ref_6;
 		ref_6.pop();
 		assert_eq!(*states.state_ref(6).history, ref_6);
 	}
