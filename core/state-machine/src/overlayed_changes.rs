@@ -22,9 +22,10 @@ use std::collections::{HashMap, BTreeSet};
 use codec::Decode;
 use crate::changes_trie::{NO_EXTRINSIC_INDEX, Configuration as ChangesTrieConfig};
 use primitives::storage::well_known_keys::EXTRINSIC_INDEX;
-use historied_data::linear::{States, History, HistoriedValue};
+use historied_data::linear::{States, HistoryInnerMut as History, HistoriedValue};
 use historied_data::State as TransactionState;
 use historied_data::DEFAULT_GC_CONF;
+use std::cell::Ref;
 
 /// The overlayed changes to state to be queried on top of the backend.
 ///
@@ -201,7 +202,7 @@ impl OverlayedChangeSet {
 	pub fn iter_overlay(
 		&self,
 		storage_key: Option<&[u8]>,
-	) -> impl Iterator<Item = (&[u8], &OverlayedValue)> {
+	) -> impl Iterator<Item = (&[u8], Ref<OverlayedValue>)> {
 		let option_map = if let Some(storage_key) = storage_key.as_ref() {
 			self.children.get(*storage_key)
 		} else {
@@ -220,20 +221,24 @@ impl OverlayedChangeSet {
 		&self,
 		storage_key: Option<&[u8]>,
 	) -> impl Iterator<Item = (&[u8], Option<&[u8]>)> {
-		self.iter_overlay(storage_key)
-			.map(|(k, v)| (k, v.value.as_ref().map(|v| v.as_slice())))
+		unimplemented!("TODO this is impacting, but we need to run it without switching to owned");
+/*		self.iter_overlay(storage_key)
+			.map(|(k, v)| (k, v.value.as_ref().map(|v| v.as_slice())))*/
+			vec![].into_iter()
 	}
 
 	/// Iterator over current state of all children overlays, values only.
 	pub fn children_iter(
 		&self,
 	) -> impl Iterator<Item=(&[u8], impl Iterator<Item = (&[u8], Option<&[u8]>)>)> {
-		self.children.iter()
+		unimplemented!("TODO this is impacting, but we need to run it without switching to owned");
+/*		self.children.iter()
 			.map(move |(keyspace, child)| (keyspace.as_slice(), child.iter()
 				.filter_map(move |(k, v)|
 					v.get(self.history.as_ref())
 						.map(|v| (k.as_slice(), v.value.as_ref().map(|v| v.as_slice()))))
-			))
+			))*/
+			vec![(&[][..], None.into_iter())].into_iter()
 	}
 
 	/// Iterator over current state of all children overlays, values only.
@@ -253,11 +258,13 @@ impl OverlayedChangeSet {
 	pub fn children_iter_overlay(
 		&self,
 	) -> impl Iterator<Item=(&[u8], impl Iterator<Item = (&[u8], &OverlayedValue)>)> {
-		self.children.iter()
+		unimplemented!("TODO this is impacting, but we need to run it without switching to owned");
+		/*self.children.iter()
 			.map(move |(keyspace, child)| (keyspace.as_slice(), child.iter()
 				.filter_map(move |(k, v)|
 					v.get(self.history.as_ref()).map(|v| (k.as_slice(), v)))
-			))
+			))*/
+			vec![(&[][..], None.into_iter())].into_iter()
 	}
 
 	/// Test only method to access current prospective changes.

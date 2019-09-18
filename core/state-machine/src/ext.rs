@@ -501,7 +501,7 @@ mod tests {
 	use crate::changes_trie::{Configuration as ChangesTrieConfiguration,
 		InMemoryStorage as InMemoryChangesTrieStorage};
 	use crate::overlayed_changes::{OverlayedValue, OverlayedChangeSet};
-	use historied_data::linear::{History, HistoriedValue};
+	use historied_data::linear::{HistoryInnerMut as History, HistoriedValue};
 	use super::*;
 
 	type TestBackend = InMemory<Blake2Hasher>;

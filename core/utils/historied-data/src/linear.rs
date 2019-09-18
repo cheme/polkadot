@@ -25,6 +25,8 @@
 use crate::State as TransactionState;
 use rstd::vec::Vec;
 use rstd::vec;
+use rstd::marker::PhantomData;
+use rstd::cell::{RefCell, Ref};
 
 /// An entry at a given history height.
 #[derive(Debug, Clone)]
@@ -75,17 +77,28 @@ const ALLOCATED_HISTORY: usize = 2;
 /// Values are always paired with a state history index.
 #[derive(Debug, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct History<V>(MemoryOnly<V>);
+pub struct History<V, B>(B, PhantomData<V>);
 
-impl<V> Default for History<V> {
+/// type alias where history does not use inner mutability,
+/// this is preffered when memory is not scarce.
+pub type HistoryNoInnerMut<V> = History<V, MemoryOnly<V>>;
+
+/// type alias where history does not use inner mutability,
+/// this is preffered when memory is scarce, but only for
+/// high volumetry (per item storage increase by one byte
+/// each and it only release more memory if there is frequent
+/// key access).
+pub type HistoryInnerMut<V> = History<V, RefCell<MemoryOnly<V>>>;
+
+impl<V, B: Default> Default for History<V, B> {
 	fn default() -> Self {
-		History(Default::default())
+		History(Default::default(), PhantomData)
 	}
 }
 
 // Following implementation are here to isolate
 // buffer specific functions.
-impl<V> History<V> {
+impl<V> History<V, MemoryOnly<V>> {
 
 	fn get_state(&self, index: usize) -> HistoriedValue<&V> {
 		self.0[index].as_ref()
@@ -94,7 +107,7 @@ impl<V> History<V> {
 	#[cfg(any(test, feature = "test"))]
 	/// Create an history from an existing history.
 	pub fn from_iter(input: impl IntoIterator<Item = HistoriedValue<V>>) -> Self {
-		let mut history = History::default();
+		let mut history = Self::default();
 		for v in input {
 			history.push_unchecked(v);
 		}
@@ -136,6 +149,77 @@ impl<V> History<V> {
 		&mut self.0[index].value
 	}
 
+	/// if possible apply inner mutability and drop last value.
+	fn inner_mut_drop_last(&self) {
+		()
+	}
+
+}
+
+impl<V> History<V, RefCell<MemoryOnly<V>>> {
+
+	fn get_state(&self, index: usize) -> HistoriedValue<Ref<V>> {
+		let index = self.0.borrow()[index].index;
+		let value: Ref<V> = Ref::map(
+			self.0.borrow(),
+			|inner| &inner[index].value,
+		);
+		HistoriedValue { index, value }
+	}
+
+	#[cfg(any(test, feature = "test"))]
+	/// Create an history from an existing history.
+	pub fn from_iter(input: impl IntoIterator<Item = HistoriedValue<V>>) -> Self {
+		let mut history = Self::default();
+		for v in input {
+			history.push_unchecked(v);
+		}
+		history
+	}
+
+	#[cfg(any(test, feature = "test"))]
+	pub fn len(&self) -> usize {
+		self.0.borrow().len()
+	}
+
+	#[cfg(not(any(test, feature = "test")))]
+	fn len(&self) -> usize {
+		self.0.borrow().len()
+	}
+
+	fn truncate(&mut self, index: usize) {
+		self.0.get_mut().truncate(index)
+	}
+
+	fn pop(&mut self) -> Option<HistoriedValue<V>> {
+		self.0.get_mut().pop()
+	}
+
+	fn remove(&mut self, index: usize) {
+		let _ = self.0.get_mut().remove(index);
+	}
+
+	/// Append without checking if a value already exist.
+	/// If a value already exists, the history will be broken.
+	/// This method shall only be call after a `get_mut` where
+	/// the returned index indicate that a `set` will result
+	/// in appending a value.
+	pub fn push_unchecked(&mut self, value: HistoriedValue<V>) {
+		self.0.get_mut().push(value)
+	}
+
+	fn mut_ref(&mut self, index: usize) -> &mut V {
+		&mut self.0.get_mut()[index].value
+	}
+
+	/// if possible apply inner mutability and drop last value.
+	fn inner_mut_drop_last(&self) {
+
+		match self.0.try_borrow_mut() {
+			Ok(mut ref_mut) => { let _ = ref_mut.pop(); },
+			Err(_) => (), // silently skip
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -258,12 +342,12 @@ impl States {
 
 }
 
-impl<V> History<V> {
+macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty ) => {
 
 	/// Set a value, it uses a state history as parameter.
 	/// This method uses `get_mut` and do remove pending
 	/// dropped value.
-	pub fn set(&mut self, history: &[TransactionState], value: V) {
+	pub fn set(&mut self, history: &[TransactionState], value: $owned) {
 		if let Some(v) = self.get_mut(history) {
 			if v.index == history.len() - 1 {
 				*v.value = value;
@@ -279,7 +363,7 @@ impl<V> History<V> {
 	/// Access to latest pending value (non dropped state in history).
 	/// When possible please prefer `get_mut` as it can free
 	/// some memory.
-	pub fn get(&self, history: &[TransactionState]) -> Option<&V> {
+	pub fn get(&self, history: &[TransactionState]) -> Option<$read> {
 		// index is never 0,
 		let mut index = self.len();
 		if index == 0 {
@@ -290,7 +374,7 @@ impl<V> History<V> {
 			index -= 1;
 			let HistoriedValue { value, index: history_index } = self.get_state(index);
 			match history[history_index] {
-				TransactionState::Dropped => (),
+				TransactionState::Dropped => self.inner_mut_drop_last(),
 				TransactionState::Pending
 				| TransactionState::TxPending
 				| TransactionState::Prospective
@@ -302,7 +386,7 @@ impl<V> History<V> {
 	}
 
 	/// Get latest value, consuming the historied data.
-	pub fn into_pending(mut self, history: &[TransactionState]) -> Option<V> {
+	pub fn into_pending(mut self, history: &[TransactionState]) -> Option<$owned> {
 		let mut index = self.len();
 		if index == 0 {
 			return None;
@@ -325,9 +409,8 @@ impl<V> History<V> {
 		None
 	}
 
-
 	#[cfg(any(test, feature = "test"))]
-	pub fn get_prospective(&self, history: &[TransactionState]) -> Option<&V> {
+	pub fn get_prospective(&self, history: &[TransactionState]) -> Option<$read> {
 		// index is never 0,
 		let mut index = self.len();
 		if index == 0 {
@@ -350,7 +433,7 @@ impl<V> History<V> {
 	}
 
 	#[cfg(any(test, feature = "test"))]
-	pub fn get_committed(&self, history: &[TransactionState]) -> Option<&V> {
+	pub fn get_committed(&self, history: &[TransactionState]) -> Option<$read> {
 		// index is never 0,
 		let mut index = self.len();
 		if index == 0 {
@@ -371,7 +454,7 @@ impl<V> History<V> {
 		None
 	}
 
-	pub fn into_committed(mut self, history: &[TransactionState]) -> Option<V> {
+	pub fn into_committed(mut self, history: &[TransactionState]) -> Option<$owned> {
 		// index is never 0,
 		let mut index = self.len();
 		if index == 0 {
@@ -401,7 +484,7 @@ impl<V> History<V> {
 	/// Access to latest pending value (non dropped state in history).
 	///
 	/// This method removes latest dropped values up to the latest valid value.
-	pub fn get_mut(&mut self, history: &[TransactionState]) -> Option<HistoriedValue<&mut V>> {
+	pub fn get_mut(&mut self, history: &[TransactionState]) -> Option<HistoriedValue<$mut>> {
 
 		let mut index = self.len();
 		if index == 0 {
@@ -441,7 +524,7 @@ impl<V> History<V> {
 		&mut self,
 		history: &[TransactionState],
 		transaction_index: Option<&[usize]>,
-	) -> Option<HistoriedValue<&mut V>> {
+	) -> Option<HistoriedValue<$mut>> {
 		if let Some(mut transaction_index) = transaction_index {
 			let mut index = self.len();
 			if index == 0 {
@@ -511,5 +594,12 @@ impl<V> History<V> {
 			self.get_mut(history)
 		}
 	}
+});
 
+impl<V> History<V, MemoryOnly<V>> {
+	history_impl!(&V, V, &mut V);
+}
+
+impl<V> History<V, RefCell<MemoryOnly<V>>> {
+	history_impl!(Ref<V>, V, &mut V);
 }

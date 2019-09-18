@@ -928,7 +928,7 @@ fn test_sr25519_crypto() -> (sr25519::AppSignature, sr25519::AppPublic) {
 fn test_historied_data() -> u64 {
 
 	let mut states = historied_data::linear::States::default();
-	let mut value = historied_data::linear::History::default();
+	let mut value = historied_data::linear::HistoryInnerMut::default();
 	if value.get(states.as_ref()) != None {
 		// value greater than 100 are error codes.
 		return 101;
