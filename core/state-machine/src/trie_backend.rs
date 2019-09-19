@@ -224,7 +224,11 @@ pub mod tests {
 	use trie::{TrieMut, PrefixedMemoryDB, trie_types::TrieDBMut};
 	use super::*;
 
-	fn test_db() -> (PrefixedMemoryDB<Blake2Hasher>, H256) {
+	// TODO this need an actual in momery with possibly content
+	// as the test uses a prefixed memory db.
+	type OffstateBackend = crate::offstate_backend::TODO;
+
+	fn test_db() -> (PrefixedMemoryDB<Blake2Hasher>, H256, OffstateBackend) {
 		let mut root = H256::default();
 		let mut mdb = PrefixedMemoryDB::<Blake2Hasher>::default();
 		{
@@ -246,12 +250,17 @@ pub mod tests {
 				trie.insert(&[i], &[i]).unwrap();
 			}
 		}
-		(mdb, root)
+		// empty history.
+		let offstate = crate::offstate_backend::TODO(Default::default());
+		// TODO EMCH add a block in offstate or use an actual implementation of
+		// offstate that do not use history (a test implementation most likely)
+		// TODO EMCH feed offstate with keyspace for roots.
+		(mdb, root, offstate)
 	}
 
-	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher> {
-		let (mdb, root) = test_db();
-		TrieBackend::new(mdb, root)
+	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher, OffstateBackend> {
+		let (mdb, root, offstate) = test_db();
+		TrieBackend::new(mdb, root, offstate)
 	}
 
 	#[test]
@@ -271,9 +280,10 @@ pub mod tests {
 
 	#[test]
 	fn pairs_are_empty_on_empty_storage() {
-		assert!(TrieBackend::<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher>::new(
+		assert!(TrieBackend::<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher, OffstateBackend>::new(
 			PrefixedMemoryDB::default(),
 			Default::default(),
+			crate::offstate_backend::TODO(Default::default()),
 		).pairs().is_empty());
 	}
 

@@ -257,9 +257,13 @@ mod tests {
 	use super::*;
 	use primitives::{Blake2Hasher, child_storage_key::ChildStorageKey};
 
+	// TODO this need an actual in momery with possibly content
+	// as the test uses a prefixed memory db.
+	type OffstateBackend = TODO;
+
 	fn test_proving<'a>(
-		trie_backend: &'a TrieBackend<PrefixedMemoryDB<Blake2Hasher>,Blake2Hasher>,
-	) -> ProvingBackend<'a, PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher> {
+		trie_backend: &'a TrieBackend<PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher, OffstateBackend>,
+	) -> ProvingBackend<'a, PrefixedMemoryDB<Blake2Hasher>, Blake2Hasher, OffstateBackend> {
 		ProvingBackend::new(trie_backend)
 	}
 
