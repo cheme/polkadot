@@ -17,8 +17,20 @@
 //! Backend for storing data without a state.
 
 use primitives::offstate::{BranchRanges, LinearStatesRef, StatesBranchRef};
+use std::sync::Arc;
+use std::ops::Deref;
 
 pub trait OffstateBackendStorage {
+/*	/// state type for querying data
+	/// (similar to hash for a trie_backend).
+	trait ChanState;*/
+
+	/// Retrieve a value from storage under given key and prefix.
+	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>>;
+
+}
+
+pub trait OffstateStorage {
 /*	/// state type for querying data
 	/// (similar to hash for a trie_backend).
 	trait ChanState;*/
@@ -34,17 +46,35 @@ pub trait OffstateBackendStorage {
 impl OffstateBackendStorage for TODO {
 	//trait ChainState = BranchRanges;
 
-	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
-		unimplemented!()
-	}
-
 	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
 		unimplemented!()
 	}
 
 }
 
+// This implementation is used by normal storage trie clients.
+impl OffstateBackendStorage for Arc<dyn OffstateStorage> {
+
+	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+		OffstateStorage::get(self.deref(), prefix, key)
+	}
+}
+
+
+impl OffstateStorage for TODO {
+	//trait ChainState = BranchRanges;
+
+	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
+		unimplemented!()
+	}
+
+	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+		<Self as OffstateBackendStorage>::get(&self, prefix, key)
+	}
+
+}
+
 // TODO EMCH implement, generic over a keyvalue db using BranchRanges so it is same impl for inmemory or
-// actual ext.
+// actual ext -> Memory db and inmemory
 pub struct TODO(pub BranchRanges);
 

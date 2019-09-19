@@ -423,7 +423,9 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 		}
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<
+		&TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, H>
+	> {
 		match self {
 			GenesisOrUnavailableState::Genesis(ref mut state) => state.as_trie_backend(),
 			GenesisOrUnavailableState::Unavailable => None,

@@ -34,6 +34,7 @@ use sr_primitives::traits::{Header as HeaderT, SimpleArithmetic, Zero, One};
 use state_machine::backend::InMemory as InMemoryState;
 use state_machine::{MemoryDB, TrieBackend, Backend as StateBackend,
 	prove_read_on_trie_backend, read_proof_check, read_proof_check_on_proving_backend};
+use state_machine::offstate_backend::{OffstateBackendStorage, TODO};
 
 use crate::error::{Error as ClientError, Result as ClientResult};
 
@@ -138,7 +139,7 @@ pub fn check_proof_on_proving_backend<Header, Hasher>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	proving_backend: &TrieBackend<MemoryDB<Hasher>, Hasher>,
+	proving_backend: &TrieBackend<MemoryDB<Hasher>, TODO, Hasher>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,

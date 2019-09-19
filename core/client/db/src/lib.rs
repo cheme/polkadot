@@ -60,6 +60,7 @@ use executor::RuntimeInfo;
 use state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, ChangesTrieBuildCache,
 	backend::Backend as StateBackend,
+	TODO,
 };
 use crate::utils::{Meta, db_err, meta_keys, read_db, block_id_to_lookup_key, read_meta};
 use client::leaves::{LeafSet, FinalizationDisplaced};
@@ -81,7 +82,11 @@ const MIN_BLOCKS_TO_KEEP_CHANGES_TRIES_FOR: u32 = 32768;
 const DEFAULT_CHILD_RATIO: (usize, usize) = (1, 10);
 
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
-pub type DbState = state_machine::TrieBackend<Arc<dyn state_machine::Storage<Blake2Hasher>>, Blake2Hasher>;
+pub type DbState = state_machine::TrieBackend<
+	Arc<dyn state_machine::Storage<Blake2Hasher>>,
+	Arc<dyn state_machine::OffstateStorage>,
+	Blake2Hasher
+>;
 
 /// A reference tracking state.
 ///
@@ -115,7 +120,7 @@ impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
 	type Error =  <DbState as StateBackend<Blake2Hasher>>::Error;
 	type Transaction = <DbState as StateBackend<Blake2Hasher>>::Transaction;
 	type TrieBackendStorage = <DbState as StateBackend<Blake2Hasher>>::TrieBackendStorage;
-	type OffstateBackendStorage = state_machine::offstate_backend::TODO;
+	type OffstateBackendStorage = <DbState as StateBackend<Blake2Hasher>>::OffstateBackendStorage;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.state.storage(key)
@@ -179,7 +184,9 @@ impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
 		self.state.child_keys(child_key, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&state_machine::TrieBackend<Self::TrieBackendStorage, Blake2Hasher>> {
+	fn as_trie_backend(&mut self) -> Option<
+		&state_machine::TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, Blake2Hasher>
+	> {
 		self.state.as_trie_backend()
 	}
 }
@@ -1492,7 +1499,9 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 			BlockId::Hash(h) if h == Default::default() => {
 				let genesis_storage = DbGenesisStorage::new();
 				let root = genesis_storage.0.clone();
-				let db_state = DbState::new(Arc::new(genesis_storage), root);
+				// TODO EMCH see genesis impl: that is empty storage
+				let genesis_offstate = TODO(Default::default());
+				let db_state = DbState::new(Arc::new(genesis_storage), root, Arc::new(genesis_offstate));
 				let state = RefTrackingState::new(db_state, self.storage.clone(), None);
 				return Ok(CachingState::new(state, self.shared_cache.clone(), None));
 			},
@@ -1504,7 +1513,8 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 				let hash = hdr.hash();
 				if let Ok(()) = self.storage.state_db.pin(&hash) {
 					let root = H256::from_slice(hdr.state_root().as_ref());
-					let db_state = DbState::new(self.storage.clone(), root);
+					let range = unimplemented!("TODO EMCH right input point get range from leaf");
+					let db_state = DbState::new(self.storage.clone(), root, Arc::new(TODO(range)));
 					let state = RefTrackingState::new(db_state, self.storage.clone(), Some(hash.clone()));
 					Ok(CachingState::new(state, self.shared_cache.clone(), Some(hash)))
 				} else {

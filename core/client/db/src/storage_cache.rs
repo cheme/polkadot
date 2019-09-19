@@ -464,7 +464,7 @@ impl<H: Hasher, S: StateBackend<H>, B: BlockT> StateBackend<H> for CachingState<
 	type Error = S::Error;
 	type Transaction = S::Transaction;
 	type TrieBackendStorage = S::TrieBackendStorage;
-	type OffstateBackendStorage = state_machine::offstate_backend::TODO;
+	type OffstateBackendStorage = S::OffstateBackendStorage;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		let local_cache = self.cache.local_cache.upgradable_read();
@@ -577,7 +577,9 @@ impl<H: Hasher, S: StateBackend<H>, B: BlockT> StateBackend<H> for CachingState<
 		self.state.child_keys(child_key, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<
+		&TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, H>
+	> {
 		self.state.as_trie_backend()
 	}
 }

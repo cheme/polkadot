@@ -22,17 +22,21 @@ use trie::{Trie, delta_trie_root, default_child_trie_root, child_delta_trie_root
 use trie::trie_types::{TrieDB, TrieError, Layout};
 use crate::trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral};
 use crate::Backend;
+use crate::offstate_backend::OffstateBackendStorage;
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
-pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
+/// TODO EMCH with offstaet in backend this should be renamed eg StateBackend.
+pub struct TrieBackend<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> {
 	essence: TrieBackendEssence<S, H>,
+	offstate_storage: O,
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> {
+impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> TrieBackend<S, O, H> {
 	/// Create new trie-based backend.
-	pub fn new(storage: S, root: H::Out) -> Self {
+	pub fn new(storage: S, root: H::Out, offstate_storage: O) -> Self {
 		TrieBackend {
 			essence: TrieBackendEssence::new(storage, root),
+			offstate_storage,
 		}
 	}
 
@@ -55,22 +59,34 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> {
 	pub fn into_storage(self) -> S {
 		self.essence.into_storage()
 	}
+
+	// TODO EMCH PROTO: remove before pr.
+	pub fn child_keyspace(&self, key: &[u8]) -> Option<Vec<u8>> {
+		const PREFIX_KEYSPACE: &'static[u8] = b"offstate_keyspace";
+		self.offstate_storage.get(PREFIX_KEYSPACE, key)
+	}
+
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
+impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> Backend<H> for TrieBackend<S, O, H> where
 	H::Out: Ord,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
 	// TODO EMCH this does not make sens : split as a OffstateBackend from trait.
-	type OffstateBackendStorage = crate::offstate_backend::TODO;
+	type OffstateBackendStorage = O;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.essence.storage(key)
 	}
 
 	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+
+		// TODO EMCH PROTO: remove before pr.
+		let keyspace = self.child_keyspace(storage_key);
+		// Then change essence functions to use keyspace as input.
+
 		self.essence.child_storage(storage_key, key)
 	}
 
@@ -193,7 +209,9 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		(root, is_default, write_overlay)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn as_trie_backend(&mut self) -> Option<
+		&TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, H>
+	> {
 		Some(self)
 	}
 }

@@ -28,6 +28,7 @@ pub use trie::trie_types::{Layout, TrieError};
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::{Error, ExecutionError, Backend};
+use crate::offstate_backend::{OffstateBackendStorage, TODO};
 
 /// Patricia trie-based backend essence which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
@@ -103,14 +104,22 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
-pub struct ProvingBackend<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
-	backend: &'a TrieBackend<S, H>,
+pub struct ProvingBackend<'a,
+	S: 'a + TrieBackendStorage<H>,
+	O: 'a + OffstateBackendStorage,
+	H: 'a + Hasher
+> {
+	backend: &'a TrieBackend<S, O, H>,
 	proof_recorder: Rc<RefCell<Recorder<H::Out>>>,
 }
 
-impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H> {
+impl<'a,
+	S: 'a + TrieBackendStorage<H>,
+	O: 'a + OffstateBackendStorage,
+	H: 'a + Hasher
+> ProvingBackend<'a, S, O, H> {
 	/// Create new proving backend.
-	pub fn new(backend: &'a TrieBackend<S, H>) -> Self {
+	pub fn new(backend: &'a TrieBackend<S, O, H>) -> Self {
 		ProvingBackend {
 			backend,
 			proof_recorder: Rc::new(RefCell::new(Recorder::new())),
@@ -119,7 +128,7 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 
 	/// Create new proving backend with the given recorder.
 	pub fn new_with_recorder(
-		backend: &'a TrieBackend<S, H>,
+		backend: &'a TrieBackend<S, O, H>,
 		proof_recorder: Rc<RefCell<Recorder<H::Out>>>,
 	) -> Self {
 		ProvingBackend {
@@ -139,16 +148,17 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 	}
 }
 
-impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
+impl<'a, S, O, H> Backend<H> for ProvingBackend<'a, S, O, H>
 	where
 		S: 'a + TrieBackendStorage<H>,
+		O: 'a + OffstateBackendStorage,
 		H: 'a + Hasher,
 		H::Out: Ord,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = PrefixedMemoryDB<H>;
-	type OffstateBackendStorage = crate::offstate_backend::TODO;
+	type OffstateBackendStorage = O;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		ProvingBackendEssence {
@@ -213,14 +223,14 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 pub fn create_proof_check_backend<H>(
 	root: H::Out,
 	proof: Vec<Vec<u8>>
-) -> Result<TrieBackend<MemoryDB<H>, H>, Box<dyn Error>>
+) -> Result<TrieBackend<MemoryDB<H>, TODO, H>, Box<dyn Error>>
 where
 	H: Hasher,
 {
 	let db = create_proof_check_backend_storage(proof);
 
 	if db.contains(&root, EMPTY_PREFIX) {
-		Ok(TrieBackend::new(db, root))
+		Ok(TrieBackend::new(db, root, TODO(Default::default())))
 	} else {
 		Err(Box::new(ExecutionError::InvalidProof))
 	}
