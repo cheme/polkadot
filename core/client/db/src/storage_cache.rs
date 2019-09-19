@@ -578,7 +578,7 @@ impl<H: Hasher, S: StateBackend<H>, B: BlockT> StateBackend<H> for CachingState<
 	}
 
 	fn as_trie_backend(&mut self) -> Option<
-		&TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, H>
+		&TrieBackend<Self::TrieBackendStorage, H, Self::OffstateBackendStorage>
 	> {
 		self.state.as_trie_backend()
 	}

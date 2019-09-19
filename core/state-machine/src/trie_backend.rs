@@ -26,12 +26,12 @@ use crate::offstate_backend::OffstateBackendStorage;
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 /// TODO EMCH with offstaet in backend this should be renamed eg StateBackend.
-pub struct TrieBackend<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> {
+pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher, O: OffstateBackendStorage> {
 	essence: TrieBackendEssence<S, H>,
 	offstate_storage: O,
 }
 
-impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> TrieBackend<S, O, H> {
+impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> TrieBackend<S, H, O> {
 	/// Create new trie-based backend.
 	pub fn new(storage: S, root: H::Out, offstate_storage: O) -> Self {
 		TrieBackend {
@@ -68,7 +68,7 @@ impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> TrieBackend
 
 }
 
-impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> Backend<H> for TrieBackend<S, O, H> where
+impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> Backend<H> for TrieBackend<S, H, O> where
 	H::Out: Ord,
 {
 	type Error = String;
@@ -210,7 +210,7 @@ impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> Backend<H> 
 	}
 
 	fn as_trie_backend(&mut self) -> Option<
-		&TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, H>
+		&TrieBackend<Self::TrieBackendStorage, H, Self::OffstateBackendStorage>
 	> {
 		Some(self)
 	}

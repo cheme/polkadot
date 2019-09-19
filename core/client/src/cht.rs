@@ -139,7 +139,7 @@ pub fn check_proof_on_proving_backend<Header, Hasher>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	proving_backend: &TrieBackend<MemoryDB<Hasher>, TODO, Hasher>,
+	proving_backend: &TrieBackend<MemoryDB<Hasher>, Hasher, TODO>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,

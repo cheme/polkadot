@@ -106,20 +106,20 @@ impl<'a, S, H> ProvingBackendEssence<'a, S, H>
 /// These can be sent to remote node and used as a proof of execution.
 pub struct ProvingBackend<'a,
 	S: 'a + TrieBackendStorage<H>,
+	H: 'a + Hasher,
 	O: 'a + OffstateBackendStorage,
-	H: 'a + Hasher
 > {
-	backend: &'a TrieBackend<S, O, H>,
+	backend: &'a TrieBackend<S, H, O>,
 	proof_recorder: Rc<RefCell<Recorder<H::Out>>>,
 }
 
 impl<'a,
 	S: 'a + TrieBackendStorage<H>,
+	H: 'a + Hasher,
 	O: 'a + OffstateBackendStorage,
-	H: 'a + Hasher
-> ProvingBackend<'a, S, O, H> {
+> ProvingBackend<'a, S, H, O> {
 	/// Create new proving backend.
-	pub fn new(backend: &'a TrieBackend<S, O, H>) -> Self {
+	pub fn new(backend: &'a TrieBackend<S, H, O>) -> Self {
 		ProvingBackend {
 			backend,
 			proof_recorder: Rc::new(RefCell::new(Recorder::new())),
@@ -128,7 +128,7 @@ impl<'a,
 
 	/// Create new proving backend with the given recorder.
 	pub fn new_with_recorder(
-		backend: &'a TrieBackend<S, O, H>,
+		backend: &'a TrieBackend<S, H, O>,
 		proof_recorder: Rc<RefCell<Recorder<H::Out>>>,
 	) -> Self {
 		ProvingBackend {
@@ -148,12 +148,12 @@ impl<'a,
 	}
 }
 
-impl<'a, S, O, H> Backend<H> for ProvingBackend<'a, S, O, H>
+impl<'a, S, H, O> Backend<H> for ProvingBackend<'a, S, H, O>
 	where
 		S: 'a + TrieBackendStorage<H>,
-		O: 'a + OffstateBackendStorage,
 		H: 'a + Hasher,
 		H::Out: Ord,
+		O: 'a + OffstateBackendStorage,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
@@ -223,7 +223,7 @@ impl<'a, S, O, H> Backend<H> for ProvingBackend<'a, S, O, H>
 pub fn create_proof_check_backend<H>(
 	root: H::Out,
 	proof: Vec<Vec<u8>>
-) -> Result<TrieBackend<MemoryDB<H>, TODO, H>, Box<dyn Error>>
+) -> Result<TrieBackend<MemoryDB<H>, H, TODO>, Box<dyn Error>>
 where
 	H: Hasher,
 {

@@ -84,8 +84,8 @@ const DEFAULT_CHILD_RATIO: (usize, usize) = (1, 10);
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
 pub type DbState = state_machine::TrieBackend<
 	Arc<dyn state_machine::Storage<Blake2Hasher>>,
+	Blake2Hasher,
 	Arc<dyn state_machine::OffstateStorage>,
-	Blake2Hasher
 >;
 
 /// A reference tracking state.
@@ -185,7 +185,7 @@ impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
 	}
 
 	fn as_trie_backend(&mut self) -> Option<
-		&state_machine::TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, Blake2Hasher>
+		&state_machine::TrieBackend<Self::TrieBackendStorage, Blake2Hasher, Self::OffstateBackendStorage>
 	> {
 		self.state.as_trie_backend()
 	}

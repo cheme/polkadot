@@ -182,7 +182,7 @@ impl<Block, B, Local> CallExecutor<Block, Blake2Hasher> for
 		O: state_machine::OffstateBackendStorage,
 	>(
 		&self,
-		_state: &state_machine::TrieBackend<S, O, Blake2Hasher>,
+		_state: &state_machine::TrieBackend<S, Blake2Hasher, O>,
 		_changes: &mut OverlayedChanges,
 		_method: &str,
 		_call_data: &[u8]

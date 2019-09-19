@@ -124,7 +124,7 @@ pub trait Backend<H: Hasher> {
 
 	/// Try convert into trie backend.
 	fn as_trie_backend(&mut self) -> Option<
-		&TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, H>
+		&TrieBackend<Self::TrieBackendStorage, H, Self::OffstateBackendStorage>
 	> {
 		None
 	}
@@ -258,7 +258,7 @@ impl error::Error for Void {
 /// tests.
 pub struct InMemory<H: Hasher> {
 	inner: HashMap<Option<Vec<u8>>, HashMap<Vec<u8>, Vec<u8>>>,
-	trie: Option<TrieBackend<MemoryDB<H>, TODO, H>>,
+	trie: Option<TrieBackend<MemoryDB<H>, H, TODO>>,
 	_hasher: PhantomData<H>,
 }
 
@@ -469,7 +469,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 	}
 
 	fn as_trie_backend(&mut self)-> Option<
-		&TrieBackend<Self::TrieBackendStorage, Self::OffstateBackendStorage, H>
+		&TrieBackend<Self::TrieBackendStorage, H, Self::OffstateBackendStorage>
 	> {
 		let mut mdb = MemoryDB::default();
 		let mut root = None;

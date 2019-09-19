@@ -148,7 +148,7 @@ where
 		O: state_machine::OffstateBackendStorage,
 	>(
 		&self,
-		trie_state: &state_machine::TrieBackend<S, O, H>,
+		trie_state: &state_machine::TrieBackend<S, H, O>,
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
@@ -386,7 +386,7 @@ where
 		O: state_machine::OffstateBackendStorage,
 	>(
 		&self,
-		trie_state: &state_machine::TrieBackend<S, O, Blake2Hasher>,
+		trie_state: &state_machine::TrieBackend<S, Blake2Hasher, O>,
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
