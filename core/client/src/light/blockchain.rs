@@ -20,6 +20,7 @@
 use std::future::Future;
 use std::{sync::Arc, collections::HashMap};
 
+use primitives::offstate::BranchRanges;
 use sr_primitives::{Justification, generic::BlockId};
 use sr_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor, Zero};
 use consensus::well_known_cache_keys;
@@ -133,10 +134,11 @@ impl<S, Block> BlockchainHeaderBackend<Block> for Blockchain<S> where Block: Blo
 		self.storage.number(hash)
 	}
 
-	fn branch_index(&self, _hash: &Block::Hash) -> ClientResult<Option<u64>> {
+	fn branch_ranges(&self, hash: &Block::Hash) -> ClientResult<BranchRanges> {
 		// TODO EMCH this does not make sense for light client, it is technical info
-		// for a storage that does not exists for light client.
-		Ok(Some(0))
+		// for a storage that does not exists for light client. TODO consider puting in
+		// its own trait.
+		Ok(Default::default())
 	}
 
 	fn hash(&self, number: <<Block as BlockT>::Header as HeaderT>::Number) -> ClientResult<Option<Block::Hash>> {
@@ -276,8 +278,8 @@ pub mod tests {
 			}
 		}
 
-		fn branch_index(&self, _hash: &Hash) -> ClientResult<Option<u64>> {
-			Ok(Some(0))
+		fn branch_ranges(&self, hash: &Hash) -> ClientResult<BranchRanges> {
+			Ok(Default::default())
 		}
 
 		fn hash(&self, number: u64) -> ClientResult<Option<Hash>> {

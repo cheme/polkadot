@@ -72,6 +72,9 @@ pub struct LeafSet<H, N> {
 	// at this time only its last item seems read.
 	pending_added: Vec<LeafSetItem<H, N>>,
 	pending_removed: Vec<H>,
+	// TODO range set cache at this level see branch_range function define for leafset. 
+	// TODO EMCH put under rw lock and put BranchRange in it (put arc in branch range
+	// to lower mem consumption).
 	ranges: RangeSet,
 }
 
@@ -349,6 +352,14 @@ impl<H, N> LeafSet<H, N> where
 
 		removed
 	}
+
+	/// fetch branch ranges for hash. Missing block result in empty branch ranges,
+	/// which can still be usefull to access finalize default value.
+	pub fn branch_ranges(&self, hash: &H) -> Result<BranchRanges, error::Error> {
+		// note that cache uses a rwlock (we do not want to borrow write when no cache updates).
+		unimplemented!("TODO EMCH implement get caching in leaves and get from leaves no caching.")
+	}
+
 }
 
 /// Helper for undoing operations.

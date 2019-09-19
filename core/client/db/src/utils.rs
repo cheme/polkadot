@@ -205,6 +205,9 @@ pub fn block_id_to_lookup_key<Block>(
 }
 
 /// Read a stored branch index for a block hash.
+/// TODO EMCH audit need for a cache (is accessed directly for
+/// any block insertion).
+/// TODO &H ??
 pub fn read_branch_index<H: AsRef<[u8]> + Clone>(
 	db: &dyn KeyValueDB,
 	key_lookup_col: Option<u32>,

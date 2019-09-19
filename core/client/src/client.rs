@@ -29,6 +29,7 @@ use primitives::{
 	Blake2Hasher, H256, ChangesTrieConfiguration, convert_hash, NeverNativeValue, ExecutionContext,
 	NativeOrEncoded, storage::{StorageKey, StorageData, well_known_keys},
 	offchain::{NeverOffchainExt, self}, traits::CodeExecutor,
+	offstate::BranchRanges,
 };
 use substrate_telemetry::{telemetry, SUBSTRATE_INFO};
 use sr_primitives::{
@@ -1363,8 +1364,8 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for Client<B, E, Block, RA> wher
 		self.backend.blockchain().number(hash)
 	}
 
-	fn branch_index(&self, hash: &Block::Hash) -> error::Result<Option<u64>> {
-		self.backend.blockchain().branch_index(hash)
+	fn branch_ranges(&self, hash: &Block::Hash) -> error::Result<BranchRanges> {
+		self.backend.blockchain().branch_ranges(hash)
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> error::Result<Option<Block::Hash>> {
@@ -1395,8 +1396,8 @@ impl<B, E, Block, RA> ChainHeaderBackend<Block> for &Client<B, E, Block, RA> whe
 		(**self).number(hash)
 	}
 
-	fn branch_index(&self, hash: &Block::Hash) -> error::Result<Option<u64>> {
-		(**self).branch_index(hash)
+	fn branch_ranges(&self, hash: &Block::Hash) -> error::Result<BranchRanges> {
+		(**self).branch_ranges(hash)
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> error::Result<Option<Block::Hash>> {

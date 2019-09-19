@@ -22,6 +22,7 @@ use sr_primitives::traits::{Block as BlockT, Header as HeaderT, NumberFor};
 use sr_primitives::generic::BlockId;
 use sr_primitives::Justification;
 use consensus::well_known_cache_keys;
+use primitives::offstate::BranchRanges;
 
 use crate::error::{Error, Result};
 
@@ -44,7 +45,7 @@ pub trait HeaderBackend<Block: BlockT>: Send + Sync {
 	/// make sense : light already does not).
 	/// TODO see if it can get removed (probably need to switch to branch_range ref for externalities
 	/// in fact).
-	fn branch_index(&self, hash: &Block::Hash) -> Result<Option<u64>>;
+	fn branch_ranges(&self, hash: &Block::Hash) -> Result<BranchRanges>;
 	/// Get block hash by number. Returns `None` if the header is not in the chain.
 	fn hash(&self, number: NumberFor<Block>) -> Result<Option<Block::Hash>>;
 

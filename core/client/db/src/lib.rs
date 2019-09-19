@@ -49,6 +49,7 @@ use trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
 use parking_lot::{Mutex, RwLock};
 use primitives::{H256, Blake2Hasher, ChangesTrieConfiguration, convert_hash, traits::CodeExecutor};
 use primitives::storage::well_known_keys;
+use primitives::offstate::BranchRanges;
 use sr_primitives::{
 	generic::{BlockId, DigestItem}, Justification, StorageOverlay, ChildrenStorageOverlay,
 	BuildStorage,
@@ -321,6 +322,13 @@ impl<Block: BlockT> BlockchainDb<Block> {
 			meta.finalized_hash = hash;
 		}
 	}
+
+	fn branch_index(&self, hash: &Block::Hash) -> Result<Option<u64>, client::error::Error> {
+		// TODO EMCH not using key lookup, is that fine -> this more than need a cache, but
+		// it also need to be accessible from leaves (need crate refact)
+		Ok(utils::read_branch_index(&*self.db, columns::BRANCH_INDEX, hash)?)
+	}
+
 }
 
 impl<Block: BlockT> client::blockchain::HeaderBackend<Block> for BlockchainDb<Block> {
@@ -364,10 +372,11 @@ impl<Block: BlockT> client::blockchain::HeaderBackend<Block> for BlockchainDb<Bl
 		}
 	}
 
-	fn branch_index(&self, hash: &Block::Hash) -> Result<Option<u64>, client::error::Error> {
+	fn branch_ranges(&self, hash: &Block::Hash) -> Result<BranchRanges, client::error::Error> {
 		// TODO EMCH not using key lookup, is that fine -> this more than need a cache, but
-		// it also need to be accessible from leaves (need crate refact)
-		Ok(utils::read_branch_index(&*self.db, columns::BRANCH_INDEX, hash)?)
+		// it also need to be accessible from leaves (need crate refact) -> put friggin cache in
+		// leaves!!
+		self.leaves.write().branch_ranges(hash)
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> Result<Option<Block::Hash>, client::error::Error> {
@@ -1513,7 +1522,7 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 				let hash = hdr.hash();
 				if let Ok(()) = self.storage.state_db.pin(&hash) {
 					let root = H256::from_slice(hdr.state_root().as_ref());
-					let range = unimplemented!("TODO EMCH right input point get range from leaf");
+					let range = self.blockchain.branch_ranges(&hash)?;
 					let db_state = DbState::new(self.storage.clone(), root, Arc::new(TODO(range)));
 					let state = RefTrackingState::new(db_state, self.storage.clone(), Some(hash.clone()));
 					Ok(CachingState::new(state, self.shared_cache.clone(), Some(hash)))
@@ -2351,4 +2360,6 @@ mod tests {
 			backend.commit_operation(op).unwrap_err();
 		}
 	}
+
+	// TODO EMCH here test on offstate storage!!
 }

@@ -30,6 +30,7 @@ use client::error::{Error as ClientError, Result as ClientResult};
 use client::light::blockchain::Storage as LightBlockchainStorage;
 use codec::{Decode, Encode};
 use primitives::Blake2Hasher;
+use primitives::offstate::BranchRanges;
 use sr_primitives::generic::{DigestItem, BlockId};
 use sr_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, One, NumberFor};
 use consensus_common::well_known_cache_keys;
@@ -52,8 +53,6 @@ const HEADER_CHT_PREFIX: u8 = 0;
 /// Prefix for changes tries roots CHT.
 const CHANGES_TRIE_CHT_PREFIX: u8 = 1;
 
-/// light do not manage branch index, all index are 0.
-const NO_BRANCH_INDEX: u64 = 0;
 
 /// Light blockchain storage. Stores most recent headers + CHTs for older headers.
 /// Locks order: meta, cache.
@@ -192,9 +191,9 @@ impl<Block> BlockchainHeaderBackend<Block> for LightStorage<Block>
 		Ok(self.header(BlockId::Number(number))?.map(|header| header.hash().clone()))
 	}
 
-	fn branch_index(&self, _hash: &Block::Hash) -> ClientResult<Option<u64>> {
-		// no support for light.
-		Ok(Some(NO_BRANCH_INDEX))
+	fn branch_ranges(&self, _hash: &Block::Hash) -> ClientResult<BranchRanges> {
+		// light do not manage branch index, no range.
+		Ok(Default::default())
 	}
 
 }

@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use parking_lot::{RwLock, Mutex};
 use primitives::{ChangesTrieConfiguration, storage::well_known_keys};
+use primitives::offstate::BranchRanges;
 use sr_primitives::generic::{BlockId, DigestItem};
 use sr_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor};
 use sr_primitives::{Justification, StorageOverlay, ChildrenStorageOverlay};
@@ -39,7 +40,7 @@ struct PendingBlock<B: BlockT> {
 	block: StoredBlock<B>,
 	state: NewBlockState,
 }
-
+// TODO EMCH this index can be removed (read from leaves)
 #[derive(PartialEq, Eq, Clone)]
 enum StoredBlock<B: BlockT> {
 	Header(B::Header, Option<Justification>, u64),
@@ -166,7 +167,8 @@ impl<Block: BlockT> Blockchain<Block> {
 		}
 
 		{
-			let parent_branch_index = self.branch_index(header.parent_hash())?.unwrap_or(0);
+			let parent_branch_index = self.storage.read().blocks.get(&hash)
+				.map(|b| b.branch_index()).unwrap_or(0);
 			let mut storage = self.storage.write();
 			let (_, branch_index) = storage.leaves.import(
 				hash.clone(),
@@ -332,8 +334,8 @@ impl<Block: BlockT> HeaderBackend<Block> for Blockchain<Block> {
 		Ok(self.storage.read().blocks.get(&hash).map(|b| *b.header().number()))
 	}
 
-	fn branch_index(&self, hash: &Block::Hash) -> error::Result<Option<u64>> {
-		Ok(self.storage.read().blocks.get(hash).map(|b| b.branch_index()))
+	fn branch_ranges(&self, hash: &Block::Hash) -> error::Result<BranchRanges> {
+		self.storage.read().leaves.branch_ranges(hash)
 	}
 
 	fn hash(&self, number: <<Block as BlockT>::Header as HeaderT>::Number) -> error::Result<Option<Block::Hash>> {
