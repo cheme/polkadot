@@ -83,8 +83,8 @@ impl<S: TrieBackendStorage<H>, O: OffstateBackendStorage, H: Hasher> Backend<H> 
 
 	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 
-		// TODO EMCH PROTO: remove before pr.
-		let keyspace = self.child_keyspace(storage_key);
+		// TODO EMCH PROTO: remove before pr. TODO test it when implemented!!
+//		let keyspace = self.child_keyspace(storage_key);
 		// Then change essence functions to use keyspace as input.
 
 		self.essence.child_storage(storage_key, key)

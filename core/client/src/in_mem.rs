@@ -167,13 +167,14 @@ impl<Block: BlockT> Blockchain<Block> {
 		}
 
 		{
-			let parent_branch_index = self.storage.read().blocks.get(&hash)
+			let parent_hash =	header.parent_hash().clone();
+			let parent_branch_index = self.storage.read().blocks.get(&parent_hash)
 				.map(|b| b.branch_index()).unwrap_or(0);
 			let mut storage = self.storage.write();
 			let (_, branch_index) = storage.leaves.import(
 				hash.clone(),
 				number.clone(),
-				header.parent_hash().clone(),
+				parent_hash,
 				parent_branch_index,
 			);
 			storage.blocks.insert(
@@ -335,7 +336,12 @@ impl<Block: BlockT> HeaderBackend<Block> for Blockchain<Block> {
 	}
 
 	fn branch_ranges(&self, hash: &Block::Hash) -> error::Result<BranchRanges> {
-		self.storage.read().leaves.branch_ranges(hash)
+
+		let storage = self.storage.read();
+		let (branch_index, block_number) = storage.blocks.get(&hash)
+				.map(|b| (b.branch_index(), *b.header().number()))
+				.unwrap_or((0, 0u32.into()));
+		storage.leaves.branch_ranges(branch_index, block_number)
 	}
 
 	fn hash(&self, number: <<Block as BlockT>::Header as HeaderT>::Number) -> error::Result<Option<Block::Hash>> {

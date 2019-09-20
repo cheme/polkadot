@@ -109,7 +109,6 @@ impl<H, N> LeafSet<H, N> where
 			last_branch_index_key,
 		)?;
 		let mut storage = BTreeMap::new();
-
 		for (key, value) in db.iter_from_prefix(column, prefix) {
 			if !key.starts_with(prefix) { break }
 			let raw_hash = &mut &key[prefix.len()..];
@@ -128,6 +127,7 @@ impl<H, N> LeafSet<H, N> where
 				column_branch_range,
 				branch_index,
 			)?;
+			// TODO EMCH feed ranging cache
 			storage.entry(Reverse(number)).or_insert_with(Vec::new).push((hash, state_ref));
 		}
 		Ok(Self {
@@ -355,10 +355,10 @@ impl<H, N> LeafSet<H, N> where
 
 	/// fetch branch ranges for hash. Missing block result in empty branch ranges,
 	/// which can still be usefull to access finalize default value.
-	pub fn branch_ranges(&self, hash: &H) -> Result<BranchRanges, error::Error> {
-		// note that cache uses a rwlock (we do not want to borrow write when no cache updates).
-		unimplemented!("TODO EMCH implement get caching in leaves and get from leaves no caching.")
-			put cache as instance behind a rw lock, the value do not invalidate anyway.
+	pub fn branch_ranges(&self, branch_index: u64, number: N) -> Result<BranchRanges, error::Error> {
+		let mut range = self.ranges.branch_ranges_from_cache(branch_index);
+		// TODO EMCH limit upper to number N!!!
+		Ok(range)
 	}
 
 }

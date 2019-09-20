@@ -422,6 +422,7 @@ mod tests {
 	use std::sync::{Arc, Mutex};
 	use test_client::runtime::Block;
 	use tokio::runtime::current_thread;
+	use primitives::offstate::BranchRanges;
 
 	#[derive(Clone)]
 	struct TestApi {}
@@ -467,11 +468,11 @@ mod tests {
 			Ok(None)
 		}
 
-		fn branch_index(
+		fn branch_ranges(
 			&self,
 			_hash: &Block::Hash,
-		) -> std::result::Result<Option<u64>, client::error::Error> {
-			Ok(Some(0))
+		) -> std::result::Result<BranchRanges, client::error::Error> {
+			Ok(Vec::new())
 		}
 
 		fn hash(

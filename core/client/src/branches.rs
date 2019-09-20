@@ -155,6 +155,8 @@ impl RangeSet {
 		Ok(result)
 	}
 
+	// TODO EMCH can rw lock over the latest accessed range (lru) and
+	// return an clone of it (arc of the value so it will be fine). this is call by state_at that is call a lot!!!
 	pub fn branch_ranges_from_cache(
 		&self,
 		mut branch_index: u64,
@@ -333,8 +335,16 @@ impl RangeSet {
 		full: bool,
 	) -> TresholdUpdateDisplaced {
 
+		if branch_index <= self.treshold {
+			return TresholdUpdateDisplaced {
+				ranges: Default::default(),
+				treshold: self.treshold,
+			}
+		}
 		// range set update
 		let old_treshold = self.treshold;
+		// we do not finalize current branch cause it
+		// can contains other blocks
 		self.treshold = branch_index;
 		let removed_ranges = if branch_index == 0 || !full {
 			// remove cached value under treshold only

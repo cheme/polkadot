@@ -376,7 +376,12 @@ impl<Block: BlockT> client::blockchain::HeaderBackend<Block> for BlockchainDb<Bl
 		// TODO EMCH not using key lookup, is that fine -> this more than need a cache, but
 		// it also need to be accessible from leaves (need crate refact) -> put friggin cache in
 		// leaves!!
-		self.leaves.write().branch_ranges(hash)
+		let branch_index = self.branch_index(hash)?
+			.unwrap_or(0);
+		// TODO EMCH this call is very costy, but it may get cached in other pr
+		let number = self.number(*hash)?
+			.unwrap_or(0u32.into());
+		self.leaves.write().branch_ranges(branch_index, number)
 	}
 
 	fn hash(&self, number: NumberFor<Block>) -> Result<Option<Block::Hash>, client::error::Error> {
