@@ -358,6 +358,7 @@ impl<H, N> LeafSet<H, N> where
 	pub fn branch_ranges(&self, hash: &H) -> Result<BranchRanges, error::Error> {
 		// note that cache uses a rwlock (we do not want to borrow write when no cache updates).
 		unimplemented!("TODO EMCH implement get caching in leaves and get from leaves no caching.")
+			put cache as instance behind a rw lock, the value do not invalidate anyway.
 	}
 
 }

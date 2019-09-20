@@ -45,6 +45,7 @@ pub trait HeaderBackend<Block: BlockT>: Send + Sync {
 	/// make sense : light already does not).
 	/// TODO see if it can get removed (probably need to switch to branch_range ref for externalities
 	/// in fact).
+	/// TODO EMCH try to put in no trait at all to
 	fn branch_ranges(&self, hash: &Block::Hash) -> Result<BranchRanges>;
 	/// Get block hash by number. Returns `None` if the header is not in the chain.
 	fn hash(&self, number: NumberFor<Block>) -> Result<Option<Block::Hash>>;
