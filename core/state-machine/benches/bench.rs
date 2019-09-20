@@ -223,6 +223,35 @@ fn bench_tx_drop_get_4(c: &mut Criterion) {
 	c.bench_function_over_inputs("tx_drop_get_4", tx_drop_get_4, inps);
 }
 
+fn tx_set_only(b: &mut Bencher, input: &(Vec<u8>, usize)) {
+	let key_vals = key_val(&input.0[..], 32, 32);
+	b.iter(move || {
+		let mut overlayed = OverlayedChanges::default();
+		for i in key_vals.iter() {
+			overlayed.set_storage(i.0.clone(), Some(i.1.clone()));
+		}
+		for _ in 0 .. input.1 {
+		overlayed.start_transaction();
+			for i in key_vals.iter() {
+				black_box(overlayed.set_storage(i.0.clone(), Some(i.1.clone())));
+			}
+		}
+	});
+}
+
+fn bench_tx_set_only(c: &mut Criterion) {
+	let size = [50, 500, 5000];
+	let overlays = [0, 2, 4, 8, 16, 64];
+	for s in size.iter() {
+		let inp = get_content(12, CONTENT_KEY_SIZE * *s * 2);
+		for o in overlays.iter() {
+			println!("nb keyval {}, nb overlays {}", s, o);
+			let inps = vec![(inp.clone(), *o)];
+			c.bench_function_over_inputs("tx_set_only", tx_set_only, inps);
+		}
+	}
+}
+
 
 
 
@@ -233,5 +262,6 @@ criterion_group!(benches,
 	bench_tx_drop_get_2,
 	bench_tx_drop_get_3,
 	bench_tx_drop_get_4,
+	bench_tx_set_only,
 );
 criterion_main!(benches);
