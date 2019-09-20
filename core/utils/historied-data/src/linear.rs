@@ -168,35 +168,18 @@ impl States {
 
 	/// Discard prospective changes to state.
 	pub fn discard_prospective(&mut self) {
-		let mut i = self.0.len();
-		while i > 0 {
-			i -= 1;
-			match self.0[i] {
-				TransactionState::Dropped => (),
-				TransactionState::Pending
-				| TransactionState::TxPending
-				| TransactionState::Prospective => self.0[i] = TransactionState::Dropped,
-				TransactionState::Committed => break,
-			}
-		}
-		self.0.push(TransactionState::Pending);
+		// TODO EMCH this assumes that after a extrinsic eval we will have
+		// only one transaction remaining: I am really not confident (panic case).
+		self.discard_transaction();
+		self.start_transaction();
 	}
 
 	/// Commit prospective changes to state.
 	pub fn commit_prospective(&mut self) {
-		debug_assert!(self.0.len() > 0);
-		let mut i = self.0.len();
-		while i > 0 {
-			i -= 1;
-			match self.0[i] {
-				TransactionState::Dropped => (),
-				TransactionState::Prospective
-				| TransactionState::TxPending
-				| TransactionState::Pending => self.0[i] = TransactionState::Committed,
-				| TransactionState::Committed => break,
-			}
-		}
-		self.0.push(TransactionState::Pending);
+		// TODO EMCH same as discard, this assume we got a single transaction
+		// remaining: with proper runtime it should be true.
+		self.commit_transaction();
+		self.start_transaction();
 	}
 
 	/// Create a new transactional layer.
@@ -218,7 +201,6 @@ impl States {
 					self.0[i] = TransactionState::Dropped;
 					break;
 				},
-				TransactionState::Committed => break,
 			}
 		}
 		self.0.push(TransactionState::Pending);
@@ -237,7 +219,6 @@ impl States {
 					self.0[i] = TransactionState::Prospective;
 					break;
 				},
-				TransactionState::Committed => break,
 			}
 		}
 		self.0.push(TransactionState::Pending);
@@ -293,8 +274,7 @@ impl<V> History<V> {
 				TransactionState::Dropped => (),
 				TransactionState::Pending
 				| TransactionState::TxPending
-				| TransactionState::Prospective
-				| TransactionState::Committed =>
+				| TransactionState::Prospective =>
 					return Some(value),
 			}
 		}
@@ -315,8 +295,7 @@ impl<V> History<V> {
 				TransactionState::Dropped => (),
 				TransactionState::Pending
 				| TransactionState::TxPending
-				| TransactionState::Prospective
-				| TransactionState::Committed => {
+				| TransactionState::Prospective => {
 					self.truncate(index + 1);
 					return self.pop().map(|v| v.value);
 				},
@@ -342,37 +321,15 @@ impl<V> History<V> {
 				| TransactionState::TxPending
 				| TransactionState::Prospective =>
 					return Some(value),
-				TransactionState::Committed
-				| TransactionState::Dropped => (),
-			}
-		}
-		None
-	}
-
-	#[cfg(any(test, feature = "test"))]
-	pub fn get_committed(&self, history: &[TransactionState]) -> Option<&V> {
-		// index is never 0,
-		let mut index = self.len();
-		if index == 0 {
-			return None;
-		}
-		debug_assert!(history.len() >= index);
-		while index > 0 {
-			index -= 1;
-			let HistoriedValue { value, index: history_index } = self.get_state(index);
-			match history[history_index] {
-				TransactionState::Committed => return Some(value),
-				TransactionState::Pending
-				| TransactionState::TxPending
-				| TransactionState::Prospective
-				| TransactionState::Dropped => (),
+				TransactionState::Dropped => (),
 			}
 		}
 		None
 	}
 
 	pub fn into_committed(mut self, history: &[TransactionState]) -> Option<V> {
-		// index is never 0,
+		// without commited state this is useless TODO EMCH does not seems right
+		// but if code ok this is the first prospective as all tx are dropped
 		let mut index = self.len();
 		if index == 0 {
 			return None;
@@ -385,13 +342,12 @@ impl<V> History<V> {
 			index -= 1;
 			let history_index = self.get_state(index).index;
 			match history[history_index] {
-				TransactionState::Committed => {
+				TransactionState::Prospective => {
 					self.truncate(index + 1);
 					return self.pop().map(|v| v.value);
 				},
 				TransactionState::Pending
 				| TransactionState::TxPending
-				| TransactionState::Prospective
 				| TransactionState::Dropped => (),
 			}
 		}
@@ -415,11 +371,6 @@ impl<V> History<V> {
 			index -= 1;
 			let history_index = self.get_state(index).index;
 			match history[history_index] {
-				TransactionState::Committed => {
-					// here we could gc all preceding values but that is additional cost
-					// and get_mut should stop at pending following committed.
-					return Some((self.mut_ref(index), history_index).into())
-				},
 				TransactionState::Pending
 				| TransactionState::TxPending
 				| TransactionState::Prospective => {
@@ -459,14 +410,6 @@ impl<V> History<V> {
 				index -= 1;
 				let history_index = self.get_state(index).index;
 				match history[history_index] {
-					TransactionState::Committed => {
-						for _ in 0..index {
-							self.remove(0);
-						}
-						result = Some(result.map(|(i, history_index)| (i - index, history_index))
-							.unwrap_or((0, history_index)));
-						break;
-					},
 					TransactionState::Pending
 					| TransactionState::Prospective => {
 						if history_index >= below_value {

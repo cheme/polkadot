@@ -275,20 +275,6 @@ impl OverlayedChangeSet {
 		result
 	}
 
-	/// Test only method to access current commited changes.
-	/// It is here to keep old test compatibility and should be
-	/// avoid for new tests.
-	#[cfg(test)]
-	pub(crate) fn top_committed(&self) -> HashMap<Vec<u8>, OverlayedValue> {
-		let mut result = HashMap::new();
-		for (k, v) in self.top.iter() {
-			if let Some(v) = v.get_committed(self.history.as_ref()) {
-				result.insert(k.clone(), v.clone());
-			}
-		}
-		result
-	}
-
 }
 
 impl OverlayedChanges {
@@ -722,30 +708,15 @@ mod tests {
 		overlay.set_extrinsic_index(4);
 		overlay.set_storage(vec![1], Some(vec![8]));
 
-		assert_eq!(strip_extrinsic_index(overlay.changes.top_committed()),
-			vec![
-				(vec![1], OverlayedValue { value: Some(vec![6]), extrinsics: Some(vec![0, 2].into_iter().collect()) }),
-				(vec![3], OverlayedValue { value: Some(vec![4]), extrinsics: Some(vec![1].into_iter().collect()) }),
-				(vec![100], OverlayedValue { value: Some(vec![101]), extrinsics: Some(vec![NO_EXTRINSIC_INDEX].into_iter().collect()) }),
-			].into_iter().collect());
-
 		assert_eq!(strip_extrinsic_index(overlay.changes.top_prospective()),
 			vec![
 				(vec![1], OverlayedValue { value: Some(vec![8]), extrinsics: Some(vec![0, 2, 4].into_iter().collect()) }),
 				(vec![3], OverlayedValue { value: Some(vec![7]), extrinsics: Some(vec![1, 3].into_iter().collect()) }),
+				(vec![100], OverlayedValue { value: Some(vec![101]), extrinsics: Some(vec![NO_EXTRINSIC_INDEX].into_iter().collect()) }),
 			].into_iter().collect());
 
 		overlay.commit_prospective();
 
-		assert_eq!(strip_extrinsic_index(overlay.changes.top_committed()),
-			vec![
-				(vec![1], OverlayedValue { value: Some(vec![8]), extrinsics: Some(vec![0, 2, 4].into_iter().collect()) }),
-				(vec![3], OverlayedValue { value: Some(vec![7]), extrinsics: Some(vec![1, 3].into_iter().collect()) }),
-				(vec![100], OverlayedValue { value: Some(vec![101]), extrinsics: Some(vec![NO_EXTRINSIC_INDEX].into_iter().collect()) }),
-			].into_iter().collect());
-
-		assert_eq!(overlay.changes.top_prospective(),
-			Default::default());
 	}
 
 
