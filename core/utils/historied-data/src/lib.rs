@@ -23,9 +23,49 @@
 pub mod tree;
 pub mod linear;
 
+/// An entry at a given history index.
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+pub struct HistoriedValue<V, I> {
+	/// The stored value.
+	pub value: V,
+	/// The moment in history when the value got set.
+	pub index: I,
+}
+
+impl<V, I> From<(V, I)> for HistoriedValue<V, I> {
+	fn from(input: (V, I)) -> HistoriedValue<V, I> {
+		HistoriedValue { value: input.0, index: input.1 }
+	}
+}
+
+impl<V, I: Copy> HistoriedValue<V, I> {
+	fn as_ref(&self) -> HistoriedValue<&V, I> {
+		HistoriedValue {
+			value: &self.value,
+			index: self.index,
+		}
+	}
+
+	fn as_mut(&mut self) -> HistoriedValue<&mut V, I> {
+		HistoriedValue {
+			value: &mut self.value,
+			index: self.index,
+		}
+	}
+
+	fn map<R, F: FnOnce(V) -> R>(self, f: F) -> HistoriedValue<R, I> {
+		HistoriedValue {
+			value: f(self.value),
+			index: self.index,
+		}
+	}
+
+}
+
 #[derive(Debug, Clone, PartialEq, Copy)]
 /// State of a data.
-pub enum State {
+pub enum TransactionState {
 	/// Data is under change and can still be dropped.
 	Pending,
 	/// Data is under change and can still be dropped.
@@ -56,7 +96,7 @@ pub struct GCConfiguration {
 	/// possibly more frequent than commit).
 	pub trigger_transaction_gc: usize,
 
-	/// Treshold in number of operation before running a garbage colletion
+	/// Treshold in number of infooperation before running a garbage colletion
 	/// on a commit operation.
 	///
 	/// We may want a lower value than for a transaction, even
@@ -83,3 +123,26 @@ impl GCConfiguration {
 	}
 
 }
+
+
+/*
+//pub trait HistoriedData<I, V, VRef, VRefMut, State, StateRef, StatePruning> {
+pub trait HistoriedData<V, State> {
+
+	fn get_trait(self, history: State) -> Option<V>;
+
+}
+
+pub trait HistoriedDataMut<I, V, VRef, State, StatePruning> {
+
+	fn set_trait(self, history: State, value: V);
+
+	fn get_mut_trait(self, history: State) -> Option<HistoriedValue<VRef, I>>;
+
+	fn get_mut_pruning_trait(
+		self,
+		history: State,
+		pruning_infos: StatePruning,
+	) -> Option<HistoriedValue<VRef, I>>;
+
+}*/

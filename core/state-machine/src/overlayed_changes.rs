@@ -21,8 +21,8 @@ use std::collections::{HashMap, BTreeSet};
 use codec::Decode;
 use crate::changes_trie::{NO_EXTRINSIC_INDEX, Configuration as ChangesTrieConfig};
 use primitives::storage::well_known_keys::EXTRINSIC_INDEX;
-use historied_data::linear::{States, History as HistoryInner, HistoriedValue};
-use historied_data::State as TransactionState;
+use historied_data::linear::{States, History as HistoryInner};
+use historied_data::{TransactionState, HistoriedValue};
 use historied_data::DEFAULT_GC_CONF;
 
 type History<V> = HistoryInner<V, usize>;

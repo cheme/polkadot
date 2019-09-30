@@ -22,51 +22,13 @@
 //! It only allows linear history (no branch so
 //! inner storage is only an array of element).
 
-use crate::State as TransactionState;
+use crate::TransactionState;
 use rstd::vec::Vec;
 use rstd::vec;
 use rstd::borrow::Cow;
 use rstd::convert::{TryFrom, TryInto};
+use crate::HistoriedValue;
 
-/// An entry at a given history height.
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct HistoriedValue<V, I> {
-	/// The stored value.
-	pub value: V,
-	/// The moment in history when the value got set.
-	pub index: I,
-}
-
-impl<V, I> From<(V, I)> for HistoriedValue<V, I> {
-	fn from(input: (V, I)) -> HistoriedValue<V, I> {
-		HistoriedValue { value: input.0, index: input.1 }
-	}
-}
-
-impl<V, I: Copy> HistoriedValue<V, I> {
-	fn as_ref(&self) -> HistoriedValue<&V, I> {
-		HistoriedValue {
-			value: &self.value,
-			index: self.index,
-		}
-	}
-
-	fn as_mut(&mut self) -> HistoriedValue<&mut V, I> {
-		HistoriedValue {
-			value: &mut self.value,
-			index: self.index,
-		}
-	}
-
-	fn map<R, F: FnOnce(V) -> R>(self, f: F) -> HistoriedValue<R, I> {
-		HistoriedValue {
-			value: f(self.value),
-			index: self.index,
-		}
-	}
-
-}
 
 /// Array like buffer for in memory storage.
 /// By in memory we expect that this will
@@ -527,7 +489,7 @@ impl<'a> Serialized<'a> {
 
 
 // share implementation, trait would be better.
-macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty, $par: ty ) => {
+macro_rules! transaction_history_impl(( $read: ty, $owned: ty, $mut: ty, $par: ty ) => {
 
 	/// Access to latest pending value (non dropped state in history).
 	/// When possible please prefer `get_mut` as it can free
@@ -767,11 +729,11 @@ macro_rules! history_impl(( $read: ty, $owned: ty, $mut: ty, $par: ty ) => {
 });
 
 impl<'a> Serialized<'a> {
-	history_impl!(&[u8], Vec<u8>, (), u64);
+	transaction_history_impl!(&[u8], Vec<u8>, (), u64);
 }
 
 impl<V, I: Copy + Eq + TryFrom<usize> + TryInto<usize>> History<V, I> {
-	history_impl!(&V, V, &mut V, I);
+	transaction_history_impl!(&V, V, &mut V, I);
 }
 
 
@@ -834,3 +796,20 @@ mod test {
 		assert_eq!(ser.get_state(0), (v2, 2).into());
 	}
 }
+/*
+impl<'a, 'b, V, I: Copy + Eq + TryFrom<usize> + TryInto<usize>>
+	crate::HistoriedData<&'a V, &'b [TransactionState]>
+for &'a History<V, I> {
+
+	fn get_trait(self, history: &'b [TransactionState]) -> Option<&'a V> {
+		self.get(history)
+	}
+}
+
+impl<'a, 'b> crate::HistoriedData<&'a [u8], &'b [TransactionState]>
+for &'a Serialized<'a> {
+	fn get_trait(self, history: &'b [TransactionState]) -> Option<&'a [u8]> {
+		self.get(history)
+	}
+}
+*/
