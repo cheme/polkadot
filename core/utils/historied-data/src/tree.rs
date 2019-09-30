@@ -349,9 +349,9 @@ pub struct StatesBranchRef {
 pub struct StatesRef {
 	/// Oredered by branch index linear branch states.
 	history: Rc<Vec<StatesBranchRef>>,
-	/// Index is  include, acts as length of history.
+	/// Index is included, acts as length of history.
 	upper_branch_index: Option<u64>,
-	/// Index is not include, acts as a branch ref end value.
+	/// Index is included, acts as a branch ref end value.
 	upper_node_index: Option<u64>,
 }
 
@@ -584,44 +584,53 @@ pub struct Serialized<'a>(Cow<'a, [u8]>);
 impl<V> History<V> {
 
 	/// Set or update value for a given state.
-	pub fn set(&mut self, state: &StatesRef, value: V) {
+	pub fn set<S, I, BI>(&mut self, state: S, value: V) 
+		where
+			S: TreeStateTrait<bool, I, BI>,
+			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+			BI: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+	{
 		// TODO EMCH it does not seem stricly needed to pass
 		// a full state, double index looks enough.
 		// but this api can help using consistent state.
 		if let Some((state_branch, state_index)) = state.iter().next() {
-			let mut i = self.0.len();
-			let (branch_position, new_branch) = loop {
-				if i == 0 {
-					break (0, true);
-				}
-				let branch_index = self.0[i - 1].branch_index;
-				if branch_index == state_index {
-					break (i - 1, false);
-				} else if branch_index < state_index {
-					break (i, true);
-				}
-				i -= 1;
-			};
-			if new_branch {
-				let index = state_branch.last_index();
-				let mut history = BranchBackend::<V, u64>::default();
-				history.push(HistoriedValue {
-					value,
-					index,
-				});
-				let h_value = HistoryBranch {
-					branch_index: state_index,
-					history,
+			if let Ok(state_index_usize) = state_index.try_into() {
+				let state_index_u64 = state_index_usize as u64;
+				let mut i = self.0.len();
+				let (branch_position, new_branch) = loop {
+					if i == 0 {
+						break (0, true);
+					}
+					let branch_index = self.0[i - 1].branch_index;
+					if branch_index == state_index_u64 {
+						break (i - 1, false);
+					} else if branch_index < state_index_u64 {
+						break (i, true);
+					}
+					i -= 1;
 				};
-				if branch_position == self.0.len() {
-					self.0.push(h_value);
+				if new_branch {
+					if let Ok(index_usize) = state_branch.last_index().try_into() {
+						let index = index_usize as u64;
+						let mut history = BranchBackend::<V, u64>::default();
+						history.push(HistoriedValue {
+							value,
+							index,
+						});
+						let h_value = HistoryBranch {
+							branch_index: state_index_u64,
+							history,
+						};
+						if branch_position == self.0.len() {
+							self.0.push(h_value);
+						} else {
+							self.0.insert(branch_position, h_value);
+						}
+					}
 				} else {
-					self.0.insert(branch_position, h_value);
+					self.node_set(branch_position, &state_branch, value)
 				}
-			} else {
-				self.node_set(branch_position, &state_branch, value)
 			}
-
 		}
 	}
 
