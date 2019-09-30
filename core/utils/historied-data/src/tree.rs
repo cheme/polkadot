@@ -52,7 +52,7 @@
 //
 
 use crate::linear::{
-	MemoryOnly as LinearBackend,
+	MemoryOnly as BranchBackend,
 };
 use crate::HistoriedValue;
 use rstd::borrow::Cow;
@@ -84,7 +84,7 @@ pub trait TreeStateTrait<S, I, BI> {
 
 	fn get_branch(self, index: I) -> Option<Self::Branch>;
 
-	/// Non inclusive.
+	/// Inclusive.
 	fn last_index(self) -> I;
 
 	/// Iterator.
@@ -94,6 +94,9 @@ pub trait TreeStateTrait<S, I, BI> {
 pub trait BranchStateTrait<S, I> {
 
 	fn get_node(&self, i: I) -> S;
+
+	/// Inclusive.
+	fn last_index(&self) -> I;
 }
 
 
@@ -151,9 +154,17 @@ impl<'a> BranchStateTrait<bool, u64> for (&'a StatesBranchRef, Option<u64>) {
 
 	fn get_node(&self, i: u64) -> bool {
 		let l = self.0.state.end;
-		let upper = self.1.map(|u| rstd::cmp::min(u, l)).unwrap_or(l);
+		let upper = self.1.map(|u| rstd::cmp::min(u + 1, l)).unwrap_or(l);
 		i >= self.0.state.start && i < upper
 	}
+
+	fn last_index(&self) -> u64 {
+		// underflow should not happen as long as branchstateref are not allowed to be empty.
+		let state_end = self.0.state.end - 1;
+		self.1.map(|bound| rstd::cmp::min(state_end, bound)).unwrap_or(state_end)
+	}
+
+
 }
 
 impl Default for BranchState {
@@ -562,7 +573,7 @@ impl<V> Default for History<V> {
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 pub struct HistoryBranch<V> {
 	branch_index: u64,
-	history: LinearBackend<V, u64>,
+	history: BranchBackend<V, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -577,63 +588,72 @@ impl<V> History<V> {
 		// TODO EMCH it does not seem stricly needed to pass
 		// a full state, double index looks enough.
 		// but this api can help using consistent state.
-		let branch_state = state.current_branch_state();
-		let mut i = self.0.len();
-		let (branch_position, new_branch) = loop {
-			if i == 0 {
-				break (0, true);
-			}
-			let branch_index = self.0[i - 1].branch_index;
-			if branch_index == branch_state.branch_index {
-				break (i - 1, false);
-			} else if branch_index < branch_state.branch_index {
-				break (i, true);
-			}
-			i -= 1;
-		};
-		if new_branch {
-			let mut history = LinearBackend::<V, u64>::default();
-			let index = state.upper_node_index.unwrap_or(branch_state.state.end) - 1;
-			history.push(HistoriedValue {
-				value,
-				index,
-			});
-			let h_value = HistoryBranch {
-				branch_index: branch_state.branch_index,
-				history,
+		if let Some((state_branch, state_index)) = state.iter().next() {
+			let mut i = self.0.len();
+			let (branch_position, new_branch) = loop {
+				if i == 0 {
+					break (0, true);
+				}
+				let branch_index = self.0[i - 1].branch_index;
+				if branch_index == state_index {
+					break (i - 1, false);
+				} else if branch_index < state_index {
+					break (i, true);
+				}
+				i -= 1;
 			};
-			if branch_position == self.0.len() {
-				self.0.push(h_value);
+			if new_branch {
+				let index = state_branch.last_index();
+				let mut history = BranchBackend::<V, u64>::default();
+				history.push(HistoriedValue {
+					value,
+					index,
+				});
+				let h_value = HistoryBranch {
+					branch_index: state_index,
+					history,
+				};
+				if branch_position == self.0.len() {
+					self.0.push(h_value);
+				} else {
+					self.0.insert(branch_position, h_value);
+				}
 			} else {
-				self.0.insert(branch_position, h_value);
+				self.node_set(branch_position, &state_branch, value)
 			}
-		} else {
-			self.node_set(branch_position, branch_state, state.upper_node_index, value)
+
 		}
 	}
 
-	fn node_set(&mut self, index: usize, state: &StatesBranchRef, bound: Option<u64>, value: V) {
-		let node_index = bound.unwrap_or(state.state.end) - 1;
-		let history = &mut self.0[index];
-		let mut index = history.history.len();
-		debug_assert!(index > 0);
-		loop {
-			if index == 0 || history.history[index - 1].index < node_index {
-				let h_value = HistoriedValue {
-					value,
-					index: node_index,
-				};
-				if index == history.history.len() {
-					history.history.push(h_value);
-				} else {
-					history.history.insert(index, h_value);
+	fn node_set<S, I>(&mut self, branch_index: usize, state: &S, value: V)
+		where
+			S: BranchStateTrait<bool, I>,
+			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+	{
+		let node_index = state.last_index();
+		if let Ok(node_index_usize) = state.last_index().try_into() {
+			let node_index_u64 = node_index_usize as u64;
+			let history = &mut self.0[branch_index];
+			let mut index = history.history.len();
+			debug_assert!(index > 0);
+			loop {
+				if index == 0 || history.history[index - 1].index < node_index_u64 {
+					let h_value = HistoriedValue {
+						value,
+						index: node_index_u64
+					};
+					if index == history.history.len() {
+						history.history.push(h_value);
+					} else {
+						history.history.insert(index, h_value);
+					}
+					break;
+				} else if history.history[index - 1].index == node_index_u64 {
+					history.history[index - 1].value = value;
+					break;
 				}
-				break;
-			} else if history.history[index - 1].index == node_index {
-				history.history[index - 1].value = value;
-				break;
+				index -= 1;
 			}
-			index -= 1;
 		}
 	}
 
