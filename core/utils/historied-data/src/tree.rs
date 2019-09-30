@@ -115,7 +115,7 @@ impl<'a> TreeStateTrait<bool, u64, u64> for &'a StatesRef {
 	fn last_index(self) -> u64 {
 		let l = self.history.len();
 		let l = if l > 0 {
-			self.history[l - 1].branch_index + 1
+			self.history[l - 1].branch_index
 		} else {
 			0
 		};
@@ -129,7 +129,7 @@ impl<'a> TreeStateTrait<bool, u64, u64> for &'a StatesRef {
 			self.upper_node_index
 		} else { None };
 		while end > 0 {
-			if self.history[end - 1].branch_index < last_index {
+			if self.history[end - 1].branch_index <= last_index {
 				break;
 			}
 			end -= 1;
@@ -368,18 +368,8 @@ impl StatesRef {
 	/// Optionally limiting branch to a linear index (included).
 	fn limit_branch(&mut self, branch_index: u64, node_index: Option<u64>) {
 		debug_assert!(branch_index > 0);
-		let mut upper_state_linear = None;
-		self.history.iter()
-			.position(|v| {
-				if v.branch_index == branch_index {
-					upper_state_linear = Some(v.state.end);
-					true
-				} else { false }
-			})
-			.map(|index| { self.upper_branch_index = Some(index as u64 + 1); });
-		upper_state_linear.map(|limit| {
-			self.upper_node_index = node_index.map(|v| rstd::cmp::min(v, limit) + 1);
-		});
+		self.upper_branch_index = Some(branch_index);
+		self.upper_node_index = node_index;
 	}
 
 	/// remove any limit.
@@ -391,7 +381,7 @@ impl StatesRef {
 	// vec like function
 	
 	fn len(&self) -> usize {
-		self.upper_branch_index.map(|i| i as usize).unwrap_or(self.history.len())
+		self.history.len()
 	}
 
 	fn branch_state(&self, index: usize) -> &StatesBranchRef {
@@ -664,12 +654,14 @@ impl<V> History<V> {
 		}
 
 		for (state_branch, state_index) in state.iter() {
-			index -= 1;
-			if let Ok(branch_index) = self.0[index].branch_index.try_into() {
-				if let Ok(state_index) = state_index.try_into() {
-					if state_index == branch_index {
-						if let Some(result) = self.branch_get(index, state_branch) {
-							return Some(result)
+			while index > 0 {
+				index -= 1;
+				if let Ok(branch_index) = self.0[index].branch_index.try_into() {
+					if let Ok(state_index) = state_index.try_into() {
+						if state_index == branch_index {
+							if let Some(result) = self.branch_get(index, &state_branch) {
+								return Some(result)
+							}
 						}
 					}
 				}
@@ -681,7 +673,7 @@ impl<V> History<V> {
 		self.1.as_ref()
 	}
 
-	fn branch_get<S, I>(&self, index: usize, state: S) -> Option<&V>
+	fn branch_get<S, I>(&self, index: usize, state: &S) -> Option<&V>
 		where
 			S: BranchStateTrait<bool, I>,
 			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
