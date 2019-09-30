@@ -724,18 +724,16 @@ impl<V> History<V> {
 
 	/// Gc an historied value other its possible values.
 	/// Iterator need to be reversed ordered by branch index.
-	pub fn gc<IT, S, I, BI>(&mut self, mut states: IT) 
+	pub fn gc<IT, S, I>(&mut self, mut states: IT) 
 		where
 			IT: Iterator<Item = (S, I)>,
 			S: BranchStateTrait<bool, I>,
 			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
-			BI: Copy + Eq + TryFrom<usize> + TryInto<usize>,
 	{
 		// state is likely bigger than history.
-		let mut branch_index = self.0.len();
 		let mut current_state = states.next();
-		for history_index in (0..self.0.len()).rev() {
-			let history_branch = self.0[history_index].branch_index;
+		for branch_index in (0..self.0.len()).rev() {
+			let history_branch = self.0[branch_index].branch_index;
 			loop {
 				if let Some(state) = current_state.as_ref() {
 					if let Ok(state_index_usize) = state.1.try_into() {
@@ -743,13 +741,24 @@ impl<V> History<V> {
 						if history_branch < state_index_u64 {
 							current_state = states.next();
 						} else if history_branch == state_index_u64 {
-							let len = self.0[history_index].history.len();
-							for branch_index in (0..len).rev() {
-							}
+							let len = self.0[branch_index].history.len();
+								for history_index in (0..len).rev() {
+									
+									let node_index = self.0[branch_index].history[branch_index].index as usize;
+									if let Ok(node_index) = node_index.try_into() {
+										if !state.0.get_node(node_index) {
+											if history_index == len - 1 {
+												let _ = self.0[branch_index].history.pop();
+											} else {
+												let _ = self.0[branch_index].history.remove(history_index);
+											}
+										}
+									}
+								}
 							current_state = states.next();
 							break;
 						} else {
-							self.0.remove(history_index);
+							self.0.remove(branch_index);
 						}
 					}
 				} else {
@@ -933,6 +942,34 @@ mod test {
 				assert_eq!(item.get(&states.state_ref(*i)), Some(i));
 			}
 		}
+
+	}
+
+
+	#[test]
+	fn test_gc() {
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let states = test_states();
+		let mut item: History<u64> = Default::default();
+		// setting value respecting branch build order
+		for i in 1..6 {
+			item.set(&states.state_ref(i), i);
+		}
+
+		let mut states1 = states.branches.clone();
+		states1.remove(&3);
+		states1.remove(&5);
+		states1.remove(&2);
+		// makes invalid tree (detaches 4)
+		states1.get_mut(&1).map(|br| br.state.len = 1);
+		let mut states1: BTreeMap<_, _> = states1.iter().map(|(k,v)| (k, v.branch_ref())).collect();
+		let mut item1 = item.clone();
+		item1.gc(states1.iter().map(|(k, v)| ((v, None), *k)).rev());
+		panic!("{:?}, {:?}, ", item, item1);
 
 	}
 
