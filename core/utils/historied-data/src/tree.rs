@@ -742,23 +742,27 @@ impl<V> History<V> {
 							current_state = states.next();
 						} else if history_branch == state_index_u64 {
 							let len = self.0[branch_index].history.len();
-								for history_index in (0..len).rev() {
+							for history_index in (0..len).rev() {
 									
-									let node_index = self.0[branch_index].history[branch_index].index as usize;
-									if let Ok(node_index) = node_index.try_into() {
-										if !state.0.get_node(node_index) {
-											if history_index == len - 1 {
-												let _ = self.0[branch_index].history.pop();
-											} else {
-												let _ = self.0[branch_index].history.remove(history_index);
-											}
+								let node_index = self.0[branch_index].history[history_index].index as usize;
+								if let Ok(node_index) = node_index.try_into() {
+									if !state.0.get_node(node_index) {
+										if history_index == len - 1 {
+											let _ = self.0[branch_index].history.pop();
+										} else {
+											let _ = self.0[branch_index].history.remove(history_index);
 										}
 									}
 								}
+							}
+							if self.0[branch_index].history.len() == 0 {
+								let _ = self.0.remove(branch_index);
+							}
 							current_state = states.next();
 							break;
 						} else {
 							self.0.remove(branch_index);
+							break;
 						}
 					}
 				} else {
@@ -961,15 +965,25 @@ mod test {
 		}
 
 		let mut states1 = states.branches.clone();
-		states1.remove(&3);
-		states1.remove(&5);
-		states1.remove(&2);
+		let action = [(1, true), (2, false), (3, false), (4, true), (5, false)];
+		for a in action.iter() {
+			if !a.1 {
+				states1.remove(&a.0);
+			}
+		}
 		// makes invalid tree (detaches 4)
 		states1.get_mut(&1).map(|br| br.state.len = 1);
 		let mut states1: BTreeMap<_, _> = states1.iter().map(|(k,v)| (k, v.branch_ref())).collect();
 		let mut item1 = item.clone();
-		item1.gc(states1.iter().map(|(k, v)| ((v, None), *k)).rev());
-		panic!("{:?}, {:?}, ", item, item1);
+		item1.gc(states1.iter().map(|(k, v)| ((v, None), **k)).rev());
+		assert_eq!(item1.get(&states.state_ref(1)), None);
+		for a in action.iter().skip(1) {
+			if a.1 {
+				assert_eq!(item1.get(&states.state_ref(a.0)), Some(&a.0));
+			} else {
+				assert_eq!(item1.get(&states.state_ref(a.0)), None);
+			}
+		}
 
 	}
 
