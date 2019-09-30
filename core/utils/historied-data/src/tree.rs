@@ -639,7 +639,6 @@ impl<V> History<V> {
 			S: BranchStateTrait<bool, I>,
 			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
 	{
-		let node_index = state.last_index();
 		if let Ok(node_index_usize) = state.last_index().try_into() {
 			let node_index_u64 = node_index_usize as u64;
 			let history = &mut self.0[branch_index];
@@ -682,6 +681,7 @@ impl<V> History<V> {
 			return self.1.as_ref();
 		}
 
+		// TODO EMCH reverse loops ? probably.
 		for (state_branch, state_index) in state.iter() {
 			while index > 0 {
 				index -= 1;
@@ -721,6 +721,44 @@ impl<V> History<V> {
 		}
 		None
 	}
+
+	/// Gc an historied value other its possible values.
+	/// Iterator need to be reversed ordered by branch index.
+	pub fn gc<IT, S, I, BI>(&mut self, mut states: IT) 
+		where
+			IT: Iterator<Item = (S, I)>,
+			S: BranchStateTrait<bool, I>,
+			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+			BI: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+	{
+		// state is likely bigger than history.
+		let mut branch_index = self.0.len();
+		let mut current_state = states.next();
+		for history_index in (0..self.0.len()).rev() {
+			let history_branch = self.0[history_index].branch_index;
+			loop {
+				if let Some(state) = current_state.as_ref() {
+					if let Ok(state_index_usize) = state.1.try_into() {
+						let state_index_u64 = state_index_usize as u64;
+						if history_branch < state_index_u64 {
+							current_state = states.next();
+						} else if history_branch == state_index_u64 {
+							let len = self.0[history_index].history.len();
+							for branch_index in (0..len).rev() {
+							}
+							current_state = states.next();
+							break;
+						} else {
+							self.0.remove(history_index);
+						}
+					}
+				} else {
+					break;
+				}
+			}
+		}
+	}
+	
 /*
 	/// Access to last valid value (non dropped state in history).
 	/// When possible please use `get_mut` as it can free some memory.
