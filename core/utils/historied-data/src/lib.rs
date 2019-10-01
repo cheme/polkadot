@@ -20,6 +20,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use rstd::convert::{TryFrom, TryInto};
+
 pub mod tree;
 pub mod linear;
 
@@ -124,6 +126,21 @@ impl GCConfiguration {
 
 }
 
+// utility function for panicking cast (similar as `as` cas with number
+fn as_usize<I: TryInto<usize>>(i: I) -> usize {
+	match i.try_into() {
+		Ok(index) => index,
+		Err(_) => panic!("historied value index overflow"),
+	}
+}
+
+// utility function for panicking cast (similar as `as` cas with number
+fn as_i<I: TryFrom<usize>>(i: usize) -> I {
+	match i.try_into() {
+		Ok(index) => index,
+		Err(_) => panic!("historied value index underflow"),
+	}
+}
 
 /*
 //pub trait HistoriedData<I, V, VRef, VRefMut, State, StateRef, StatePruning> {

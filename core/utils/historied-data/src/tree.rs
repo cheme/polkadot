@@ -53,8 +53,11 @@
 
 use crate::linear::{
 	MemoryOnly as BranchBackend,
+	Serialized as SerializedInner,
+	SerializedConfig,
 };
 use crate::HistoriedValue;
+use crate::{as_usize, as_i};
 use rstd::borrow::Cow;
 use rstd::rc::Rc;
 use rstd::vec::Vec;
@@ -576,11 +579,6 @@ pub struct HistoryBranch<V> {
 	history: BranchBackend<V, u64>,
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct Serialized<'a>(Cow<'a, [u8]>);
-
-
 impl<V> History<V> {
 
 	/// Set or update value for a given state.
@@ -818,6 +816,91 @@ impl<V> History<V> {
 		None
 	}
 */
+}
+
+impl<'a, F: SerializedConfig> Serialized<'a, F> {
+	pub fn get<I, S> (&self, state: S) -> Option<&[u8]> 
+		where
+			S: BranchStateTrait<bool, I>,
+			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+	{
+		let mut index = self.0.len();
+		if index == 0 {
+			return None;
+		}
+		while index > 0 {
+			index -= 1;
+			let HistoriedValue { value, index: state_index } = self.0.get_state(index);
+			if state.get_node(as_i(state_index as usize)) {
+				return Some(value)
+			}
+		}
+		None
+	}
+
+	/// This append the value, and can only be use in an
+	/// orderly fashion.
+	pub fn push<S, I, BI>(&mut self, state: S, value: &[u8]) 
+		where
+			S: BranchStateTrait<bool, I>,
+			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+	{
+		let target_state_index = as_usize(state.last_index()) as u64;
+		let index = self.0.len();
+		if index > 0 {
+			let last = self.0.get_state(index);
+			debug_assert!(target_state_index >= last.index); 
+			if target_state_index == last.index {
+				self.0.pop();
+			}
+		}
+		self.0.push(HistoriedValue {value, index: target_state_index});
+	}
+
+	/// keep an single history before the state.
+	pub fn prune<S, I, BI>(&mut self, index: I, value: &[u8]) 
+		where
+			I: Copy + Eq + TryFrom<usize> + TryInto<usize>,
+	{
+		let from = as_usize(index) as u64;
+		let len = self.0.len();
+		let mut end = len;
+		for index in 0..len {
+			let history = self.0.get_state(index);
+			if history.index >= from {
+				end == index;
+				break;
+			}
+		}
+		// delete all index up to end
+		self.0.truncate_start(end);
+	}
+	
+}
+
+
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+/// Serialized implementation when transaction support is not
+/// needed.
+pub struct Serialized<'a, F>(SerializedInner<'a, F>);
+
+impl<'a, F> Into<Serialized<'a, F>> for SerializedInner<'a, F> {
+	fn into(self) -> Serialized<'a, F> {
+		Serialized(self)
+	}
+}
+
+impl<'a, F> Into<SerializedInner<'a, F>> for Serialized<'a, F> {
+	fn into(self) -> SerializedInner<'a, F> {
+		self.0
+	}
+}
+
+impl<'a, F: SerializedConfig> Default for Serialized<'a, F> {
+	fn default() -> Self {
+		SerializedInner::<'a, F>::default().into()
+	}
 }
 
 
