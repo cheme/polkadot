@@ -843,7 +843,7 @@ mod test {
 		let ser1: Serialized<NoVersion> = Default::default();
 		let ser2: Serialized<DefaultVersion> = Default::default();
 		test_serialized_basis(ser1);
-		//test_serialized_basis(ser2);
+		test_serialized_basis(ser2);
 	}
 }
 /*
