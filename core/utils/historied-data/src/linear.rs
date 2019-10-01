@@ -25,6 +25,7 @@
 use crate::TransactionState;
 use rstd::vec::Vec;
 use rstd::vec;
+use rstd::marker::PhantomData;
 use rstd::borrow::Cow;
 use rstd::convert::{TryFrom, TryInto};
 use crate::HistoriedValue;
@@ -259,7 +260,38 @@ impl States {
 /// Can be written as is in underlying
 /// storage.
 /// Could be use for direct access memory to.
-pub struct Serialized<'a>(Cow<'a, [u8]>);
+pub struct Serialized<'a, F>(Cow<'a, [u8]>, PhantomData<F>);
+
+/// Serialized specific behavior.
+pub trait SerializedConfig {
+	/// encoded empty slice
+	fn empty() -> &'static [u8];
+	/// size at start for encoding version.
+	fn version_len() -> usize;
+}
+/// Serialize without versioning.
+pub struct NoVersion;
+
+/// Serialize with default verison
+pub struct DefaultVersion;
+
+impl SerializedConfig for NoVersion {
+	fn empty() -> &'static [u8] {
+		&EMPTY_SERIALIZED
+	}
+	fn version_len() -> usize {
+		0
+	}
+}
+
+impl SerializedConfig for DefaultVersion {
+	fn empty() -> &'static [u8] {
+		&DEFAULT_VERSION_EMPTY_SERIALIZED
+	}
+	fn version_len() -> usize {
+		1
+	}
+}
 
 // encoding size as u64
 const SIZE_BYTE_LEN: usize = 8;
@@ -268,11 +300,11 @@ const SIZE_BYTE_LEN: usize = 8;
 // vec like container. Those method could be move to a trait
 // implementation.
 // Those function requires checked index.
-impl<'a> Serialized<'a> {
+impl<'a, F: SerializedConfig> Serialized<'a, F> {
 
 
-	fn into_owned(self) -> Serialized<'static> {
-    Serialized(Cow::from(self.0.into_owned()))
+	fn into_owned(self) -> Serialized<'static, F> {
+    Serialized(Cow::from(self.0.into_owned()), PhantomData)
   }
 
 	fn len(&self) -> usize {
@@ -281,8 +313,8 @@ impl<'a> Serialized<'a> {
 	}
 
 	fn clear(&mut self) {
-		self.write_le_usize(0, 0);
-		self.0.to_mut().truncate(SIZE_BYTE_LEN);
+		self.write_le_usize(F::version_len(), 0);
+		self.0.to_mut().truncate(F::version_len() + SIZE_BYTE_LEN);
 	}
 
 	fn truncate(&mut self, index: usize) {
@@ -391,26 +423,34 @@ impl<'a> Serialized<'a> {
 
 }
 
-impl<'a> Default for Serialized<'a> {
+const EMPTY_SERIALIZED: [u8; SIZE_BYTE_LEN] = [0u8; SIZE_BYTE_LEN];
+const DEFAULT_VERSION: u8 = 1;
+const DEFAULT_VERSION_EMPTY_SERIALIZED: [u8; SIZE_BYTE_LEN + 1] = {
+	let mut buf = [0u8; SIZE_BYTE_LEN + 1];
+	buf[0] = DEFAULT_VERSION;
+	buf
+};
+
+impl<'a, F: SerializedConfig> Default for Serialized<'a, F> {
 	fn default() -> Self {
-		Serialized(Cow::Borrowed(&[0u8; SIZE_BYTE_LEN][..]))
+		Serialized(Cow::Borrowed(F::empty()), PhantomData)
 	}
 }
 
 // Utility function for basis implementation.
-impl<'a> Serialized<'a> {
+impl<'a, F: SerializedConfig> Serialized<'a, F> {
 	
 	// Index at end, also contains the encoded size
 	fn index_start(&self) -> usize {
 		let nb_ix = self.len();
-		if nb_ix ==0 { return 0; }
+		if nb_ix == 0 { return F::version_len(); }
 		let end = self.0.len();
 		end - (nb_ix * SIZE_BYTE_LEN)
 	}
 
 	fn index_element(&self, position: usize) -> usize {
 		if position == 0 {
-			return 0;
+			return F::version_len();
 		}
 		let i = self.index_start() + (position - 1) * SIZE_BYTE_LEN;
 		self.read_le_usize(i)
@@ -431,7 +471,7 @@ impl<'a> Serialized<'a> {
 	}
 
 	// Usize encoded as le u64 (only for internal indexing).
-	// TODO EMCH change that to u32
+	// TODO EMCH change usize encoding to u32?
 	fn read_le_usize(&self, pos: usize) -> usize {
 		let mut buffer = [0u8; SIZE_BYTE_LEN];
 		buffer.copy_from_slice(&self.0[pos..pos + SIZE_BYTE_LEN]);
@@ -462,10 +502,9 @@ impl<'a> Serialized<'a> {
 		self.0.to_mut().extend_from_slice(&buffer[..]);
 	}
 
-
 }
 
-impl<'a> Serialized<'a> {
+impl<'a, F: SerializedConfig> Serialized<'a, F> {
 
 	/// Set a value, it uses a state history as parameter.
 	/// This method uses `get_mut` and do remove pending
@@ -728,7 +767,7 @@ macro_rules! transaction_history_impl(( $read: ty, $owned: ty, $mut: ty, $par: t
 	}
 });
 
-impl<'a> Serialized<'a> {
+impl<'a, F: SerializedConfig> Serialized<'a, F> {
 	transaction_history_impl!(&[u8], Vec<u8>, (), u64);
 }
 
@@ -757,14 +796,13 @@ fn as_i<I: TryFrom<usize>>(i: usize) -> I {
 mod test {
 	use super::*;
 
-	#[test]
-	fn serialized_basis() {
+	fn test_serialized_basis<F: SerializedConfig>(mut ser: Serialized<F>) {
 		// test basis unsafe function similar to a simple vec
 		// without index checking.
 		let v1 = &b"val1"[..];
 		let v2 = &b"value_2"[..];
 		let v3 = &b"a third value 3"[..];
-		let mut ser = Serialized::default();
+
 		assert_eq!(ser.len(), 0);
 		assert_eq!(ser.pop(), None);
 		ser.push((v1, 1).into());
@@ -774,7 +812,7 @@ mod test {
 		ser.push((v1, 1).into());
 		ser.push((v2, 2).into());
 		ser.push((v3, 3).into());
- 		assert_eq!(ser.get_state(0), (v1, 1).into());
+		assert_eq!(ser.get_state(0), (v1, 1).into());
 		assert_eq!(ser.get_state(1), (v2, 2).into());
 		assert_eq!(ser.get_state(2), (v3, 3).into());
 		assert_eq!(ser.pop(), Some((v3.to_vec(), 3).into()));
@@ -794,6 +832,14 @@ mod test {
 		ser.truncate(1);
 		assert_eq!(ser.len(), 1);
 		assert_eq!(ser.get_state(0), (v2, 2).into());
+	}
+
+	#[test]
+	fn serialized_basis() {
+		let ser1: Serialized<NoVersion> = Default::default();
+		let ser2: Serialized<DefaultVersion> = Default::default();
+		test_serialized_basis(ser1);
+		test_serialized_basis(ser2);
 	}
 }
 /*
