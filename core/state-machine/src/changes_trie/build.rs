@@ -133,7 +133,12 @@ fn prepare_extrinsics_input_inner<'a, B, H, Number>(
 		Number: BlockNumber,
 {
 	let (committed, prospective) = if let Some(sk) = storage_key.as_ref() {
-		(changes.committed.children.get(sk), changes.prospective.children.get(sk))
+		(
+			changes.committed.children.get(sk).as_ref()
+				.map(|ct| &ct.map),
+			changes.prospective.children.get(sk).as_ref()
+				.map(|ct| &ct.map),
+		)
 	} else {
 		(Some(&changes.committed.top), Some(&changes.prospective.top))
 	};

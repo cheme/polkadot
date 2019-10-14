@@ -115,7 +115,7 @@ pub trait Backend<H: Hasher>: std::fmt::Debug {
 		&self,
 		storage_key: &[u8],
 		keyspace: &KeySpace,
-		delta: I,
+		delta: (I, bool, Option<Vec<u8>>),
 	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
@@ -171,7 +171,7 @@ pub trait Backend<H: Hasher>: std::fmt::Debug {
 	where
 		I1: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		I2i: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		I2: IntoIterator<Item=(Vec<u8>, I2i)>,
+		I2: IntoIterator<Item=(Vec<u8>, (I2i, bool, Option<Vec<u8>>))>,
 		I3: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		<H as Hasher>::Out: Ord,
 	{
@@ -278,7 +278,7 @@ impl<'a, T: Backend<H>, H: Hasher> Backend<H> for &'a T {
 		&self,
 		storage_key: &[u8],
 		keyspace: &KeySpace,
-		delta: I,
+		delta: (I, bool, Option<Vec<u8>>)
 	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
@@ -347,6 +347,13 @@ impl<U: Consolidate, V: Consolidate> Consolidate for (U, V) {
 	}
 }
 
+impl<U: Consolidate, V: Consolidate, W: Consolidate> Consolidate for (U, V, W) {
+	fn consolidate(&mut self, other: Self) {
+		self.0.consolidate(other.0);
+		self.1.consolidate(other.1);
+		self.2.consolidate(other.2);
+	}
+}
 
 impl Consolidate for InMemoryTransaction {
 	fn consolidate(&mut self, other: Self) {
@@ -629,7 +636,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 		&self,
 		storage_key: &[u8],
 		_keyspace: &KeySpace,
-		delta: I,
+		delta: (I, bool, Option<Vec<u8>>),
 	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
@@ -641,7 +648,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 			.into_iter()
 			.flat_map(|map| map.iter().map(|(k, v)| (k.clone(), Some(v.clone()))));
 
-		let transaction: Vec<_> = delta.into_iter().collect();
+		let transaction: Vec<_> = delta.0.into_iter().collect();
 		let root = child_trie_root::<Layout<H>, _, _, _>(
 			storage_key.as_ref().expect("Initialized to some"),
 			existing_pairs.chain(transaction.iter().cloned())

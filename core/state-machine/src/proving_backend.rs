@@ -170,7 +170,7 @@ impl<'a, S, H, O> Backend<H> for ProvingBackend<'a, S, H, O>
 		O: 'a + KvBackend,
 {
 	type Error = String;
-	type Transaction = (S::Overlay, HashMap<Vec<u8>, Option<Vec<u8>>>);
+	type Transaction = (S::Overlay, HashMap<Vec<u8>, Option<Vec<u8>>>, Vec<KeySpace>);
 	type TrieBackendStorage = PrefixedMemoryDB<H>;
 	type KvBackend = O;
 
@@ -250,7 +250,7 @@ impl<'a, S, H, O> Backend<H> for ProvingBackend<'a, S, H, O>
 		&self,
 		storage_key: &[u8],
 		keyspace: &KeySpace,
-		delta: I,
+		delta: (I, bool, Option<Vec<u8>>)
 	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,

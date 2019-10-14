@@ -50,6 +50,23 @@ pub struct OverlayedValue {
 	pub extrinsics: Option<BTreeSet<u32>>,
 }
 
+/// Prospective or committed changeset of a child trie.
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct OverlayedChildTrie {
+	/// Changes on content.
+	pub map: HashMap<Vec<u8>, OverlayedValue>,
+	/// When the child trie got deleted this is
+	/// set to true and overlay primitive shall
+	/// indicate that we do not need to query
+	/// backend.
+	pub deleted: (bool, Option<BTreeSet<u32>>),
+	/// If child trie got moved, we store previous
+	/// child trie storage_key to be able to query the backend
+	/// accordingly.
+	pub previous_storage_key: (Option<Vec<u8>>, Option<BTreeSet<u32>>),
+}
+
 /// Prospective or committed overlayed change set.
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -57,9 +74,11 @@ pub struct OverlayedChangeSet {
 	/// Top level storage changes.
 	pub top: HashMap<Vec<u8>, OverlayedValue>,
 	/// Child storage changes.
-	pub children: HashMap<Vec<u8>, HashMap<Vec<u8>, OverlayedValue>>,
+	pub children: HashMap<Vec<u8>, OverlayedChildTrie>,
 	/// Non trie key value storage changes.
 	pub kv: HashMap<Vec<u8>, Option<Vec<u8>>>,
+	/// Keyspace marked for deletion (deletion of a full child).
+	pub keyspace_to_delete: BTreeSet<KeySpace>,
 }
 
 #[cfg(test)]
@@ -187,34 +206,21 @@ impl OverlayedChanges {
 	/// NOTE that this doesn't take place immediately but written into the prospective
 	/// change set, and still can be reverted by [`discard_prospective`].
 	///
+	/// Keyspace paramenter can be `None` iff the child storage does not exist in backend.
 	/// [`discard_prospective`]: #method.discard_prospective
-	pub(crate) fn clear_child_storage(&mut self, storage_key: &[u8]) {
+	pub(crate) fn kill_child_storage(&mut self, storage_key: &[u8], keyspace: Option<&KeySpace>) {
 		let extrinsic_index = self.extrinsic_index();
-		let map_entry = self.prospective.children.entry(storage_key.to_vec()).or_default();
-
-		map_entry.values_mut().for_each(|e| {
-			if let Some(extrinsic) = extrinsic_index {
-				e.extrinsics.get_or_insert_with(Default::default)
-					.insert(extrinsic);
-			}
-
-			e.value = None;
-		});
-
-		if let Some(committed_map) = self.committed.children.get(storage_key) {
-			for (key, value) in committed_map.iter() {
-				if !map_entry.contains_key(key) {
-					map_entry.insert(key.clone(), OverlayedValue {
-						value: None,
-						extrinsics: extrinsic_index.map(|i| {
-							let mut e = value.extrinsics.clone()
-								.unwrap_or_else(|| BTreeSet::default());
-							e.insert(i);
-							e
-						}),
-					});
-				}
-			}
+		let child_entry = self.prospective.children.entry(storage_key.to_vec()).or_default();
+		child_entry.map.clear();
+		child_entry.deleted.0 = true;
+		child_entry.previous_storage_key.0 = None;
+		if let Some(extrinsic) = extrinsic_index {
+			child_entry.deleted.1.get_or_insert_with(Default::default)
+				.insert(extrinsic);
+		}
+		if let Some(keyspace) = keyspace {
+			self.prospective.keyspace_to_delete.insert(keyspace.to_vec());
+			self.prospective.kv.insert(prefixed_keyspace_kv(keyspace), None);
 		}
 	}
 
@@ -255,6 +261,8 @@ impl OverlayedChanges {
 		}
 	}
 
+	// TODO EMCH return optional storage key to query (if child trie was removed or
+	// replaced it can be another storage_key to use to query the backend).
 	pub(crate) fn clear_child_prefix(&mut self, storage_key: &[u8], prefix: &[u8]) {
 		let extrinsic_index = self.extrinsic_index();
 		let map_entry = self.prospective.children.entry(storage_key.to_vec()).or_default();
@@ -332,17 +340,27 @@ impl OverlayedChanges {
 	/// transaction, a cache update should also be send for the root from full
 	/// storage root). (both are not in the overlay but change on fsr call).
 	///
+	/// TODO EMCH this need update on delete to clear cache.
+	///
 	/// Panics:
 	/// Will panic if there are any uncommitted prospective changes.
 	pub fn into_committed(self) -> (
 		impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		impl Iterator<Item=(Vec<u8>, impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>)>,
+		impl Iterator<Item=(Vec<u8>, (
+			impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
+			bool,
+			Option<Vec<u8>>,
+		))>,
 		impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 	){
 		assert!(self.prospective.is_empty());
 		(self.committed.top.into_iter().map(|(k, v)| (k, v.value)),
 			self.committed.children.into_iter()
-				.map(|(sk, v)| (sk, v.into_iter().map(|(k, v)| (k, v.value)))),
+				.map(|(sk, v)| (sk, (
+					v.map.into_iter().map(|(k, v)| (k, v.value)),
+					v.deleted.0,
+					v.previous_storage_key.0,
+				))),
 			self.committed.kv.into_iter())
 	}
 

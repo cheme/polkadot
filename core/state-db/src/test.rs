@@ -92,6 +92,9 @@ impl TestDb {
 		for k in commit.meta.deleted.iter() {
 			self.meta.remove(k);
 		}
+		for keyspace in commit.keyspace_deleted.iter() {
+			self.data.retain(|k, _v| !k[..].starts_with(keyspace.as_slice()));
+		}
 	}
 
 	pub fn commit_canonical(&mut self, commit: &CommitSetCanonical<H256>) {
@@ -176,6 +179,7 @@ pub fn make_commit(inserted: &[u64], deleted: &[u64]) -> CommitSet<H256> {
 		data: make_changeset(inserted, deleted),
 		meta: ChangeSet::default(),
 		kv: KvChangeSet::default(),
+		keyspace_deleted: Default::default(),
 	}
 }
 
@@ -184,6 +188,7 @@ pub fn make_commit_both(inserted: &[u64], deleted: &[u64]) -> CommitSetCanonical
 		data: make_changeset(inserted, deleted),
 		meta: ChangeSet::default(),
 		kv: make_kv_changeset(inserted, deleted),
+		keyspace_deleted: Default::default(),
 	}, None)
 }
 

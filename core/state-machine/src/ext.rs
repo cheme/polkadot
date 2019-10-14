@@ -383,10 +383,9 @@ where
 		let _guard = panic_handler::AbortGuard::force_abort();
 
 		self.mark_dirty();
-		self.overlay.clear_child_storage(storage_key.as_ref());
-		self.backend.for_keys_in_child_storage(storage_key.as_ref(), |key| {
-			self.overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
-		});
+		let keyspace = self.backend.get_child_keyspace(storage_key.as_ref())
+			.expect(EXT_NOT_ALLOWED_TO_FAIL);
+		self.overlay.kill_child_storage(storage_key.as_ref(), keyspace.as_ref());
 	}
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {
@@ -439,13 +438,40 @@ where
 		let child_storage_keys =
 			self.overlay.prospective.children.keys()
 				.chain(self.overlay.committed.children.keys());
-		let child_delta_iter = child_storage_keys.map(|storage_key|
-			(storage_key.clone(), self.overlay.committed.children.get(storage_key)
+		let child_delta_iter = child_storage_keys.map(|storage_key| {
+			let committed_storage_key = self.overlay.prospective.children.get(storage_key)
+				.and_then(|child| child.previous_storage_key.0.as_ref())
+				.unwrap_or_else(|| storage_key);
+			let deleted_committed = self.overlay.prospective.children.get(storage_key)
+				.map(|child| child.deleted.0)
+				.unwrap_or(false);
+	
+			let child_iter = self.overlay.committed.children.get(committed_storage_key)
 				.into_iter()
-				.flat_map(|map| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
+				.flat_map(|child| if !deleted_committed {
+					Some(child.map)
+				} else {
+					None
+				}).into_iter()
+				.flat_map(|cm| cm.iter().map(|(k, v)| (k.clone(), v.value.clone())))
 				.chain(self.overlay.prospective.children.get(storage_key)
 					.into_iter()
-					.flat_map(|map| map.iter().map(|(k, v)| (k.clone(), v.value.clone()))))));
+					.flat_map(|child| child.map.iter().map(|(k, v)| (k.clone(), v.value.clone()))));
+
+			let backend_storage_key = self.overlay.committed.children.get(committed_storage_key)
+				.and_then(|child| child.previous_storage_key.0.as_ref())
+				.unwrap_or_else(|| committed_storage_key);
+			let backend_storage_key = if backend_storage_key == storage_key {
+				None
+			} else {
+				Some(backend_storage_key.clone())
+			};
+			let backend_deleted = self.overlay.committed.children.get(committed_storage_key)
+				.map(|child| child.deleted.0)
+				.unwrap_or(deleted_committed);
+	
+			(storage_key.clone(), (child_iter, backend_deleted, backend_storage_key))
+		});
 
 
 		// compute and memoize

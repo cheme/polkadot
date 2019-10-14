@@ -65,6 +65,10 @@ pub enum InputPair<Number: BlockNumber> {
 	DigestIndex(DigestIndex<Number>, DigestIndexValue<Number>),
 	/// Element of { childtrie key => Childchange trie } where key has been changed } element mapping.
 	ChildIndex(ChildIndex<Number>, ChildIndexValue),
+	/// Element of { childtrie key => set of extrinsics where the child trie values were entirely
+	/// dropped or replaced } element mapping.
+	/// TODO EMCH represent it in the change trie somehow
+	ChildInvalidated(ChildIndex<Number>, ExtrinsicIndexValue),
 }
 
 /// Single input key of changes trie.
@@ -85,6 +89,7 @@ impl<Number: BlockNumber> InputPair<Number> {
 			InputPair::ExtrinsicIndex(ref key, _) => Some(&key.key),
 			InputPair::DigestIndex(ref key, _) => Some(&key.key),
 			InputPair::ChildIndex(_, _) => None,
+			InputPair::ChildInvalidated(_, _) => None,
 		}
 	}
 }
@@ -95,6 +100,7 @@ impl<Number: BlockNumber> Into<(Vec<u8>, Vec<u8>)> for InputPair<Number> {
 			InputPair::ExtrinsicIndex(key, value) => (key.encode(), value.encode()),
 			InputPair::DigestIndex(key, value) => (key.encode(), value.encode()),
 			InputPair::ChildIndex(key, value) => (key.encode(), value.encode()),
+			InputPair::ChildInvalidated(key, value) => (key.encode(), value.encode()),
 		}
 	}
 }
@@ -105,6 +111,7 @@ impl<Number: BlockNumber> Into<InputKey<Number>> for InputPair<Number> {
 			InputPair::ExtrinsicIndex(key, _) => InputKey::ExtrinsicIndex(key),
 			InputPair::DigestIndex(key, _) => InputKey::DigestIndex(key),
 			InputPair::ChildIndex(key, _) => InputKey::ChildIndex(key),
+			InputPair::ChildInvalidated(key, _) => InputKey::ChildIndex(key),
 		}
 	}
 }

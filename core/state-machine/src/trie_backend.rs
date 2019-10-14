@@ -94,7 +94,7 @@ impl<
 	H::Out: Ord,
 {
 	type Error = String;
-	type Transaction = (S::Overlay, HashMap<Vec<u8>, Option<Vec<u8>>>);
+	type Transaction = (S::Overlay, HashMap<Vec<u8>, Option<Vec<u8>>>, Vec<KeySpace>);
 	type TrieBackendStorage = S;
 	type KvBackend = O;
 
@@ -260,14 +260,14 @@ impl<
 			}
 		}
 
-		(root, (write_overlay, Default::default()))
+		(root, (write_overlay, Default::default(), Default::default()))
 	}
 
 	fn child_storage_root<I>(
 		&self,
 		storage_key: &[u8],
 		keyspace: &KeySpace,
-		delta: I,
+		delta: (I, bool, Option<Vec<u8>>)
 	) -> (Vec<u8>, bool, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
@@ -304,7 +304,7 @@ impl<
 
 		let is_default = root == default_root;
 
-		(root, is_default, (write_overlay, Default::default()))
+		(root, is_default, (write_overlay, Default::default(), Default::default()))
 	}
 
 	fn kv_transaction<I>(&self, delta: I) -> Self::Transaction
@@ -313,7 +313,7 @@ impl<
 	{
 		let mut result = self.kv_storage.pairs();
 		result.extend(delta.into_iter());
-		(Default::default(), result)
+		(Default::default(), result, Default::default())
 	}
 
 	fn as_trie_backend(&mut self) -> Option<

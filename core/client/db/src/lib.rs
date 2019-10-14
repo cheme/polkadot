@@ -476,7 +476,7 @@ impl<Block: BlockT> HeaderMetadata<Block> for BlockchainDb<Block> {
 /// Database transaction
 pub struct BlockImportOperation<Block: BlockT, H: Hasher> {
 	old_state: CachingState<Blake2Hasher, RefTrackingState<Block>, Block>,
-	db_updates: (PrefixedMemoryDB<H>, HashMap<Vec<u8>, Option<Vec<u8>>>),
+	db_updates: (PrefixedMemoryDB<H>, HashMap<Vec<u8>, Option<Vec<u8>>>, Vec<KeySpace>),
 	storage_updates: StorageCollection,
 	child_storage_updates: ChildStorageCollection,
 	changes_trie_updates: MemoryDB<H>,
@@ -530,7 +530,7 @@ impl<Block> client::backend::BlockImportOperation<Block, Blake2Hasher>
 
 	fn update_db_storage(
 		&mut self,
-		update: (PrefixedMemoryDB<Blake2Hasher>, HashMap<Vec<u8>, Option<Vec<u8>>>),
+		update: (PrefixedMemoryDB<Blake2Hasher>, HashMap<Vec<u8>, Option<Vec<u8>>>, Vec<KeySpace>),
 	) -> ClientResult<()> {
 		self.db_updates = update;
 		Ok(())
@@ -1248,6 +1248,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			let kv_changeset: state_db::KvChangeSet<Vec<u8>> = operation.db_updates.1
 				// use as vec from hash map
 				.into_iter().collect();
+			let keyspace_deleted = operation.db_updates.2;
 			let number_u64 = number.saturated_into::<u64>();
 			let commit = self.storage.state_db.insert_block(
 				&hash,
@@ -1255,6 +1256,7 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 				&pending_block.header.parent_hash(),
 				changeset,
 				kv_changeset,
+				keyspace_deleted,
 			).map_err(|e: state_db::Error<io::Error>|
 				client::error::Error::from(format!("State database error: {:?}", e)))?;
 			apply_state_commit(&mut transaction, commit, &self.storage.db, number_u64).map_err(|err|
@@ -1514,7 +1516,9 @@ fn apply_state_commit_no_kv(
 	for key in commit.meta.deleted.into_iter() {
 		transaction.delete(columns::STATE_META, &key[..]);
 	}
-
+	for keyspace in commit.keyspace_deleted.into_iter() {
+		transaction.delete_prefix(columns::STATE, &keyspace[..]);
+	}
 }
 
 
@@ -1563,7 +1567,7 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 		Ok(BlockImportOperation {
 			pending_block: None,
 			old_state,
-			db_updates: (PrefixedMemoryDB::default(), Default::default()),
+			db_updates: (PrefixedMemoryDB::default(), Default::default(), Default::default()),
 			storage_updates: Default::default(),
 			child_storage_updates: Default::default(),
 			changes_trie_updates: MemoryDB::default(),

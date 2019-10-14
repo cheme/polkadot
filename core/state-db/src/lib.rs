@@ -41,6 +41,7 @@ use std::collections::{HashSet, HashMap, hash_map::Entry};
 use noncanonical::NonCanonicalOverlay;
 use pruning::RefWindow;
 use log::trace;
+use primitives::child_trie::KeySpace;
 pub use branch::BranchRanges;
 
 /// Database value type.
@@ -161,6 +162,8 @@ pub struct CommitSet<H: Hash> {
 	pub meta: ChangeSet<Vec<u8>>,
 	/// Kv data changes.
 	pub kv: KvChangeSet<KvKey>,
+	/// Keyspace that has been deleted.
+	pub keyspace_deleted: Vec<KeySpace>,
 }
 
 /// Pruning constraints. If none are specified pruning is
@@ -248,6 +251,7 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 		parent_hash: &BlockHash,
 		mut changeset: ChangeSet<Key>,
 		kv_changeset: KvChangeSet<KvKey>,
+		keyspace_deleted: Vec<KeySpace>,
 	) -> Result<CommitSet<Key>, Error<E>> {
 
 		match self.mode {
@@ -264,10 +268,18 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 					// and use and ordered tuple (branchix, blocknumber)
 					// index to run.
 					kv: kv_changeset,
+					keyspace_deleted: Default::default(),
 				})
 			},
 			PruningMode::Constrained(_) | PruningMode::ArchiveCanonical => {
-				self.non_canonical.insert(hash, number, parent_hash, changeset, kv_changeset)
+				self.non_canonical.insert(
+					hash,
+					number,
+					parent_hash,
+					changeset,
+					kv_changeset,
+					keyspace_deleted,
+				)
 			}
 		}
 	}
@@ -284,6 +296,7 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 			Ok(()) => {
 				if self.mode == PruningMode::ArchiveCanonical {
 					commit.0.data.deleted.clear();
+					commit.0.keyspace_deleted.clear();
 				}
 			}
 			Err(e) => return Err(e),
@@ -474,8 +487,16 @@ impl<BlockHash: Hash, Key: Hash> StateDb<BlockHash, Key> {
 		parent_hash: &BlockHash,
 		changeset: ChangeSet<Key>,
 		kv_changeset: KvChangeSet<KvKey>,
+		keyspace_deleted: Vec<KeySpace>,
 	) -> Result<CommitSet<Key>, Error<E>> {
-		self.db.write().insert_block(hash, number, parent_hash, changeset, kv_changeset)
+		self.db.write().insert_block(
+			hash,
+			number,
+			parent_hash,
+			changeset,
+			kv_changeset,
+			keyspace_deleted,
+		)
 	}
 
 	/// Finalize a previously inserted block.
@@ -576,6 +597,7 @@ mod tests {
 					&H256::from_low_u64_be(0),
 					make_changeset(&[1], &[91]),
 					make_kv_changeset(&[1], &[81]),
+					Default::default(),
 				)
 				.unwrap(),
 		);
@@ -587,6 +609,7 @@ mod tests {
 					&H256::from_low_u64_be(1),
 					make_changeset(&[21], &[921, 1]),
 					make_kv_changeset(&[21], &[821, 1]),
+					Default::default(),
 				)
 				.unwrap(),
 		);
@@ -598,6 +621,7 @@ mod tests {
 					&H256::from_low_u64_be(1),
 					make_changeset(&[22], &[922]),
 					make_kv_changeset(&[22], &[822]),
+					Default::default(),
 				)
 				.unwrap(),
 		);
@@ -609,6 +633,7 @@ mod tests {
 					&H256::from_low_u64_be(21),
 					make_changeset(&[3], &[93]),
 					make_kv_changeset(&[3], &[83]),
+					Default::default(),
 				)
 				.unwrap(),
 		);
@@ -626,6 +651,7 @@ mod tests {
 					&H256::from_low_u64_be(3),
 					make_changeset(&[4], &[94]),
 					make_kv_changeset(&[4], &[84]),
+					Default::default(),
 				)
 				.unwrap(),
 		);

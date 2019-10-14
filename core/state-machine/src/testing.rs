@@ -259,13 +259,7 @@ impl<H, N> Externalities for TestExternalities<H, N> where
 	}
 
 	fn kill_child_storage(&mut self, storage_key: ChildStorageKey) {
-		let backend = &self.backend;
-		let overlay = &mut self.overlay;
-
-		overlay.clear_child_storage(storage_key.as_ref());
-		backend.for_keys_in_child_storage(storage_key.as_ref(), |key| {
-			overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
-		});
+		self.overlay.kill_child_storage(storage_key.as_ref());
 	}
 
 	fn clear_prefix(&mut self, prefix: &[u8]) {

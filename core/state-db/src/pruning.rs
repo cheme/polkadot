@@ -27,6 +27,7 @@ use codec::{Encode, Decode};
 use crate::{CommitSet, CommitSetCanonical, Error, MetaDb, to_meta_key, Hash,
 	KvKey};
 use log::{trace, warn};
+use primitives::child_trie::KeySpace;
 
 const LAST_PRUNED: &[u8] = b"last_pruned";
 const PRUNING_JOURNAL: &[u8] = b"pruning_journal";
@@ -58,6 +59,7 @@ struct DeathRow<BlockHash: Hash, Key: Hash> {
 	// in memory so we can make it lazy (load from
 	// pruning journal on actual prune).
 	kv_modified: HashSet<KvKey>,
+	keyspace_deleted: Vec<KeySpace>,
 }
 
 #[derive(Encode, Decode)]
@@ -70,6 +72,7 @@ struct JournalRecord<BlockHash: Hash, Key: Hash> {
 #[derive(Encode, Decode)]
 struct KvJournalRecord {
 	modified: Vec<KvKey>,
+	keyspace_deleted: Vec<KeySpace>,
 }
 
 fn to_journal_key(block: u64) -> Vec<u8> {
@@ -104,11 +107,11 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			match db.get_meta(&journal_key).map_err(|e| Error::Db(e))? {
 				Some(record) => {
 					let record: JournalRecord<BlockHash, Key> = Decode::decode(&mut record.as_slice())?;
-					let kv_record_inserted = if let Some(record) = db
+					let (kv_record_inserted, keyspace_deleted) = if let Some(record) = db
 						.get_meta(&kv_journal_key).map_err(|e| Error::Db(e))? {
 						let record = KvJournalRecord::decode(&mut record.as_slice())?;
-						record.modified
-					} else { Vec::new() };
+						(record.modified, record.keyspace_deleted)
+					} else { (Vec::new(), Vec::new()) };
 	
 					trace!(
 						target: "state-db",
@@ -125,6 +128,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 						record.inserted.into_iter(),
 						record.deleted,
 						kv_record_inserted.into_iter(),
+						keyspace_deleted,
 					);
 				},
 				None => break,
@@ -142,6 +146,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 		inserted: I,
 		deleted: Vec<Key>,
 		kv_modified: I2,
+		keyspace_deleted: Vec<KeySpace>,
 	) {
 		// remove all re-inserted keys from death rows
 		for k in inserted {
@@ -162,6 +167,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 				hash: hash.clone(),
 				deleted: deleted.into_iter().collect(),
 				kv_modified,
+				keyspace_deleted,
 				journal_key,
 				kv_journal_key,
 			}
@@ -200,6 +206,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			trace!(target: "state-db", "Pruning {:?} ({} deleted)", pruned.hash, pruned.deleted.len());
 			let index = self.pending_number + self.pending_prunings as u64;
 			commit.data.deleted.extend(pruned.deleted.iter().cloned());
+			commit.keyspace_deleted.extend(pruned.keyspace_deleted.iter().cloned());
 			if let Some(kv) = kv_prune.as_mut() {
 				kv.0 = std::cmp::max(kv.0, index);
 				kv.1.extend(pruned.kv_modified.iter().cloned());
@@ -224,6 +231,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 		let inserted = commit.data.inserted.iter().map(|(k, _)| k.clone()).collect();
 		let kv_modified = commit.kv.iter().map(|(k, _)| k.clone()).collect();
 		let deleted = ::std::mem::replace(&mut commit.data.deleted, Vec::new());
+		let keyspace_deleted = ::std::mem::replace(&mut commit.keyspace_deleted, Vec::new());
 		let journal_record = JournalRecord {
 			hash: hash.clone(),
 			inserted,
@@ -231,6 +239,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 		};
 		let kv_journal_record = KvJournalRecord {
 			modified: kv_modified,
+			keyspace_deleted: keyspace_deleted.clone(),
 		};
 		let block = self.pending_number + self.death_rows.len() as u64;
 		let journal_key = to_journal_key(block);
@@ -244,6 +253,7 @@ impl<BlockHash: Hash, Key: Hash> RefWindow<BlockHash, Key> {
 			journal_record.inserted.into_iter(),
 			journal_record.deleted,
 			kv_journal_record.modified.into_iter(),
+			keyspace_deleted,
 		);
 		self.pending_canonicalizations += 1;
 	}
