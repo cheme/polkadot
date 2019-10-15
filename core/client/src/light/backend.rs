@@ -283,7 +283,7 @@ where
 		// create a list of children keys to re-compute roots for
 		let child_delta = children.keys()
 			.cloned()
-			.map(|storage_key| (storage_key, None))
+			.map(|storage_key| (storage_key, (None, false, None)))
 			.collect::<Vec<_>>();
 
 		// make sure to persist the child storage
@@ -418,7 +418,12 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 		}
 	}
 
-	fn child_storage_root<I>(&self, key: &[u8], keyspace: &KeySpace, delta: I) -> (Vec<u8>, bool, Self::Transaction)
+	fn child_storage_root<I>(
+		&self,
+		key: &[u8],
+		keyspace: &KeySpace,
+		delta: (I, bool, Option<Vec<u8>>),
+	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{

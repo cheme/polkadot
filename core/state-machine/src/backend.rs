@@ -458,28 +458,26 @@ impl<H: Hasher> InMemory<H> {
 	/// Copy the state, with applied updates
 	pub fn update(
 		&self,
-		deleted: Vec<Vec<u8>>,
-		moved: Vec<(Vec<u8>, Vec<u8>)>,
 		changes: <Self as Backend<H>>::Transaction,
 	) -> Self {
 		let mut inner: HashMap<_, _> = self.inner.clone();
 		let mut kv: HashMap<_, _> = self.kv().clone();
-
 		// move apply first (in overlay a move of a deleted child resolve to a deletion).
 		let mut temp: HashMap<_, _> = HashMap::new();
-		for (from, to) in moved.into_iter() {
-			if let Some(v) = inner.remove(&Some(to)) {
-				temp.insert(to, v);
+		for (from, to) in changes.moved_child_trie.into_iter() {
+			let to = Some(to);
+			if let Some(v) = inner.remove(&to) {
+				temp.insert(to.as_ref().expect("Init above").clone(), v);
 			}
 			if let Some(v) = temp.remove(&from) {
-				inner.insert(Some(to), v);
+				inner.insert(to.clone(), v);
 			} else if let Some(v) = inner.remove(&Some(from)) {
-				inner.insert(Some(to), v);
+				inner.insert(to.clone(), v);
 			}
 		}
 
 		// apply delete
-		for deleted in deleted {
+		for deleted in changes.deleted_child_trie {
 			inner.remove(&Some(deleted));
 		}
 
@@ -589,6 +587,10 @@ pub struct InMemoryTransaction {
 	pub storage: Vec<(Option<Vec<u8>>, Vec<u8>, Option<Vec<u8>>)>,
 	/// Changes to non trie key value datas.
 	pub kv: HashMap<Vec<u8>, Option<Vec<u8>>>,
+	/// Deleted child trie storage.
+	pub deleted_child_trie: Vec<Vec<u8>>,
+	/// Moved child trie storage.
+	pub moved_child_trie: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 impl<H: Hasher> Backend<H> for InMemory<H> {
@@ -653,7 +655,12 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 
 		let full_transaction = transaction.into_iter().map(|(k, v)| (None, k, v)).collect();
 
-		(root, InMemoryTransaction { storage: full_transaction, kv: Default::default() })
+		(root, InMemoryTransaction {
+			storage: full_transaction,
+			kv: Default::default(),
+			deleted_child_trie: Default::default(),
+			moved_child_trie: Default::default(),
+		})
 	}
 
 	fn child_storage_root<I>(
@@ -691,7 +698,12 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 		(
 			root,
 			is_default,
-			InMemoryTransaction { storage: full_transaction, kv: Default::default() },
+			InMemoryTransaction {
+				storage: full_transaction,
+				kv: Default::default(),
+				moved_child_trie: Default::default(),
+				deleted_child_trie: Default::default(),
+			},
 		)
 	}
 
@@ -701,7 +713,12 @@ impl<H: Hasher> Backend<H> for InMemory<H> {
 	{
 		let mut kv = self.kv().clone();
 		kv.extend(delta.into_iter());
-		InMemoryTransaction { storage: Default::default(), kv}
+		InMemoryTransaction {
+			storage: Default::default(),
+			kv,
+			moved_child_trie: Default::default(),
+			deleted_child_trie: Default::default(),
+		}
 	}
 
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {

@@ -358,6 +358,8 @@ mod tests {
 		let mut in_memory = in_memory.update(InMemoryTransaction {
 			storage: contents,
 			kv: Default::default(),
+			deleted_child_trie: Default::default(),
+			moved_child_trie: Default::default(),
 		});
 
 		let in_memory_root = in_memory.storage_root(::std::iter::empty()).0;
@@ -391,10 +393,12 @@ mod tests {
 		let mut in_memory = in_memory.update(InMemoryTransaction {
 			storage: contents,
 			kv: Default::default(),
+			deleted_child_trie: Default::default(),
+			moved_child_trie: Default::default(),
 		});
 		let in_memory_root = in_memory.full_storage_root::<_, Vec<_>, _, _>(
 			::std::iter::empty(),
-			in_memory.child_storage_keys().map(|k|(k.to_vec(), Vec::new())),
+			in_memory.child_storage_keys().map(|k|(k.to_vec(), Default::default())),
 			::std::iter::empty(),
 		).unwrap().0;
 		(0..64).for_each(|i| assert_eq!(

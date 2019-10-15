@@ -88,6 +88,7 @@ impl FromIterator<(Vec<u8>, OverlayedValue)> for OverlayedChangeSet {
 			top: iter.into_iter().collect(),
 			children: Default::default(),
 			kv: Default::default(),
+			keyspace_to_delete: Default::default(),
 		}
 	}
 }
@@ -140,20 +141,43 @@ impl OverlayedChanges {
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be refered
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
-	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Option<Option<&[u8]>> {
-		if let Some(map) = self.prospective.children.get(storage_key) {
-			if let Some(val) = map.get(key) {
-				return Some(val.value.as_ref().map(AsRef::as_ref));
+	/// Also return a possible storage key update if child trie got deleted or moved.
+	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> (
+		Option<Option<&[u8]>>,
+		Option<Option<&[u8]>>,
+	) {
+		let mut commited_storage_key = None;
+		if let Some(child_trie) = self.prospective.children.get(storage_key) {
+			commited_storage_key = if child_trie.deleted.0 {
+				Some(None)
+			} else {
+				child_trie.previous_storage_key.0.as_ref().map(|v| Some(v.as_slice()))
+			};
+			if let Some(val) = child_trie.map.get(key) {
+				return (Some(val.value.as_ref().map(AsRef::as_ref)), commited_storage_key);
 			}
 		}
 
-		if let Some(map) = self.committed.children.get(storage_key) {
-			if let Some(val) = map.get(key) {
-				return Some(val.value.as_ref().map(AsRef::as_ref));
+		let storage_key = if let Some(Some(key)) = commited_storage_key {
+			key
+		} else {
+			storage_key
+		};
+		let mut backend_storage_key = commited_storage_key;
+
+		if let Some(child_trie) = self.committed.children.get(storage_key) {
+			backend_storage_key = if child_trie.deleted.0 {
+				Some(None)
+			} else {
+				child_trie.previous_storage_key.0.as_ref().map(|v| Some(v.as_slice()))
+			};
+
+			if let Some(val) = child_trie.map.get(key) {
+				return (Some(val.value.as_ref().map(AsRef::as_ref)), backend_storage_key);
 			}
 		}
 
-		None
+		(None, backend_storage_key)
 	}
 
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be refered
@@ -184,8 +208,8 @@ impl OverlayedChanges {
 	/// `None` can be used to delete a value specified by the given key.
 	pub(crate) fn set_child_storage(&mut self, storage_key: Vec<u8>, key: Vec<u8>, val: Option<Vec<u8>>) {
 		let extrinsic_index = self.extrinsic_index();
-		let map_entry = self.prospective.children.entry(storage_key).or_default();
-		let entry = map_entry.entry(key).or_default();
+		let child_entry = self.prospective.children.entry(storage_key).or_default();
+		let entry = child_entry.map.entry(key).or_default();
 		entry.value = val;
 
 		if let Some(extrinsic) = extrinsic_index {
@@ -262,13 +286,17 @@ impl OverlayedChanges {
 		}
 	}
 
-	// TODO EMCH return optional storage key to query (if child trie was removed or
-	// replaced it can be another storage_key to use to query the backend).
-	pub(crate) fn clear_child_prefix(&mut self, storage_key: &[u8], prefix: &[u8]) {
+	/// return a possible child update, `Some(None)` if deleted, `Some(Some(new_storage_key))`
+	/// if original location differs.
+	pub(crate) fn clear_child_prefix(&mut self, storage_key: &[u8], prefix: &[u8])
+		-> Option<Option<Vec<u8>>> {
 		let extrinsic_index = self.extrinsic_index();
-		let map_entry = self.prospective.children.entry(storage_key.to_vec()).or_default();
+		let child_entry = self.prospective.children.entry(storage_key.to_vec()).or_default();
 
-		for (key, entry) in map_entry.iter_mut() {
+
+
+		for (key, entry) in child_entry.map.iter_mut() {
+
 			if key.starts_with(prefix) {
 				entry.value = None;
 
@@ -279,12 +307,24 @@ impl OverlayedChanges {
 			}
 		}
 
+		let mut	n_storage_key = if child_entry.deleted.0 {
+			return Some(None)
+		} else {
+			child_entry.previous_storage_key.0.as_ref().map(|v| Some(v.as_slice()))
+		};
+
+		let storage_key = if let Some(Some(key)) = n_storage_key {
+			key
+		} else {
+			storage_key
+		};
+
 		if let Some(child_committed) = self.committed.children.get(storage_key) {
 			// Then do the same with keys from commited changes.
 			// NOTE that we are making changes in the prospective change set.
-			for key in child_committed.keys() {
+			for key in child_committed.map.keys() {
 				if key.starts_with(prefix) {
-					let entry = map_entry.entry(key.clone()).or_default();
+					let entry = child_entry.map.entry(key.clone()).or_default();
 					entry.value = None;
 
 					if let Some(extrinsic) = extrinsic_index {
@@ -293,7 +333,13 @@ impl OverlayedChanges {
 					}
 				}
 			}
+			n_storage_key = if child_committed.deleted.0 {
+				Some(None)
+			} else {
+				child_committed.previous_storage_key.0.as_ref().map(|v| Some(v.as_slice()))
+			};
 		}
+		n_storage_key.map(|o| o.map(|v| v.to_vec()))
 	}
 
 	/// Discard prospective changes to state.
@@ -318,10 +364,34 @@ impl OverlayedChanges {
 			for (key, val) in self.prospective.kv.drain() {
 				self.committed.kv.insert(key, val);
 			}
-			for (storage_key, mut map) in self.prospective.children.drain() {
-				let map_dest = self.committed.children.entry(storage_key).or_default();
-				for (key, val) in map.drain() {
-					let entry = map_dest.entry(key).or_default();
+			let mut temp = HashMap::new();
+			for (storage_key, mut child) in self.prospective.children.drain() {
+				if let Some(old_key) = child.previous_storage_key.0.as_ref() {
+					if let Some(child) = self.committed.children.remove(&storage_key) {
+						temp.insert(storage_key.clone(), child);
+					}
+					if let Some(child) = temp.remove(old_key) {
+						self.committed.children.insert(storage_key.clone(), child);
+					} else  {
+						if let Some(child) = temp.remove(old_key) {
+							self.committed.children.insert(storage_key.clone(), child);
+						} else if let Some(child) = self.committed.children.remove(old_key) {
+							self.committed.children.insert(storage_key.clone(), child);
+						}
+					};	
+				}
+				let child_dest = self.committed.children.entry(storage_key).or_default();
+				if child.deleted.0 {
+					child_dest.deleted = child.deleted;
+					child_dest.map.clear();
+				}
+				if child.previous_storage_key.0.is_some() {
+					// overwrite possibly previous move as committed is at the right
+					// location (move occurs before).
+					child_dest.previous_storage_key = child.previous_storage_key;
+				}
+				for (key, val) in child.map.drain() {
+					let entry = child_dest.map.entry(key).or_default();
 					entry.value = val.value;
 
 					if let Some(prospective_extrinsics) = val.extrinsics {

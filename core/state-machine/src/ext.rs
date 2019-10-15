@@ -239,12 +239,14 @@ where
 
 	fn child_storage(&self, storage_key: ChildStorageKey, key: &[u8]) -> Option<Vec<u8>> {
 		let _guard = panic_handler::AbortGuard::force_abort();
-		let result = self.overlay
-			.child_storage(storage_key.as_ref(), key)
-			.map(|x| x.map(|x| x.to_vec()))
-			.unwrap_or_else(||
-				self.backend.child_storage(storage_key.as_ref(), key).expect(EXT_NOT_ALLOWED_TO_FAIL)
-			);
+		let result = match self.overlay.child_storage(storage_key.as_ref(), key) {
+			(Some(result), _) => result.map(|x| x.to_vec()),
+			(None, None) => self.backend.child_storage(storage_key.as_ref(), key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(Some(sk))) => self.backend.child_storage(sk.as_ref(), key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(None)) => None,
+		};
 
 		trace!(target: "state-trace", "{:04x}: GetChild({}) {}={:?}",
 			self.id,
@@ -258,12 +260,14 @@ where
 
 	fn child_storage_hash(&self, storage_key: ChildStorageKey, key: &[u8]) -> Option<H256> {
 		let _guard = panic_handler::AbortGuard::force_abort();
-		let result = self.overlay
-			.child_storage(storage_key.as_ref(), key)
-			.map(|x| x.map(|x| H::hash(x)))
-			.unwrap_or_else(||
-				self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
-			);
+		let result = match self.overlay.child_storage(storage_key.as_ref(), key) {
+			(Some(result), _) => result.map(|x| H::hash(x)),
+			(None, None) => self.backend.child_storage_hash(storage_key.as_ref(), key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(Some(sk))) => self.backend.child_storage_hash(sk.as_ref(), key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(None)) => None,
+		};
 
 		trace!(target: "state-trace", "{:04x}: ChildHash({}) {}={:?}",
 			self.id,
@@ -325,10 +329,12 @@ where
 		let _guard = panic_handler::AbortGuard::force_abort();
 
 		let result = match self.overlay.child_storage(storage_key.as_ref(), key) {
-			Some(x) => x.is_some(),
-			_ => self.backend
-				.exists_child_storage(storage_key.as_ref(), key)
+			(Some(result), _) => result.is_some(),
+			(None, None) => self.backend.exists_child_storage(storage_key.as_ref(), key)
 				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(Some(sk))) => self.backend.exists_child_storage(sk.as_ref(), key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(None)) => false,
 		};
 
 		trace!(target: "state-trace", "{:04x}: ChildExists({}) {}={:?}",
@@ -414,10 +420,21 @@ where
 		let _guard = panic_handler::AbortGuard::force_abort();
 
 		self.mark_dirty();
-		self.overlay.clear_child_prefix(storage_key.as_ref(), prefix);
-		self.backend.for_child_keys_with_prefix(storage_key.as_ref(), prefix, |key| {
-			self.overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
-		});
+
+		let backend_storage_key = match self.overlay.clear_child_prefix(storage_key.as_ref(), prefix) {
+			Some(Some(old_key)) => Some(old_key),
+			Some(None) => None,
+			None => Some(storage_key.as_ref().to_vec()),
+		};
+
+		if let Some(backend_storage_key) = backend_storage_key {
+			let backend = &self.backend;
+			let overlay = &mut self.overlay;
+			backend.for_child_keys_with_prefix(backend_storage_key.as_ref(), prefix, |key| {
+				overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
+			});
+		}
+	
 	}
 
 	fn chain_id(&self) -> u64 {
@@ -446,8 +463,8 @@ where
 	
 			let child_iter = self.overlay.committed.children.get(committed_storage_key)
 				.into_iter()
-				.flat_map(|child| if !deleted_committed {
-					Some(child.map)
+				.flat_map(move |child| if !deleted_committed {
+					Some(&child.map)
 				} else {
 					None
 				}).into_iter()
@@ -517,8 +534,8 @@ where
 
 			let child_iter = self.overlay.committed.children.get(committed_storage_key)
 				.into_iter()
-				.flat_map(|child| if !deleted_committed {
-					Some(child.map)
+				.flat_map(move |child| if !deleted_committed {
+					Some(&child.map)
 				} else {
 					None
 				}).into_iter()

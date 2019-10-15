@@ -1029,7 +1029,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		Option<Option<ChangesUpdate<Block>>>,
 		Option<(
 			Vec<(Vec<u8>, Option<Vec<u8>>)>,
-			Vec<(Vec<u8>, Vec<(Vec<u8>, Option<Vec<u8>>)>)>,
+			Vec<(Vec<u8>, Vec<(Vec<u8>, Option<Vec<u8>>)>, bool, Option<Vec<u8>>)>,
 			Vec<(Vec<u8>, Option<Vec<u8>>)>,
 		)>
 	)>
@@ -1084,7 +1084,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 				overlay.commit_prospective();
 
 				let (top, children, kv) = overlay.into_committed();
-				let children = children.map(|(sk, it)| (sk, it.collect())).collect();
+				let children = children.map(|(sk, it)| (sk, it.0.collect(), it.1, it.2)).collect();
 				if import_headers.post().state_root() != &storage_update.1 {
 					return Err(error::Error::InvalidStateRoot);
 				}
@@ -1194,7 +1194,9 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 				.trigger(
 					&notify_import.hash,
 					storage_changes.0.into_iter(),
-					storage_changes.1.into_iter().map(|(sk, v)| (sk, v.into_iter())),
+					storage_changes.1.into_iter()
+						// TODO EMCH this skip child deletion and child move
+						.map(|(sk, v, _, _)| (sk, v.into_iter())),
 				);
 		}
 

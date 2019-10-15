@@ -507,7 +507,11 @@ where
 
 		let child_delta = children.into_iter()
 			.map(|(storage_key, child_overlay)|
-				(storage_key, child_overlay.into_iter().map(|(k, v)| (k, Some(v)))));
+				(storage_key, (
+					child_overlay.into_iter().map(|(k, v)| (k, Some(v))),
+					Default::default(),
+					Default::default(),
+				)));
 
 		let (root, transaction) = self.old_state.full_storage_root(
 			top.into_iter().map(|(k, v)| (k, Some(v))),

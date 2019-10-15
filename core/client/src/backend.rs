@@ -34,7 +34,7 @@ use parking_lot::Mutex;
 pub type StorageCollection = Vec<(Vec<u8>, Option<Vec<u8>>)>;
 
 /// In memory arrays of storage values for multiple child tries.
-pub type ChildStorageCollection = Vec<(Vec<u8>, StorageCollection)>;
+pub type ChildStorageCollection = Vec<(Vec<u8>, StorageCollection, bool, Option<Vec<u8>>)>;
 
 pub(crate) struct ImportSummary<Block: BlockT> {
 	pub(crate) hash: Block::Hash,

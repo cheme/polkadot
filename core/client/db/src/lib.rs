@@ -185,7 +185,12 @@ impl<B: BlockT> StateBackend<Blake2Hasher> for RefTrackingState<B> {
 		self.state.storage_root(delta)
 	}
 
-	fn child_storage_root<I>(&self, storage_key: &[u8], keyspace: &KeySpace, delta: I) -> (Vec<u8>, bool, Self::Transaction)
+	fn child_storage_root<I>(
+		&self,
+		storage_key: &[u8],
+		keyspace: &KeySpace,
+		delta: (I, bool, Option<Vec<u8>>),
+	) -> (Vec<u8>, bool, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 	{
@@ -554,7 +559,7 @@ impl<Block> client::backend::BlockImportOperation<Block, Blake2Hasher>
 
 		let child_delta = children.into_iter()
 			.map(|(storage_key, child_overlay)|
-				(storage_key, child_overlay.into_iter().map(|(k, v)| (k, Some(v)))));
+				(storage_key, (child_overlay.into_iter().map(|(k, v)| (k, Some(v))), false, None)));
 
 		let (root, transaction) = self.old_state.full_storage_root(
 			top.into_iter().map(|(k, v)| (k, Some(v))),

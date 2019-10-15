@@ -102,10 +102,14 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 		.into_iter()
 		.map(|(k, v)| (None, k, Some(v)))
 		.collect::<Vec<_>>();
-	let mut storage = InMemoryState::<Hasher>::default().update(InMemoryTransaction {
-		storage: transaction,
-		kv: Default::default(),
-	});
+	let mut storage = InMemoryState::<Hasher>::default().update(
+		InMemoryTransaction {
+			storage: transaction,
+			kv: Default::default(),
+			moved_child_trie: Default::default(),
+			deleted_child_trie: Default::default(),
+		},
+	);
 	let trie_storage = storage.as_trie_backend()
 		.expect("InMemoryState::as_trie_backend always returns Some; qed");
 	prove_read_on_trie_backend(

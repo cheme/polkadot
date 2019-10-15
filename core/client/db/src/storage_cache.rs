@@ -353,7 +353,8 @@ impl<H: Hasher, B: BlockT> CacheChanges<H, B> {
 			}
 			let mut modifications = HashSet::new();
 			let mut child_modifications = HashSet::new();
-			child_changes.into_iter().for_each(|(sk, changes)|
+			// TODO EMCH handle deleted and moved.
+			child_changes.into_iter().for_each(|(sk, changes, _deleted, _moved)|
 				for (k, v) in changes.into_iter() {
 					let k = (sk.clone(), k);
 					if is_best {
@@ -572,7 +573,7 @@ impl<H: Hasher, S: StateBackend<H>, B: BlockT> StateBackend<H> for CachingState<
 		&self,
 		storage_key: &[u8],
 		keyspace: &KeySpace,
-		delta: I,
+		delta: (I, bool, Option<Vec<u8>>),
 	) -> (Vec<u8>, bool, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,

@@ -96,11 +96,11 @@ impl<H: Hasher<Out=H256>, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 	/// Insert key/value into backend
 	pub fn insert(&mut self, k: Vec<u8>, v: Vec<u8>) {
 		self.backend = self.backend.update(
-			Default::default(),
-			Default::default(),
 			InMemoryTransaction {
 				storage: vec![(None, k, Some(v))],
 				kv: Default::default(),
+				moved_child_trie: Default::default(),
+				deleted_child_trie: Default::default(),
 			},
 		);
 	}
@@ -108,11 +108,11 @@ impl<H: Hasher<Out=H256>, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 	/// Insert key/value into ofstate information backend
 	pub fn insert_kv(&mut self, k: Vec<u8>, v: Vec<u8>) {
 		self.backend = self.backend.update(
-			Default::default(),
-			Default::default(),
 			InMemoryTransaction {
 				storage: Default::default(),
 				kv: Some((k, Some(v))).into_iter().collect(),
+				moved_child_trie: Default::default(),
+				deleted_child_trie: Default::default(),
 			}
 		);
 	}
@@ -145,16 +145,16 @@ impl<H: Hasher<Out=H256>, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 			.chain(self.overlay.prospective.top.clone().into_iter())
 			.map(|(k, v)| (None, k, v.value));
 
-		let mut deleted_children = Vec::new();
-		let mut moved_children = Vec::new();
+		let mut deleted_child_trie = Vec::new();
+		let mut moved_child_trie = Vec::new();
 		let children = self.overlay.committed.children.clone().into_iter()
 			.chain(self.overlay.prospective.children.clone().into_iter())
 			.flat_map(|(storage_key, child)| {
 				if child.deleted.0 {
-					deleted_children.push(storage_key.clone());
+					deleted_child_trie.push(storage_key.clone());
 				}
 				if let Some(origin) = child.previous_storage_key.0 {
-					moved_children.push((origin, storage_key.clone()));
+					moved_child_trie.push((origin, storage_key.clone()));
 				}
 				child.map.into_iter()
 					.map(|(k, v)| (Some(storage_key.clone()), k, v.value))
@@ -167,9 +167,9 @@ impl<H: Hasher<Out=H256>, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 			.chain(self.overlay.prospective.kv.clone().into_iter());
 
 		self.backend.update(
-			deleted_children,
-			moved_children,
 			InMemoryTransaction {
+				deleted_child_trie,
+				moved_child_trie,
 				storage,
 				kv: kv.collect(),
 			},
@@ -239,13 +239,14 @@ impl<H, N> Externalities for TestExternalities<H, N> where
 	}
 
 	fn child_storage(&self, storage_key: ChildStorageKey, key: &[u8]) -> Option<Vec<u8>> {
-		self.overlay
-			.child_storage(storage_key.as_ref(), key)
-			.map(|x| x.map(|x| x.to_vec()))
-			.unwrap_or_else(|| self.backend
-				.child_storage(storage_key.as_ref(), key)
-				.expect(EXT_NOT_ALLOWED_TO_FAIL)
-			)
+		match self.overlay.child_storage(storage_key.as_ref(), key) {
+			(Some(result), _) => result.map(|x| x.to_vec()),
+			(None, None) => self.backend.child_storage(storage_key.as_ref(), key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(Some(sk))) => self.backend.child_storage(sk.as_ref(), key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL),
+			(None, Some(None)) => None,
+		}
 	}
 
 	fn child_storage_hash(&self, storage_key: ChildStorageKey, key: &[u8]) -> Option<H256> {
@@ -301,13 +302,19 @@ impl<H, N> Externalities for TestExternalities<H, N> where
 	}
 
 	fn clear_child_prefix(&mut self, storage_key: ChildStorageKey, prefix: &[u8]) {
-		self.overlay.clear_child_prefix(storage_key.as_ref(), prefix);
+		let backend_storage_key = match self.overlay.clear_child_prefix(storage_key.as_ref(), prefix) {
+			Some(Some(old_key)) => Some(old_key),
+			Some(None) => None,
+			None => Some(storage_key.as_ref().to_vec()),
+		};
 
-		let backend = &self.backend;
-		let overlay = &mut self.overlay;
-		backend.for_child_keys_with_prefix(storage_key.as_ref(), prefix, |key| {
-			overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
-		});
+		if let Some(backend_storage_key) = backend_storage_key {
+			let backend = &self.backend;
+			let overlay = &mut self.overlay;
+			backend.for_child_keys_with_prefix(backend_storage_key.as_ref(), prefix, |key| {
+				overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
+			});
+		}
 	}
 
 	fn chain_id(&self) -> u64 { 42 }
@@ -325,8 +332,8 @@ impl<H, N> Externalities for TestExternalities<H, N> where
 	
 			let child_iter = self.overlay.committed.children.get(committed_storage_key)
 				.into_iter()
-				.flat_map(|child| if !deleted_committed {
-					Some(child.map)
+				.flat_map(move |child| if !deleted_committed {
+					Some(&child.map)
 				} else {
 					None
 				}).into_iter()
@@ -372,8 +379,8 @@ impl<H, N> Externalities for TestExternalities<H, N> where
 
 		let child_iter = self.overlay.committed.children.get(committed_storage_key)
 			.into_iter()
-			.flat_map(|child| if !deleted_committed {
-				Some(child.map)
+			.flat_map(move |child| if !deleted_committed {
+				Some(&child.map)
 			} else {
 				None
 			}).into_iter()

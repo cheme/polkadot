@@ -273,15 +273,21 @@ impl<
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 			H::Out: Ord
 	{
+		// move only between same type so storage_key use does not matter here.
+		let storage_key = delta.2.as_ref().map(Vec::as_ref).unwrap_or(storage_key);
 		let default_root = default_child_trie_root::<Layout<H>>(storage_key);
 
 		let mut write_overlay = S::Overlay::default();
-		let mut root = match self.storage(storage_key) {
-			Ok(value) => value.unwrap_or(default_child_trie_root::<Layout<H>>(storage_key)),
-			Err(e) => {
-				warn!(target: "trie", "Failed to read child storage root: {}", e);
-				default_root.clone()
-			},
+		let mut root = if delta.1 {
+			default_root.clone()
+		} else {
+			match self.storage(storage_key) {
+				Ok(value) => value.unwrap_or(default_root.clone()),
+				Err(e) => {
+					warn!(target: "trie", "Failed to read child storage root: {}", e);
+					default_root.clone()
+				},
+			}
 		};
 
 		{
@@ -295,7 +301,7 @@ impl<
 				&mut eph,
 				keyspace,
 				root.clone(),
-				delta
+				delta.0
 			) {
 				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
