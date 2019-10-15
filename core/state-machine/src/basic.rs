@@ -198,7 +198,11 @@ impl Externalities for BasicExternalities {
 			let delta = child.clone().into_iter().map(|(k, v)| (k, Some(v)));
 			// no transaction produce, just send a dummy
 			let keyspace = NO_CHILD_KEYSPACE.to_vec();
-			InMemory::<Blake2Hasher>::default().child_storage_root(storage_key.as_ref(), &keyspace, delta).0
+			InMemory::<Blake2Hasher>::default().child_storage_root(
+				storage_key.as_ref(),
+				&keyspace,
+				(delta, false, None),
+			).0
 		} else {
 			default_child_trie_root::<Layout<Blake2Hasher>>(storage_key.as_ref())
 		}

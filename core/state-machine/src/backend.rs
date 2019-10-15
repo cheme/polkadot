@@ -456,9 +456,33 @@ impl<H: Hasher> InMemory<H> {
 	}
 
 	/// Copy the state, with applied updates
-	pub fn update(&self, changes: <Self as Backend<H>>::Transaction) -> Self {
+	pub fn update(
+		&self,
+		deleted: Vec<Vec<u8>>,
+		moved: Vec<(Vec<u8>, Vec<u8>)>,
+		changes: <Self as Backend<H>>::Transaction,
+	) -> Self {
 		let mut inner: HashMap<_, _> = self.inner.clone();
 		let mut kv: HashMap<_, _> = self.kv().clone();
+
+		// move apply first (in overlay a move of a deleted child resolve to a deletion).
+		let mut temp: HashMap<_, _> = HashMap::new();
+		for (from, to) in moved.into_iter() {
+			if let Some(v) = inner.remove(&Some(to)) {
+				temp.insert(to, v);
+			}
+			if let Some(v) = temp.remove(&from) {
+				inner.insert(Some(to), v);
+			} else if let Some(v) = inner.remove(&Some(from)) {
+				inner.insert(Some(to), v);
+			}
+		}
+
+		// apply delete
+		for deleted in deleted {
+			inner.remove(&Some(deleted));
+		}
+
 		for (storage_key, key, val) in changes.storage {
 			match val {
 				Some(v) => { inner.entry(storage_key).or_default().insert(key, v); },

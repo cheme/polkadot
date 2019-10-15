@@ -170,14 +170,13 @@ where
 			.collect()
 	}
 
-	fn get_child_keyspace(&self, storage_key: &[u8]) -> Option<KeySpace> {
+	fn get_child_keyspace(&self, storage_key: &[u8]) -> Result<Option<KeySpace>, ()> {
 		match self.overlay.kv_storage(prefixed_keyspace_kv(storage_key).as_slice()) {
-			Some(Some(keyspace)) => return Some(keyspace.to_vec()),
-			Some(None) => return None,
+			Some(Some(keyspace)) => return Ok(Some(keyspace.to_vec())),
+			Some(None) => return Ok(None),
 			None => (),
 		}
-		self.backend.get_child_keyspace(storage_key)
-			.expect(EXT_NOT_ALLOWED_TO_FAIL)
+		self.backend.get_child_keyspace(storage_key).map_err(|_e| ())
 	}
 }
 
@@ -435,8 +434,7 @@ where
 			return root.clone();
 		}
 
-		let child_storage_keys =
-			self.overlay.prospective.children.keys()
+		let child_storage_keys = self.overlay.prospective.children.keys()
 				.chain(self.overlay.committed.children.keys());
 		let child_delta_iter = child_storage_keys.map(|storage_key| {
 			let committed_storage_key = self.overlay.prospective.children.get(storage_key)
@@ -505,22 +503,64 @@ where
 			);
 			root
 		} else {
-			let storage_key = storage_key.as_ref();
+			let storage_key = storage_key.as_ref().to_vec();
+			let storage_key = &storage_key;
 
-			let delta = self.overlay.committed.children.get(storage_key)
+			// TODO EMCH push block as fn (use in storage_root to).
+
+			let committed_storage_key = self.overlay.prospective.children.get(storage_key)
+				.and_then(|child| child.previous_storage_key.0.as_ref())
+				.unwrap_or_else(|| storage_key);
+			let deleted_committed = self.overlay.prospective.children.get(storage_key)
+				.map(|child| child.deleted.0)
+				.unwrap_or(false);
+
+			let child_iter = self.overlay.committed.children.get(committed_storage_key)
 				.into_iter()
-				.flat_map(|map| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
+				.flat_map(|child| if !deleted_committed {
+					Some(child.map)
+				} else {
+					None
+				}).into_iter()
+				.flat_map(|cm| cm.iter().map(|(k, v)| (k.clone(), v.value.clone())))
 				.chain(self.overlay.prospective.children.get(storage_key)
-						.into_iter()
-						.flat_map(|map| map.iter().map(|(k, v)| (k.clone(), v.value.clone()))));
+					.into_iter()
+					.flat_map(|child| child.map.iter().map(|(k, v)| (k.clone(), v.value.clone()))));
 
-			let keyspace = self.get_child_keyspace(storage_key)
+			let backend_storage_key = self.overlay.committed.children.get(committed_storage_key)
+				.and_then(|child| child.previous_storage_key.0.as_ref())
+				.unwrap_or_else(|| committed_storage_key);
+
+			let backend_deleted = self.overlay.committed.children.get(committed_storage_key)
+				.map(|child| child.deleted.0)
+				.unwrap_or(deleted_committed);
+
+			// End block TODO EMCH
+
+			let keyspace = self.get_child_keyspace(backend_storage_key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL)
 				// no need to generate keyspace here (tx are dropped)
 				.unwrap_or_else(|| NO_CHILD_KEYSPACE.to_vec());
-			let root = self.backend.child_storage_root(storage_key, &keyspace, delta).0;
 
-			self.overlay.set_storage(storage_key.to_vec(), Some(root.to_vec()));
+			let backend_storage_key = if backend_storage_key == storage_key {
+				None
+			} else {
+				Some(backend_storage_key.clone())
+			};
+	
+			let (root, is_empty, _) = self.backend.child_storage_root(
+				storage_key,
+				&keyspace,
+				(child_iter, backend_deleted, backend_storage_key),
+			);
 
+			if is_empty {
+				self.overlay.set_kv_storage(prefixed_keyspace_kv(storage_key), None);
+				self.overlay.set_storage(storage_key.clone(), None);
+			} else {
+				self.overlay.set_storage(storage_key.clone(), Some(root.clone()));
+			}
+	
 			trace!(target: "state-trace", "{:04x}: ChildRoot({}) {}",
 				self.id,
 				HexDisplay::from(&storage_key.as_ref()),

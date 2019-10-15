@@ -206,7 +206,8 @@ impl OverlayedChanges {
 	/// NOTE that this doesn't take place immediately but written into the prospective
 	/// change set, and still can be reverted by [`discard_prospective`].
 	///
-	/// Keyspace paramenter can be `None` iff the child storage does not exist in backend.
+	/// Keyspace paramenter can be `None` iff the child storage does not exist in backend,
+	/// or backend is not using keyspace (eg in memory backend).
 	/// [`discard_prospective`]: #method.discard_prospective
 	pub(crate) fn kill_child_storage(&mut self, storage_key: &[u8], keyspace: Option<&KeySpace>) {
 		let extrinsic_index = self.extrinsic_index();
