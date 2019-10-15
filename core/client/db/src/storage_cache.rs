@@ -718,7 +718,7 @@ mod tests {
 			&[],
 			&[],
 			vec![],
-			vec![(s_key.clone(), vec![(key.clone(), Some(vec![1, 2]))])],
+			vec![(s_key.clone(), vec![(key.clone(), Some(vec![1, 2]))], false, None)],
 			Some(h0.clone()),
 			Some(0),
 			|| true,

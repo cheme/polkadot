@@ -995,6 +995,8 @@ impl<Block: BlockT<Hash=H256>> Backend<Block> {
 			op.update_db_storage(InMemoryTransaction {
 				storage,
 				kv: state.kv_pairs().clone(),
+				deleted_child_trie: Default::default(),
+				moved_child_trie: Default::default(),
 			}).unwrap();
 			inmem.commit_operation(op).unwrap();
 		}
@@ -1933,7 +1935,7 @@ mod tests {
 				(vec![5, 5, 5], Some(vec![4, 5, 6])),
 			];
 
-			let child: Option<(_, Option<_>)> = None;
+			let child: Option<(_, (Option<_>, _, _))> = None;
 			let (root, overlay) = op.old_state.full_storage_root(
 				storage.iter().cloned(),
 				child,
