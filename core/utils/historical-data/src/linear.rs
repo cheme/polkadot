@@ -64,6 +64,24 @@ const ALLOCATED_HISTORY: usize = 2;
 #[derive(Debug, Clone)]
 pub struct Serialized<'a, F>(Cow<'a, [u8]>, PhantomData<F>);
 
+/// Serialized with a range to skip traversing if state
+/// is out of range.
+#[derive(Debug, Clone)]
+pub struct RangedSerialized<'a, F>(Cow<'a, [u8]>, PhantomData<F>);
+
+#[derive(Debug, Clone)]
+pub struct SplitSerialized<'a, F> {
+	current: RangedSerialized<'a, F>,
+	has_previous: bool,
+	current_index: usize,
+	_ph: PhantomData<F>,
+}
+
+pub trait SplitSerializedDb<'a, F> {
+	fn get(&self, key: &[u8], split_index: usize) -> Option<Serialized<'a, F>>;
+	fn update(&self, key: &[u8], split_index: usize, value: Serialized<'static, F>);
+}
+
 impl<'a, 'b, F> PartialEq<Serialized<'b, F>> for Serialized<'a, F> {
   fn eq(&self, other: &Serialized<'b, F>) -> bool {
 		self.0.eq(&other.0)
@@ -79,6 +97,8 @@ pub trait SerializedConfig {
 	/// Size needed to encode version.
 	/// Should be a static value.
 	fn version_len() -> usize;
+	/// Determine if range should be encoded.
+	fn encode_range() -> bool;
 }
 
 #[derive(Debug, Clone)]
@@ -91,12 +111,20 @@ pub struct NoVersion;
 /// Serialize with default version.
 pub struct DefaultVersion;
 
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+/// Serialize with default version and range.
+pub struct DefaultVersionRange;
+
 impl SerializedConfig for NoVersion {
 	fn empty() -> &'static [u8] {
 		&NO_VERSION_EMPTY_SERIALIZED
 	}
 	fn version_len() -> usize {
 		0
+	}
+	fn encode_range() -> bool {
+		false
 	}
 }
 
@@ -107,7 +135,23 @@ impl SerializedConfig for DefaultVersion {
 	fn version_len() -> usize {
 		1
 	}
+	fn encode_range() -> bool {
+		false
+	}
 }
+
+impl SerializedConfig for DefaultVersionRange {
+	fn empty() -> &'static [u8] {
+		&DEFAULT_VERSION_EMPTY_SERIALIZED
+	}
+	fn version_len() -> usize {
+		1
+	}
+	fn encode_range() -> bool {
+		true
+	}
+}
+
 
 // Length in number of bytes for an encoded size.
 // Current value is one of a u64.
