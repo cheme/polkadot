@@ -197,6 +197,14 @@ impl OverlayedChanges {
 		}
 	}
 
+	/// Clear child changes from the overlay.
+	/// Both prospective and committed values.
+	/// Note that change trie values are not kept.
+	pub(crate) fn clear_child(&mut self, storage_key: &[u8]) {
+		self.prospective.children.remove(storage_key);
+		self.committed.children.remove(storage_key);
+	}
+
 	/// Removes all key-value pairs which keys share the given prefix.
 	///
 	/// NOTE that this doesn't take place immediately but written into the prospective
@@ -416,11 +424,13 @@ mod tests {
 		};
 
 		let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
+		let client = crate::client::NoClient;
 		let mut ext = Ext::new(
 			&mut overlay,
 			&backend,
 			Some(&changes_trie_storage),
 			None,
+			Some(&client),
 		);
 		const ROOT: [u8; 32] = hex!("39245109cef3758c2eed2ccba8d9b370a917850af3824bc8348d505df2c298fa");
 

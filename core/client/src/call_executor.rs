@@ -211,6 +211,7 @@ where
 			method,
 			call_data,
 			self.keystore.clone().map(KeystoreExt),
+			Some(&self.backend),
 		).execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
 			strategy.get_manager(),
 			false,
@@ -283,6 +284,7 @@ where
 					method,
 					call_data,
 					keystore,
+					Some(&self.backend),
 				)
 				.execute_using_consensus_failure_handler(
 					execution_manager,
@@ -301,6 +303,7 @@ where
 				method,
 				call_data,
 				keystore,
+				Some(&self.backend),
 			)
 			.execute_using_consensus_failure_handler(
 				execution_manager,
@@ -322,6 +325,7 @@ where
 			&state,
 			self.backend.changes_trie_storage(),
 			None,
+			Some(&self.backend),
 		);
 		let version = self.executor.runtime_version(&mut ext);
 		self.backend.destroy_state(state)?;
@@ -358,6 +362,7 @@ where
 			method,
 			call_data,
 			self.keystore.clone().map(KeystoreExt),
+			Some(&self.backend),
 		).execute_using_consensus_failure_handler(
 			manager,
 			true,
@@ -385,6 +390,7 @@ where
 			method,
 			call_data,
 			self.keystore.clone().map(KeystoreExt),
+			Some(&self.backend),
 		)
 		.map_err(Into::into)
 	}

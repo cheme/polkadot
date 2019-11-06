@@ -29,7 +29,7 @@ use sr_primitives::{
 use state_machine::{
 	self, Backend as StateBackend, OverlayedChanges, ExecutionStrategy, create_proof_check_backend,
 	execution_proof_check_on_trie_backend, ExecutionManager, ChangesTrieTransaction, StorageProof,
-	merge_storage_proofs,
+	merge_storage_proofs, client::Externalities as ClientExternalities,
 };
 use hash_db::Hasher;
 
@@ -225,17 +225,19 @@ pub fn prove_execution<Block, S, E>(
 ///
 /// Method is executed using passed header as environment' current block.
 /// Proof should include both environment preparation proof and method execution proof.
-pub fn check_execution_proof<Header, E, H>(
+pub fn check_execution_proof<Header, E, H, C>(
 	executor: &E,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: StorageProof,
+	client: Option<&C>
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
 		E: CodeExecutor,
 		H: Hasher<Out=H256>,
+		C: ClientExternalities,
 {
-	check_execution_proof_with_make_header::<Header, E, H, _>(
+	check_execution_proof_with_make_header::<Header, E, H, _, C>(
 		executor,
 		request,
 		remote_proof,
@@ -246,19 +248,22 @@ pub fn check_execution_proof<Header, E, H>(
 			header.hash(),
 			Default::default(),
 		),
+		client,
 	)
 }
 
-fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Header) -> Header>(
+fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Header) -> Header, C>(
 	executor: &E,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: StorageProof,
 	make_next_header: MakeNextHeader,
+	client: Option<&C>
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
 		E: CodeExecutor,
 		H: Hasher<Out=H256>,
+		C: ClientExternalities,
 {
 	let local_state_root = request.header.state_root();
 	let root: H::Out = convert_hash(&local_state_root);
@@ -267,23 +272,25 @@ fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Head
 	let mut changes = OverlayedChanges::default();
 	let trie_backend = create_proof_check_backend(root, remote_proof)?;
 	let next_header = make_next_header(&request.header);
-	execution_proof_check_on_trie_backend::<H, _>(
+	execution_proof_check_on_trie_backend::<H, _, C>(
 		&trie_backend,
 		&mut changes,
 		executor,
 		"Core_initialize_block",
 		&next_header.encode(),
 		None,
+		client,
 	)?;
 
 	// execute method
-	execution_proof_check_on_trie_backend::<H, _>(
+	execution_proof_check_on_trie_backend::<H, _, C>(
 		&trie_backend,
 		&mut changes,
 		executor,
 		&request.method,
 		&request.call_data,
 		None,
+		client,
 	).map_err(Into::into)
 }
 

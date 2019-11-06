@@ -205,6 +205,11 @@ impl Externalities for BasicExternalities {
 	fn storage_changes_root(&mut self, _parent: H256) -> Result<Option<H256>, ()> {
 		Ok(None)
 	}
+
+	fn child_reroot(&mut self, storage_key: ChildStorageKey, block_number: u64) -> bool {
+		// basic externalities do not access past state
+		false
+	}
 }
 
 impl externalities::ExtensionStore for BasicExternalities {

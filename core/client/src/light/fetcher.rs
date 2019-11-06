@@ -422,7 +422,12 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 		request: &RemoteCallRequest<Block::Header>,
 		remote_proof: StorageProof,
 	) -> ClientResult<Vec<u8>> {
-		check_execution_proof::<_, _, H>(&self.executor, request, remote_proof)
+		check_execution_proof::<_, _, H, _>(
+			&self.executor,
+			request,
+			remote_proof,
+			Some(&self.blockchain),
+		)
 	}
 
 	fn check_changes_proof(

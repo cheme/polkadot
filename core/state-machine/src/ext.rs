@@ -30,6 +30,7 @@ use primitives::{
 };
 use trie::{trie_types::Layout, MemoryDB, default_child_trie_root};
 use externalities::Extensions;
+use crate::client::Externalities as ClientExternalities;
 
 use std::{error, fmt, any::{Any, TypeId}};
 use log::{warn, trace};
@@ -66,7 +67,12 @@ impl<B: error::Error, E: error::Error> error::Error for Error<B, E> {
 }
 
 /// Wraps a read-only backend, call executor, and current overlayed changes.
-pub struct Ext<'a, H, N, B, T> where H: Hasher<Out=H256>, B: 'a + Backend<H> {
+pub struct Ext<'a, H, N, B, T, C>
+where
+	H: Hasher<Out=H256>,
+	B: 'a + Backend<H>,
+	C: 'a + ClientExternalities,
+{
 	/// The overlayed changes to write to.
 	overlay: &'a mut OverlayedChanges,
 	/// The storage backend to read from.
@@ -85,18 +91,21 @@ pub struct Ext<'a, H, N, B, T> where H: Hasher<Out=H256>, B: 'a + Backend<H> {
 	changes_trie_transaction: Option<(MemoryDB<H>, H::Out, ChangesTrieCacheAction<H::Out, N>)>,
 	/// Pseudo-unique id used for tracing.
 	pub id: u16,
-	/// Dummy usage of N arg.
+	/// TODO EMCH doc
+	client: Option<&'a C>,
+/// Dummy usage of N arg.
 	_phantom: std::marker::PhantomData<N>,
 	/// Extensions registered with this instance.
 	extensions: Option<&'a mut Extensions>,
 }
 
-impl<'a, H, N, B, T> Ext<'a, H, N, B, T>
+impl<'a, H, N, B, T, C> Ext<'a, H, N, B, T, C>
 where
 	H: Hasher<Out=H256>,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
 	N: crate::changes_trie::BlockNumber,
+	C: 'a + ClientExternalities,
 {
 
 	/// Create a new `Ext` from overlayed changes and read-only backend
@@ -105,6 +114,7 @@ where
 		backend: &'a B,
 		changes_trie_storage: Option<&'a T>,
 		extensions: Option<&'a mut Extensions>,
+		client: Option<&'a C>,
 	) -> Self {
 		Ext {
 			overlay,
@@ -112,6 +122,7 @@ where
 			storage_transaction: None,
 			changes_trie_storage,
 			changes_trie_transaction: None,
+			client,
 			id: rand::random(),
 			_phantom: Default::default(),
 			extensions,
@@ -149,11 +160,12 @@ where
 }
 
 #[cfg(test)]
-impl<'a, H, N, B, T> Ext<'a, H, N, B, T>
+impl<'a, H, N, B, T, C> Ext<'a, H, N, B, T, C>
 where
 	H: Hasher<Out=H256>,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
+	C: 'a + ClientExternalities,
 	N: crate::changes_trie::BlockNumber,
 {
 	pub fn storage_pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -170,11 +182,12 @@ where
 	}
 }
 
-impl<'a, H, B, T, N> Externalities for Ext<'a, H, N, B, T>
+impl<'a, H, B, T, N, C> Externalities for Ext<'a, H, N, B, T, C>
 where
 	H: Hasher<Out=H256>,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
+	C: 'a + ClientExternalities,
 	N: crate::changes_trie::BlockNumber,
 {
 	fn storage(&self, key: &[u8]) -> Option<Vec<u8>> {
@@ -403,12 +416,22 @@ where
 			HexDisplay::from(&prefix),
 		);
 		let _guard = panic_handler::AbortGuard::force_abort();
-
 		self.mark_dirty();
 		self.overlay.clear_child_prefix(storage_key.as_ref(), prefix);
 		self.backend.for_child_keys_with_prefix(storage_key.as_ref(), prefix, |key| {
 			self.overlay.set_child_storage(storage_key.as_ref().to_vec(), key.to_vec(), None);
 		});
+	}
+	
+	fn child_reroot(&mut self, storage_key: ChildStorageKey, block_number: u64) -> bool {
+		let _guard = panic_handler::AbortGuard::force_abort();
+		self.mark_dirty();
+		self.overlay.clear_child(storage_key.as_ref());
+		self.client
+			.and_then(|cli| cli.externalities_at(block_number))
+			.and_then(|ext| ext.storage(storage_key.as_ref()))
+			.map(|old_child_root| panic!("catch a child previous root, do implement now"))
+			.unwrap_or(false)
 	}
 
 	fn chain_id(&self) -> u64 {
@@ -512,11 +535,12 @@ where
 	}
 }
 
-impl<'a, H, B, T, N> externalities::ExtensionStore for Ext<'a, H, N, B, T>
+impl<'a, H, B, T, N, C> externalities::ExtensionStore for Ext<'a, H, N, B, T, C>
 where
 	H: Hasher<Out=H256>,
 	B: 'a + Backend<H>,
 	T: 'a + ChangesTrieStorage<H, N>,
+	C: 'a + ClientExternalities,
 	N: crate::changes_trie::BlockNumber,
 {
 	fn extension_by_type_id(&mut self, type_id: TypeId) -> Option<&mut dyn Any> {
@@ -531,15 +555,17 @@ mod tests {
 	use codec::Encode;
 	use primitives::{Blake2Hasher, storage::well_known_keys::EXTRINSIC_INDEX};
 	use crate::{
+		client::NoClient,
 		changes_trie::{
 			Configuration as ChangesTrieConfiguration,
 			InMemoryStorage as InMemoryChangesTrieStorage,
 		}, backend::InMemory, overlayed_changes::OverlayedValue,
 	};
 
+	const CLIENT: NoClient = NoClient;
 	type TestBackend = InMemory<Blake2Hasher>;
 	type TestChangesTrieStorage = InMemoryChangesTrieStorage<Blake2Hasher, u64>;
-	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend, TestChangesTrieStorage>;
+	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend, TestChangesTrieStorage, NoClient>;
 
 	fn prepare_overlay_with_changes() -> OverlayedChanges {
 		OverlayedChanges {
@@ -565,7 +591,7 @@ mod tests {
 	fn storage_changes_root_is_none_when_storage_is_not_provided() {
 		let mut overlay = prepare_overlay_with_changes();
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &backend, None, None, Some(&CLIENT));
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(), None);
 	}
 
@@ -575,7 +601,7 @@ mod tests {
 		overlay.changes_trie_config = None;
 		let storage = TestChangesTrieStorage::with_blocks(vec![(100, Default::default())]);
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None, Some(&CLIENT));
 		assert_eq!(ext.storage_changes_root(Default::default()).unwrap(), None);
 	}
 
@@ -584,7 +610,7 @@ mod tests {
 		let mut overlay = prepare_overlay_with_changes();
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None, Some(&CLIENT));
 		assert_eq!(
 			ext.storage_changes_root(Default::default()).unwrap(),
 			Some(hex!("bb0c2ef6e1d36d5490f9766cfcc7dfe2a6ca804504c3bb206053890d6dd02376").into()),
@@ -597,7 +623,7 @@ mod tests {
 		overlay.prospective.top.get_mut(&vec![1]).unwrap().value = None;
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None);
+		let mut ext = TestExt::new(&mut overlay, &backend, Some(&storage), None, Some(&CLIENT));
 		assert_eq!(
 			ext.storage_changes_root(Default::default()).unwrap(),
 			Some(hex!("96f5aae4690e7302737b6f9b7f8567d5bbb9eac1c315f80101235a92d9ec27f4").into()),

@@ -124,6 +124,9 @@ pub trait Externalities: ExtensionStore {
 
 	/// Get the change trie root of the current storage overlay at a block with given parent.
 	fn storage_changes_root(&mut self, parent: H256) -> Result<Option<H256>, ()>;
+
+	/// TODO doc
+	fn child_reroot(&mut self, storage_key: ChildStorageKey, block_number: u64) -> bool;
 }
 
 /// Extension for the [`Externalities`] trait.

@@ -18,6 +18,7 @@
 
 use std::{collections::HashMap, any::{Any, TypeId}};
 use hash_db::Hasher;
+use crate::client::Externalities as ClientExternalities;
 use crate::{
 	backend::{InMemory, Backend}, OverlayedChanges,
 	changes_trie::{
@@ -37,6 +38,18 @@ use externalities::{Extensions, Extension};
 
 type StorageTuple = (HashMap<Vec<u8>, Vec<u8>>, HashMap<Vec<u8>, HashMap<Vec<u8>, Vec<u8>>>);
 
+/// A stub for testing, cannot access client info.
+pub struct NoClient;
+
+impl ClientExternalities for NoClient {
+
+	fn externalities_at(&self, _block_number: u64) -> Option<Box<dyn externalities::Externalities>> {
+		unreachable!("When using NoClient tests ClientExternalities functionalities shall not be use");
+	}
+
+}
+
+
 /// Simple HashMap-based Externalities impl.
 pub struct TestExternalities<H: Hasher<Out=H256>=Blake2Hasher, N: ChangesTrieBlockNumber=u64> {
 	overlay: OverlayedChanges,
@@ -48,12 +61,13 @@ pub struct TestExternalities<H: Hasher<Out=H256>=Blake2Hasher, N: ChangesTrieBlo
 impl<H: Hasher<Out=H256>, N: ChangesTrieBlockNumber> TestExternalities<H, N> {
 
 	/// Get externalities implementation.
-	pub fn ext(&mut self) -> Ext<H, N, InMemory<H>, ChangesTrieInMemoryStorage<H, N>> {
+	pub fn ext(&mut self) -> Ext<H, N, InMemory<H>, ChangesTrieInMemoryStorage<H, N>, NoClient> {
 		Ext::new(
 			&mut self.overlay,
 			&self.backend,
 			Some(&self.changes_trie_storage),
 			Some(&mut self.extensions),
+			None
 		)
 	}
 
