@@ -34,6 +34,7 @@ use crate::blockchain::{
 use crate::cht;
 use crate::error::{Error as ClientError, Result as ClientResult};
 use crate::light::fetcher::{Fetcher, RemoteHeaderRequest};
+use state_machine::client::Externalities as ClientExternalities;
 
 /// Light client blockchain storage.
 pub trait Storage<Block: BlockT>: AuxStore + BlockchainHeaderBackend<Block> + HeaderMetadata<Block, Error=ClientError> {
@@ -142,6 +143,15 @@ impl<S, Block> BlockchainHeaderBackend<Block> for Blockchain<S> where Block: Blo
 	}
 }
 
+impl<S: Send + Sync> ClientExternalities for Blockchain<S> {
+
+	fn storage_at(&self, key: &[u8], block_number: u64) -> Option<Vec<u8>> {
+		unimplemented!("TODO use fetcher");
+	}
+
+}
+
+
 impl<S, Block> HeaderMetadata<Block> for Blockchain<S> where Block: BlockT, S: Storage<Block> {
 	type Error = ClientError;
 
@@ -157,6 +167,7 @@ impl<S, Block> HeaderMetadata<Block> for Blockchain<S> where Block: BlockT, S: S
 		self.storage.remove_header_metadata(hash)
 	}
 }
+
 
 impl<S, Block> BlockchainBackend<Block> for Blockchain<S> where Block: BlockT, S: Storage<Block> {
 	fn body(&self, _id: BlockId<Block>) -> ClientResult<Option<Vec<Block::Extrinsic>>> {

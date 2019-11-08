@@ -428,8 +428,7 @@ where
 		self.mark_dirty();
 		self.overlay.clear_child(storage_key.as_ref());
 		self.client
-			.and_then(|cli| cli.externalities_at(block_number))
-			.and_then(|ext| ext.storage(storage_key.as_ref()))
+			.and_then(|ext| ext.storage_at(storage_key.as_ref(), block_number))
 			.map(|old_child_root| panic!("catch a child previous root, do implement now"))
 			.unwrap_or(false)
 	}

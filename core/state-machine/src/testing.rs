@@ -43,7 +43,7 @@ pub struct NoClient;
 
 impl ClientExternalities for NoClient {
 
-	fn externalities_at(&self, _block_number: u64) -> Option<Box<dyn externalities::Externalities>> {
+	fn storage_at(&self, key: &[u8], block_number: u64) -> Option<Vec<u8>> {
 		unreachable!("When using NoClient tests ClientExternalities functionalities shall not be use");
 	}
 

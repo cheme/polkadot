@@ -19,10 +19,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::marker::PhantomData;
 use parking_lot::{RwLock, Mutex};
 
 use sr_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::{Backend as StateBackend, TrieBackend, backend::InMemory as InMemoryState, ChangesTrieTransaction};
+use state_machine::client::Externalities as ClientExternalities;
 use sr_primitives::traits::{Block as BlockT, NumberFor, Zero, Header};
 use crate::in_mem::{self, check_genesis_storage};
 use crate::backend::{
@@ -38,10 +40,11 @@ use trie::MemoryDB;
 const IN_MEMORY_EXPECT_PROOF: &str = "InMemory state backend has Void error type and always succeeds; qed";
 
 /// Light client backend.
-pub struct Backend<S, H: Hasher> {
+pub struct Backend<S, Block, H: Hasher> {
 	blockchain: Arc<Blockchain<S>>,
 	genesis_state: RwLock<Option<InMemoryState<H>>>,
 	import_lock: Mutex<()>,
+	_ph: PhantomData<Block>,
 }
 
 /// Light block (header and justification) import operation.
@@ -65,13 +68,14 @@ pub enum GenesisOrUnavailableState<H: Hasher> {
 	Unavailable,
 }
 
-impl<S, H: Hasher> Backend<S, H> {
+impl<S, B, H: Hasher> Backend<S, B, H> {
 	/// Create new light backend.
 	pub fn new(blockchain: Arc<Blockchain<S>>) -> Self {
 		Self {
 			blockchain,
 			genesis_state: RwLock::new(None),
 			import_lock: Default::default(),
+			_ph: PhantomData,
 		}
 	}
 
@@ -81,7 +85,7 @@ impl<S, H: Hasher> Backend<S, H> {
 	}
 }
 
-impl<S: AuxStore, H: Hasher> AuxStore for Backend<S, H> {
+impl<S: AuxStore, B, H: Hasher> AuxStore for Backend<S, B, H> {
 	fn insert_aux<
 		'a,
 		'b: 'a,
@@ -97,7 +101,19 @@ impl<S: AuxStore, H: Hasher> AuxStore for Backend<S, H> {
 	}
 }
 
-impl<S, Block, H> ClientBackend<Block, H> for Backend<S, H> where
+impl<S, Block, H> ClientExternalities for Backend<S, Block, H> where
+	Block: BlockT,
+	S: BlockchainStorage<Block>,
+	H: Hasher<Out=Block::Hash>,
+	H::Out: Ord,
+{
+	fn storage_at(&self, key: &[u8], block_number: u64) -> Option<Vec<u8>> {
+		unimplemented!("TODO");
+	}
+}
+
+
+impl<S, Block, H> ClientBackend<Block, H> for Backend<S, Block, H> where
 	Block: BlockT,
 	S: BlockchainStorage<Block>,
 	H: Hasher<Out=Block::Hash>,
@@ -213,7 +229,7 @@ impl<S, Block, H> ClientBackend<Block, H> for Backend<S, H> where
 	}
 }
 
-impl<S, Block, H> RemoteBackend<Block, H> for Backend<S, H>
+impl<S, Block, H> RemoteBackend<Block, H> for Backend<S, Block, H>
 where
 	Block: BlockT,
 	S: BlockchainStorage<Block> + 'static,

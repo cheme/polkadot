@@ -24,6 +24,7 @@ use sr_primitives::generic::{BlockId, DigestItem};
 use sr_primitives::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor};
 use sr_primitives::{Justification, StorageOverlay, ChildrenStorageOverlay};
 use state_machine::backend::{Backend as StateBackend, InMemory};
+use state_machine::client::Externalities as ClientExternalities;
 use state_machine::{self, InMemoryChangesTrieStorage, ChangesTrieAnchorBlockId, ChangesTrieTransaction};
 use hash_db::{Hasher, Prefix};
 use trie::MemoryDB;
@@ -719,6 +720,17 @@ where
 	H: Hasher<Out=Block::Hash>,
 	H::Out: Ord,
 {}
+
+impl<Block, H> ClientExternalities for Backend<Block, H>
+where
+	Block: BlockT,
+	H: Hasher<Out=Block::Hash>,
+	H::Out: Ord,
+{
+	fn storage_at(&self, key: &[u8], block_number: u64) -> Option<Vec<u8>> {
+		unimplemented!("TODO");
+	}
+}
 
 impl<Block, H> backend::RemoteBackend<Block, H> for Backend<Block, H>
 where

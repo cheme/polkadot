@@ -60,7 +60,7 @@ use sr_primitives::traits::{
 use executor::RuntimeInfo;
 use state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, ChangesTrieBuildCache,
-	backend::Backend as StateBackend,
+	backend::Backend as StateBackend, client::Externalities as ClientExternalities,
 };
 use crate::utils::{Meta, db_err, meta_keys, read_db, read_meta};
 use client::leaves::{LeafSet, FinalizationDisplaced};
@@ -1509,6 +1509,12 @@ impl<Block> client::backend::Backend<Block, Blake2Hasher> for Backend<Block> whe
 	}
 }
 
+impl<Block> ClientExternalities for Backend<Block> where Block: BlockT<Hash=H256> {
+	fn storage_at(&self, key: &[u8], block_number: u64) -> Option<Vec<u8>> {
+		unimplemented!("TODO");
+	}
+}
+	
 impl<Block> client::backend::LocalBackend<Block, Blake2Hasher> for Backend<Block>
 where Block: BlockT<Hash=H256> {}
 

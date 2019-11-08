@@ -25,6 +25,7 @@ use sr_primitives::{generic::BlockId, Justification, StorageOverlay, ChildrenSto
 use sr_primitives::traits::{Block as BlockT, NumberFor};
 use state_machine::backend::Backend as StateBackend;
 use state_machine::{ChangesTrieStorage as StateChangesTrieStorage, ChangesTrieTransaction};
+use state_machine::client::Externalities as ClientExternalities;
 use crate::blockchain::well_known_cache_keys;
 use consensus::BlockOrigin;
 use hash_db::Hasher;
@@ -188,7 +189,7 @@ pub trait AuxStore {
 ///
 /// The same applies for live `BlockImportOperation`s: while an import operation building on a parent `P`
 /// is alive, the state for `P` should not be pruned.
-pub trait Backend<Block, H>: AuxStore + Send + Sync where
+pub trait Backend<Block, H>: ClientExternalities + AuxStore + Send + Sync where
 	Block: BlockT,
 	H: Hasher<Out=Block::Hash>,
 {

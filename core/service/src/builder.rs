@@ -115,6 +115,7 @@ type TLightClient<TBl, TRtApi, TExecDisp> = Client<
 /// Light client backend type.
 type TLightBackend<TBl> = client::light::backend::Backend<
 	client_db::light::LightStorage<TBl>,
+	TBl,
 	Blake2Hasher,
 >;
 
@@ -122,11 +123,13 @@ type TLightBackend<TBl> = client::light::backend::Backend<
 type TLightCallExecutor<TBl, TExecDisp> = client::light::call_executor::GenesisCallExecutor<
 	client::light::backend::Backend<
 		client_db::light::LightStorage<TBl>,
+		TBl,
 		Blake2Hasher
 	>,
 	client::LocalCallExecutor<
 		client::light::backend::Backend<
 			client_db::light::LightStorage<TBl>,
+			TBl,
 			Blake2Hasher
 		>,
 		NativeExecutor<TExecDisp>

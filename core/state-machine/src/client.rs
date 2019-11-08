@@ -15,15 +15,18 @@
 // along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Client related externalities.
-//! This is mainly use to query past state on the chain.
+//! This gives access to client information through the state machine.
+//! Those information are targetting previous block history.
 pub use crate::testing::NoClient;
 
+/// This is implementing part of client backend for a given past block.
 pub trait Externalities: Send + Sync {
-	fn externalities_at(&self, block_number: u64) -> Option<Box<dyn externalities::Externalities>>;
+	/// Get value for a key at a previous block. TODO consider using hash??
+	fn storage_at(&self, key: &[u8], block_number: u64) -> Option<Vec<u8>>;
 }
 
 impl<C: Externalities> Externalities for std::sync::Arc<C> {
-	fn externalities_at(&self, block_number: u64) -> Option<Box<dyn externalities::Externalities>> {
-		<C as Externalities>::externalities_at(&*self, block_number)
+	fn storage_at(&self, key: &[u8], block_number: u64) -> Option<Vec<u8>> {
+		<C as Externalities>::storage_at(&*self, key, block_number)
 	}
 }
