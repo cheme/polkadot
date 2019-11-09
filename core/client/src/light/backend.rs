@@ -467,7 +467,7 @@ mod tests {
 		let def = Default::default();
 		let header0 = test_client::runtime::Header::new(0, def, def, def, Default::default());
 
-		let backend: Backend<_, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
+		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 		let mut op = backend.begin_operation().unwrap();
 		op.set_block_data(header0, None, None, NewBlockState::Final).unwrap();
 		op.reset_storage(Default::default(), Default::default()).unwrap();
@@ -481,7 +481,7 @@ mod tests {
 
 	#[test]
 	fn unavailable_state_is_created_when_genesis_state_is_unavailable() {
-		let backend: Backend<_, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
+		let backend: Backend<_, _, Blake2Hasher> = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 
 		match backend.state_at(BlockId::Number(0)).unwrap() {
 			GenesisOrUnavailableState::Unavailable => (),

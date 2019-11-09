@@ -298,13 +298,15 @@ fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Head
 mod tests {
 	use super::*;
 	use consensus::BlockOrigin;
-	use test_client::{self, runtime::{Header, Digest, Block}, ClientExt, TestClient};
+	use test_client::{self, runtime::{Header, Digest, Block}, ClientExt, TestClient, NoClient};
 	use executor::{NativeExecutor, WasmExecutionMethod};
 	use primitives::Blake2Hasher;
 	use crate::backend::{Backend, NewBlockState};
 	use crate::in_mem::Backend as InMemBackend;
 
 	struct DummyCallExecutor;
+
+	const NOCLIENT: NoClient = NoClient;
 
 	impl CallExecutor<Block, Blake2Hasher> for DummyCallExecutor {
 		type Error = ClientError;
@@ -410,7 +412,7 @@ mod tests {
 			).unwrap();
 
 			// check remote execution proof locally
-			let local_result = check_execution_proof::<_, _, Blake2Hasher>(
+			let local_result = check_execution_proof::<_, _, Blake2Hasher, _>(
 				&local_executor(),
 				&RemoteCallRequest {
 					block: test_client::runtime::Hash::default(),
@@ -420,6 +422,7 @@ mod tests {
 					retry_count: None,
 				},
 				remote_execution_proof,
+				Some(&NOCLIENT),
 			).unwrap();
 
 			(remote_result, local_result)
@@ -437,7 +440,7 @@ mod tests {
 			).unwrap();
 
 			// check remote execution proof locally
-			let execution_result = check_execution_proof_with_make_header::<_, _, Blake2Hasher, _>(
+			let execution_result = check_execution_proof_with_make_header::<_, _, Blake2Hasher, _, _>(
 				&local_executor(),
 				&RemoteCallRequest {
 					block: test_client::runtime::Hash::default(),
@@ -454,6 +457,7 @@ mod tests {
 					header.hash(),
 					header.digest().clone(), // this makes next header wrong
 				),
+				Some(&NOCLIENT),
 			);
 			match execution_result {
 				Err(crate::error::Error::Execution(_)) => (),

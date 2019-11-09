@@ -33,6 +33,7 @@ pub use keyring::{
 pub use primitives::{Blake2Hasher, traits::BareCryptoStorePtr};
 pub use sr_primitives::{StorageOverlay, ChildrenStorageOverlay};
 pub use state_machine::ExecutionStrategy;
+pub use state_machine::client::NoClient;
 
 use std::sync::Arc;
 use std::collections::HashMap;

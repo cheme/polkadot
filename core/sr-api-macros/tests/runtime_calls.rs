@@ -187,6 +187,7 @@ fn record_proof_works() {
 	// Use the proof backend to execute `execute_block`.
 	let mut overlay = Default::default();
 	let executor = NativeExecutor::<LocalExecutor>::new(WasmExecutionMethod::Interpreted, None);
+	let client_state = state_machine::client::NoClient;
 	execution_proof_check_on_trie_backend(
 		&backend,
 		&mut overlay,
@@ -194,5 +195,6 @@ fn record_proof_works() {
 		"Core_execute_block",
 		&block.encode(),
 		None,
+		Some(&client_state),
 	).expect("Executes block while using the proof backend");
 }

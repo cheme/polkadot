@@ -55,6 +55,9 @@ mod tests {
 	};
 	use primitives::{Blake2Hasher, map};
 	use hex_literal::*;
+	use state_machine::client::NoClient;
+
+	const NOCLIENT: NoClient = NoClient;
 
 	native_executor_instance!(
 		Executor,
@@ -99,6 +102,7 @@ mod tests {
 			"Core_initialize_block",
 			&header.encode(),
 			None,
+			Some(&NOCLIENT),
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		).unwrap();
@@ -113,6 +117,7 @@ mod tests {
 				"BlockBuilder_apply_extrinsic",
 				&tx.encode(),
 				None,
+				Some(&NOCLIENT),
 			).execute(
 				ExecutionStrategy::NativeElseWasm,
 			).unwrap();
@@ -127,6 +132,8 @@ mod tests {
 			"BlockBuilder_finalize_block",
 			&[],
 			None,
+			// TODO EMCH think optional is useless
+			Some(&NOCLIENT),
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		).unwrap();
@@ -175,6 +182,7 @@ mod tests {
 			"Core_execute_block",
 			&b1data,
 			None,
+			Some(&NOCLIENT),
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		).unwrap();
@@ -205,6 +213,7 @@ mod tests {
 			"Core_execute_block",
 			&b1data,
 			None,
+			Some(&NOCLIENT),
 		).execute(
 			ExecutionStrategy::AlwaysWasm,
 		).unwrap();
@@ -235,6 +244,7 @@ mod tests {
 			"Core_execute_block",
 			&b1data,
 			None,
+			Some(&NOCLIENT),
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		);
