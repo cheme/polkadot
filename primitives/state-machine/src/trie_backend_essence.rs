@@ -150,7 +150,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 			storage: &self.storage,
 			overlay: &mut read_overlay,
 		};
-
+let mut nb = 0;
+let mut test_break = false;
 		let mut iter = move || -> Result<(), Box<TrieError<H::Out>>> {
 			let trie = TrieDB::<H>::new(&eph, root)?;
 			let mut iter = trie.iter()?;
@@ -158,9 +159,12 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 			iter.seek(prefix)?;
 
 			for x in iter {
+				nb += 1;
 				let (key, value) = x?;
 
 				if !key.starts_with(prefix) {
+					// TODO EMCH try changing proof to check if same breakage as in 0.16
+					test_break = true;
 					break;
 				}
 
@@ -171,7 +175,27 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> {
 		};
 
 		if let Err(e) = iter() {
-			debug!(target: "trie", "Error while iterating by prefix: {}", e);
+			debug!(target: "trie", "Error while iterating by prefix: {} nb iter {} is test break {:?}", e, nb, test_break);
+		}
+		if test_break {
+		let mut read_overlay = S::Overlay::default();
+		let eph = Ephemeral {
+			storage: &self.storage,
+			overlay: &mut read_overlay,
+		};
+
+			if let Ok(trie) = TrieDB::<H>::new(&eph, root) {
+			if let Ok(mut iter) = trie.iter() {
+
+			iter.seek(prefix);
+
+			for x in iter {
+						nb += 1;
+						if nb == nb +1 {
+							break;
+						}
+			}
+			}}
 		}
 	}
 
