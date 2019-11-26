@@ -278,20 +278,22 @@ impl_wasm_host_interface! {
 		ext_clear_prefix(prefix_data: Pointer<u8>, prefix_len: WordSize) {
 			let prefix = context.read_memory(prefix_data, prefix_len)
 				.map_err(|_| "Invalid attempt to determine prefix in ext_clear_prefix")?;
-			Ok(runtime_io::storage::clear_prefix(&prefix))
+			debug_trace!(target: "sr-io", "skip a legacy clear prefix {:?}", &prefix);
+			// Do nothing there was a bug in iterator by prefix logic that prevent it from working
+			// properly
+			Ok(())
 		}
 
 		ext_clear_child_prefix(
-			storage_key_data: Pointer<u8>,
-			storage_key_len: WordSize,
-			prefix_data: Pointer<u8>,
-			prefix_len: WordSize,
+			_storage_key_data: Pointer<u8>,
+			_storage_key_len: WordSize,
+			_prefix_data: Pointer<u8>,
+			_prefix_len: WordSize,
 		) {
-			let storage_key = context.read_memory(storage_key_data, storage_key_len)
-				.map_err(|_| "Invalid attempt to determine storage_key in ext_clear_child_prefix")?;
-			let prefix = context.read_memory(prefix_data, prefix_len)
-				.map_err(|_| "Invalid attempt to determine prefix in ext_clear_child_prefix")?;
-			Ok(runtime_io::storage::child_clear_prefix(&storage_key, &prefix))
+			// Do nothing there was a bug in iterator by prefix logic that prevent it from working
+			// properly
+			debug_trace!(target: "sr-io", "skip a legacy clear child prefix");
+			Ok(())
 		}
 
 		ext_kill_child_storage(storage_key_data: Pointer<u8>, storage_key_len: WordSize) {
