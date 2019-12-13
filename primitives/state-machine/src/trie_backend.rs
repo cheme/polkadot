@@ -18,7 +18,7 @@
 
 use log::{warn, debug};
 use hash_db::Hasher;
-use trie::{Trie, delta_trie_root, default_child_trie_root, child_delta_trie_root};
+use trie::{Trie, delta_trie_root2, delta_trie_root, default_child_trie_root, child_delta_trie_root};
 use trie::trie_types::{TrieDB, TrieError, Layout};
 use crate::trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral};
 use crate::Backend;
@@ -151,6 +151,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		let mut write_overlay = S::Overlay::default();
+		let mut write_overlay2 = S::Overlay::default();
 		let mut root = *self.essence.root();
 
 		{
@@ -159,13 +160,13 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				&mut write_overlay,
 			);
 
-			match delta_trie_root::<Layout<H>, _, _, _, _>(&mut eph, root, delta) {
+			match delta_trie_root2::<Layout<H>, _, _, _, _, _>(&mut eph, &mut write_overlay2, root, delta) {
 				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
 		}
 
-		(root, write_overlay)
+		(root, write_overlay2)
 	}
 
 	fn child_storage_root<I>(&self, storage_key: &[u8], delta: I) -> (H::Out, bool, Self::Transaction)

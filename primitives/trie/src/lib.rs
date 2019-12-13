@@ -24,6 +24,7 @@ mod node_codec;
 mod trie_stream;
 
 use sp_std::boxed::Box;
+use sp_std::collections::btree_map::BTreeMap;
 use sp_std::vec::Vec;
 use hash_db::Hasher;
 /// Our `NodeCodec`-specific error.
@@ -35,6 +36,7 @@ pub use node_codec::NodeCodec;
 /// Various re-exports from the `trie-db` crate.
 pub use trie_db::{
 	Trie, TrieMut, DBValue, Recorder, CError, Query, TrieLayout, TrieConfiguration, nibble_ops,
+	traverse::{BatchUpdate, trie_traverse_key},
 };
 /// Various re-exports from the `memory-db` crate.
 pub use memory_db::KeyFunction;
@@ -142,6 +144,48 @@ pub fn delta_trie_root<L: TrieConfiguration, I, A, B, DB>(
 
 	Ok(root)
 }
+
+/// Determine a trie root given a hash DB and delta values.
+pub fn delta_trie_root2<L: TrieConfiguration, I, A, B, DB, D>(
+	db: &mut DB,
+	dest: &mut D,
+	mut root: TrieHash<L>,
+	delta: I
+) -> Result<TrieHash<L>, Box<TrieError<L>>> where
+	I: IntoIterator<Item = (A, Option<B>)>,
+	A: AsRef<[u8]> + Ord,
+	B: AsRef<[u8]>,
+	DB: hash_db::HashDB<L::Hash, trie_db::DBValue>,
+	D: hash_db::HashDB<L::Hash, trie_db::DBValue> + Default,
+{
+//		let mut trie = TrieDBMut::<L>::from_existing(&mut *db, &mut root)?;
+
+	// TODO this is useless as btree map are currently use in the overlay
+	let sort: BTreeMap<A, Option<B>> = delta.into_iter().collect();
+
+	let mut batch_update = BatchUpdate(Default::default(), root.clone(), None);
+
+	trie_traverse_key::<Layout<L::Hash>, _, _, _, (), _, _>(
+		db,
+		&root,
+		sort.iter().map(|(a, b)| (a, b.as_ref())),
+		&mut batch_update,
+	);
+
+	// TODO change overlay and skip this costy insertion, by using directly result as vec
+	batch_update.0.into_iter()
+		.for_each(|(p, h, v, d)| if d {
+			// TODO actually delete is of no use (pruning system)
+			if let Some(v) = v {
+				let p = (&p.0[..], p.1);
+				// TODO convert to dbvalue can be avoid by changing batch update.
+				dest.emplace(h, p, DBValue::from_slice(&v[..])); 
+			}
+		});
+
+	Ok(batch_update.1)
+}
+
 
 /// Read a value from the trie.
 pub fn read_trie_value<L: TrieConfiguration, DB: hash_db::HashDBRef<L::Hash, trie_db::DBValue>>(
