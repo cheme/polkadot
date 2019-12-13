@@ -157,6 +157,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		let mut root = *self.essence.root();
 		let mut root2 = root.clone();
 
+		panic!("test");
 		{
 			 let span = tracing::error_span!("storage_root_2");
 			 let _guard = span.enter();
