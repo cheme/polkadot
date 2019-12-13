@@ -158,7 +158,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		let mut root2 = root.clone();
 
 		{
-			 let span = tracing::info_span!("storage_root_2");
+			 let span = tracing::error_span!("storage_root_2");
 			 let _guard = span.enter();
 
 			let mut eph = Ephemeral::new(
@@ -173,7 +173,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		}
 		{
 			let mut write_overlay = S::Overlay::default();
-			 let span = tracing::info_span!("storage_root_1");
+			 let span = tracing::error_span!("storage_root_1");
 			 let _guard = span.enter();
 
 			let mut eph = Ephemeral::new(
