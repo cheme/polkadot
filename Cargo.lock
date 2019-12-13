@@ -6456,6 +6456,7 @@ dependencies = [
  "sp-externalities 2.0.0",
  "sp-panic-handler 2.0.0",
  "sp-trie 2.0.0",
+ "tracing 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "trie-db 0.16.0 (git+https://github.com/cheme/trie?branch=updatable_traverse)",
  "trie-root 0.15.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

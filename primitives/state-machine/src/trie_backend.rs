@@ -150,21 +150,42 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn storage_root<I>(&self, delta: I) -> (H::Out, S::Overlay)
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
+		let input: Vec<_> = delta.into_iter().collect();
+		let input2 = input.clone();
 		let mut write_overlay = S::Overlay::default();
 		let mut write_overlay2 = S::Overlay::default();
 		let mut root = *self.essence.root();
+		let mut root2 = root.clone();
 
 		{
+			 let span = tracing::info_span!("storage_root_2");
+			 let _guard = span.enter();
+
 			let mut eph = Ephemeral::new(
 				self.essence.backend_storage(),
 				&mut write_overlay,
 			);
 
-			match delta_trie_root2::<Layout<H>, _, _, _, _, _>(&mut eph, &mut write_overlay2, root, delta) {
+			match delta_trie_root2::<Layout<H>, _, _, _, _, _>(&mut eph, &mut write_overlay2, root, input2) {
 				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
 		}
+		{
+			let mut write_overlay = S::Overlay::default();
+			 let span = tracing::info_span!("storage_root_1");
+			 let _guard = span.enter();
+
+			let mut eph = Ephemeral::new(
+				self.essence.backend_storage(),
+				&mut write_overlay,
+			);
+			match delta_trie_root::<Layout<H>, _, _, _, _>(&mut eph, root2, input) {
+				Ok(ret) => root2 = ret,
+				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
+			}
+		}
+
 
 		(root, write_overlay2)
 	}
