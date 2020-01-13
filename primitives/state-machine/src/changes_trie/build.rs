@@ -328,7 +328,7 @@ mod test {
 	use crate::InMemoryBackend;
 	use crate::changes_trie::{RootsStorage, Configuration, storage::InMemoryStorage};
 	use crate::changes_trie::build_cache::{IncompleteCacheAction, IncompleteCachedBuildData};
-	use crate::overlayed_changes::{OverlayedValue, OverlayedChangeSet};
+	use crate::overlayed_changes::{OverlayedValue, OverlayedChangeSet, TreeChangeSet};
 	use crate::transaction_layers::{COMMITTED_LAYER, Layers, LayerEntry};
 	use super::*;
 
@@ -404,39 +404,15 @@ mod test {
 		let changes = OverlayedChanges {
 			changes: OverlayedChangeSet {
 				number_transactions: COMMITTED_LAYER + 1,
-				top: vec![
-					(EXTRINSIC_INDEX.to_vec(), Layers::from_iter(vec![
-						(OverlayedValue {
-							value: Some(3u32.encode()),
-							extrinsics: None,
-						}, COMMITTED_LAYER),
-					].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-					(vec![100], Layers::from_iter(vec![
-						(OverlayedValue {
-							value: Some(vec![202]),
-							extrinsics: Some(vec![3].into_iter().collect())
-						}, COMMITTED_LAYER),
-						(OverlayedValue {
-							value: Some(vec![200]),
-							extrinsics: Some(vec![3, 0, 2].into_iter().collect())
-						}, COMMITTED_LAYER + 1),
-					].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-					(vec![101], Layers::from_iter(vec![
-						(OverlayedValue {
-						value: Some(vec![203]),
-						extrinsics: Some(vec![1].into_iter().collect())
-						}, COMMITTED_LAYER),
-					].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-					(vec![103], Layers::from_iter(vec![
-						(OverlayedValue {
-						value: None,
-						extrinsics: Some(vec![0, 1].into_iter().collect())
-						}, COMMITTED_LAYER + 1),
-					].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-				].into_iter().collect(),
-				children: vec![
-					(child_trie_key1, (vec![
-						(vec![100], Layers::from_iter(vec![
+				top: TreeChangeSet {
+					map: vec![
+						(EXTRINSIC_INDEX.into(), Layers::from_iter(vec![
+							(OverlayedValue {
+								value: Some(3u32.encode()),
+								extrinsics: None,
+							}, COMMITTED_LAYER),
+						].into_iter().map(|(value, index)| LayerEntry { value, index }))),
+						(vec![100].into(), Layers::from_iter(vec![
 							(OverlayedValue {
 								value: Some(vec![202]),
 								extrinsics: Some(vec![3].into_iter().collect())
@@ -446,15 +422,48 @@ mod test {
 								extrinsics: Some(vec![3, 0, 2].into_iter().collect())
 							}, COMMITTED_LAYER + 1),
 						].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-					].into_iter().collect(), CHILD_INFO_1.to_owned())),
-					(child_trie_key2, (vec![
-						(vec![100], Layers::from_iter(vec![
+						(vec![101].into(), Layers::from_iter(vec![
 							(OverlayedValue {
-								value: Some(vec![200]),
-								extrinsics: Some(vec![0, 2].into_iter().collect())
+							value: Some(vec![203]),
+							extrinsics: Some(vec![1].into_iter().collect())
+							}, COMMITTED_LAYER),
+						].into_iter().map(|(value, index)| LayerEntry { value, index }))),
+						(vec![103].into(), Layers::from_iter(vec![
+							(OverlayedValue {
+							value: None,
+							extrinsics: Some(vec![0, 1].into_iter().collect())
 							}, COMMITTED_LAYER + 1),
 						].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-					].into_iter().collect(), CHILD_INFO_2.to_owned())),
+					].into_iter().collect(),
+					changes: Default::default(),
+				},
+				children: vec![
+					(child_trie_key1, (TreeChangeSet {
+						map: vec![
+							(vec![100].into(), Layers::from_iter(vec![
+								(OverlayedValue {
+									value: Some(vec![202]),
+									extrinsics: Some(vec![3].into_iter().collect())
+								}, COMMITTED_LAYER),
+								(OverlayedValue {
+									value: Some(vec![200]),
+									extrinsics: Some(vec![3, 0, 2].into_iter().collect())
+								}, COMMITTED_LAYER + 1),
+							].into_iter().map(|(value, index)| LayerEntry { value, index }))),
+						].into_iter().collect(),
+						changes: Default::default(),
+					}, CHILD_INFO_1.to_owned())),
+					(child_trie_key2, (TreeChangeSet {
+						map: vec![
+							(vec![100].into(), Layers::from_iter(vec![
+								(OverlayedValue {
+									value: Some(vec![200]),
+									extrinsics: Some(vec![0, 2].into_iter().collect())
+								}, COMMITTED_LAYER + 1),
+							].into_iter().map(|(value, index)| LayerEntry { value, index }))),
+						].into_iter().collect(),
+						changes: Default::default(),
+					}, CHILD_INFO_2.to_owned())),
 				].into_iter().collect(),
 			},
 			changes_trie_config: Some(config.clone()),
@@ -649,7 +658,7 @@ mod test {
 			let (backend, storage, mut changes, config) = prepare_for_build(zero);
 
 			// 110: missing from backend, set to None in overlay
-			changes.changes.top.insert(vec![110], Layers::from_iter(vec![
+			changes.changes.top.map.insert(vec![110].into(), Layers::from_iter(vec![
 				(OverlayedValue {
 					value: None,
 					extrinsics: Some(vec![1].into_iter().collect()),

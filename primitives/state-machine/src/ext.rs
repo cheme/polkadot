@@ -622,7 +622,7 @@ mod tests {
 		changes_trie::{
 			Configuration as ChangesTrieConfiguration,
 			InMemoryStorage as InMemoryChangesTrieStorage,
-		}, InMemoryBackend, overlayed_changes::{OverlayedValue, OverlayedChangeSet},
+		}, InMemoryBackend, overlayed_changes::{OverlayedValue, OverlayedChangeSet, TreeChangeSet},
 	};
 	use sp_core::storage::{Storage, StorageChild};
 	use crate::transaction_layers::{Layers, LayerEntry, COMMITTED_LAYER};
@@ -640,20 +640,22 @@ mod tests {
 			changes: OverlayedChangeSet {
 				number_transactions: COMMITTED_LAYER + 1,
 				children: Default::default(),
-				top: vec![
-					(EXTRINSIC_INDEX.to_vec(), Layers::from_iter(vec![
-						(OverlayedValue {
-							value: Some(3u32.encode()),
-							extrinsics: Some(vec![1].into_iter().collect())
-						}, COMMITTED_LAYER),
-					].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-					(vec![1], Layers::from_iter(vec![
-						(OverlayedValue {
-							value: Some(vec![100]),
-							extrinsics: Some(vec![1].into_iter().collect())
-						}, COMMITTED_LAYER),
-					].into_iter().map(|(value, index)| LayerEntry { value, index }))),
-				].into_iter().collect(),
+					top: TreeChangeSet { map: vec![
+						(EXTRINSIC_INDEX.into(), Layers::from_iter(vec![
+							(OverlayedValue {
+								value: Some(3u32.encode()),
+								extrinsics: Some(vec![1].into_iter().collect())
+							}, COMMITTED_LAYER),
+						].into_iter().map(|(value, index)| LayerEntry { value, index }))),
+						(vec![1].into(), Layers::from_iter(vec![
+							(OverlayedValue {
+								value: Some(vec![100]),
+								extrinsics: Some(vec![1].into_iter().collect())
+							}, COMMITTED_LAYER),
+						].into_iter().map(|(value, index)| LayerEntry { value, index }))),
+					].into_iter().collect(),
+					changes: Default::default(),
+				},
 			},
 		}
 	}

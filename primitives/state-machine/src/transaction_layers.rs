@@ -16,9 +16,17 @@
 
 //! Types and method for managing a stack of transactional values.
 
+#[cfg(not(test))]
+use std::rc::{Rc, Weak};
+#[cfg(test)]
+// TestExternalities need to be sync
+use std::sync::{Arc as Rc, Weak};
+
 /// Stack of values at different transactional layers.
+/// The second field Rc is only used to build weak pointers in order
+/// to process only once.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Layers<V>(pub(crate) smallvec::SmallVec<[LayerEntry<V>; ALLOCATED_HISTORY]>);
+pub(crate) struct Layers<V>(pub(crate) smallvec::SmallVec<[(LayerEntry<V>, Rc<()>); ALLOCATED_HISTORY]>);
 
 /// Index of reserved layer for commited values.
 pub(crate) const COMMITTED_LAYER: usize = 0;
@@ -71,8 +79,12 @@ pub(crate) enum LayeredOpsResult {
 impl<V> Layers<V> {
 	/// Push a value without checking without transactional layer
 	/// consistency.
-	pub(crate) fn push_unchecked(&mut self, item: LayerEntry<V>) {
-		self.0.push(item);
+	/// Return reference count weak pointer on this new entry.
+	pub(crate) fn push_unchecked(&mut self, item: LayerEntry<V>) -> Weak<()> {
+		let handle = Rc::new(());
+		let result = Rc::downgrade(&handle);
+		self.0.push((item, handle));
+		result
 	}
 
 	/// Discard all prospective values, keeping previous committed value
@@ -81,7 +93,7 @@ impl<V> Layers<V> {
 		if self.0.is_empty() {
 			return LayeredOpsResult::Cleared;
 		}
-		if self.0[0].index == COMMITTED_LAYER {
+		if self.0[0].0.index == COMMITTED_LAYER {
 			if self.0.len() == 1 {
 				LayeredOpsResult::Unchanged
 			} else {
@@ -100,13 +112,14 @@ impl<V> Layers<V> {
 			return LayeredOpsResult::Cleared;
 		}
 		if self.0.len() == 1 {
-			if self.0[0].index != COMMITTED_LAYER {
-				self.0[0].index = COMMITTED_LAYER;
+			if self.0[0].0.index != COMMITTED_LAYER {
+				self.0[0].0.index = COMMITTED_LAYER;
 			} else {
 				return LayeredOpsResult::Unchanged;
 			}
 		} else if let Some(mut v) = self.0.pop() {
-			v.index = COMMITTED_LAYER;
+			v.0.index = COMMITTED_LAYER;
+			v.1 = Rc::new(());
 			self.0.clear();
 			self.0.push(v);
 		}
@@ -115,41 +128,52 @@ impl<V> Layers<V> {
 
 	/// Access to the latest transactional value.
 	pub(crate) fn get(&self) -> Option<&V> {
-		self.0.last().map(|h| &h.value)
+		self.0.last().map(|h| &h.0.value)
 	}
 
 	/// Returns mutable handle on latest pending historical value.
 	pub(crate) fn get_mut(&mut self) -> Option<LayerEntry<&mut V>> {
-		self.0.last_mut().map(|h| h.as_mut())
+		self.0.last_mut().map(|h| h.0.as_mut())
+	}
+
+	/// Returns latest handle.
+	pub(crate) fn handle(&self) -> Option<Weak<()>> {
+		self.0.last().map(|h| Rc::downgrade(&h.1))
 	}
 
 	/// Set a new value, this function expect that
 	/// `number_transactions` is a valid state (can fail
 	/// otherwise).
-	pub(crate) fn set(&mut self, number_transactions: usize, value: V) {
+	pub(crate) fn set(&mut self, number_transactions: usize, value: V) -> Weak<()> {
 		if let Some(v) = self.0.last_mut() {
-			debug_assert!(v.index <= number_transactions,
+			debug_assert!(v.0.index <= number_transactions,
 				"Layers expects \
 				only new values at the latest transaction \
 				this indicates some unsynchronized layer value.");
-			if v.index == number_transactions {
-				v.value = value;
-				return;
+			if v.0.index == number_transactions {
+				v.0.value = value;
+				return Rc::downgrade(&v.1);
 			}
 		}
-		self.0.push(LayerEntry {
-			value,
-			index: number_transactions,
-		});
+		let handle = Rc::new(());
+		let result = Rc::downgrade(&handle);
+		self.0.push((
+			LayerEntry {
+				value,
+				index: number_transactions,
+			},
+			handle
+		));
+		result
 	}
 
 	/// Extracts the committed value if there is one.
 	pub fn into_committed(mut self) -> Option<V> {
 		self.0.truncate(COMMITTED_LAYER + 1);
-		if let Some(LayerEntry {
+		if let Some((LayerEntry {
 					value,
 					index: COMMITTED_LAYER,
-				}) = self.0.pop() {
+				}, _rc)) = self.0.pop() {
 			return Some(value)
 		} else {
 			None
@@ -163,15 +187,15 @@ impl<V> Layers<V> {
 		// Iterate on layers to get latest layered value and remove
 		// unused layered values inbetween.
 		for i in (0 .. self.0.len()).rev() {
-			if self.0[i].index > COMMITTED_LAYER {
-				if self.0[i].index > number_transaction {
+			if self.0[i].0.index > COMMITTED_LAYER {
+				if self.0[i].0.index > number_transaction {
 					// Remove value from committed layer
-					if let Some(v) = self.0.pop() {
+					if let Some((v, _rc)) = self.0.pop() {
 						if new_value.is_none() {
 							new_value = Some(v.value);
 						}
 					}
-				} else if self.0[i].index == number_transaction && new_value.is_some() {
+				} else if self.0[i].0.index == number_transaction && new_value.is_some() {
 					// Remove parent layer value (will be overwritten by `new_value`.
 					self.0.pop();
 				} else {
@@ -184,10 +208,10 @@ impl<V> Layers<V> {
 			}
 		}
 		if let Some(new_value) = new_value {
-			self.0.push(LayerEntry {
+			self.0.push((LayerEntry {
 				value: new_value,
 				index: number_transaction,
-			});
+			}, Rc::new(())));
 			return LayeredOpsResult::Changed;
 		}
 		LayeredOpsResult::Unchanged
@@ -198,7 +222,7 @@ impl<V> Layers<V> {
 	pub fn discard_transaction(&mut self, number_transaction: usize) -> LayeredOpsResult {
 		let init_len = self.0.len();
 		let truncate_index = self.0.iter().rev()
-			.position(|entry| entry.index <= number_transaction)
+			.position(|entry| entry.0.index <= number_transaction)
 			.unwrap_or(init_len);
 		self.0.truncate(init_len - truncate_index);
 		if self.0.is_empty() {
@@ -226,10 +250,10 @@ impl<V> Layers<V> {
 	/// committed values.
 	pub(crate) fn get_prospective(&self) -> Option<&V> {
 		match self.0.get(0) {
-			Some(entry) if entry.index == COMMITTED_LAYER => {
+			Some(entry) if entry.0.index == COMMITTED_LAYER => {
 				if let Some(entry) = self.0.get(1) {
-					if entry.index > COMMITTED_LAYER {
-						Some(&entry.value)
+					if entry.0.index > COMMITTED_LAYER {
+						Some(&entry.0.value)
 					} else {
 						None
 					}
@@ -237,7 +261,7 @@ impl<V> Layers<V> {
 					None
 				}
 			},
-			Some(entry) => Some(&entry.value),
+			Some(entry) => Some(&entry.0.value),
 			None => None,
 		}
 	}
@@ -245,8 +269,8 @@ impl<V> Layers<V> {
 	/// Get latest committed value.
 	pub(crate) fn get_committed(&self) -> Option<&V> {
 		if let Some(entry) = self.0.get(0) {
-			if entry.index == COMMITTED_LAYER {
-				return Some(&entry.value)
+			if entry.0.index == COMMITTED_LAYER {
+				return Some(&entry.0.value)
 			} else {
 				None
 			}
