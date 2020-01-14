@@ -102,7 +102,7 @@ impl Changes {
 			// we only take the max value to account for possible redundancy between layer
 			// this will lead to suboptimal processing (but otherwhise we can use a single
 			// value in n layer to force full scan).
-			result = std::cmp::max(result, self.0[i]s.changes.len());
+			result = std::cmp::max(result, self.0[i].changes.len());
 		}
 		(cleared, result)
 	}
