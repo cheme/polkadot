@@ -140,7 +140,43 @@ pub type ChangeReference = (Weak<()>, Weak<[u8]>);
 /// Treshold for applying commit or discard operation
 /// to specific key (when there is enough value changed
 /// doing the operation on the whole map is more efficient).
-const APPLY_BY_KEY_TRESHOLD: usize = usize::max_value();
+/// First is set size, second is size factor, third is multiplicator factor,
+/// fourth is divisor factor, fifth is base multiplicator, sixth is base divisor.
+const APPLY_BY_KEY_TRESHOLD: (usize, usize, usize, usize, usize, usize) = (100, 10, 1, 2, 1, 4);
+
+fn apply_selective(total_len: usize, change_len: usize) -> bool {
+	if change_len >= total_len {
+		return false;
+	}
+	let mut mult = APPLY_BY_KEY_TRESHOLD.4;
+	let mut div = APPLY_BY_KEY_TRESHOLD.5;
+	let mut total_len_mult = total_len;
+	while APPLY_BY_KEY_TRESHOLD.0 < total_len_mult {
+		total_len_mult /= APPLY_BY_KEY_TRESHOLD.1;
+		mult *= APPLY_BY_KEY_TRESHOLD.2;
+		div *= APPLY_BY_KEY_TRESHOLD.3;
+	}
+	let treshold = total_len * mult / div;
+	change_len <= treshold
+}
+
+#[test]
+fn test_apply_selective() {
+	assert!(!apply_selective(1, 1));
+	assert!(!apply_selective(1, 2));
+	// quick test over bench values.
+	assert!(!apply_selective(100, 50));
+	assert!(!apply_selective(100, 26));
+	assert!(apply_selective(100, 25));
+	assert!(!apply_selective(1000, 250));
+	assert!(!apply_selective(1000, 126));
+	assert!(apply_selective(1000, 125));
+	assert!(!apply_selective(10_000, 1_250));
+	assert!(!apply_selective(10_000, 626));
+	assert!(apply_selective(10_000, 625));
+
+
+}
 
 /// Average ratio of repeating values between two layers.
 /// This lower the total number of counted change between layers
@@ -1045,7 +1081,7 @@ fn retain_treshold(
 	if !cleared && len_from == 0 {
 		change.changes.0.truncate(from);
 	}
-	if !cleared && len_from < APPLY_BY_KEY_TRESHOLD {
+	if !cleared && apply_selective(change.map.len(), len_from) {
 		for layer in from .. change.changes.0.len() {
 			for (pointer, weak_key) in change.changes.0[layer].changes.drain(..) {
 				if pointer.upgrade().is_some() {

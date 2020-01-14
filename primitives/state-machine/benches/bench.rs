@@ -49,6 +49,32 @@ fn key_val(
 	result
 }
 
+fn commit(b: &mut Bencher, input: &Vec<u8>) {
+	let key_vals = key_val(&input[..], 32, 32);
+
+	let mut overlayed = OverlayedChanges::default();
+	let mut nb = 0;
+	for i in key_vals.iter() {
+		nb += 1;
+		overlayed.set_storage(i.0.clone(), Some(i.1.clone()));
+	}
+	let ratio = (1, 16);
+	let nb = nb * ratio.0 / ratio.1;
+	overlayed.start_transaction();
+	for (pos, i) in key_vals.iter().enumerate() {
+		if pos >= nb {
+			break;
+		}
+		overlayed.set_storage(i.0.clone(), None);
+	}
+
+	let overlayed = &mut overlayed;
+	b.iter(move || {
+		let mut overlayed = overlayed.clone();
+		overlayed.commit_transaction();
+	});
+}
+
 fn commit_drop_commit(b: &mut Bencher, input: &Vec<u8>) {
 	let key_vals = key_val(&input[..], 32, 32);
 	b.iter(move || {
@@ -102,6 +128,12 @@ fn bench_overlay_commit_drop_commit(c: &mut Criterion) {
 	c.bench_function_over_inputs("commit_drop_commit", commit_drop_commit, inps);
 }
 
+fn bench_overlay_commit_only(c: &mut Criterion) {
+	let inp = get_content(12, CONTENT_KEY_SIZE * 2 * 10_000);
+	let inps = vec![inp];
+	c.bench_function_over_inputs("commit_only", commit, inps);
+}
+
 fn bench_overlay_commit_drop_commit_get(c: &mut Criterion) {
 	let inp = get_content(12, CONTENT_KEY_SIZE * 100);
 	let inps = vec![inp];
@@ -109,6 +141,7 @@ fn bench_overlay_commit_drop_commit_get(c: &mut Criterion) {
 }
 
 criterion_group!(benches,
+	bench_overlay_commit_only,
 	bench_overlay_commit_drop_commit,
 	bench_overlay_commit_drop_commit_get,
 );
