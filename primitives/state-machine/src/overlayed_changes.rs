@@ -99,8 +99,10 @@ impl Changes {
 				result = 0;
 				break;
 			}
-			result += self.0[i].changes.len()
-				.saturating_sub(HEURISTIC_REPEAT_RATIO.0 * result / HEURISTIC_REPEAT_RATIO.1);
+			// we only take the max value to account for possible redundancy between layer
+			// this will lead to suboptimal processing (but otherwhise we can use a single
+			// value in n layer to force full scan).
+			result = std::cmp::max(result, self.0[i]s.changes.len());
 		}
 		(cleared, result)
 	}
@@ -177,13 +179,6 @@ fn test_apply_selective() {
 
 
 }
-
-/// Average ratio of repeating values between two layers.
-/// This lower the total number of counted change between layers
-/// and if too low can result in choice of selective iteration
-/// for transaction operation when a full iteration could have
-/// perform better.
-const HEURISTIC_REPEAT_RATIO: (usize, usize) = (0, 1);
 
 /// Overlayed change set, content keep trace of its history.
 ///
