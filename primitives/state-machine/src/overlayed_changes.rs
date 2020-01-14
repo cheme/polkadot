@@ -69,23 +69,12 @@ pub struct TreeChangeSet {
 	pub(crate) map: BTreeMap<Rc<[u8]>, Layers<OverlayedValue>>,
 	/// Bookkeeping of changed keys for layers (indexed
 	/// by layer index).
-	pub(crate) changes: Vec<ChangeLayer>,
+	pub(crate) changes: Changes,
 }
 
-fn set_pointer(changes: &mut Vec<ChangeLayer>, pointer: ChangeReference, layer_index: usize) {
-	for _ in changes.len() .. layer_index + 1 {
-		changes.push(Default::default());
-	}
-	changes[layer_index].changes.push(pointer);
-}
-
-fn set_cleared(changes: &mut Vec<ChangeLayer>, layer_index: usize) {
-	for _ in changes.len() .. layer_index + 1 {
-		changes.push(Default::default());
-	}
-	changes[layer_index].changes.clear();
-	changes[layer_index].cleared = true;
-}
+/// Store information on changes that occurs.
+#[derive(Debug, Clone, Default)]
+pub struct Changes(Vec<ChangeLayer>);
 
 /// Store information on changes that occurs
 /// for a given transaction layer.
@@ -100,10 +89,48 @@ pub struct ChangeLayer {
 	pub cleared: bool,
 }
 
+impl Changes {
+	fn len_from(&self, layer_index: usize) -> (bool, usize) {
+		let mut cleared = false;
+		let mut result = 0;
+		for i in layer_index .. self.0.len() {
+			if self.0[i].cleared {
+				cleared = true;
+				result = 0;
+				break;
+			}
+			result += self.0[i].changes.len()
+				.saturating_sub(HEURISTIC_REPEAT_RATIO.0 * result / HEURISTIC_REPEAT_RATIO.1);
+		}
+		(cleared, result)
+	}
+
+	fn set_pointer(&mut self, pointer: ChangeReference, layer_index: usize) {
+		for _ in self.0.len() .. layer_index + 1 {
+			self.0.push(Default::default());
+		}
+		self.0[layer_index].changes.push(pointer);
+	}
+
+	fn set_pointers(&mut self, mut pointers: Vec<ChangeReference>, layer_index: usize) {
+		for _ in self.0.len() .. layer_index + 1 {
+			self.0.push(Default::default());
+		}
+		self.0[layer_index].changes.append(&mut pointers);
+	}
+
+	fn set_cleared(&mut self, layer_index: usize) {
+		for _ in self.0.len() .. layer_index + 1 {
+			self.0.push(Default::default());
+		}
+		self.0[layer_index].changes.clear();
+		self.0[layer_index].cleared = true;
+	}
+}
 #[cfg(test)]
-impl PartialEq for ChangeLayer {
+impl PartialEq for Changes {
 	// ignore change layer data when comparing in tests
-  fn eq(&self, other: &ChangeLayer) -> bool {
+  fn eq(&self, _other: &Changes) -> bool {
 		true
 	}
 }
@@ -114,6 +141,13 @@ pub type ChangeReference = (Weak<()>, Weak<[u8]>);
 /// to specific key (when there is enough value changed
 /// doing the operation on the whole map is more efficient).
 const APPLY_BY_KEY_TRESHOLD: usize = usize::max_value();
+
+/// Average ratio of repeating values between two layers.
+/// This lower the total number of counted change between layers
+/// and if too low can result in choice of selective iteration
+/// for transaction operation when a full iteration could have
+/// perform better.
+const HEURISTIC_REPEAT_RATIO: (usize, usize) = (0, 1);
 
 /// Overlayed change set, content keep trace of its history.
 ///
@@ -315,12 +349,19 @@ impl OverlayedChangeSet {
 
 	/// Discard prospective changes from the change set.
 	pub fn discard_prospective(&mut self) {
-		retain(
-			&mut self.top.map,
+		retain_treshold(
+			&mut self.top,
+			None,
+			COMMITTED_LAYER + 1,
 			|_, history| history.discard_prospective() != LayeredOpsResult::Cleared,
 		);
 		self.children.retain(|_, (map, _child_info)| {
-			retain(&mut map.map, |_, history| history.discard_prospective() != LayeredOpsResult::Cleared);
+			retain_treshold(
+				map,
+				None,
+				COMMITTED_LAYER + 1,
+				|_, history| history.discard_prospective() != LayeredOpsResult::Cleared,
+			);
 			!map.map.is_empty()
 		});
 		self.number_transactions = 1;
@@ -328,12 +369,19 @@ impl OverlayedChangeSet {
 
 	/// Commit prospective changes into the change set.
 	pub fn commit_prospective(&mut self) {
-		retain(
-			&mut self.top.map,
+		retain_treshold(
+			&mut self.top,
+			None,
+			COMMITTED_LAYER + 1,
 			|_, history| history.commit_prospective() != LayeredOpsResult::Cleared,
 		);
 		self.children.retain(|_, (map, _child_info)| {
-			retain(&mut map.map, |_, history| history.commit_prospective() != LayeredOpsResult::Cleared);
+			retain_treshold(
+				map,
+				None,
+				COMMITTED_LAYER + 1,
+				|_, history| history.commit_prospective() != LayeredOpsResult::Cleared,
+			);
 			!map.map.is_empty()
 		});
 		self.number_transactions = 1;
@@ -348,21 +396,27 @@ impl OverlayedChangeSet {
 	/// There is always a transactional layer running
 	/// (discarding the last trasactional layer open a new one).
 	pub fn discard_transaction(&mut self) {
-		let number_transactions = self.number_transactions.saturating_sub(1);
-
-		retain(
-			&mut self.top.map,
+		let treshold_transactions = self.number_transactions;
+		self.number_transactions = self.number_transactions.saturating_sub(1);
+		let number_transactions = self.number_transactions;
+		retain_treshold(
+			&mut self.top,
+			None,
+			treshold_transactions,
 			|_, history| history.discard_transaction(number_transactions) != LayeredOpsResult::Cleared,
 		);
 		self.children.retain(|_, (map, _child_info)| {
-			retain(
-				&mut map.map,
+			retain_treshold(
+				map,
+				None,
+				treshold_transactions,
 				|_, history| history.discard_transaction(number_transactions) != LayeredOpsResult::Cleared,
 			);
 			!map.map.is_empty()
 		});
 		if number_transactions == COMMITTED_LAYER {
-			self.number_transactions = COMMITTED_LAYER + 1;
+			// start new transaction
+			self.start_transaction();
 		} else {
 			self.number_transactions = number_transactions;
 		}
@@ -370,20 +424,56 @@ impl OverlayedChangeSet {
 
 	/// Commit a transactional layer into previous transaction layer.
 	pub fn commit_transaction(&mut self) {
-		if self.number_transactions > COMMITTED_LAYER + 1 {
-			self.number_transactions -= 1;
+		if self.number_transactions == COMMITTED_LAYER + 1 {
+			// do nothing
+			return;
 		}
-
+		let treshold_transactions = self.number_transactions;
+		self.number_transactions = self.number_transactions.saturating_sub(1);
 		let number_transactions = self.number_transactions;
-		retain(
-			&mut self.top.map,
-			|_, history| history.commit_transaction(number_transactions) != LayeredOpsResult::Cleared,
+		let len_from = self.top.changes.len_from(treshold_transactions);
+		let mut changed = Vec::with_capacity(len_from.1);
+		retain_treshold(
+			&mut self.top,
+			Some(len_from),
+			treshold_transactions,
+			|key, history| {
+				match history.commit_transaction(number_transactions) {
+					LayeredOpsResult::Changed => {
+						changed.push((
+							history.handle().expect("would be cleared if empty"),
+							Rc::downgrade(key),
+						));
+						true
+					},
+					LayeredOpsResult::Unchanged => true,
+					LayeredOpsResult::Cleared => false,
+				}
+			},
 		);
+		self.top.changes.set_pointers(changed, number_transactions);
 		self.children.retain(|_, (map, _child_info)| {
-			retain(
-				&mut map.map,
-				|_, history| history.commit_transaction(number_transactions) != LayeredOpsResult::Cleared,
+			let len_from = map.changes.len_from(treshold_transactions);
+			let mut changed = Vec::with_capacity(len_from.1);
+			retain_treshold(
+				map,
+				Some(len_from),
+				treshold_transactions,
+				|key, history| {
+					match history.commit_transaction(number_transactions) {
+						LayeredOpsResult::Changed => {
+							changed.push((
+								history.handle().expect("would be cleared if empty"),
+								Rc::downgrade(key),
+							));
+							true
+						},
+						LayeredOpsResult::Unchanged => true,
+						LayeredOpsResult::Cleared => false,
+					}
+				},
 			);
+			map.changes.set_pointers(changed, number_transactions);
 			!map.map.is_empty()
 		});
 	}
@@ -571,7 +661,7 @@ impl OverlayedChanges {
 			value,
 			extrinsic_index,
 		) {
-			set_pointer(&mut self.changes.top.changes, pointer, number_transactions);
+			self.changes.top.changes.set_pointer(pointer, number_transactions);
 		};
 	}
 
@@ -601,7 +691,7 @@ impl OverlayedChanges {
 			value,
 			extrinsic_index,
 		) {
-			set_pointer(&mut map_entry.0.changes, pointer, number_transactions);
+			map_entry.0.changes.set_pointer(pointer, number_transactions);
 		};
 	}
 
@@ -627,7 +717,7 @@ impl OverlayedChanges {
 			.for_each(|e| {
 				set_with_extrinsic_overlayed_value(Rc::downgrade(e.0), e.1, number_transactions, None, extrinsic_index);
 			});
-		set_cleared(&mut map_entry.0.changes, number_transactions);
+		map_entry.0.changes.set_cleared(number_transactions);
 	}
 
 	/// Removes all key-value pairs which keys share the given prefix.
@@ -649,7 +739,7 @@ impl OverlayedChanges {
 					None,
 					extrinsic_index,
 				) {
-					set_pointer(&mut self.changes.top.changes, pointer, number_transactions);
+					self.changes.top.changes.set_pointer(pointer, number_transactions);
 				}
 			}
 		}
@@ -676,7 +766,7 @@ impl OverlayedChanges {
 						None,
 						extrinsic_index,
 					) {
-						set_pointer(&mut child_change.0.changes, pointer, number_transactions);
+						child_change.0.changes.set_pointer(pointer, number_transactions);
 					}
 				}
 			}
@@ -939,6 +1029,39 @@ impl OverlayedChanges {
 		}
 		None
 	}
+}
+
+fn retain_treshold(
+	change: &mut TreeChangeSet,
+	len_from: Option<(bool, usize)>,
+	from: usize,
+	mut f: impl FnMut(&Rc<[u8]>, &mut Layers<OverlayedValue>) -> bool,
+) {
+	let (cleared, len_from) = if let Some(param) = len_from {
+		(param.0, param.1)
+	} else {
+		change.changes.len_from(from)
+	};
+	if !cleared && len_from == 0 {
+		change.changes.0.truncate(from);
+	}
+	if !cleared && len_from < APPLY_BY_KEY_TRESHOLD {
+		for layer in from .. change.changes.0.len() {
+			for (pointer, weak_key) in change.changes.0[layer].changes.drain(..) {
+				if pointer.upgrade().is_some() {
+					let key = weak_key.upgrade().expect("Key is in a parent container of pointer");
+					if let Some(value) = change.map.get_mut(&key) {
+						if !f(&key, value) {
+							change.map.remove(&key);
+						}
+					}
+				}
+			}
+		}
+	} else {
+		retain(&mut change.map, f);
+	}
+	change.changes.0.truncate(from);
 }
 
 /// This is an implementation of retain for btreemap,
