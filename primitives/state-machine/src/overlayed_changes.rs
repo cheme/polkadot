@@ -35,6 +35,8 @@ use std::ops;
 
 use hash_db::Hasher;
 
+// TODO type alias InnerMut<OverlayedChange> , it is a bit everywhere
+
 /// The overlayed changes to state to be queried on top of the backend.
 ///
 /// A transaction shares all prospective changes within an inner overlay
@@ -307,7 +309,7 @@ impl OverlayedChangeSet {
 			.into_iter()
 			.flat_map(move |map| map.iter()
 				.filter_map(move |(k, v)|
-					v.get(self.states.as_ref()).map(|v| (k.as_slice(), v)))
+					v.get(self.states.as_ref()).0.map(|v| (k.as_slice(), v)))
 			), option_child_info)
 
 	}
@@ -333,7 +335,7 @@ impl OverlayedChangeSet {
 			.map(move |(keyspace, child_content)| (
 				keyspace.as_slice(),
 				child_content.0.iter()
-					.filter_map(move |(k, v)| v.get(self.states.as_ref()).map(|v| (
+					.filter_map(move |(k, v)| v.get(self.states.as_ref()).0.map(|v| (
 						k.as_slice(),
 						v.value.as_ref()
 							.map(|v| v.as_slice()),
@@ -356,7 +358,7 @@ impl OverlayedChangeSet {
 				keyspace.to_vec(),
 				map.iter()
 					.filter_map(move |(k, v)|
-						v.get(self.states.as_ref())
+						v.get(self.states.as_ref()).0
 							.map(|v| (k.to_vec(), v.value.as_ref().map(|v| v.to_vec())))),
 				child_info.to_owned(),
 			))
@@ -375,7 +377,7 @@ impl OverlayedChangeSet {
 				keyspace.as_slice(),
 				map.iter()
 					.filter_map(move |(k, v)|
-						v.get(self.states.as_ref()).map(|v| (k.as_slice(), v))),
+						v.get(self.states.as_ref()).0.map(|v| (k.as_slice(), v))),
 				child_info.as_ref(),
 			))
 	}
@@ -431,13 +433,26 @@ impl OverlayedChanges {
 		true
 	}
 
-	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be referred
-	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
-	/// value has been set.
-	pub fn storage(&self, key: &[u8]) -> Option<Option<&[u8]>> {
+	/// Same as `storage` but to use carefully as it does not clean
+	/// tail values and complexity remain the same for following calls.
+	/// The return boolean indicates if a tail value iteration was required
+	pub fn storage_n(&self, key: &[u8]) -> Option<(Option<&[u8]>, bool)> {
 		if let Some(overlay_value) = self.changes.top.get(key) {
-			if let Some(o_value) = overlay_value.get(self.changes.states.as_ref()) {
-				return Some(o_value.value.as_ref().map(|v| v.as_slice()))
+			if let (Some(o_value), tail) = overlay_value.get(self.changes.states.as_ref()) {
+				return Some((o_value.value.as_ref().map(|v| v.as_slice()), tail))
+			}
+		}
+		None
+	}
+
+	/// Same as `child_storage` but to use carefully as it does not clean
+	/// tail values and complexity remain the same for following calls.
+	pub fn child_storage_n(&self, storage_key: &[u8], key: &[u8]) -> Option<(Option<&[u8]>, bool)> {
+		if let Some(map) = self.changes.children.get(storage_key) {
+			if let Some(overlay_value) = map.0.get(key) {
+				if let (Some(o_value), tail) = overlay_value.get(self.changes.states.as_ref()) {
+					return Some((o_value.value.as_ref().map(|v| v.as_slice()), tail))
+				}
 			}
 		}
 		None
@@ -446,11 +461,23 @@ impl OverlayedChanges {
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be referred
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
-	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Option<Option<&[u8]>> {
-		if let Some(map) = self.changes.children.get(storage_key) {
-			if let Some(overlay_value) = map.0.get(key) {
-				if let Some(o_value) = overlay_value.get(self.changes.states.as_ref()) {
-					return Some(o_value.value.as_ref().map(|v| v.as_slice()))
+	pub fn storage(&mut self, key: &[u8]) -> Option<Option<&[u8]>> {
+		if let Some(overlay_value) = self.changes.top.get_mut(key) {
+			if let Some(o_value) = overlay_value.get_mut(&self.changes.states) {
+				return Some(o_value.value.value.as_ref().map(|v| v.as_slice()))
+			}
+		}
+		None
+	}
+
+	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be referred
+	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
+	/// value has been set.
+	pub fn child_storage(&mut self, storage_key: &[u8], key: &[u8]) -> Option<Option<&[u8]>> {
+		if let Some(map) = self.changes.children.get_mut(storage_key) {
+			if let Some(overlay_value) = map.0.get_mut(key) {
+				if let Some(o_value) = overlay_value.get_mut(&self.changes.states) {
+					return Some(o_value.value.value.as_ref().map(|v| v.as_slice()))
 				}
 			}
 		}
@@ -706,9 +733,11 @@ impl OverlayedChanges {
 	/// set this index before first and unset after last extrinsic is executed.
 	/// Changes that are made outside of extrinsics, are marked with
 	/// `NO_EXTRINSIC_INDEX` index.
-	fn extrinsic_index(&self) -> Option<u32> {
+	fn extrinsic_index(&mut self) -> Option<u32> {
 		match self.changes_trie_config.is_some() {
 			true => Some(
+				// this call to storage is a map access for something that is just
+				// a counter and should be a field of the struct TODO
 				self.storage(EXTRINSIC_INDEX)
 					.and_then(|idx| idx.and_then(|idx| Decode::decode(&mut &*idx).ok()))
 					.unwrap_or(NO_EXTRINSIC_INDEX)),
@@ -810,13 +839,13 @@ impl OverlayedChanges {
 
 	/// Returns the next (in lexicographic order) storage key in the overlayed alongside its value.
 	/// If no value is next then `None` is returned.
-	pub fn next_storage_key_change(&self, key: &[u8]) -> Option<(&[u8], &OverlayedValue)> {
+	pub fn next_storage_key_change(&mut self, key: &[u8]) -> Option<(&[u8], &OverlayedValue)> {
 		let range = (ops::Bound::Excluded(key), ops::Bound::Unbounded);
 
-		let mut next_keys = self.changes.top.range::<[u8], _>(range);
+		let mut next_keys = self.changes.top.range_mut::<[u8], _>(range);
 		while let Some((key, historic_value)) = next_keys.next() {
-			if let Some(overlay_value) = historic_value.get(self.changes.states.as_ref()) {
-				return Some((key, overlay_value));
+			if let Some(overlay_value) = historic_value.get_mut(&self.changes.states) {
+				return Some((key, overlay_value.value));
 			}
 		}
 		None
@@ -825,17 +854,17 @@ impl OverlayedChanges {
 	/// Returns the next (in lexicographic order) child storage key in the overlayed alongside its
 	/// value.  If no value is next then `None` is returned.
 	pub fn next_child_storage_key_change(
-		&self,
+		&mut self,
 		storage_key: &[u8],
 		key: &[u8]
 	) -> Option<(&[u8], &OverlayedValue)> {
 		let range = (ops::Bound::Excluded(key), ops::Bound::Unbounded);
 
-		if let Some(child) = self.changes.children.get(storage_key) {
-			let mut next_keys = child.0.range::<[u8], _>(range);
+		if let Some(child) = self.changes.children.get_mut(storage_key) {
+			let mut next_keys = child.0.range_mut::<[u8], _>(range);
 			while let Some((key, historic_value)) = next_keys.next() {
-				if let Some(overlay_value) = historic_value.get(self.changes.states.as_ref()) {
-					return Some((key, overlay_value));
+				if let Some(overlay_value) = historic_value.get_mut(&self.changes.states) {
+					return Some((key, overlay_value.value));
 				}
 			}
 		}
@@ -925,6 +954,7 @@ mod tests {
 
 	#[test]
 	fn overlayed_storage_root_works() {
+		use crate::inner_mut::InnerMutTrait;
 		let initial: BTreeMap<_, _> = vec![
 			(b"doe".to_vec(), b"reindeer".to_vec()),
 			(b"dog".to_vec(), b"puppyXXX".to_vec()),
@@ -932,7 +962,7 @@ mod tests {
 			(b"doug".to_vec(), b"notadog".to_vec()),
 		].into_iter().collect();
 		let backend = InMemoryBackend::<Blake2Hasher>::from(initial);
-		let mut overlay = OverlayedChanges::new_from_top(
+		let overlay = crate::inner_mut::InnerMut::new(OverlayedChanges::new_from_top(
 			vec![
 				(b"dog".to_vec(), Some(b"puppy".to_vec()).into()),
 				(b"dogglesworth".to_vec(), Some(b"catYYY".to_vec()).into()),
@@ -941,12 +971,12 @@ mod tests {
 			vec![
 				(b"dogglesworth".to_vec(), Some(b"cat".to_vec()).into()),
 				(b"doug".to_vec(), None.into()),
-			].into_iter().collect(), None);
+			].into_iter().collect(), None));
 
 		let changes_trie_storage = InMemoryChangesTrieStorage::<Blake2Hasher, u64>::new();
 		let mut cache = StorageTransactionCache::default();
 		let mut ext = Ext::new(
-			&mut overlay,
+			&overlay,
 			&mut cache,
 			&backend,
 			Some(&changes_trie_storage),

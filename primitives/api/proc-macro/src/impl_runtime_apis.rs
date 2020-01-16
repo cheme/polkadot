@@ -242,7 +242,7 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 			call: &'static C,
 			commit_on_success: std::cell::RefCell<bool>,
 			initialized_block: std::cell::RefCell<Option<#crate_::BlockId<Block>>>,
-			changes: std::cell::RefCell<#crate_::OverlayedChanges>,
+			changes: #crate_::InnerMut<#crate_::OverlayedChanges>,
 			storage_transaction_cache: std::cell::RefCell<
 				#crate_::StorageTransactionCache<Block, C::StateBackend>
 			>,
@@ -334,13 +334,16 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 				#crate_::StorageChanges<Self::StateBackend, Block>,
 				String
 			> where Self: Sized {
+				use #crate_::InnerMutTrait;
+				use std::ops::DerefMut;
 				self.initialized_block.borrow_mut().take();
-				self.changes.replace(Default::default()).into_storage_changes(
-					backend,
-					changes_trie_storage,
-					parent_hash,
-					self.storage_transaction_cache.replace(Default::default()),
-				)
+				std::mem::replace(self.changes.as_mut().deref_mut(), Default::default())
+					.into_storage_changes(
+						backend,
+						changes_trie_storage,
+						parent_hash,
+						self.storage_transaction_cache.replace(Default::default()),
+					)
 			}
 		}
 
@@ -379,7 +382,7 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 				F: FnOnce(
 					&C,
 					&Self,
-					&std::cell::RefCell<#crate_::OverlayedChanges>,
+					&#crate_::InnerMut<#crate_::OverlayedChanges>,
 					&std::cell::RefCell<#crate_::StorageTransactionCache<Block, C::StateBackend>>,
 					&std::cell::RefCell<Option<#crate_::BlockId<Block>>>,
 					&Option<#crate_::ProofRecorder<Block>>,
@@ -403,11 +406,12 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 			}
 
 			fn commit_on_ok<R, E>(&self, res: &std::result::Result<R, E>) {
+				use #crate_::InnerMutTrait;
 				if *self.commit_on_success.borrow() {
 					if res.is_err() {
-						self.changes.borrow_mut().discard_prospective();
+						self.changes.as_mut().discard_prospective();
 					} else {
-						self.changes.borrow_mut().commit_prospective();
+						self.changes.as_mut().commit_prospective();
 					}
 				}
 			}

@@ -24,6 +24,7 @@ sp-externalities = { version = "2.0.0", path = "../externalities" }
 hex-literal = "0.2.1"
 criterion = "0.2"
 rand = { version = "0.7.1", features = ["small_rng"] }
+parking_lot = "0.9.0"
 
 [[bench]]
 name = "bench"

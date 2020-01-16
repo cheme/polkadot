@@ -23,6 +23,7 @@ use sp_runtime::{
 };
 use sp_state_machine::{
 	OverlayedChanges, ExecutionManager, ExecutionStrategy, StorageProof,
+	inner_mut::{InnerMut, InnerMutTrait},
 };
 use sc_executor::{RuntimeVersion, NativeVersion};
 use sp_externalities::Extensions;
@@ -70,7 +71,7 @@ pub trait CallExecutor<B: BlockT> {
 		at: &BlockId<B>,
 		method: &str,
 		call_data: &[u8],
-		changes: &RefCell<OverlayedChanges>,
+		changes: &InnerMut<OverlayedChanges>,
 		storage_transaction_cache: Option<&RefCell<
 			StorageTransactionCache<B, <Self::Backend as crate::backend::Backend<B>>::State>,
 		>>,
@@ -92,7 +93,7 @@ pub trait CallExecutor<B: BlockT> {
 	fn prove_at_state<S: sp_state_machine::Backend<HasherFor<B>>>(
 		&self,
 		mut state: S,
-		overlay: &mut OverlayedChanges,
+		overlay: &InnerMut<OverlayedChanges>,
 		method: &str,
 		call_data: &[u8]
 	) -> Result<(Vec<u8>, StorageProof), sp_blockchain::Error> {
@@ -110,7 +111,7 @@ pub trait CallExecutor<B: BlockT> {
 	fn prove_at_trie_state<S: sp_state_machine::TrieBackendStorage<HasherFor<B>>>(
 		&self,
 		trie_state: &sp_state_machine::TrieBackend<S, HasherFor<B>>,
-		overlay: &mut OverlayedChanges,
+		overlay: &InnerMut<OverlayedChanges>,
 		method: &str,
 		call_data: &[u8]
 	) -> Result<(Vec<u8>, StorageProof), sp_blockchain::Error>;

@@ -22,6 +22,7 @@ use sp_runtime::{
 use sp_state_machine::{
 	self, OverlayedChanges, Ext, ExecutionManager, StateMachine, ExecutionStrategy,
 	backend::Backend as _, StorageProof,
+	inner_mut::{InnerMut, InnerMutTrait},
 };
 use sc_executor::{RuntimeVersion, RuntimeInfo, NativeVersion};
 use sp_externalities::Extensions;
@@ -76,12 +77,12 @@ where
 		strategy: ExecutionStrategy,
 		extensions: Option<Extensions>,
 	) -> sp_blockchain::Result<Vec<u8>> {
-		let mut changes = OverlayedChanges::default();
+		let changes = InnerMut::new(OverlayedChanges::default());
 		let state = self.backend.state_at(*id)?;
 		let return_data = StateMachine::new(
 			&state,
 			self.backend.changes_trie_storage(),
-			&mut changes,
+			&changes,
 			&self.executor,
 			method,
 			call_data,
@@ -112,7 +113,7 @@ where
 		at: &BlockId<Block>,
 		method: &str,
 		call_data: &[u8],
-		changes: &RefCell<OverlayedChanges>,
+		changes: &InnerMut<OverlayedChanges>,
 		storage_transaction_cache: Option<&RefCell<
 			StorageTransactionCache<Block, B::State>
 		>>,
@@ -151,7 +152,7 @@ where
 				StateMachine::new(
 					&backend,
 					self.backend.changes_trie_storage(),
-					&mut *changes.borrow_mut(),
+					changes,
 					&self.executor,
 					method,
 					call_data,
@@ -164,7 +165,7 @@ where
 			None => StateMachine::new(
 				&state,
 				self.backend.changes_trie_storage(),
-				&mut *changes.borrow_mut(),
+				changes,
 				&self.executor,
 				method,
 				call_data,
@@ -181,12 +182,12 @@ where
 	}
 
 	fn runtime_version(&self, id: &BlockId<Block>) -> sp_blockchain::Result<RuntimeVersion> {
-		let mut overlay = OverlayedChanges::default();
+		let overlay = InnerMut::new(OverlayedChanges::default());
 		let state = self.backend.state_at(*id)?;
 		let mut cache = StorageTransactionCache::<Block, B::State>::default();
 
 		let mut ext = Ext::new(
-			&mut overlay,
+			&overlay,
 			&mut cache,
 			&state,
 			self.backend.changes_trie_storage(),
@@ -203,7 +204,7 @@ where
 	fn prove_at_trie_state<S: sp_state_machine::TrieBackendStorage<HasherFor<Block>>>(
 		&self,
 		trie_state: &sp_state_machine::TrieBackend<S, HasherFor<Block>>,
-		overlay: &mut OverlayedChanges,
+		overlay: &InnerMut<OverlayedChanges>,
 		method: &str,
 		call_data: &[u8]
 	) -> Result<(Vec<u8>, StorageProof), sp_blockchain::Error> {

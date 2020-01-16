@@ -37,6 +37,7 @@ extern crate self as sp_api;
 #[cfg(feature = "std")]
 pub use sp_state_machine::{
 	OverlayedChanges, StorageProof, Backend as StateBackend, ChangesTrieStorage,
+	inner_mut::{InnerMut, InnerMutTrait},
 };
 #[doc(hidden)]
 #[cfg(feature = "std")]
@@ -370,7 +371,7 @@ pub struct CallApiAtParams<'a, Block: BlockT, C, NC, Backend: StateBackend<Hashe
 	/// The encoded arguments of the function.
 	pub arguments: Vec<u8>,
 	/// The overlayed changes that are on top of the state.
-	pub overlayed_changes: &'a RefCell<OverlayedChanges>,
+	pub overlayed_changes: &'a InnerMut<OverlayedChanges>,
 	/// The cache for storage transactions.
 	pub storage_transaction_cache: &'a RefCell<StorageTransactionCache<Block, Backend>>,
 	/// Determines if the function requires that `initialize_block` should be called before calling

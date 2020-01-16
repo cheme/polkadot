@@ -88,12 +88,12 @@ mod tests {
 			digest: Digest { logs: vec![], },
 		};
 		let hash = header.hash();
-		let mut overlay = OverlayedChanges::default();
+		let overlay = Default::default();
 
 		StateMachine::new(
 			backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
-			&mut overlay,
+			&overlay,
 			&executor(),
 			"Core_initialize_block",
 			&header.encode(),
@@ -106,7 +106,7 @@ mod tests {
 			StateMachine::new(
 				backend,
 				Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
-				&mut overlay,
+				&overlay,
 				&executor(),
 				"BlockBuilder_apply_extrinsic",
 				&tx.encode(),
@@ -119,7 +119,7 @@ mod tests {
 		let ret_data = StateMachine::new(
 			backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
-			&mut overlay,
+			&overlay,
 			&executor(),
 			"BlockBuilder_finalize_block",
 			&[],
@@ -162,11 +162,11 @@ mod tests {
 		let backend = InMemoryBackend::from(storage);
 		let (b1data, _b1hash) = block1(genesis_hash, &backend);
 
-		let mut overlay = OverlayedChanges::default();
+		let overlay = Default::default();
 		let _ = StateMachine::new(
 			&backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
-			&mut overlay,
+			&overlay,
 			&executor(),
 			"Core_execute_block",
 			&b1data,
@@ -190,11 +190,11 @@ mod tests {
 		let backend = InMemoryBackend::from(storage);
 		let (b1data, _b1hash) = block1(genesis_hash, &backend);
 
-		let mut overlay = OverlayedChanges::default();
+		let overlay = Default::default();
 		let _ = StateMachine::new(
 			&backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
-			&mut overlay,
+			&overlay,
 			&executor(),
 			"Core_execute_block",
 			&b1data,
@@ -218,11 +218,11 @@ mod tests {
 		let backend = InMemoryBackend::from(storage);
 		let (b1data, _b1hash) = block1(genesis_hash, &backend);
 
-		let mut overlay = OverlayedChanges::default();
+		let overlay = Default::default();
 		let r = StateMachine::new(
 			&backend,
 			Some(&InMemoryChangesTrieStorage::<_, u64>::new()),
-			&mut overlay,
+			&overlay,
 			&executor(),
 			"Core_execute_block",
 			&b1data,

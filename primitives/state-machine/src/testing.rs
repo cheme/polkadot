@@ -34,13 +34,15 @@ use sp_core::{
 };
 use codec::Encode;
 use sp_externalities::{Extensions, Extension};
+use crate::ext::InnerMut as InnerMutTrait;
+use crate::ext::inner_mut::InnerMut;
 
 /// Simple HashMap-based Externalities impl.
 pub struct TestExternalities<H: Hasher = Blake2Hasher, N: ChangesTrieBlockNumber = u64>
 where
 	H::Out: codec::Codec,
 {
-	overlay: OverlayedChanges,
+	overlay: InnerMut<OverlayedChanges>,
 	storage_transaction_cache: StorageTransactionCache<
 		<InMemoryBackend<H> as Backend<H>>::Transaction, H, N
 	>,
@@ -86,7 +88,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 		storage.top.insert(CODE.to_vec(), code.to_vec());
 
 		TestExternalities {
-			overlay,
+			overlay: InnerMut::new(overlay),
 			changes_trie_storage: ChangesTrieInMemoryStorage::new(),
 			backend: storage.into(),
 			extensions: Default::default(),
@@ -111,11 +113,11 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 
 	/// Return a new backend with all pending value.
 	pub fn commit_all(&self) -> InMemoryBackend<H> {
-		let top: Vec<_> = self.overlay.changes.iter_overlay(None).0
+		let top: Vec<_> = self.overlay.as_ref().changes.iter_overlay(None).0
 			.map(|(k, v)| (k.to_vec(), v.value.clone())).collect();
 		let mut transaction = vec![(None, top)];
 
-		self.overlay.changes.children_iter_overlay()
+		self.overlay.as_ref().changes.children_iter_overlay()
 			.for_each(|(storage_key, map, child_info)| {
 				transaction.push((
 					Some((storage_key.to_vec(), child_info.to_owned())),
@@ -140,7 +142,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> std::fmt::Debug for TestExternalities
 	where H::Out: codec::Codec,
 {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "overlay: {:?}\nbackend: {:?}", self.overlay, self.backend.pairs())
+		write!(f, "overlay: {:?}\nbackend: {:?}", self.overlay.as_ref(), self.backend.pairs())
 	}
 }
 

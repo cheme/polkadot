@@ -31,6 +31,7 @@ use sp_state_machine::{
 	execution_proof_check_on_trie_backend, ExecutionManager, StorageProof,
 	merge_storage_proofs,
 };
+use sp_state_machine::inner_mut::{InnerMutTrait, InnerMut};
 use hash_db::Hasher;
 
 use sp_api::{ProofRecorder, InitializeBlock, StorageTransactionCache};
@@ -108,7 +109,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 		at: &BlockId<Block>,
 		method: &str,
 		call_data: &[u8],
-		changes: &RefCell<OverlayedChanges>,
+		changes: &InnerMut<OverlayedChanges>,
 		_: Option<&RefCell<StorageTransactionCache<Block, B::State>>>,
 		initialize_block: InitializeBlock<'a, Block>,
 		_manager: ExecutionManager<EM>,
@@ -156,7 +157,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 	fn prove_at_trie_state<S: sp_state_machine::TrieBackendStorage<HasherFor<Block>>>(
 		&self,
 		_state: &sp_state_machine::TrieBackend<S, HasherFor<Block>>,
-		_changes: &mut OverlayedChanges,
+		_changes: &InnerMut<OverlayedChanges>,
 		_method: &str,
 		_call_data: &[u8],
 	) -> ClientResult<(Vec<u8>, StorageProof)> {
@@ -191,10 +192,10 @@ pub fn prove_execution<Block, S, E>(
 		)?;
 
 	// prepare execution environment + record preparation proof
-	let mut changes = Default::default();
+	let changes = InnerMut::new(Default::default());
 	let (_, init_proof) = executor.prove_at_trie_state(
 		trie_state,
-		&mut changes,
+		&changes,
 		"Core_initialize_block",
 		&header.encode(),
 	)?;
@@ -202,7 +203,7 @@ pub fn prove_execution<Block, S, E>(
 	// execute method + record execution proof
 	let (result, exec_proof) = executor.prove_at_trie_state(
 		&trie_state,
-		&mut changes,
+		&changes,
 		method,
 		call_data,
 	)?;
@@ -256,12 +257,12 @@ fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Head
 	let root: H::Out = convert_hash(&local_state_root);
 
 	// prepare execution environment + check preparation proof
-	let mut changes = OverlayedChanges::default();
+	let changes = InnerMut::new(OverlayedChanges::default());
 	let trie_backend = create_proof_check_backend(root, remote_proof)?;
 	let next_header = make_next_header(&request.header);
 	execution_proof_check_on_trie_backend::<H, _>(
 		&trie_backend,
-		&mut changes,
+		&changes,
 		executor,
 		"Core_initialize_block",
 		&next_header.encode(),
@@ -270,7 +271,7 @@ fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Head
 	// execute method
 	execution_proof_check_on_trie_backend::<H, _>(
 		&trie_backend,
-		&mut changes,
+		&changes,
 		executor,
 		&request.method,
 		&request.call_data,
@@ -322,7 +323,7 @@ mod tests {
 			_at: &BlockId<Block>,
 			_method: &str,
 			_call_data: &[u8],
-			_changes: &RefCell<OverlayedChanges>,
+			_changes: &InnerMut<OverlayedChanges>,
 			_storage_transaction_cache: Option<&RefCell<
 				StorageTransactionCache<
 					Block,
@@ -345,7 +346,7 @@ mod tests {
 		fn prove_at_trie_state<S: sp_state_machine::TrieBackendStorage<HasherFor<Block>>>(
 			&self,
 			_trie_state: &sp_state_machine::TrieBackend<S, HasherFor<Block>>,
-			_overlay: &mut OverlayedChanges,
+			_overlay: &InnerMut<OverlayedChanges>,
 			_method: &str,
 			_call_data: &[u8]
 		) -> Result<(Vec<u8>, StorageProof), ClientError> {
