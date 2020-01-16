@@ -17,12 +17,15 @@
 //! Test implementation for Externalities.
 
 use std::any::{Any, TypeId};
+use codec::Decode;
 use hash_db::Hasher;
 use crate::{
 	backend::Backend, OverlayedChanges, StorageTransactionCache, ext::Ext, InMemoryBackend,
 	changes_trie::{
+		Configuration as ChangesTrieConfiguration,
 		InMemoryStorage as ChangesTrieInMemoryStorage,
 		BlockNumber as ChangesTrieBlockNumber,
+		State as ChangesTrieState,
 	},
 };
 use sp_core::{
@@ -47,6 +50,7 @@ where
 		<InMemoryBackend<H> as Backend<H>>::Transaction, H, N
 	>,
 	backend: InMemoryBackend<H>,
+	changes_trie_config: Option<ChangesTrieConfiguration>,
 	changes_trie_storage: ChangesTrieInMemoryStorage<H, N>,
 	extensions: Extensions,
 }
@@ -56,12 +60,19 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 		H::Out: Ord + 'static + codec::Codec
 {
 	/// Get externalities implementation.
-	pub fn ext(&mut self) -> Ext<H, N, InMemoryBackend<H>, ChangesTrieInMemoryStorage<H, N>> {
+	pub fn ext(&mut self) -> Ext<H, N, InMemoryBackend<H>> {
 		Ext::new(
 			&mut self.overlay,
 			&mut self.storage_transaction_cache,
 			&self.backend,
-			Some(&self.changes_trie_storage),
+			match self.changes_trie_config.clone() {
+				Some(config) => Some(ChangesTrieState {
+					config,
+					zero: 0.into(),
+					storage: &self.changes_trie_storage,
+				}),
+				None => None,
+			},
 			Some(&mut self.extensions),
 		)
 	}
@@ -74,21 +85,19 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 	/// Create a new instance of `TestExternalities` with code and storage.
 	pub fn new_with_code(code: &[u8], mut storage: Storage) -> Self {
 		let mut overlay = OverlayedChanges::default();
+		let changes_trie_config = storage.top.get(CHANGES_TRIE_CONFIG)
+			.and_then(|v| Decode::decode(&mut &v[..]).ok());
+		overlay.set_collect_extrinsics(changes_trie_config.is_some());
 
 		assert!(storage.top.keys().all(|key| !is_child_storage_key(key)));
 		assert!(storage.children.keys().all(|key| is_child_storage_key(key)));
-
-		super::set_changes_trie_config(
-			&mut overlay,
-			storage.top.get(&CHANGES_TRIE_CONFIG.to_vec()).cloned(),
-			false,
-		).expect("changes trie configuration is correct in test env; qed");
 
 		storage.top.insert(HEAP_PAGES.to_vec(), 8u64.encode());
 		storage.top.insert(CODE.to_vec(), code.to_vec());
 
 		TestExternalities {
 			overlay: InnerMut::new(overlay),
+			changes_trie_config,
 			changes_trie_storage: ChangesTrieInMemoryStorage::new(),
 			backend: storage.into(),
 			extensions: Default::default(),

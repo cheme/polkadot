@@ -17,7 +17,7 @@
 use std::{sync::Arc, panic::UnwindSafe, result, cell::RefCell};
 use codec::{Encode, Decode};
 use sp_runtime::{
-	generic::BlockId, traits::{Block as BlockT, HasherFor},
+	generic::BlockId, traits::{Block as BlockT, HasherFor, NumberFor},
 };
 use sp_state_machine::{
 	self, OverlayedChanges, Ext, ExecutionManager, StateMachine, ExecutionStrategy,
@@ -62,7 +62,7 @@ impl<B, E> Clone for LocalCallExecutor<B, E> where E: Clone {
 impl<B, E, Block> CallExecutor<Block> for LocalCallExecutor<B, E>
 where
 	B: backend::Backend<Block>,
-	E: CodeExecutor + RuntimeInfo,
+	E: CodeExecutor + RuntimeInfo + Clone + 'static,
 	Block: BlockT,
 {
 	type Error = E::Error;
@@ -81,7 +81,7 @@ where
 		let state = self.backend.state_at(*id)?;
 		let return_data = StateMachine::new(
 			&state,
-			self.backend.changes_trie_storage(),
+			backend::changes_tries_state_at_block(id, self.backend.changes_trie_storage())?,
 			&changes,
 			&self.executor,
 			method,
@@ -133,6 +133,7 @@ where
 		}
 
 		let mut state = self.backend.state_at(*at)?;
+		let changes_trie_state = backend::changes_tries_state_at_block(at, self.backend.changes_trie_storage())?;
 
 		let mut storage_transaction_cache = storage_transaction_cache.map(|c| c.borrow_mut());
 
@@ -151,7 +152,7 @@ where
 
 				StateMachine::new(
 					&backend,
-					self.backend.changes_trie_storage(),
+					changes_trie_state,
 					changes,
 					&self.executor,
 					method,
@@ -164,7 +165,7 @@ where
 			}
 			None => StateMachine::new(
 				&state,
-				self.backend.changes_trie_storage(),
+				changes_trie_state,
 				changes,
 				&self.executor,
 				method,
@@ -184,13 +185,13 @@ where
 	fn runtime_version(&self, id: &BlockId<Block>) -> sp_blockchain::Result<RuntimeVersion> {
 		let overlay = InnerMut::new(OverlayedChanges::default());
 		let state = self.backend.state_at(*id)?;
+		let changes_trie_state = backend::changes_tries_state_at_block(id, self.backend.changes_trie_storage())?;
 		let mut cache = StorageTransactionCache::<Block, B::State>::default();
-
 		let mut ext = Ext::new(
 			&overlay,
 			&mut cache,
 			&state,
-			self.backend.changes_trie_storage(),
+			changes_trie_state,
 			None,
 		);
 		let version = self.executor.runtime_version(&mut ext);
@@ -208,7 +209,7 @@ where
 		method: &str,
 		call_data: &[u8]
 	) -> Result<(Vec<u8>, StorageProof), sp_blockchain::Error> {
-		sp_state_machine::prove_execution_on_trie_backend(
+		sp_state_machine::prove_execution_on_trie_backend::<_, _, NumberFor<Block>, _>(
 			trie_state,
 			overlay,
 			&self.executor,
@@ -226,7 +227,7 @@ where
 impl<B, E, Block> sp_version::GetRuntimeVersion<Block> for LocalCallExecutor<B, E>
 	where
 		B: backend::Backend<Block>,
-		E: CodeExecutor + RuntimeInfo,
+		E: CodeExecutor + RuntimeInfo + Clone + 'static,
 		Block: BlockT,
 {
 	fn native_version(&self) -> &sp_version::NativeVersion {
