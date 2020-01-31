@@ -76,7 +76,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 	pub fn next_child_storage_key(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>, String> {
 		let child_root = match self.storage(storage_key)? {
@@ -99,7 +99,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 	fn next_storage_key_from_root(
 		&self,
 		root: &H::Out,
-		child_info: Option<ChildInfo>,
+		child_info: Option<&ChildInfo>,
 		key: &[u8],
 	) -> Result<Option<StorageKey>, String> {
 		let mut read_overlay = S::Overlay::default();
@@ -162,7 +162,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 	pub fn child_storage(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>, String> {
 		let root = self.storage(storage_key)?
@@ -184,7 +184,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 	pub fn for_keys_in_child_storage<F: FnMut(&[u8])>(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		f: F,
 	) {
 		let root = match self.storage(storage_key) {
@@ -216,7 +216,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 	pub fn for_child_keys_with_prefix<F: FnMut(&[u8])>(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		prefix: &[u8],
 		mut f: F,
 	) {
@@ -242,7 +242,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		root: &H::Out,
 		prefix: &[u8],
 		mut f: F,
-		child_info: Option<ChildInfo>,
+		child_info: Option<&ChildInfo>,
 	) {
 		let mut read_overlay = S::Overlay::default();
 		let eph = Ephemeral {
@@ -441,7 +441,7 @@ mod test {
 
 	#[test]
 	fn next_storage_key_and_next_child_storage_key_work() {
-		let child_info = ChildInfo::new_default(b"uniqueid");
+		let child_info = ChildInfo::resolve_child_info(b"\x01\x00\x00\x00uniqueid").unwrap();
 		// Contains values
 		let mut root_1 = H256::default();
 		// Contains child trie

@@ -81,7 +81,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn child_storage(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>, Self::Error> {
 		self.essence.child_storage(storage_key, child_info, key)
@@ -94,7 +94,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn next_child_storage_key(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>, Self::Error> {
 		self.essence.next_child_storage_key(storage_key, child_info, key)
@@ -111,7 +111,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn for_keys_in_child_storage<F: FnMut(&[u8])>(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		f: F,
 	) {
 		self.essence.for_keys_in_child_storage(storage_key, child_info, f)
@@ -120,7 +120,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn for_child_keys_with_prefix<F: FnMut(&[u8])>(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		prefix: &[u8],
 		f: F,
 	) {
@@ -195,7 +195,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn child_storage_root<I>(
 		&self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		delta: I,
 	) -> (H::Out, bool, Self::Transaction)
 	where
@@ -252,14 +252,14 @@ pub mod tests {
 
 	const CHILD_KEY_1: &[u8] = b":child_storage:default:sub1";
 
-	const CHILD_UUID_1: &[u8] = b"unique_id_1";
-	const CHILD_INFO_1: ChildInfo<'static> = ChildInfo::new_default(CHILD_UUID_1);
+	const CHILD_UUID_1: &[u8] = b"\x01\x00\x00\x00unique_id_1";
 
 	fn test_db() -> (PrefixedMemoryDB<Blake2Hasher>, H256) {
+		let child_info1 = ChildInfo::resolve_child_info(CHILD_UUID_1).unwrap();
 		let mut root = H256::default();
 		let mut mdb = PrefixedMemoryDB::<Blake2Hasher>::default();
 		{
-			let mut mdb = KeySpacedDBMut::new(&mut mdb, CHILD_UUID_1);
+			let mut mdb = KeySpacedDBMut::new(&mut mdb, child_info1.keyspace());
 			let mut trie = TrieDBMut::new(&mut mdb, &mut root);
 			trie.insert(b"value3", &[142]).expect("insert failed");
 			trie.insert(b"value4", &[124]).expect("insert failed");
@@ -293,9 +293,10 @@ pub mod tests {
 
 	#[test]
 	fn read_from_child_storage_returns_some() {
+		let child_info1 = ChildInfo::resolve_child_info(CHILD_UUID_1).unwrap();
 		let test_trie = test_trie();
 		assert_eq!(
-			test_trie.child_storage(CHILD_KEY_1, CHILD_INFO_1, b"value3").unwrap(),
+			test_trie.child_storage(CHILD_KEY_1, child_info1, b"value3").unwrap(),
 			Some(vec![142u8]),
 		);
 	}

@@ -248,7 +248,7 @@ impl OverlayedChanges {
 	pub(crate) fn set_child_storage(
 		&mut self,
 		storage_key: StorageKey,
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		key: StorageKey,
 		val: Option<StorageValue>,
 	) {
@@ -276,7 +276,7 @@ impl OverlayedChanges {
 	pub(crate) fn clear_child_storage(
 		&mut self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 	) {
 		let extrinsic_index = self.extrinsic_index();
 		let map_entry = self.prospective.children.entry(storage_key.to_vec())
@@ -350,7 +350,7 @@ impl OverlayedChanges {
 	pub(crate) fn clear_child_prefix(
 		&mut self,
 		storage_key: &[u8],
-		child_info: ChildInfo,
+		child_info: &ChildInfo,
 		prefix: &[u8],
 	) {
 		let extrinsic_index = self.extrinsic_index();
@@ -533,8 +533,9 @@ impl OverlayedChanges {
 							.into_iter()
 							.flat_map(|(map, _)| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
 					),
-				self.child_info(storage_key).cloned()
-					.expect("child info initialized in either committed or prospective"),
+				self.child_info(storage_key)
+					.expect("child info initialized in either committed or prospective")
+					.to_owned(),
 			)
 		);
 
@@ -581,12 +582,12 @@ impl OverlayedChanges {
 
 	/// Get child info for a storage key.
 	/// Take the latest value so prospective first.
-	pub fn child_info(&self, storage_key: &[u8]) -> Option<&OwnedChildInfo> {
+	pub fn child_info(&self, storage_key: &[u8]) -> Option<&ChildInfo> {
 		if let Some((_, ci)) = self.prospective.children.get(storage_key) {
-			return Some(&ci);
+			return Some(&*ci);
 		}
 		if let Some((_, ci)) = self.committed.children.get(storage_key) {
-			return Some(&ci);
+			return Some(&*ci);
 		}
 		None
 	}
@@ -838,7 +839,7 @@ mod tests {
 	#[test]
 	fn next_child_storage_key_change_works() {
 		let child = b"Child1".to_vec();
-		let child_info = ChildInfo::new_default(b"uniqueid");
+		let child_info = ChildInfo::resolve_child_info(b"\x01\x00\x00\x00uniqueid").unwrap();
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_child_storage(child.clone(), child_info, vec![20], Some(vec![20]));
 		overlay.set_child_storage(child.clone(), child_info, vec![30], Some(vec![30]));
