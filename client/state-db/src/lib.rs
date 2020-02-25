@@ -378,11 +378,11 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 	}
 
 	pub fn apply_pending(&mut self) {
+		if let Some(pruning) = &mut self.pruning {
+			pruning.apply_pending();
+		}
 		if let Some(non_canonical) = self.non_canonical.as_mut() {
 			non_canonical.apply_pending();
-			if let Some(pruning) = &mut self.pruning {
-				pruning.apply_pending();
-			}
 			trace!(target: "forks", "First available: {:?} ({}), Last canon: {:?} ({}), Best forks: {:?}",
 				self.pruning.as_ref().and_then(|p| p.next_hash()),
 				self.pruning.as_ref().map(|p| p.pending()).unwrap_or(0),
