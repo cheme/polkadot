@@ -191,7 +191,7 @@ fn to_meta_key<S: Codec>(suffix: &[u8], data: &S) -> Vec<u8> {
 
 struct StateDbSync<BlockHash: Hash, Key: Hash> {
 	mode: PruningMode,
-	non_canonical: NonCanonicalOverlay<BlockHash, Key>,
+	non_canonical: Option<NonCanonicalOverlay<BlockHash, Key>>,
 	pruning: Option<RefWindow<BlockHash, Key>>,
 	pinned: HashMap<BlockHash, u32>,
 }
@@ -203,7 +203,11 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 		// Check that settings match
 		Self::check_meta(&mode, db)?;
 
-		let non_canonical: NonCanonicalOverlay<BlockHash, Key> = NonCanonicalOverlay::new(db)?;
+		let non_canonical: Option<NonCanonicalOverlay<BlockHash, Key>> = if mode != PruningMode::ArchiveAll {
+			Some(NonCanonicalOverlay::new(db)?)
+		} else {
+			None
+		};
 		let pruning: Option<RefWindow<BlockHash, Key>> = match mode {
 			PruningMode::Constrained(Constraints {
 				max_mem: Some(_),
@@ -241,59 +245,57 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 			meta.inserted.push((to_meta_key(PRUNING_MODE, &()), self.mode.id().into()));
 		}
 
-		match self.mode {
-			PruningMode::ArchiveAll => {
-				changeset.deleted.clear();
-				// write changes immediately
-				Ok(CommitSet {
-					data: changeset,
-					meta: meta,
-				})
-			},
-			PruningMode::Constrained(_) | PruningMode::ArchiveCanonical => {
-				let commit = self.non_canonical.insert(hash, number, parent_hash, changeset);
-				commit.map(|mut c| {
-					c.meta.inserted.extend(meta.inserted);
-					c
-				})
-			}
+		if let Some(non_canonical) = self.non_canonical.as_mut() {
+			let commit = non_canonical.insert(hash, number, parent_hash, changeset);
+			commit.map(|mut c| {
+				c.meta.inserted.extend(meta.inserted);
+				c
+			})
+		} else {
+			// ArchiveAll
+			changeset.deleted.clear();
+			// write changes immediately
+			Ok(CommitSet {
+				data: changeset,
+				meta: meta,
+			})
 		}
 	}
 
 	pub fn canonicalize_block<E: fmt::Debug>(&mut self, hash: &BlockHash) -> Result<CommitSet<Key>, Error<E>> {
 		let mut commit = CommitSet::default();
-		if self.mode == PruningMode::ArchiveAll {
+		if let Some(non_canonical) = self.non_canonical.as_mut() {
+			match non_canonical.canonicalize(&hash, &mut commit) {
+				Ok(()) => {
+					if self.mode == PruningMode::ArchiveCanonical {
+						commit.data.deleted.clear();
+					}
+				}
+				Err(e) => return Err(e),
+			};
+			if let Some(ref mut pruning) = self.pruning {
+				pruning.note_canonical(&hash, &mut commit);
+			}
+			self.prune(&mut commit);
+			Ok(commit)
+		} else {
 			return Ok(commit)
 		}
-		match self.non_canonical.canonicalize(&hash, &mut commit) {
-			Ok(()) => {
-				if self.mode == PruningMode::ArchiveCanonical {
-					commit.data.deleted.clear();
-				}
-			}
-			Err(e) => return Err(e),
-		};
-		if let Some(ref mut pruning) = self.pruning {
-			pruning.note_canonical(&hash, &mut commit);
-		}
-		self.prune(&mut commit);
-		Ok(commit)
 	}
 
 	pub fn best_canonical(&self) -> Option<u64> {
-		return self.non_canonical.last_canonicalized_block_number()
+		return self.non_canonical.as_ref().and_then(|n| n.last_canonicalized_block_number())
 	}
 
 	pub fn is_pruned(&self, hash: &BlockHash, number: u64) -> bool {
-		match self.mode {
-			PruningMode::ArchiveAll => false,
-			PruningMode::ArchiveCanonical | PruningMode::Constrained(_) => {
-				if self.best_canonical().map(|c| number > c).unwrap_or(true) {
-					!self.non_canonical.have_block(hash)
-				} else {
-					self.pruning.as_ref().map_or(false, |pruning| number < pruning.pending() || !pruning.have_block(hash))
-				}
+		if let Some(non_canonical) = self.non_canonical.as_ref() {
+			if self.best_canonical().map(|c| number > c).unwrap_or(true) {
+				!non_canonical.have_block(hash)
+			} else {
+				self.pruning.as_ref().map_or(false, |pruning| number < pruning.pending() || !pruning.have_block(hash))
 			}
+		} else {
+			false
 		}
 	}
 
@@ -321,81 +323,83 @@ impl<BlockHash: Hash, Key: Hash> StateDbSync<BlockHash, Key> {
 	/// Returns a database commit or `None` if not possible.
 	/// For archive an empty commit set is returned.
 	pub fn revert_one(&mut self) -> Option<CommitSet<Key>> {
-		match self.mode {
-			PruningMode::ArchiveAll => {
-				Some(CommitSet::default())
-			},
-			PruningMode::ArchiveCanonical | PruningMode::Constrained(_) => {
-				self.non_canonical.revert_one()
-			},
+		if let Some(non_canonical) = self.non_canonical.as_mut() {
+			non_canonical.revert_one()
+		} else {
+			Some(CommitSet::default())
 		}
 	}
 
 	pub fn pin(&mut self, hash: &BlockHash) -> Result<(), PinError> {
-		match self.mode {
-			PruningMode::ArchiveAll => Ok(()),
-			PruningMode::ArchiveCanonical | PruningMode::Constrained(_) => {
-				if self.non_canonical.have_block(hash) ||
-					self.pruning.as_ref().map_or(false, |pruning| pruning.have_block(hash))
-				{
-					let refs = self.pinned.entry(hash.clone()).or_default();
-					if *refs == 0 {
-						trace!(target: "state-db", "Pinned block: {:?}", hash);
-						self.non_canonical.pin(hash);
-					}
-					*refs += 1;
-					Ok(())
-				} else {
-					Err(PinError::InvalidBlock)
+		if let Some(non_canonical) = self.non_canonical.as_mut() {
+			if non_canonical.have_block(hash) ||
+				self.pruning.as_ref().map_or(false, |pruning| pruning.have_block(hash))
+			{
+				let refs = self.pinned.entry(hash.clone()).or_default();
+				if *refs == 0 {
+					trace!(target: "state-db", "Pinned block: {:?}", hash);
+					non_canonical.pin(hash);
 				}
+				*refs += 1;
+				Ok(())
+				} else {
+			Err(PinError::InvalidBlock)
 			}
+		} else {
+			Ok(())
 		}
 	}
 
 	pub fn unpin(&mut self, hash: &BlockHash) {
-		match self.pinned.entry(hash.clone()) {
-			Entry::Occupied(mut entry) => {
-				*entry.get_mut() -= 1;
-				if *entry.get() == 0 {
-					trace!(target: "state-db", "Unpinned block: {:?}", hash);
-					entry.remove();
-					self.non_canonical.unpin(hash);
-				} else {
-					trace!(target: "state-db", "Releasing reference for {:?}", hash);
-				}
-			},
-			Entry::Vacant(_) => {},
+		if let Some(non_canonical) = self.non_canonical.as_mut() {
+			match self.pinned.entry(hash.clone()) {
+				Entry::Occupied(mut entry) => {
+					*entry.get_mut() -= 1;
+					if *entry.get() == 0 {
+						trace!(target: "state-db", "Unpinned block: {:?}", hash);
+						entry.remove();
+						non_canonical.unpin(hash);
+					} else {
+						trace!(target: "state-db", "Releasing reference for {:?}", hash);
+					}
+				},
+				Entry::Vacant(_) => {},
+			}
 		}
 	}
 
 	pub fn get<D: NodeDb>(&self, key: &Key, db: &D) -> Result<Option<DBValue>, Error<D::Error>>
 		where Key: AsRef<D::Key>
 	{
-		if let Some(value) = self.non_canonical.get(key) {
+		if let Some(value) = self.non_canonical.as_ref().and_then(|n| n.get(key)) {
 			return Ok(Some(value));
 		}
 		db.get(key.as_ref()).map_err(|e| Error::Db(e))
 	}
 
 	pub fn apply_pending(&mut self) {
-		self.non_canonical.apply_pending();
-		if let Some(pruning) = &mut self.pruning {
-			pruning.apply_pending();
+		if let Some(non_canonical) = self.non_canonical.as_mut() {
+			non_canonical.apply_pending();
+			if let Some(pruning) = &mut self.pruning {
+				pruning.apply_pending();
+			}
+			trace!(target: "forks", "First available: {:?} ({}), Last canon: {:?} ({}), Best forks: {:?}",
+				self.pruning.as_ref().and_then(|p| p.next_hash()),
+				self.pruning.as_ref().map(|p| p.pending()).unwrap_or(0),
+				non_canonical.last_canonicalized_hash(),
+				non_canonical.last_canonicalized_block_number().unwrap_or(0),
+				non_canonical.top_level(),
+			);
 		}
-		trace!(target: "forks", "First available: {:?} ({}), Last canon: {:?} ({}), Best forks: {:?}",
-			self.pruning.as_ref().and_then(|p| p.next_hash()),
-			self.pruning.as_ref().map(|p| p.pending()).unwrap_or(0),
-			self.non_canonical.last_canonicalized_hash(),
-			self.non_canonical.last_canonicalized_block_number().unwrap_or(0),
-			self.non_canonical.top_level(),
-		);
 	}
 
 	pub fn revert_pending(&mut self) {
 		if let Some(pruning) = &mut self.pruning {
 			pruning.revert_pending();
 		}
-		self.non_canonical.revert_pending();
+		if let Some(non_canonical) = self.non_canonical.as_mut() {
+			non_canonical.revert_pending();
+		}
 	}
 }
 
