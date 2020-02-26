@@ -3627,3 +3627,162 @@ fn zero_slash_keeps_nominators() {
 		assert!(nominations.submitted_in >= last_slash);
 	});
 }
+
+
+#[test]
+fn submission_evaluation_1() {
+	use crate::offchain_election::prepare_submission;
+
+	// Set of solutions assumes that all nominator nominates every validators
+	// but the first one (so he is always the min stake).
+	// Each nominators stake 1000.
+	let validators = vec![0u64, 1u64, 2u64];
+	let nominators = vec![11u64, 21u64];
+	// two round weight phragmen as described in w3 wiki sample
+	let assignments_1 = vec![
+		Assignment {
+			who: 11u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(1, 2)),
+				(2u64, OffchainAccuracy::from_rational_approximation(1, 2)),
+			],
+		},
+		Assignment {
+			who: 21u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(1, 1)),
+			],
+		},
+	];
+	let winners_1 = vec![
+		(0u64, 0),
+		(1u64, 1500),
+		(2u64, 500),
+	];
+
+	let assignments_2 = vec![
+		Assignment {
+			who: 11u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(0, 2)),
+				(2u64, OffchainAccuracy::from_rational_approximation(2, 2)),
+			],
+		},
+		Assignment {
+			who: 21u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(1, 1)),
+			],
+		},
+	];
+	let winners_2 = vec![
+		(0u64, 0),
+		(1u64, 1000),
+		(2u64, 1000),
+	];
+
+
+	ExtBuilder::default()
+	//	.offchain_phragmen_ext()
+		.validator_count(3)
+		.minimum_validator_count(2)
+		.build()
+		.execute_with(|| {
+			let (_, _, score_1) = prepare_submission::<Test> (
+				nominators.clone(),
+				validators.clone(),
+				assignments_1.clone(),
+				winners_1.clone(),
+				false,
+			);
+			let (_, _, score_2) = prepare_submission::<Test> (
+				nominators.clone(),
+				validators.clone(),
+				assignments_2.clone(),
+				winners_2.clone(),
+				false,
+			);
+			println!("{:?}", score_1);
+			println!("{:?}", score_2);
+			// check score1 is better than 2 (odd ordering of function).
+			assert!(is_score_better(score_2, score_1));
+		});
+}
+
+#[test]
+fn submission_evaluation_2() {
+	use crate::offchain_election::prepare_submission;
+
+	// Set of solutions assumes that all nominator nominates every validators
+	// but the first one (so he is always the min stake).
+	// Each nominators stake 1000.
+	let validators = vec![0u64, 1u64, 2u64];
+	let nominators = vec![11u64, 21u64];
+	// two round weight phragmen as described in w3 wiki sample
+	let assignments_1 = vec![
+		Assignment {
+			who: 11u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(1, 2)),
+				(2u64, OffchainAccuracy::from_rational_approximation(1, 2)),
+			],
+		},
+		Assignment {
+			who: 21u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(1, 1)),
+			],
+		},
+	];
+	let winners_1 = vec![
+		(1u64, 1500),
+		(2u64, 500),
+	];
+
+	let assignments_2 = vec![
+		Assignment {
+			who: 11u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(0, 2)),
+				(2u64, OffchainAccuracy::from_rational_approximation(2, 2)),
+			],
+		},
+		Assignment {
+			who: 21u64,
+			distribution: vec![
+				(1u64, OffchainAccuracy::from_rational_approximation(1, 1)),
+			],
+		},
+	];
+	let winners_2 = vec![
+		(1u64, 1000),
+		(2u64, 1000),
+	];
+
+
+	ExtBuilder::default()
+	//	.offchain_phragmen_ext()
+		.validator_count(3)
+		.minimum_validator_count(2)
+		.build()
+		.execute_with(|| {
+			let (_, _, score_1) = prepare_submission::<Test> (
+				nominators.clone(),
+				validators.clone(),
+				assignments_1.clone(),
+				winners_1.clone(),
+				false,
+			);
+			let (_, _, score_2) = prepare_submission::<Test> (
+				nominators.clone(),
+				validators.clone(),
+				assignments_2.clone(),
+				winners_2.clone(),
+				false,
+			);
+			println!("{:?}", score_1);
+			println!("{:?}", score_2);
+			// check score1 is better than 2 (odd ordering of function).
+			assert!(is_score_better(score_2, score_1));
+		});
+}
