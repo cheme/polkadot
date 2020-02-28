@@ -891,15 +891,16 @@ fn test_read_storage() {
 fn test_read_child_storage() {
 	const STORAGE_KEY: &[u8] = b"unique_id_1";
 	const KEY: &[u8] = b":read_child_storage";
-	sp_io::default_child_storage::set(
-		STORAGE_KEY,
+	sp_io::default_child_storage::switch_or_create_context(
+		STORAGE_KEY
+	);
+	sp_io::storage::set(
 		KEY,
 		b"test",
 	);
 
 	let mut v = [0u8; 4];
-	let r = sp_io::default_child_storage::read(
-		STORAGE_KEY,
+	let r = sp_io::storage::read(
 		KEY,
 		&mut v,
 		0,
@@ -907,9 +908,19 @@ fn test_read_child_storage() {
 	assert_eq!(r, Some(4));
 	assert_eq!(&v, b"test");
 
+	sp_io::default_child_storage::initial_context();
+	let r = sp_io::storage::read(
+		KEY,
+		&mut v,
+		0,
+	);
+	assert_eq!(r, None);
+	assert!(sp_io::default_child_storage::switch_no_create_context(
+		STORAGE_KEY
+	).is_some());
+	
 	let mut v = [0u8; 4];
-	let r = sp_io::default_child_storage::read(
-		STORAGE_KEY,
+	let r = sp_io::storage::read(
 		KEY,
 		&mut v,
 		8,

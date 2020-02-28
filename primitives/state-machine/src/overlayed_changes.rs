@@ -28,7 +28,7 @@ use crate::{
 use std::iter::FromIterator;
 use std::collections::{HashMap, BTreeMap, BTreeSet};
 use codec::{Decode, Encode};
-use sp_core::storage::{well_known_keys::EXTRINSIC_INDEX, ChildInfo};
+use sp_core::storage::{well_known_keys::EXTRINSIC_INDEX, ChildInfo, ContextHandle};
 use std::{mem, ops};
 
 use hash_db::Hasher;
@@ -51,6 +51,11 @@ pub type ChildStorageCollection = Vec<(StorageKey, StorageCollection)>;
 /// that can be cleared.
 #[derive(Debug, Default, Clone)]
 pub struct OverlayedChanges {
+	/// Current state context
+	pub(crate) context: ContextHandle,
+	/// TODO switch Backend to be statefull and then
+	/// remove this ChildInfo field
+	pub(crate) context_child_info: Option<ChildInfo>,
 	/// Changes that are not yet committed.
 	pub(crate) prospective: OverlayedChangeSet,
 	/// Committed changes.
@@ -76,6 +81,9 @@ pub struct OverlayedValue {
 pub struct OverlayedChangeSet {
 	/// Top level storage changes.
 	pub top: BTreeMap<StorageKey, OverlayedValue>,
+	// TODO change this to a slab indexed by ContextHandle
+	// and an additional mapping.
+	//pub children_handles: HashMap<StorageKey, ContextHandle>,
 	/// Child storage changes.
 	pub children_default: HashMap<StorageKey, (BTreeMap<StorageKey, OverlayedValue>, ChildInfo)>,
 }
@@ -190,6 +198,50 @@ impl OverlayedChangeSet {
 }
 
 impl OverlayedChanges {
+
+	/// Return current child info TODO remove this by changing backend trait
+	pub fn current_child_info(&self) -> Option<&ChildInfo> {
+		self.context_child_info.as_ref()
+	}
+
+	/// TODO doc
+	pub fn initial_child_context(&mut self) {
+		self.context = 0;
+		self.context_child_info = None;
+	}
+
+	/// TODO doc
+	pub fn switch_child_context(&mut self, handle: ContextHandle) -> bool {
+		false // TODO put children in a slab
+	}
+
+	/// TODO doc
+	pub fn switch_or_create_child_context(
+		&mut self,
+		child_info: &ChildInfo,
+	) -> ContextHandle {
+		let storage_key = child_info.storage_key().to_vec();
+		let map_entry = self.prospective.children_default.entry(storage_key)
+			.or_insert_with(|| (Default::default(), child_info.to_owned()));
+		self.context_child_info = Some(child_info.to_owned());
+		0
+	}
+
+	/// TODO doc
+	pub fn switch_no_create_child_context(
+		&mut self,
+		child_info: &ChildInfo,
+	) -> Option<ContextHandle> {
+		let storage_key = child_info.storage_key();
+		if self.prospective.children_default.contains_key(storage_key)
+			|| self.committed.children_default.contains_key(storage_key) {
+			self.context_child_info = Some(child_info.to_owned());
+			Some(0)
+		} else {
+			None
+		}
+	}
+
 	/// Whether the overlayed changes are empty.
 	pub fn is_empty(&self) -> bool {
 		self.prospective.is_empty() && self.committed.is_empty()
@@ -204,15 +256,17 @@ impl OverlayedChanges {
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
 	pub fn storage(&self, key: &[u8]) -> Option<Option<&[u8]>> {
-		self.prospective.top.get(key)
-			.or_else(|| self.committed.top.get(key))
-			.map(|x| x.value.as_ref().map(AsRef::as_ref))
+		if let Some(child_info) = self.context_child_info.as_ref() {
+			self.child_storage(child_info.storage_key(), key)
+		} else {
+			// TODO remove when using slab index 0 for top.
+			self.prospective.top.get(key)
+				.or_else(|| self.committed.top.get(key))
+				.map(|x| x.value.as_ref().map(AsRef::as_ref))
+		}
 	}
 
-	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be referred
-	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
-	/// value has been set.
-	pub fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Option<Option<&[u8]>> {
+	fn child_storage(&self, storage_key: &[u8], key: &[u8]) -> Option<Option<&[u8]>> {
 		if let Some(map) = self.prospective.children_default.get(storage_key) {
 			if let Some(val) = map.0.get(key) {
 				return Some(val.value.as_ref().map(AsRef::as_ref));
@@ -232,20 +286,21 @@ impl OverlayedChanges {
 	///
 	/// `None` can be used to delete a value specified by the given key.
 	pub(crate) fn set_storage(&mut self, key: StorageKey, val: Option<StorageValue>) {
-		let extrinsic_index = self.extrinsic_index();
-		let entry = self.prospective.top.entry(key).or_default();
-		entry.value = val;
+		if let Some(child_info) = self.context_child_info.as_ref() {
+			self.set_child_storage(child_info, key, val)
+		} else {
+			let extrinsic_index = self.extrinsic_index();
+			let entry = self.prospective.top.entry(key).or_default();
+			entry.value = val;
 
-		if let Some(extrinsic) = extrinsic_index {
-			entry.extrinsics.get_or_insert_with(Default::default)
-				.insert(extrinsic);
+			if let Some(extrinsic) = extrinsic_index {
+				entry.extrinsics.get_or_insert_with(Default::default)
+					.insert(extrinsic);
+			}
 		}
 	}
 
-	/// Inserts the given key-value pair into the prospective child change set.
-	///
-	/// `None` can be used to delete a value specified by the given key.
-	pub(crate) fn set_child_storage(
+	fn set_child_storage(
 		&mut self,
 		child_info: &ChildInfo,
 		key: StorageKey,
@@ -267,46 +322,50 @@ impl OverlayedChanges {
 		}
 	}
 
-	/// Clear child storage of given storage key.
+	/// TODO doc
 	///
 	/// NOTE that this doesn't take place immediately but written into the prospective
 	/// change set, and still can be reverted by [`discard_prospective`].
 	///
 	/// [`discard_prospective`]: #method.discard_prospective
-	pub(crate) fn clear_child_storage(
-		&mut self,
-		child_info: &ChildInfo,
-	) {
-		let extrinsic_index = self.extrinsic_index();
-		let storage_key = child_info.storage_key();
-		let map_entry = self.prospective.children_default.entry(storage_key.to_vec())
-			.or_insert_with(|| (Default::default(), child_info.to_owned()));
-		let updatable = map_entry.1.try_update(child_info);
-		debug_assert!(updatable);
+	pub(crate) fn kill_storage(&mut self) -> bool {
+		if let Some(child_info) = self.context_child_info.as_ref() {
+			let extrinsic_index = self.extrinsic_index();
+			let storage_key = child_info.storage_key();
+			let map_entry = self.prospective.children_default.entry(storage_key.to_vec())
+				.or_insert_with(|| (Default::default(), child_info.to_owned()));
+			let updatable = map_entry.1.try_update(child_info);
+			debug_assert!(updatable);
 
-		map_entry.0.values_mut().for_each(|e| {
-			if let Some(extrinsic) = extrinsic_index {
-				e.extrinsics.get_or_insert_with(Default::default)
-					.insert(extrinsic);
-			}
+			map_entry.0.values_mut().for_each(|e| {
+				if let Some(extrinsic) = extrinsic_index {
+					e.extrinsics.get_or_insert_with(Default::default)
+						.insert(extrinsic);
+				}
 
-			e.value = None;
-		});
+				e.value = None;
+			});
 
-		if let Some((committed_map, _child_info)) = self.committed.children_default.get(storage_key) {
-			for (key, value) in committed_map.iter() {
-				if !map_entry.0.contains_key(key) {
-					map_entry.0.insert(key.clone(), OverlayedValue {
-						value: None,
-						extrinsics: extrinsic_index.map(|i| {
-							let mut e = value.extrinsics.clone()
-								.unwrap_or_else(|| BTreeSet::default());
-							e.insert(i);
-							e
-						}),
-					});
+			if let Some((committed_map, _child_info)) = self.committed.children_default.get(storage_key) {
+				for (key, value) in committed_map.iter() {
+					if !map_entry.0.contains_key(key) {
+						map_entry.0.insert(key.clone(), OverlayedValue {
+							value: None,
+							extrinsics: extrinsic_index.map(|i| {
+								let mut e = value.extrinsics.clone()
+									.unwrap_or_else(|| BTreeSet::default());
+								e.insert(i);
+								e
+							}),
+						});
+					}
 				}
 			}
+			true
+		} else {
+			// kill_storage forbidden on top trie
+			// TODO this should be defined in child info struct!!
+			false
 		}
 	}
 
@@ -317,37 +376,41 @@ impl OverlayedChanges {
 	///
 	/// [`discard_prospective`]: #method.discard_prospective
 	pub(crate) fn clear_prefix(&mut self, prefix: &[u8]) {
-		let extrinsic_index = self.extrinsic_index();
+		if let Some(child_info) = self.context_child_info.as_ref() {
+			self.clear_child_prefix(child_info, prefix)
+		} else {
+			let extrinsic_index = self.extrinsic_index();
 
-		// Iterate over all prospective and mark all keys that share
-		// the given prefix as removed (None).
-		for (key, entry) in self.prospective.top.iter_mut() {
-			if key.starts_with(prefix) {
-				entry.value = None;
+			// Iterate over all prospective and mark all keys that share
+			// the given prefix as removed (None).
+			for (key, entry) in self.prospective.top.iter_mut() {
+				if key.starts_with(prefix) {
+					entry.value = None;
 
-				if let Some(extrinsic) = extrinsic_index {
-					entry.extrinsics.get_or_insert_with(Default::default)
-						.insert(extrinsic);
+					if let Some(extrinsic) = extrinsic_index {
+						entry.extrinsics.get_or_insert_with(Default::default)
+							.insert(extrinsic);
+					}
 				}
 			}
-		}
 
-		// Then do the same with keys from committed changes.
-		// NOTE that we are making changes in the prospective change set.
-		for key in self.committed.top.keys() {
-			if key.starts_with(prefix) {
-				let entry = self.prospective.top.entry(key.clone()).or_default();
-				entry.value = None;
+			// Then do the same with keys from committed changes.
+			// NOTE that we are making changes in the prospective change set.
+			for key in self.committed.top.keys() {
+				if key.starts_with(prefix) {
+					let entry = self.prospective.top.entry(key.clone()).or_default();
+					entry.value = None;
 
-				if let Some(extrinsic) = extrinsic_index {
-					entry.extrinsics.get_or_insert_with(Default::default)
-						.insert(extrinsic);
+					if let Some(extrinsic) = extrinsic_index {
+						entry.extrinsics.get_or_insert_with(Default::default)
+							.insert(extrinsic);
+					}
 				}
 			}
 		}
 	}
 
-	pub(crate) fn clear_child_prefix(
+	fn clear_child_prefix(
 		&mut self,
 		child_info: &ChildInfo,
 		prefix: &[u8],
@@ -534,33 +597,51 @@ impl OverlayedChanges {
 	) -> H::Out
 		where H::Out: Ord + Encode,
 	{
-		let child_storage_keys = self.prospective.children_default.keys()
-				.chain(self.committed.children_default.keys());
-		let child_delta_iter = child_storage_keys.map(|storage_key|
-			(
-				self.default_child_info(storage_key).cloned()
-					.expect("child info initialized in either committed or prospective"),
-				self.committed.children_default.get(storage_key)
-					.into_iter()
-					.flat_map(|(map, _)| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
-					.chain(
-						self.prospective.children_default.get(storage_key)
-							.into_iter()
-							.flat_map(|(map, _)| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
-					),
-			)
-		);
+		if let Some(child_info) = self.context_child_info.as_ref() {
+			let storage_key = child_info.storage_key();
+			// TODO rec call with different context for top?? (see duplicated
+			// code bellow).
+			let delta = self.committed.children_default.get(storage_key)
+				.into_iter()
+				.flat_map(|(map, _)| map.clone().into_iter().map(|(k, v)| (k, v.value)))
+				.chain(
+					self.prospective.children_default.get(storage_key)
+						.into_iter()
+						.flat_map(|(map, _)| map.clone().into_iter().map(|(k, v)| (k, v.value)))
+				);
 
-		// compute and memoize
-		let delta = self.committed.top.iter().map(|(k, v)| (k.clone(), v.value.clone()))
-			.chain(self.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())));
+			// TODO use a cache.
 
-		let (root, transaction) = backend.full_storage_root(delta, child_delta_iter);
+			backend.child_storage_root(&child_info, delta).0
+		} else {
+			let child_storage_keys = self.prospective.children_default.keys()
+					.chain(self.committed.children_default.keys());
+			let child_delta_iter = child_storage_keys.map(|storage_key|
+				(
+					self.default_child_info(storage_key).cloned()
+						.expect("child info initialized in either committed or prospective"),
+					self.committed.children_default.get(storage_key)
+						.into_iter()
+						.flat_map(|(map, _)| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
+						.chain(
+							self.prospective.children_default.get(storage_key)
+								.into_iter()
+								.flat_map(|(map, _)| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
+						),
+				)
+			);
 
-		cache.transaction = Some(transaction);
-		cache.transaction_storage_root = Some(root);
+			// compute and memoize
+			let delta = self.committed.top.iter().map(|(k, v)| (k.clone(), v.value.clone()))
+				.chain(self.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())));
 
-		root
+			let (root, transaction) = backend.full_storage_root(delta, child_delta_iter);
+
+			cache.transaction = Some(transaction);
+			cache.transaction_storage_root = Some(root);
+
+			root
+		}
 	}
 
 	/// Generate the changes trie root.

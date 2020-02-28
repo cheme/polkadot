@@ -340,3 +340,7 @@ fn test_prefix_default_child_info() {
 	assert!(prefix.starts_with(well_known_keys::CHILD_STORAGE_KEY_PREFIX));
 	assert!(prefix.starts_with(DEFAULT_CHILD_TYPE_PARENT_PREFIX));
 }
+
+/// Compact handle to a state that can be use in a transactional
+/// context as a child trie.
+pub type ContextHandle = u32;

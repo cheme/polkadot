@@ -40,6 +40,8 @@ use sp_core::{
 	storage::{ChildInfo, ChildType},
 };
 
+use sp_core::storage::ContextHandle;
+
 use sp_core::{
 	crypto::KeyTypeId, ed25519, sr25519, H256, LogLevel,
 	offchain::{
@@ -144,6 +146,13 @@ pub trait Storage {
 		self.next_storage_key(&key)
 	}
 
+	/// Delete all content.
+	/// Return false if this is not allowed.
+	fn storage_kill(
+		&mut self,
+	) -> bool {
+		self.storage_kill()
+	}
 
 	/// Deprecated, please use dedicated runtime apis.
 	fn child_get(
@@ -283,118 +292,50 @@ pub trait Storage {
 
 }
 
-
 /// Interface for accessing the child storage for default child trie,
 /// from within the runtime.
 #[runtime_interface]
 pub trait DefaultChildStorage {
 	/// `storage_key` is the unprefixed location of the root of the child trie in the parent trie.
 	///
-	/// This function specifically returns the data for `key` in the child storage or `None`
-	/// if the key can not be found.
-	fn get(
-		&self,
-		storage_key: &[u8],
-		key: &[u8],
-	) -> Option<Vec<u8>> {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.child_storage(&child_info, key).map(|s| s.to_vec())
-	}
-
-	/// Get `key` from child storage, placing the value into `value_out` and return the number
-	/// of bytes that the entry in storage has beyond the offset or `None` if the storage entry
-	/// doesn't exist at all.
-	/// If `value_out` length is smaller than the returned length, only `value_out` length bytes
-	/// are copied into `value_out`.
-	fn read(
-		&self,
-		storage_key: &[u8],
-		key: &[u8],
-		value_out: &mut [u8],
-		value_offset: u32,
-	) -> Option<u32> {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.child_storage(&child_info, key)
-			.map(|value| {
-				let value_offset = value_offset as usize;
-				let data = &value[value_offset.min(value.len())..];
-				let written = std::cmp::min(data.len(), value_out.len());
-				value_out[..written].copy_from_slice(&data[..written]);
-				value.len() as u32
-			})
-	}
-
-	/// Set `key` to `value` in the child storage denoted by `storage_key`.
-	fn set(
+	/// This function change runtime context to a different state defined by this storage_key.
+	/// Storage key is related to the top context and not the current context.
+	/// If context does not exist it is created.
+	///
+	/// Return a handle of the context.
+	fn switch_or_create_context(
 		&mut self,
 		storage_key: &[u8],
-		key: &[u8],
-		value: &[u8],
-	) {
+	) -> ContextHandle {
 		let child_info = ChildInfo::new_default(storage_key);
-		self.set_child_storage(&child_info, key.to_vec(), value.to_vec());
+		self.switch_or_create_child_context(child_info)
 	}
-
-	/// Clear the given child storage of the given `key` and its value.
-	fn clear (
+	/// Same as `switch_or_create_context` but with no creation.
+	fn switch_no_create_context(
 		&mut self,
 		storage_key: &[u8],
-		key: &[u8],
-	) {
+	) -> Option<ContextHandle> {
 		let child_info = ChildInfo::new_default(storage_key);
-		self.clear_child_storage(&child_info, key);
+		self.switch_no_create_child_context(&child_info)
 	}
-
-	/// Clear an entire child storage.
-	fn storage_kill(
+	/// Change current context to another one, if the handle is invalid
+	/// it returns false.
+	/// In case this return false, runtime must always switch or create
+	/// context as a fallback (otherwhise future change in handle management
+	/// would break consensus).
+	fn switch_context(
 		&mut self,
-		storage_key: &[u8],
-	) {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.kill_child_storage(&child_info);
-	}
-
-	/// Check whether the given `key` exists in storage.
-	fn exists(
-		&self,
-		storage_key: &[u8],
-		key: &[u8],
+		handle: ContextHandle,
 	) -> bool {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.exists_child_storage(&child_info, key)
+		self.switch_child_context(handle)
 	}
-
-	/// Clear the child storage of each key-value pair where the key starts with the given `prefix`.
-	fn clear_prefix(
+	/// switch back to initial context.
+	/// To switch to a previous contex, the runtime will
+	/// need to store the stacked context by itself.
+	fn initial_context(
 		&mut self,
-		storage_key: &[u8],
-		prefix: &[u8],
 	) {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.clear_child_prefix(&child_info, prefix);
-	}
-
-	/// "Commit" all existing operations and compute the resulting child storage root.
-	///
-	/// The hashing algorithm is defined by the `Block`.
-	///
-	/// Returns the SCALE encoded hash.
-	fn root(
-		&mut self,
-		storage_key: &[u8],
-	) -> Vec<u8> {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.child_storage_root(&child_info)
-	}
-
-	/// Get the next key in storage after the given one in lexicographic order in child storage.
-	fn next_key(
-		&mut self,
-		storage_key: &[u8],
-		key: &[u8],
-	) -> Option<Vec<u8>> {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.next_child_storage_key(&child_info, key)
+		self.initial_child_context()
 	}
 }
 

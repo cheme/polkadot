@@ -22,28 +22,121 @@
 
 use crate::sp_std::prelude::*;
 use codec::{Codec, Encode, Decode};
-pub use sp_core::storage::{ChildInfo, ChildType};
+pub use sp_core::storage::{ChildInfo, ChildType, ContextHandle};
+
+#[derive(Clone, Copy)]
+pub struct ChildContext<'a> {
+	child_info: &'a ChildInfo,
+	handle: Option<ContextHandle>
+}
+
+impl<'a> ChildContext<'a> {
+	fn switch_context_create(&mut self) {
+		if !self.handle.map(|h| {
+			sp_io::default_child_storage::switch_context(h)
+		}).unwrap_or(false) {
+			match self.child_info.child_type() {
+				ChildType::ParentKeyId => {
+					let handle = sp_io::default_child_storage::switch_or_create_context(
+						self.child_info.storage_key()
+					);
+					self.handle = Some(handle);
+				}
+			}
+		};
+	}
+	fn switch_context_no_create(&mut self) -> bool {
+		if !self.handle.map(|h| {
+			sp_io::default_child_storage::switch_context(h)
+		}).unwrap_or(false) {
+			match self.child_info.child_type() {
+				ChildType::ParentKeyId => {
+					self.handle = sp_io::default_child_storage::switch_no_create_context(
+						self.child_info.storage_key()
+					);
+					self.handle.is_some()
+				}
+			}
+		} else {
+			true
+		}
+	}
+	/// Run on a child context.
+	pub fn with_context_create<F, R>
+	(
+		&mut self,
+		process: F,
+		mut parent: Option<&mut ChildContext>,
+	) -> R
+		where
+			F: Fn() -> R,
+	{
+		self.switch_context_create();
+		let r = process();
+		if let Some(parent) = parent.as_mut() {
+			// could also assert no create is true
+			parent.switch_context_create();
+		} else {
+			sp_io::default_child_storage::initial_context();
+		}
+		r
+	}
+	/// Run on a child context.
+	pub fn with_context_no_create<F, R>
+	(
+		&mut self,
+		process: F,
+		mut parent: Option<&mut ChildContext>,
+	) -> Option<R>
+		where
+			F: Fn() -> R,
+	{
+		if self.switch_context_no_create() {
+			let r = Some(process());
+			if let Some(parent) = parent.as_mut() {
+				if !parent.switch_context_no_create() {
+					runtime_print!("Error could not restore a parent context");
+					sp_io::default_child_storage::initial_context();
+				}
+			} else {
+				sp_io::default_child_storage::initial_context();
+			}
+			r
+		} else {
+			None
+		}
+	}
+}
+
+impl<'a> From<&'a ChildInfo> for ChildContext<'a> {
+	fn from(child_info: &'a ChildInfo) -> Self {
+		ChildContext {
+			child_info,
+			handle: None,
+		}
+	}
+}
 
 /// Return the value of the item in storage under `key`, or `None` if there is no explicit entry.
 pub fn get<T: Decode + Sized>(
 	child_info: &ChildInfo,
 	key: &[u8],
 ) -> Option<T> {
-	match child_info.child_type() {
-		ChildType::ParentKeyId => {
-			let storage_key = child_info.storage_key();
-			sp_io::default_child_storage::get(
-				storage_key,
-				key,
-			).and_then(|v| {
-				Decode::decode(&mut &v[..]).map(Some).unwrap_or_else(|_| {
-					// TODO #3700: error should be handleable.
-					runtime_print!("ERROR: Corrupted state in child trie at {:?}/{:?}", storage_key, key);
-					None
-				})
+	ChildContext::from(child_info).with_context_no_create(|| {
+		sp_io::storage::get(
+			key,
+		).and_then(|v| {
+			Decode::decode(&mut &v[..]).map(Some).unwrap_or_else(|_| {
+				// TODO #3700: error should be handleable.
+				runtime_print!(
+					"ERROR: Corrupted state in child trie at {:?}/{:?}",
+					child_info.storage_key(),
+					key,
+				);
+				None
 			})
-		},
-	}
+		})
+	}, None).flatten()
 }
 
 /// Return the value of the item in storage under `key`, or the type's default if there is no
@@ -81,15 +174,14 @@ pub fn put<T: Encode>(
 	key: &[u8],
 	value: &T,
 ) {
-	match child_info.child_type() {
-		ChildType::ParentKeyId => value.using_encoded(|slice|
-			sp_io::default_child_storage::set(
-				child_info.storage_key(),
+	ChildContext::from(child_info).with_context_create(|| {
+		value.using_encoded(|slice|
+			sp_io::storage::set(
 				key,
 				slice,
 			)
-		),
-	}
+		)
+	}, None)
 }
 
 /// Remove `key` from storage, returning its value if it had an explicit entry or `None` otherwise.
@@ -138,23 +230,20 @@ pub fn exists(
 	child_info: &ChildInfo,
 	key: &[u8],
 ) -> bool {
-	match child_info.child_type() {
-		ChildType::ParentKeyId => sp_io::default_child_storage::read(
-			child_info.storage_key(),
+	ChildContext::from(child_info).with_context_no_create(|| {
+		sp_io::storage::read(
 			key, &mut [0;0][..], 0,
-		).is_some(),
-	}
+		).is_some()
+	}, None).unwrap_or(false)
 }
 
 /// Remove all `storage_key` key/values
 pub fn kill_storage(
 	child_info: &ChildInfo,
-) {
-	match child_info.child_type() {
-		ChildType::ParentKeyId => sp_io::default_child_storage::storage_kill(
-			child_info.storage_key(),
-		),
-	}
+) -> bool {
+	ChildContext::from(child_info).with_context_no_create(|| {
+		sp_io::storage::storage_kill()
+	}, None).unwrap_or(true)
 }
 
 /// Ensure `key` has no explicit entry in storage.
@@ -162,14 +251,11 @@ pub fn kill(
 	child_info: &ChildInfo,
 	key: &[u8],
 ) {
-	match child_info.child_type() {
-		ChildType::ParentKeyId => {
-			sp_io::default_child_storage::clear(
-				child_info.storage_key(),
-				key,
-			);
-		},
-	}
+	ChildContext::from(child_info).with_context_no_create(|| {
+		sp_io::storage::clear(
+			key,
+		);
+	}, None);
 }
 
 /// Get a Vec of bytes from storage.
@@ -177,12 +263,11 @@ pub fn get_raw(
 	child_info: &ChildInfo,
 	key: &[u8],
 ) -> Option<Vec<u8>> {
-	match child_info.child_type() {
-		ChildType::ParentKeyId => sp_io::default_child_storage::get(
-			child_info.storage_key(),
+	ChildContext::from(child_info).with_context_no_create(|| {
+		sp_io::storage::get(
 			key,
-		),
-	}
+		)
+	}, None).flatten()
 }
 
 /// Put a raw byte slice into storage.
@@ -191,13 +276,12 @@ pub fn put_raw(
 	key: &[u8],
 	value: &[u8],
 ) {
-	match child_info.child_type() {
-		ChildType::ParentKeyId => sp_io::default_child_storage::set(
-			child_info.storage_key(),
+	ChildContext::from(child_info).with_context_create(|| {
+		sp_io::storage::set(
 			key,
 			value,
-		),
-	}
+		)
+	}, None);
 }
 
 /// Calculate current child root value.
@@ -205,8 +289,7 @@ pub fn root(
 	child_info: &ChildInfo,
 ) -> Vec<u8> {
 	match child_info.child_type() {
-		ChildType::ParentKeyId => sp_io::default_child_storage::root(
-			child_info.storage_key(),
-		),
+		ChildType::ParentKeyId => sp_io::storage::root(
+		)
 	}
 }
