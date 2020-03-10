@@ -80,7 +80,8 @@ use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTra
 use sc_client::leaves::{LeafSet, FinalizationDisplaced};
 use sc_state_db::StateDb;
 use sp_blockchain::{CachedHeaderMetadata, HeaderMetadata, HeaderMetadataCache};
-use crate::storage_cache::{CachingState, SyncingCachingState, SharedCache, new_shared_cache};
+use crate::storage_cache::{CachingState, SyncingCachingState, SharedCache, new_shared_cache,
+	SyncExperimentalCache};
 use crate::stats::StateUsageStats;
 use log::{trace, debug, warn};
 pub use sc_state_db::PruningMode;
@@ -264,6 +265,8 @@ pub struct DatabaseSettings {
 	pub state_cache_size: usize,
 	/// Ratio of cache size dedicated to child tries.
 	pub state_cache_child_ratio: Option<(usize, usize)>,
+	/// Use experimental cache implementation.
+	pub experimental_cache: bool,
 	/// Pruning mode.
 	pub pruning: PruningMode,
 	/// Where to find the database.
@@ -755,6 +758,7 @@ pub struct Backend<Block: BlockT> {
 	blockchain: BlockchainDb<Block>,
 	canonicalization_delay: u64,
 	shared_cache: SharedCache<Block>,
+	experimental_cache: Option<SyncExperimentalCache<Block>>,
 	import_lock: Arc<RwLock<()>>,
 	is_archive: bool,
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
@@ -779,6 +783,7 @@ impl<Block: BlockT> Backend<Block> {
 			state_cache_child_ratio: Some((50, 100)),
 			pruning: PruningMode::keep_blocks(keep_blocks),
 			source: DatabaseSettingsSrc::Custom(db),
+			experimental_cache: true,
 		};
 
 		Self::new(db_setting, canonicalization_delay).expect("failed to create test-db")
@@ -817,16 +822,19 @@ impl<Block: BlockT> Backend<Block> {
 			},
 		)?;
 
+		let (shared_cache, experimental_cache) = new_shared_cache(
+			config.state_cache_size,
+			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
+			config.experimental_cache,
+		);
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
-			shared_cache: new_shared_cache(
-				config.state_cache_size,
-				config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
-			),
+			shared_cache,
+			experimental_cache,
 			import_lock: Default::default(),
 			is_archive: is_archive_pruning,
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
@@ -1598,6 +1606,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				let caching_state = CachingState::new(
 					state,
 					self.shared_cache.clone(),
+					self.experimental_cache.clone(),
 					None,
 				);
 				return Ok(SyncingCachingState::new(
@@ -1631,6 +1640,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					let caching_state = CachingState::new(
 						state,
 						self.shared_cache.clone(),
+						self.experimental_cache.clone(),
 						Some(hash),
 					);
 					Ok(SyncingCachingState::new(
@@ -1798,6 +1808,7 @@ pub(crate) mod tests {
 			state_cache_child_ratio: Some((50, 100)),
 			pruning: PruningMode::keep_blocks(1),
 			source: DatabaseSettingsSrc::Custom(backing),
+			experimental_cache: true,
 		}, 0).unwrap();
 		assert_eq!(backend.blockchain().info().best_number, 9);
 		for i in 0..10 {

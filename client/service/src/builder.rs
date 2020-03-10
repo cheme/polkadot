@@ -243,6 +243,7 @@ fn new_full_parts<TBl, TRtApi, TExecDisp, TGen, TCSExt>(
 
 	let (client, backend) = {
 		let db_config = sc_client_db::DatabaseSettings {
+			experimental_cache: true, // TODO pass in parameters
 			state_cache_size: config.state_cache_size,
 			state_cache_child_ratio:
 			config.state_cache_child_ratio.map(|v| (v, 100)),
@@ -356,6 +357,7 @@ where TGen: RuntimeGenesis, TCSExt: Extension {
 
 		let db_storage = {
 			let db_settings = sc_client_db::DatabaseSettings {
+				experimental_cache: true,
 				state_cache_size: config.state_cache_size,
 				state_cache_child_ratio:
 					config.state_cache_child_ratio.map(|v| (v, 100)),
