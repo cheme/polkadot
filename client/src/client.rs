@@ -2996,6 +2996,7 @@ pub(crate) mod tests {
 		// states
 		let backend = Arc::new(Backend::new(
 			DatabaseSettings {
+				experimental_cache: true,
 				state_cache_size: 1 << 20,
 				state_cache_child_ratio: None,
 				pruning: PruningMode::ArchiveAll,
@@ -3198,6 +3199,7 @@ pub(crate) mod tests {
 		// states
 		let backend = Arc::new(Backend::new(
 				DatabaseSettings {
+					experimental_cache: true,
 					state_cache_size: 1 << 20,
 					state_cache_child_ratio: None,
 					pruning: PruningMode::keep_blocks(1),
