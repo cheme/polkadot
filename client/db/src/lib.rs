@@ -909,9 +909,10 @@ impl<Block: BlockT> Backend<Block> {
 		transaction: &mut DBTransaction,
 		route_to: Block::Hash,
 		best_to: (NumberFor<Block>, Block::Hash),
-	) -> ClientResult<(Vec<Block::Hash>, Vec<Block::Hash>)> {
+	) -> ClientResult<(Option<Block::Hash>, Vec<Block::Hash>, Vec<Block::Hash>)> {
 		let mut enacted = Vec::default();
 		let mut retracted = Vec::default();
+		let mut pivot = None;
 
 		let meta = self.blockchain.meta.read();
 
@@ -923,6 +924,7 @@ impl<Block: BlockT> Backend<Block> {
 				route_to,
 			)?;
 
+			pivot = Some(tree_route.common_block().hash.clone());
 			// uncanonicalize: check safety violations and ensure the numbers no longer
 			// point to these block hashes in the key mapping.
 			for r in tree_route.retracted() {
@@ -964,7 +966,7 @@ impl<Block: BlockT> Backend<Block> {
 			best_to.1,
 		)?;
 
-		Ok((enacted, retracted))
+		Ok((pivot, enacted, retracted))
 	}
 
 	fn ensure_sequential_finalization(
@@ -1083,10 +1085,10 @@ impl<Block: BlockT> Backend<Block> {
 			// blocks are keyed by number + hash.
 			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
 
-			let (enacted, retracted) = if pending_block.leaf_state.is_best() {
+			let (pivot, enacted, retracted) = if pending_block.leaf_state.is_best() {
 				self.set_head_with_transaction(&mut transaction, parent_hash, (number, hash))?
 			} else {
-				(Default::default(), Default::default())
+				(None, Default::default(), Default::default())
 			};
 
 			utils::insert_hash_to_key_mapping(
@@ -1221,7 +1223,7 @@ impl<Block: BlockT> Backend<Block> {
 
 			meta_updates.push((hash, number, pending_block.leaf_state.is_best(), finalized));
 
-			Some((number, hash, enacted, retracted, displaced_leaf, is_best, cache))
+			Some((number, hash, pivot, enacted, retracted, displaced_leaf, is_best, cache))
 		} else {
 			None
 		};
@@ -1231,13 +1233,13 @@ impl<Block: BlockT> Backend<Block> {
 				let number = header.number();
 				let hash = header.hash();
 
-				let (enacted, retracted) = self.set_head_with_transaction(
+				let (pivot, enacted, retracted) = self.set_head_with_transaction(
 					&mut transaction,
 					hash.clone(),
 					(number.clone(), hash.clone())
 				)?;
 				meta_updates.push((hash, *number, true, false));
-				Some((enacted, retracted))
+				Some((pivot, enacted, retracted))
 			} else {
 				return Err(sp_blockchain::Error::UnknownBlock(format!("Cannot set head {:?}", set_head)))
 			}
@@ -1250,6 +1252,7 @@ impl<Block: BlockT> Backend<Block> {
 		if let Some((
 			number,
 			hash,
+			pivot,
 			enacted,
 			retracted,
 			displaced_leaf,
@@ -1271,6 +1274,7 @@ impl<Block: BlockT> Backend<Block> {
 			}
 
 			cache.sync_cache(
+				pivot.as_ref(),
 				&enacted,
 				&retracted,
 				operation.storage_updates,
@@ -1286,8 +1290,13 @@ impl<Block: BlockT> Backend<Block> {
 		}
 		self.changes_tries_storage.post_commit(changes_trie_cache_ops);
 
-		if let Some((enacted, retracted)) = cache_update {
-			self.shared_cache.lock().sync(&enacted, &retracted);
+		if let Some((pivot, enacted, retracted)) = cache_update {
+			if let Some(cache) = self.experimental_cache.as_ref() {
+				let mut cache = cache.write();
+				cache.sync(pivot.as_ref(), &enacted, &retracted, None);
+			} // else { TODO disable for experimental use
+				self.shared_cache.lock().sync(&enacted, &retracted);
+			// }
 		}
 
 		for (hash, number, is_best, is_finalized) in meta_updates {

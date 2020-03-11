@@ -17,11 +17,12 @@
 //! Global cache state.
 
 use historied_db::{
-	StateDBRef, InMemoryStateDBRef, StateDB,
+	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
+	ForkableManagement,
 	historied::tree::MemoryOnly,
-	historied::tree_management::ForkPlan,
+	historied::tree_management::{Tree, TreeManagement, ForkPlan},
 };
-use std::collections::{VecDeque, HashSet, HashMap};
+use std::collections::{VecDeque, HashSet, HashMap, BTreeSet};
 use std::sync::Arc;
 use std::hash::Hash as StdHash;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -35,6 +36,7 @@ use sp_state_machine::{
 	StorageCollection, ChildStorageCollection,
 };
 use log::trace;
+use log::warn;
 use crate::{utils::Meta, stats::StateUsageStats};
 use std::marker::PhantomData;
 
@@ -98,7 +100,47 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 }
 
 struct LRUMap<K, V, B>(LinkedHashMap<K, V>, usize, usize, PhantomData<B>);
-pub struct ExperimentalCache<B>(LRUMap<StorageKey, Option<StorageValue>, B>);
+
+/// TODO replace second usize index by actual B::blocknumber
+pub struct ExperimentalCache<B: BlockT>{
+	lru_storage: LRUMap<StorageKey, MemoryOnly<usize, usize, Option<StorageValue>>, B>,
+	management: TreeManagement<B::Hash, usize, usize, Option<StorageValue>>,
+	/// since retracted branch could potentially be enacted back we do not put it
+	/// in management directly.
+	/// TODO Note that we only need lower branch number block, but will also
+	/// store the other to avoid querying enacted blocks.
+	retracted: BTreeSet<B::Hash>,
+}
+
+impl<B: BlockT> ExperimentalCache<B> {
+	pub fn sync(&mut self, pivot: Option<&B::Hash>, enacted: &[B::Hash], retracted: &[B::Hash], commit_hash: Option<&B::Hash>) {
+		trace!("Syncing experimental cache, pivot = {:?}, enacted = {:?}, retracted = {:?}", pivot, enacted, retracted);
+		for h in retracted {
+			self.retracted.insert(h.clone());
+		}
+
+		let mut state = if let Some(state) = pivot.and_then(|pivot| self.management.get_db_state_mut(pivot)) {
+			state
+		} else {
+			// empty case or unregistered: TODO need a way to distinguish
+			let result = self.management.latest_state();
+//			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
+			result
+		};
+		for h in enacted {
+			self.management.append_external_state(h.clone(), &state)
+				.expect("correct state resolution");
+			state = self.management.get_db_state_mut(h) // TODO bad api probably need to return SE instead of S
+				.expect("inserted above");
+		}
+		if let Some(h) = commit_hash {
+			self.management.append_external_state(h.clone(), &state)
+				.expect("correct state resolution");
+		}
+	
+	}
+}
+
 
 /// Internal trait similar to `heapsize` but using
 /// a simply estimation.
@@ -266,7 +308,7 @@ impl<B: BlockT> Cache<B> {
 }
 
 pub type SharedCache<B> = Arc<Mutex<Cache<B>>>;
-pub type SyncExperimentalCache<B> = Arc<Mutex<ExperimentalCache<B>>>;
+pub type SyncExperimentalCache<B> = Arc<RwLock<ExperimentalCache<B>>>;
 
 /// Fix lru storage size for hash (small 64ko).
 const FIX_LRU_HASH_SIZE: usize = 65_536;
@@ -293,9 +335,13 @@ pub fn new_shared_cache<B: BlockT>(
 		)
 	), if experimental {
 			// TODO Mutex or RwLock
-			Some(Arc::new(Mutex::new(ExperimentalCache(LRUMap(
-				LinkedHashMap::new(), 0, shared_cache_size * top / child_ratio.1, PhantomData
-			)))))
+			Some(Arc::new(RwLock::new(ExperimentalCache {
+				lru_storage: LRUMap(
+					LinkedHashMap::new(), 0, shared_cache_size * top / child_ratio.1, PhantomData
+				),
+				management: TreeManagement::default(),
+				retracted: Default::default(),
+			})))
 		} else {
 			None
 		})
@@ -383,6 +429,7 @@ impl<B: BlockT> CacheChanges<B> {
 	/// blockchain route has been calculated.
 	pub fn sync_cache(
 		&mut self,
+		pivot: Option<&B::Hash>,
 		enacted: &[B::Hash],
 		retracted: &[B::Hash],
 		changes: StorageCollection,
@@ -391,6 +438,33 @@ impl<B: BlockT> CacheChanges<B> {
 		commit_number: Option<NumberFor<B>>,
 		is_best: bool,
 	) {
+		if let Some(cache) = self.experimental_cache.as_ref() {
+			let mut cache = cache.write();
+			cache.sync(pivot, enacted, retracted, commit_hash.as_ref());
+		}// else { TODO do not sync when exp
+			self.sync_cache_default(
+				enacted,
+				retracted,
+				changes,
+				child_changes,
+				commit_hash,
+				commit_number,
+				is_best,
+			)
+		//}
+	}
+
+	fn sync_cache_default(
+		&mut self,
+		enacted: &[B::Hash],
+		retracted: &[B::Hash],
+		changes: StorageCollection,
+		child_changes: ChildStorageCollection,
+		commit_hash: Option<B::Hash>,
+		commit_number: Option<NumberFor<B>>,
+		is_best: bool,
+	) {
+
 		let mut cache = self.shared_cache.lock();
 		trace!(
 			"Syncing cache, id = (#{:?}, {:?}), parent={:?}, best={}",
@@ -489,7 +563,14 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 		experimental_cache: Option<SyncExperimentalCache<B>>,
 		parent_hash: Option<B::Hash>,
 	) -> Self {
-		let experimental_query_plan = unimplemented!("TODO fetch from management of exp cache");
+		let experimental_query_plan = parent_hash.as_ref().and_then(|ph|
+				experimental_cache.as_ref().and_then(|ec| {
+					let mut cache = ec.read();
+					cache.management.get_db_state(ph)
+				}));
+		experimental_query_plan.as_ref().map(|qp|
+			warn!("Query plan for new cache = {:?}", qp)
+		);
 		CachingState {
 			usage: StateUsageStats::new(),
 			state,
@@ -935,7 +1016,7 @@ impl<S, B: BlockT> Drop for SyncingCachingState<S, B> {
 			self.state_usage.merge_sm(caching_state.usage.take());
 			if let Some(hash) = caching_state.cache.parent_hash.clone() {
 				let is_best = self.meta.read().best_hash == hash;
-				caching_state.cache.sync_cache(&[], &[], vec![], vec![], None, None, is_best);
+				caching_state.cache.sync_cache(None, &[], &[], vec![], vec![], None, None, is_best);
 			}
 		}
 	}
@@ -976,6 +1057,7 @@ mod tests {
 			Some(root_parent),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![2]))],
@@ -991,7 +1073,7 @@ mod tests {
 			experimental.clone(),
 			Some(h0),
 		);
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h1a), Some(1), true);
+		s.cache.sync_cache(None, &[], &[], vec![], vec![], Some(h1a), Some(1), true);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1000,6 +1082,7 @@ mod tests {
 			Some(h0),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![3]))],
@@ -1016,6 +1099,7 @@ mod tests {
 			Some(h1b),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![4]))],
@@ -1032,6 +1116,7 @@ mod tests {
 			Some(h1a),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![5]))],
@@ -1047,7 +1132,7 @@ mod tests {
 			experimental.clone(),
 			Some(h2a),
 		);
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h3a), Some(3), true);
+		s.cache.sync_cache(None, &[], &[], vec![], vec![], Some(h3a), Some(3), true);
 
 		let s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1090,6 +1175,7 @@ mod tests {
 			Some(h2b),
 		);
 		s.cache.sync_cache(
+			Some(&h0),
 			&[h1b, h2b, h3b],
 			&[h1a, h2a, h3a],
 			vec![],
@@ -1127,6 +1213,7 @@ mod tests {
 			Some(root_parent),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![2]))],
@@ -1142,7 +1229,7 @@ mod tests {
 			experimental.clone(),
 			Some(h1),
 		);
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h2a), Some(2), true);
+		s.cache.sync_cache(None, &[], &[], vec![], vec![], Some(h2a), Some(2), true);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1151,6 +1238,7 @@ mod tests {
 			Some(h1),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![3]))],
@@ -1167,6 +1255,7 @@ mod tests {
 			Some(h2b),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![3]))],
@@ -1203,7 +1292,7 @@ mod tests {
 			experimental.clone(),
 			Some(root_parent),
 		);
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h1), Some(1), true);
+		s.cache.sync_cache(None, &[], &[], vec![], vec![], Some(h1), Some(1), true);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1211,7 +1300,7 @@ mod tests {
 			experimental.clone(),
 			Some(h1),
 		);
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h2a), Some(2), true);
+		s.cache.sync_cache(None, &[], &[], vec![], vec![], Some(h2a), Some(2), true);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1220,6 +1309,7 @@ mod tests {
 			Some(h2a),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![2]))],
@@ -1235,7 +1325,7 @@ mod tests {
 			experimental.clone(),
 			Some(h1),
 		);
-		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h2b), Some(2), false);
+		s.cache.sync_cache(None, &[], &[], vec![], vec![], Some(h2b), Some(2), false);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1244,6 +1334,7 @@ mod tests {
 			Some(h2b),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![3]))],
@@ -1278,6 +1369,7 @@ mod tests {
 		let key = H256::random()[..].to_vec();
 		let s_key = H256::random()[..].to_vec();
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![1, 2, 3]))],
@@ -1291,6 +1383,7 @@ mod tests {
 
 		let key = H256::random()[..].to_vec();
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![],
@@ -1318,6 +1411,7 @@ mod tests {
 
 		let key = H256::random()[..].to_vec();
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![1, 2, 3, 4]))],
@@ -1331,6 +1425,7 @@ mod tests {
 
 		let key = H256::random()[..].to_vec();
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![1, 2]))],
@@ -1361,6 +1456,7 @@ mod tests {
 			Some(root_parent.clone()),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![2]))],
@@ -1377,6 +1473,7 @@ mod tests {
 			Some(h0),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![3]))],
@@ -1408,7 +1505,7 @@ mod tests {
 		s.cache.local_cache.write().storage.insert(key.clone(), Some(vec![42]));
 
 		// New value is propagated.
-		s.cache.sync_cache(&[], &[], vec![], vec![], None, None, true);
+		s.cache.sync_cache(None, &[], &[], vec![], vec![], None, None, true);
 
 		let s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1639,6 +1736,7 @@ mod qc {
 					);
 
 					state.cache.sync_cache(
+						None,
 						&[],
 						&[],
 						changes,
@@ -1679,6 +1777,7 @@ mod qc {
 					);
 
 					state.cache.sync_cache(
+						None,
 						&[],
 						&[],
 						next.changes.clone(),
@@ -1702,6 +1801,7 @@ mod qc {
 						Some(chain) => {
 							let mut new_fork = self.canon.drain(pos+1..).collect::<Vec<Node>>();
 
+							let pivot = self.canon.last().map(|node| node.hash);
 							let retracted: Vec<H256> = new_fork.iter().map(|node| node.hash).collect();
 							let enacted: Vec<H256> = chain.iter().map(|node| node.hash).collect();
 
@@ -1728,6 +1828,7 @@ mod qc {
 
 							let height = pos as u64 + enacted.len() as u64 + 2;
 							state.cache.sync_cache(
+								pivot.as_ref(),
 								&enacted[..],
 								&retracted[..],
 								vec![],
