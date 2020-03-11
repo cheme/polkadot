@@ -18,7 +18,7 @@
 
 use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
-	ForkableManagement,
+	ForkableManagement, historied::linear::Latest,
 	historied::tree::MemoryOnly,
 	historied::tree_management::{Tree, TreeManagement, ForkPlan},
 };
@@ -58,32 +58,46 @@ pub struct Cache<B: BlockT> {
 }
 
 // TODO remove (useless) -> make the ExperimentalCache
-impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
-	type S = ();
+impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for SyncExperimentalCache<B> {
+	type S = ForkPlan<usize, usize>;
 
 	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
-		unimplemented!()
+		use historied_db::historied::ValueRef;
+		self.0.write().lru_storage.get(key).and_then(|history| history.get(at))
 	}
 
 	fn contains(&self, key: &StorageKey, at: &Self::S) -> bool {
-		unimplemented!()
+		self.get(key, at).is_some()
 	}
-
 }
 
-impl<B: BlockT> InMemoryStateDBRef<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
+impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
+	type S = ForkPlan<usize, usize>;
+	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
+		unreachable!("dummy implementation for state db implementation")
+	}
+	fn contains(&self, key: &StorageKey, at: &Self::S) -> bool {
+		unreachable!("dummy implementation for state db implementation")
+	}
+}
+
+/* cannot return ref behind a lock and lru require mut access
+impl<B: BlockT> InMemoryStateDBRef<StorageKey, Option<StorageValue>> for SyncExperimentalCache<B> {
 	fn get_ref(&self, key: &StorageKey, at: &Self::S) -> Option<&Option<StorageValue>> {
-		unimplemented!()
+		use historied_db::historied::InMemoryValueRef;
+		self.0.write().lru_storage.get(key).and_then(|history| history.get_ref(at))
 	}
 }
+*/
 
 impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
-	type SE = ();
+	type SE = Latest<(usize, usize)>;
 	type GC = ();
 	type Migrate = ();
 
 	fn emplace(&mut self, key: StorageKey, value: Option<StorageValue>, at: &Self::SE) {
-		unimplemented!()
+		use historied_db::historied::Value;
+		self.lru_storage.get(&key).map(|history| history.set(value, at));
 	}
 
 	fn remove(&mut self, key: &StorageKey, at: &Self::SE) {
@@ -91,7 +105,7 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 	}
 
 	fn gc(&mut self, gc: &Self::GC) {
-		unimplemented!()
+		unimplemented!("TODO gc on lru full")
 	}
 
 	fn migrate(&mut self, mig: &Self::Migrate) {
@@ -128,6 +142,9 @@ impl<B: BlockT> ExperimentalCache<B> {
 			result
 		};
 		for h in enacted {
+			if self.retracted.remove(h) {
+				continue;
+			}
 			self.management.append_external_state(h.clone(), &state)
 				.expect("correct state resolution");
 			state = self.management.get_db_state_mut(h) // TODO bad api probably need to return SE instead of S
@@ -163,6 +180,12 @@ impl EstimateSize for Vec<u8> {
 impl EstimateSize for Option<Vec<u8>> {
 	fn estimate_size(&self) -> usize {
 		self.as_ref().map(|v|v.capacity()).unwrap_or(0)
+	}
+}
+
+impl EstimateSize for MemoryOnly<usize, usize, Option<StorageValue>> {
+	fn estimate_size(&self) -> usize {
+		self.temp_size()
 	}
 }
 
@@ -308,7 +331,9 @@ impl<B: BlockT> Cache<B> {
 }
 
 pub type SharedCache<B> = Arc<Mutex<Cache<B>>>;
-pub type SyncExperimentalCache<B> = Arc<RwLock<ExperimentalCache<B>>>;
+
+#[derive(Clone)]
+pub struct SyncExperimentalCache<B: BlockT>(pub Arc<RwLock<ExperimentalCache<B>>>);
 
 /// Fix lru storage size for hash (small 64ko).
 const FIX_LRU_HASH_SIZE: usize = 65_536;
@@ -335,13 +360,13 @@ pub fn new_shared_cache<B: BlockT>(
 		)
 	), if experimental {
 			// TODO Mutex or RwLock
-			Some(Arc::new(RwLock::new(ExperimentalCache {
+			Some(SyncExperimentalCache(Arc::new(RwLock::new(ExperimentalCache {
 				lru_storage: LRUMap(
 					LinkedHashMap::new(), 0, shared_cache_size * top / child_ratio.1, PhantomData
 				),
 				management: TreeManagement::default(),
 				retracted: Default::default(),
-			})))
+			}))))
 		} else {
 			None
 		})
@@ -393,6 +418,7 @@ pub struct CacheChanges<B: BlockT> {
 	/// `None` if cache is disabled
 	pub parent_hash: Option<B::Hash>,
 	pub experimental_query_plan: Option<ForkPlan<usize, usize>>,
+	pub experimental_update: Option<Latest<(usize, usize)>>,
 }
 
 /// State cache abstraction.
@@ -439,7 +465,7 @@ impl<B: BlockT> CacheChanges<B> {
 		is_best: bool,
 	) {
 		if let Some(cache) = self.experimental_cache.as_ref() {
-			let mut cache = cache.write();
+			let mut cache = cache.0.write();
 			cache.sync(pivot, enacted, retracted, commit_hash.as_ref());
 		}// else { TODO do not sync when exp
 			self.sync_cache_default(
@@ -565,11 +591,21 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 	) -> Self {
 		let experimental_query_plan = parent_hash.as_ref().and_then(|ph|
 				experimental_cache.as_ref().and_then(|ec| {
-					let mut cache = ec.read();
+					let mut cache = ec.0.read();
 					cache.management.get_db_state(ph)
 				}));
+		// TODO factor with previous exp, ok for now
+		let experimental_update = parent_hash.as_ref().and_then(|ph|
+				experimental_cache.as_ref().and_then(|ec| {
+					let mut cache = ec.0.read();
+					cache.management.get_db_state_mut(ph)
+				}));
+	
 		experimental_query_plan.as_ref().map(|qp|
 			warn!("Query plan for new cache = {:?}", qp)
+		);
+		experimental_update.as_ref().map(|eu|
+			warn!("Update at for new cache = {:?}", eu)
 		);
 		CachingState {
 			usage: StateUsageStats::new(),
@@ -584,6 +620,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 				}),
 				parent_hash,
 				experimental_query_plan,
+				experimental_update,
 			},
 		}
 	}
@@ -636,12 +673,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 	}
 }
 
-impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for CachingState<S, B> {
-	type Error = S::Error;
-	type Transaction = S::Transaction;
-	type TrieBackendStorage = S::TrieBackendStorage;
-
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
+	fn storage_inner(&self, key: &[u8]) -> Result<Option<Vec<u8>>, <S as StateBackend<HashFor<B>>>::Error> {
 		let local_cache = self.cache.local_cache.upgradable_read();
 		// Note that local cache makes that lru is not refreshed
 		if let Some(entry) = local_cache.storage.get(key).cloned() {
@@ -663,6 +696,36 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		RwLockUpgradableReadGuard::upgrade(local_cache).storage.insert(key.to_vec(), value.clone());
 		self.usage.tally_key_read(key, value.as_ref(), false);
 		Ok(value)
+	}
+}
+
+impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for CachingState<S, B> {
+	type Error = S::Error;
+	type Transaction = S::Transaction;
+	type TrieBackendStorage = S::TrieBackendStorage;
+
+	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+		let exp_v = if let Some(cache) = self.cache.experimental_cache.as_ref() {
+			self.cache.experimental_query_plan.as_ref().and_then(|qp| {
+				// TODO change trait to borrow to avoid alloc
+				cache.get(&key.to_vec(), qp)
+			})
+		} else {
+			None
+		}; // TODO elsify then non cache
+	  let result = self.storage_inner(key)?;
+		if let Some(exp_v) = exp_v {
+			assert_eq!(result, exp_v);
+		} else {
+			if let Some(cache) = self.cache.experimental_cache.as_ref() {
+				self.cache.experimental_update.as_ref().map(|eu| {
+					// TODO change trait to borrow to avoid alloc
+					cache.0.write().emplace(key.to_vec(), result.clone(), eu);
+				});
+			}
+		}
+
+		Ok(result)
 	}
 
 	fn storage_hash(&self, key: &[u8]) -> Result<Option<B::Hash>, Self::Error> {

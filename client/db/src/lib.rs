@@ -1292,7 +1292,7 @@ impl<Block: BlockT> Backend<Block> {
 
 		if let Some((pivot, enacted, retracted)) = cache_update {
 			if let Some(cache) = self.experimental_cache.as_ref() {
-				let mut cache = cache.write();
+				let mut cache = cache.0.write();
 				cache.sync(pivot.as_ref(), &enacted, &retracted, None);
 			} // else { TODO disable for experimental use
 				self.shared_cache.lock().sync(&enacted, &retracted);
