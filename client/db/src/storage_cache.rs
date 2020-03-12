@@ -97,7 +97,12 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 
 	fn emplace(&mut self, key: StorageKey, value: Option<StorageValue>, at: &Self::SE) {
 		use historied_db::historied::Value;
-		self.lru_storage.get(&key).map(|history| history.set(value, at));
+		if let Some(history) = self.lru_storage.get(&key) {
+			history.set(value, at);
+		} else {
+			let history = MemoryOnly::new(value, at);
+			self.lru_storage.add(key, history);
+		}
 	}
 
 	fn remove(&mut self, key: &StorageKey, at: &Self::SE) {
