@@ -132,13 +132,33 @@ pub struct ExperimentalCache<B: BlockT>{
 }
 
 impl<B: BlockT> ExperimentalCache<B> {
-	pub fn sync(&mut self, pivot: Option<&B::Hash>, enacted: &[B::Hash], retracted: &[B::Hash], commit_hash: Option<&B::Hash>) {
+	pub fn sync(
+		&mut self,
+		pivot: Option<&B::Hash>,
+		enacted: &[B::Hash],
+		retracted: &[B::Hash],
+		commit_hash: Option<&B::Hash>,
+	) -> Option<(ForkPlan<usize, usize>, Latest<(usize, usize)>)> {
 		trace!("Syncing experimental cache, pivot = {:?}, enacted = {:?}, retracted = {:?}", pivot, enacted, retracted);
 		for h in retracted {
 			self.retracted.insert(h.clone());
 		}
+		for h in enacted {
+			self.retracted.remove(h);
+		}
+		
 
-		let mut state = if let Some(state) = pivot.and_then(|pivot| self.management.get_db_state_mut(pivot)) {
+		let state = if let Some(mut state) = pivot.and_then(|pivot| self.management.get_db_state_mut(pivot)) {
+			// TODO this should not really occur??
+			for h in enacted {
+				if self.retracted.remove(h) {
+					continue;
+				}
+				self.management.append_external_state(h.clone(), &state)
+					.expect("correct state resolution");
+				state = self.management.get_db_state_mut(h) // TODO bad api probably need to return SE instead of S
+					.expect("inserted above");
+			}
 			state
 		} else {
 			// empty case or unregistered: TODO need a way to distinguish
@@ -146,20 +166,18 @@ impl<B: BlockT> ExperimentalCache<B> {
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
 			result
 		};
-		for h in enacted {
-			if self.retracted.remove(h) {
-				continue;
-			}
-			self.management.append_external_state(h.clone(), &state)
-				.expect("correct state resolution");
-			state = self.management.get_db_state_mut(h) // TODO bad api probably need to return SE instead of S
-				.expect("inserted above");
-		}
+		
 		if let Some(h) = commit_hash {
-			self.management.append_external_state(h.clone(), &state)
-				.expect("correct state resolution");
+			// TODO returning both state on this call???
+			Some((
+				self.management.append_external_state(h.clone(), &state)
+					.expect("correct state resolution"),
+				self.management.get_db_state_mut(&h)
+					.expect("correct state resolution"),
+			))
+		} else {
+			None
 		}
-	
 	}
 }
 
@@ -471,7 +489,10 @@ impl<B: BlockT> CacheChanges<B> {
 	) {
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
-			cache.sync(pivot, enacted, retracted, commit_hash.as_ref());
+			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref()) {
+				self.experimental_query_plan = Some(qp);
+				self.experimental_update = Some(eu);
+			}
 		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
 			self.sync_cache_default(
 				enacted,
