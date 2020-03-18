@@ -472,7 +472,7 @@ impl<B: BlockT> CacheChanges<B> {
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
 			cache.sync(pivot, enacted, retracted, commit_hash.as_ref());
-		}// else { TODO do not sync when exp
+		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
 			self.sync_cache_default(
 				enacted,
 				retracted,
@@ -518,6 +518,9 @@ impl<B: BlockT> CacheChanges<B> {
 		if let Some(_) = self.parent_hash {
 			let mut local_cache = self.local_cache.write();
 			if is_best {
+				let eu = &self.experimental_update;
+				let mut exp_cache = self.experimental_cache.as_mut().map(|c| c.0.write())
+					.and_then(|c| eu.as_ref().map(|eu| (c, eu))); 
 				trace!(
 					"Committing {} local, {} hashes, {} modified root entries, {} modified child entries",
 					local_cache.storage.len(),
@@ -526,6 +529,16 @@ impl<B: BlockT> CacheChanges<B> {
 					child_changes.iter().map(|v|v.1.len()).sum::<usize>(),
 				);
 				for (k, v) in local_cache.storage.drain() {
+					// This bring some read query of unchanged values.
+					// The queries will be written at latest block index when
+					// they are not: this caching writes somewhat invalid
+					// positional when you consider real state change.
+					// With a strict historied backend we could have values
+					// with right change index, here it is not (never write
+					// this content to a backend).
+					exp_cache.as_mut().map(|(exp_cache, eu)| {
+						exp_cache.emplace(k.clone(), v.clone(), eu);
+					});
 					cache.lru_storage.add(k, v);
 				}
 				for (k, v) in local_cache.child_storage.drain() {
@@ -541,6 +554,13 @@ impl<B: BlockT> CacheChanges<B> {
 			Some(ref number), Some(ref hash), Some(ref parent))
 				= (commit_number, commit_hash, self.parent_hash)
 		{
+			let mut exp_cache = if is_best {
+				let eu = &self.experimental_update;
+				self.experimental_cache.as_mut().map(|c| c.0.write())
+					.and_then(|c| eu.as_ref().map(|eu| (c, eu)))
+			} else {
+				None
+			};
 			if cache.modifications.len() == STATE_CACHE_BLOCKS {
 				cache.modifications.pop_back();
 			}
@@ -557,6 +577,9 @@ impl<B: BlockT> CacheChanges<B> {
 			);
 			for (k, v) in changes.into_iter() {
 				if is_best {
+					exp_cache.as_mut().map(|(exp_cache, eu)| {
+						exp_cache.emplace(k.clone(), v.clone(), eu);
+					});
 					cache.lru_hashes.remove(&k);
 					cache.lru_storage.add(k.clone(), v);
 				}
@@ -678,8 +701,18 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 	}
 }
 
-impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
-	fn storage_inner(&self, key: &[u8]) -> Result<Option<Vec<u8>>, <S as StateBackend<HashFor<B>>>::Error> {
+impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for CachingState<S, B> {
+	type Error = S::Error;
+	type Transaction = S::Transaction;
+	type TrieBackendStorage = S::TrieBackendStorage;
+
+	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+
+		/* experimental cache need to use local cache (upgrade and drop is not
+		 * doable with a shared state). Generally, I think this local cache
+		 * should move into the overlay layer (most of the evaluation requires it
+		 * and we would not need the RWLock.
+		*/
 		let local_cache = self.cache.local_cache.upgradable_read();
 		// Note that local cache makes that lru is not refreshed
 		if let Some(entry) = local_cache.storage.get(key).cloned() {
@@ -688,28 +721,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 
 			return Ok(entry)
 		}
-		let mut cache = self.cache.shared_cache.lock();
-		if Self::is_allowed(Some(key), None, &self.cache.parent_hash, &cache.modifications) {
-			if let Some(entry) = cache.lru_storage.get(key).map(|a| a.clone()) {
-				trace!("Found in shared cache: {:?}", HexDisplay::from(&key));
-				self.usage.tally_key_read(key, entry.as_ref(), true);
-				return Ok(entry)
-			}
-		}
-		trace!("Cache miss: {:?}", HexDisplay::from(&key));
-		let value = self.state.storage(key)?;
-		RwLockUpgradableReadGuard::upgrade(local_cache).storage.insert(key.to_vec(), value.clone());
-		self.usage.tally_key_read(key, value.as_ref(), false);
-		Ok(value)
-	}
-}
 
-impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for CachingState<S, B> {
-	type Error = S::Error;
-	type Transaction = S::Transaction;
-	type TrieBackendStorage = S::TrieBackendStorage;
-
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		let exp_v = if let Some(cache) = self.cache.experimental_cache.as_ref() {
 			self.cache.experimental_query_plan.as_ref().and_then(|qp| {
 				// TODO change trait to borrow to avoid alloc
@@ -718,7 +730,29 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		} else {
 			None
 		}; // TODO elsify then non cache
-	  let result = self.storage_inner(key)?;
+
+		let mut cache = self.cache.shared_cache.lock();
+		if Self::is_allowed(Some(key), None, &self.cache.parent_hash, &cache.modifications) {
+			if let Some(entry) = cache.lru_storage.get(key).map(|a| a.clone()) {
+				trace!("Found in shared cache: {:?}", HexDisplay::from(&key));
+				self.usage.tally_key_read(key, entry.as_ref(), true);
+if let Some(exp_v) = exp_v {
+	assert_eq!(entry, exp_v);
+}
+				return Ok(entry)
+			}
+		}
+		trace!("Cache miss: {:?}", HexDisplay::from(&key));
+		let value = self.state.storage(key)?;
+if let Some(exp_v) = exp_v {
+	assert_eq!(value, exp_v);
+}
+	
+		RwLockUpgradableReadGuard::upgrade(local_cache).storage.insert(key.to_vec(), value.clone());
+		self.usage.tally_key_read(key, value.as_ref(), false);
+		Ok(value)
+
+/*	  let result = self.storage_inner(key)?;
 		if let Some(exp_v) = exp_v {
 			assert_eq!(result, exp_v);
 		} else {
@@ -730,7 +764,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 			}
 		}
 
-		Ok(result)
+		Ok(result)*/
 	}
 
 	fn storage_hash(&self, key: &[u8]) -> Result<Option<B::Hash>, Self::Error> {
