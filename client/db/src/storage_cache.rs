@@ -90,6 +90,34 @@ impl<B: BlockT> InMemoryStateDBRef<StorageKey, Option<StorageValue>> for SyncExp
 }
 */
 
+/// Clean mode for experimental cache.
+#[derive(Clone, Copy)]
+pub enum ExpCleanMode {
+	/// only apply lru, this will result
+	/// in memory loss in regularily used keys.
+	/// The parameter if not null indicate how many
+	/// call before next full clean (needed for mentioned
+	/// memory accumulation).
+	/// If usize is 0 we never clear: this should not be use,
+	/// only for debugging.
+	LRUOnly(usize),
+	/// Gc against a state without retracted branches.
+	/// Any enacted of non retracted branch will result
+	/// in global cache invalidation.
+	GCRetracted,
+	/// Gc against state available from the last usize blocks over current
+	/// branch.
+	/// Similar to a canonicalization window size.
+	GCRange(usize),
+}
+
+impl Default for ExpCleanMode {
+	fn default() -> Self {
+		// TODO EMCH ??(here for testing purpose, since test mostly use hardcoded default)
+		ExpCleanMode::GCRetracted
+	}
+}
+
 impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
 	type SE = Latest<(usize, usize)>;
 	type GC = ();
@@ -128,7 +156,12 @@ pub struct ExperimentalCache<B: BlockT>{
 	/// in management directly.
 	/// TODO Note that we only need lower branch number block, but will also
 	/// store the other to avoid querying enacted blocks.
+	/// Also note that gc cannot be done on retracted because it can be enacted back (unless
+	/// invalidate cache on enacted back).
 	retracted: BTreeSet<B::Hash>,
+	clean_mode: ExpCleanMode,
+	/// store if gc did happen.
+	did_gc: bool,
 }
 
 impl<B: BlockT> ExperimentalCache<B> {
@@ -143,13 +176,11 @@ impl<B: BlockT> ExperimentalCache<B> {
 		for h in retracted {
 			self.retracted.insert(h.clone());
 		}
-		for h in enacted {
-			self.retracted.remove(h);
-		}
-		
+		let mut got_all_enacted = true;
+	
 
 		let state = if let Some(mut state) = pivot.and_then(|pivot| self.management.get_db_state_mut(pivot)) {
-			// TODO this should not really occur??
+			// TODO this should not really occur?? (get state mut on pivot returning
 			for h in enacted {
 				if self.retracted.remove(h) {
 					continue;
@@ -161,11 +192,28 @@ impl<B: BlockT> ExperimentalCache<B> {
 			}
 			state
 		} else {
+			for h in enacted {
+				if !self.retracted.remove(h) {
+					got_all_enacted = false;
+				}
+			}
+	
 			// empty case or unregistered: TODO need a way to distinguish
 			let result = self.management.latest_state();
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
 			result
 		};
+
+		if let ExpCleanMode::GCRetracted = self.clean_mode {
+			if !got_all_enacted && self.did_gc {
+				// invalidate cache since a gc can have removed those value: TODO EMCH do it only if a gc did
+				// run or if eager gc on access
+				self.management = TreeManagement::default();
+				self.lru_storage.clear();
+				self.retracted.clear();
+				self.did_gc = false;
+			}
+		}
 		
 		if let Some(h) = commit_hash {
 			// TODO returning both state on this call???
@@ -365,7 +413,7 @@ const FIX_LRU_HASH_SIZE: usize = 65_536;
 pub fn new_shared_cache<B: BlockT>(
 	shared_cache_size: usize,
 	child_ratio: (usize, usize),
-	experimental: bool,
+	experimental: Option<ExpCleanMode>,
 ) -> (SharedCache<B>, Option<SyncExperimentalCache<B>>) {
 	let top = child_ratio.1.saturating_sub(child_ratio.0);
 	(Arc::new(
@@ -381,7 +429,7 @@ pub fn new_shared_cache<B: BlockT>(
 				modifications: VecDeque::new(),
 			}
 		)
-	), if experimental {
+	), if let Some(mode) = experimental {
 			// TODO Mutex or RwLock
 			Some(SyncExperimentalCache(Arc::new(RwLock::new(ExperimentalCache {
 				lru_storage: LRUMap(
@@ -389,11 +437,12 @@ pub fn new_shared_cache<B: BlockT>(
 				),
 				management: TreeManagement::default(),
 				retracted: Default::default(),
+				clean_mode: mode,
+				did_gc: false,
 			}))))
 		} else {
 			None
 		})
-
 }
 
 #[derive(Debug)]
@@ -1191,7 +1240,7 @@ mod tests {
 		let h3a = H256::random();
 		let h3b = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), true);
+		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), Some(Default::default()));
 
 		// blocks  [ 3a(c) 2a(c) 2b 1b 1a(c) 0 ]
 		// state   [ 5     5     4  3  2     2 ]
@@ -1349,7 +1398,7 @@ mod tests {
 		let h2b = H256::random();
 		let h3b = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), true);
+		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Some(Default::default()));
 
 		let mut s = CachingState::qc_new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1429,7 +1478,7 @@ mod tests {
 		let h3a = H256::random();
 		let h3b = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), true);
+		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Some(Default::default()));
 
 		let mut s = CachingState::qc_new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1501,7 +1550,7 @@ mod tests {
 	#[test]
 	fn should_track_used_size_correctly() {
 		let root_parent = H256::random();
-		let (shared, experimental) = new_shared_cache::<Block>(109, ((109-36), 109), true);
+		let (shared, experimental) = new_shared_cache::<Block>(109, ((109-36), 109), Some(Default::default()));
 		let h0 = H256::random();
 
 		let mut s = CachingState::qc_new(
@@ -1544,7 +1593,7 @@ mod tests {
 	#[test]
 	fn should_remove_lru_items_based_on_tracking_used_size() {
 		let root_parent = H256::random();
-		let (shared, experimental) = new_shared_cache::<Block>(36*3, (2,3), true);
+		let (shared, experimental) = new_shared_cache::<Block>(36*3, (2,3), Some(Default::default()));
 		let h0 = H256::random();
 
 		let mut s = CachingState::qc_new(
@@ -1593,7 +1642,7 @@ mod tests {
 		let h0 = H256::random();
 		let h1 = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), true);
+		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), Some(Default::default()));
 		let mut s = CachingState::qc_new(
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
@@ -1792,7 +1841,7 @@ mod qc {
 
 	impl Mutator {
 		fn new_empty() -> Self {
-			let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), true);
+			let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Some(Default::default()));
 
 			Self {
 				shared,

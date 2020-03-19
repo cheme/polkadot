@@ -82,6 +82,7 @@ use sc_state_db::StateDb;
 use sp_blockchain::{CachedHeaderMetadata, HeaderMetadata, HeaderMetadataCache};
 use crate::storage_cache::{CachingState, SyncingCachingState, SharedCache, new_shared_cache,
 	SyncExperimentalCache};
+pub use crate::storage_cache::ExpCleanMode;
 use crate::stats::StateUsageStats;
 use log::{trace, debug, warn};
 pub use sc_state_db::PruningMode;
@@ -266,7 +267,7 @@ pub struct DatabaseSettings {
 	/// Ratio of cache size dedicated to child tries.
 	pub state_cache_child_ratio: Option<(usize, usize)>,
 	/// Use experimental cache implementation.
-	pub experimental_cache: bool,
+	pub experimental_cache: Option<ExpCleanMode>,
 	/// Pruning mode.
 	pub pruning: PruningMode,
 	/// Where to find the database.
@@ -775,14 +776,18 @@ impl<Block: BlockT> Backend<Block> {
 
 	/// Create new memory-backed client backend for tests.
 	#[cfg(any(test, feature = "test-helpers"))]
-	pub fn new_test(keep_blocks: u32, canonicalization_delay: u64) -> Self {
+	pub fn new_test(
+		keep_blocks: u32,
+		canonicalization_delay: u64,
+		experimental_cache: Option<ExpCleanMode>,
+	) -> Self {
 		let db = Arc::new(kvdb_memorydb::create(crate::utils::NUM_COLUMNS));
 		let db_setting = DatabaseSettings {
 			state_cache_size: 16777216,
 			state_cache_child_ratio: Some((50, 100)),
 			pruning: PruningMode::keep_blocks(keep_blocks),
 			source: DatabaseSettingsSrc::Custom(db),
-			experimental_cache: true,
+			experimental_cache,
 		};
 
 		Self::new(db_setting, canonicalization_delay).expect("failed to create test-db")
@@ -1772,7 +1777,7 @@ pub(crate) mod tests {
 	#[test]
 	fn block_hash_inserted_correctly() {
 		let backing = {
-			let db = Backend::<Block>::new_test(1, 0);
+			let db = Backend::<Block>::new_test(1, 0, Some(Default::default()));
 			for i in 0..10 {
 				assert!(db.blockchain().hash(i).unwrap().is_none());
 
@@ -1816,7 +1821,7 @@ pub(crate) mod tests {
 			state_cache_child_ratio: Some((50, 100)),
 			pruning: PruningMode::keep_blocks(1),
 			source: DatabaseSettingsSrc::Custom(backing),
-			experimental_cache: true,
+			experimental_cache: Some(Default::default()),
 		}, 0).unwrap();
 		assert_eq!(backend.blockchain().info().best_number, 9);
 		for i in 0..10 {
@@ -1826,7 +1831,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn set_state_data() {
-		let db = Backend::<Block>::new_test(2, 0);
+		let db = Backend::<Block>::new_test(2, 0, Some(Default::default()));
 		let hash = {
 			let mut op = db.begin_operation().unwrap();
 			db.begin_state_operation(&mut op, BlockId::Hash(Default::default())).unwrap();
@@ -1914,7 +1919,7 @@ pub(crate) mod tests {
 	fn delete_only_when_negative_rc() {
 		let _ = ::env_logger::try_init();
 		let key;
-		let backend = Backend::<Block>::new_test(1, 0);
+		let backend = Backend::<Block>::new_test(1, 0, Some(Default::default()));
 
 		let hash = {
 			let mut op = backend.begin_operation().unwrap();
@@ -2076,7 +2081,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn tree_route_works() {
-		let backend = Backend::<Block>::new_test(1000, 100);
+		let backend = Backend::<Block>::new_test(1000, 100, Some(Default::default()));
 		let blockchain = backend.blockchain();
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
@@ -2124,7 +2129,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn tree_route_child() {
-		let backend = Backend::<Block>::new_test(1000, 100);
+		let backend = Backend::<Block>::new_test(1000, 100, Some(Default::default()));
 		let blockchain = backend.blockchain();
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
@@ -2141,7 +2146,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn lowest_common_ancestor_works() {
-		let backend = Backend::<Block>::new_test(1000, 100);
+		let backend = Backend::<Block>::new_test(1000, 100, Some(Default::default()));
 		let blockchain = backend.blockchain();
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
@@ -2206,7 +2211,7 @@ pub(crate) mod tests {
 		// triggering the issue being eviction of a previously fetched record
 		// from the cache, therefore this test is dependent on the LRU cache
 		// size for header metadata, which is currently set to 5000 elements.
-		let backend = Backend::<Block>::new_test(10000, 10000);
+		let backend = Backend::<Block>::new_test(10000, 10000, Some(Default::default()));
 		let blockchain = backend.blockchain();
 
 		let genesis = insert_header(&backend, 0, Default::default(), None, Default::default());
@@ -2233,25 +2238,25 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_leaves_with_complex_block_tree() {
-		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20));
+		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20, Some(Default::default())));
 		substrate_test_runtime_client::trait_tests::test_leaves_for_backend(backend);
 	}
 
 	#[test]
 	fn test_children_with_complex_block_tree() {
-		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20));
+		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20, Some(Default::default())));
 		substrate_test_runtime_client::trait_tests::test_children_for_backend(backend);
 	}
 
 	#[test]
 	fn test_blockchain_query_by_number_gets_canonical() {
-		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20));
+		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20, Some(Default::default())));
 		substrate_test_runtime_client::trait_tests::test_blockchain_query_by_number_gets_canonical(backend);
 	}
 
 	#[test]
 	fn test_leaves_pruned_on_finality() {
-		let backend: Backend<Block> = Backend::new_test(10, 10);
+		let backend: Backend<Block> = Backend::new_test(10, 10, Some(Default::default()));
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
 		let block1_a = insert_header(&backend, 1, block0, None, Default::default());
@@ -2275,7 +2280,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_aux() {
-		let backend: Backend<substrate_test_runtime_client::runtime::Block> = Backend::new_test(0, 0);
+		let backend: Backend<substrate_test_runtime_client::runtime::Block> = Backend::new_test(0, 0, Some(Default::default()));
 		assert!(backend.get_aux(b"test").unwrap().is_none());
 		backend.insert_aux(&[(&b"test"[..], &b"hello"[..])], &[]).unwrap();
 		assert_eq!(b"hello", &backend.get_aux(b"test").unwrap().unwrap()[..]);
@@ -2287,7 +2292,7 @@ pub(crate) mod tests {
 	fn test_finalize_block_with_justification() {
 		use sc_client::blockchain::{Backend as BlockChainBackend};
 
-		let backend = Backend::<Block>::new_test(10, 10);
+		let backend = Backend::<Block>::new_test(10, 10, Some(Default::default()));
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let _ = insert_header(&backend, 1, block0, None, Default::default());
@@ -2303,7 +2308,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_finalize_multiple_blocks_in_single_op() {
-		let backend = Backend::<Block>::new_test(10, 10);
+		let backend = Backend::<Block>::new_test(10, 10, Some(Default::default()));
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let block1 = insert_header(&backend, 1, block0, None, Default::default());
@@ -2328,7 +2333,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_finalize_non_sequential() {
-		let backend = Backend::<Block>::new_test(10, 10);
+		let backend = Backend::<Block>::new_test(10, 10, Some(Default::default()));
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let block1 = insert_header(&backend, 1, block0, None, Default::default());
