@@ -18,7 +18,8 @@
 
 use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
-	ForkableManagement, historied::linear::Latest,
+	ForkableManagement, historied::linear::Latest, UpdateResult,
+	historied::{InMemoryValue, Value},
 	historied::tree::MemoryOnly,
 	historied::tree_management::{Tree, TreeManagement, ForkPlan},
 };
@@ -26,7 +27,7 @@ use std::collections::{VecDeque, HashSet, HashMap, BTreeSet};
 use std::sync::Arc;
 use std::hash::Hash as StdHash;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use linked_hash_map::{LinkedHashMap, Entry};
+use linked_hash_map::{LinkedHashMap, Entry, IterMut};
 use hash_db::Hasher;
 use sp_runtime::traits::{Block as BlockT, Header, HashFor, NumberFor};
 use sp_core::hexdisplay::HexDisplay;
@@ -118,18 +119,47 @@ impl Default for ExpCleanMode {
 	}
 }
 
+impl ExpCleanMode {
+	fn did_gc_init(&self) -> usize {
+		match self {
+			ExpCleanMode::LRUOnly(nb) => *nb,
+			ExpCleanMode::GCRetracted => 0,
+			ExpCleanMode::GCRange(_) => 0,
+		}
+	}
+}
+
 impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
 	type SE = Latest<(usize, usize)>;
+	// not needed as ExperimentalCache also implement management
 	type GC = ();
+	// not needed as ExperimentalCache also implement management
 	type Migrate = ();
 
 	fn emplace(&mut self, key: StorageKey, value: Option<StorageValue>, at: &Self::SE) {
 		use historied_db::historied::Value;
 		if let Some(history) = self.lru_storage.get(&key) {
-			history.set(value, at);
+			let mut additional_size = value.as_ref().map(|v| v.estimate_size());
+			match history.set_mut(value, at) {
+				UpdateResult::Changed(Some(v)) | UpdateResult::Cleared(Some(v)) => {
+					let size = v.estimate_size();
+					self.lru_storage.lru_decrease_size(size);
+				},
+				UpdateResult::Unchanged => {
+					additional_size = None;
+				},
+				_ => (),
+			}
+			if let Some(size) = additional_size {
+				if self.lru_storage.lru_increase_size(size) {
+					self.gc(&());
+				}
+			}
 		} else {
 			let history = MemoryOnly::new(value, at);
-			self.lru_storage.add(key, history);
+			if self.lru_storage.add_no_resize(key, history) {
+				self.gc(&());
+			}
 		}
 	}
 
@@ -137,12 +167,85 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 		unimplemented!()
 	}
 
-	fn gc(&mut self, gc: &Self::GC) {
-		unimplemented!("TODO gc on lru full")
+	fn gc(&mut self, _gc: &Self::GC) {
+		match self.clean_mode {
+			ExpCleanMode::LRUOnly(nb) => {
+				if self.did_gc == 0 {
+					self.clear();
+					debug_assert!(self.did_gc == nb);
+				} else {
+					self.did_gc -= 1;
+				}
+			},
+			ExpCleanMode::GCRetracted => {
+				// TODO it can use a migrate (for now gc is implemented)
+				let mut change = false;
+				for retracted in std::mem::replace(&mut self.retracted, Default::default()) {
+					change = true;
+					// Those change should use trait method: here we use internals TODO EMCH + put
+					// state back to private in management
+					self.management.apply_drop_state(&retracted);
+				}
+
+				if change {
+					let mut to_rem = Vec::new();
+					let mut decrease = 0;
+					if let Some(gc) = self.management.get_gc() {
+						for (k, v) in self.lru_storage.iter_mut() {
+							let initial_size = v.estimate_size();
+							match v.gc(gc.as_ref()) {
+								UpdateResult::Cleared(_) => {
+									decrease += initial_size;
+									to_rem.push(k.clone());
+								},
+								UpdateResult::Changed(_) => {
+									let new_size = v.estimate_size();
+									decrease += initial_size - new_size;
+								},
+								UpdateResult::Unchanged => (),
+							}
+						}
+						for k in to_rem.iter() {
+							self.lru_storage.remove(k);
+						}
+						self.lru_storage.lru_decrease_size(decrease);
+					}
+				}
+			},
+			ExpCleanMode::GCRange(width) => {
+				if self.management.apply_drop_from_latest(width) {
+					let mut to_rem = Vec::new();
+					let mut decrease = 0;
+					if let Some(gc) = self.management.get_gc() {
+						for (k, v) in self.lru_storage.iter_mut() {
+							let initial_size = v.estimate_size();
+							match v.gc(gc.as_ref()) {
+								UpdateResult::Cleared(_) => {
+									decrease += initial_size;
+									to_rem.push(k.clone());
+								},
+								UpdateResult::Changed(_) => {
+									let new_size = v.estimate_size();
+									decrease += initial_size - new_size;
+								},
+								UpdateResult::Unchanged => (),
+							}
+						}
+						for k in to_rem.iter() {
+							self.lru_storage.remove(k);
+						}
+						self.lru_storage.lru_decrease_size(decrease);
+					}
+				}
+			},
+		}
+
+		self.lru_storage.lru_resize();
 	}
 
-	fn migrate(&mut self, mig: &Self::Migrate) {
-		unimplemented!()
+	fn migrate(&mut self, _mig: &Self::Migrate) {
+		// nice migration strategy
+		self.clear();
 	}
 }
 
@@ -161,7 +264,7 @@ pub struct ExperimentalCache<B: BlockT>{
 	retracted: BTreeSet<B::Hash>,
 	clean_mode: ExpCleanMode,
 	/// store if gc did happen.
-	did_gc: bool,
+	did_gc: usize,
 }
 
 impl<B: BlockT> ExperimentalCache<B> {
@@ -205,13 +308,10 @@ impl<B: BlockT> ExperimentalCache<B> {
 		};
 
 		if let ExpCleanMode::GCRetracted = self.clean_mode {
-			if !got_all_enacted && self.did_gc {
+			if !got_all_enacted && self.did_gc > 0 {
 				// invalidate cache since a gc can have removed those value: TODO EMCH do it only if a gc did
 				// run or if eager gc on access
-				self.management = TreeManagement::default();
-				self.lru_storage.clear();
-				self.retracted.clear();
-				self.did_gc = false;
+				self.clear();
 			}
 		}
 		
@@ -226,6 +326,13 @@ impl<B: BlockT> ExperimentalCache<B> {
 		} else {
 			None
 		}
+	}
+
+	fn clear(&mut self) {
+		self.management = TreeManagement::default();
+		self.lru_storage.clear();
+		self.retracted.clear();
+		self.did_gc = self.clean_mode.did_gc_init();
 	}
 }
 
@@ -286,6 +393,13 @@ impl<K: EstimateSize + Eq + StdHash, V: EstimateSize, B> LRUMap<K, V, B> {
 	}
 
 	fn add(&mut self, k: K, v: V) {
+		if self.add_no_resize(k, v) {
+			self.lru_resize()
+		}
+	}
+
+	///  return true if need resize
+	fn add_no_resize(&mut self, k: K, v: V) -> bool {
 		let lmap = &mut self.0;
 		let storage_used_size = &mut self.1;
 		let limit = self.2;
@@ -304,8 +418,13 @@ impl<K: EstimateSize + Eq + StdHash, V: EstimateSize, B> LRUMap<K, V, B> {
 				entry.insert(v);
 			},
 		};
+		*storage_used_size > limit
+	}
 
-		while *storage_used_size > limit {
+	fn lru_resize(&mut self) {
+		let lmap = &mut self.0;
+		let storage_used_size = &mut self.1;
+		while *storage_used_size > self.2 {
 			if let Some((k,v)) = lmap.pop_front() {
 				*storage_used_size -= k.estimate_size();
 				*storage_used_size -= v.estimate_size();
@@ -317,6 +436,18 @@ impl<K: EstimateSize + Eq + StdHash, V: EstimateSize, B> LRUMap<K, V, B> {
 		}
 	}
 
+	fn lru_decrease_size(&mut self, size: usize) {
+		let storage_used_size = &mut self.1;
+		debug_assert!(*storage_used_size >= size);
+		*storage_used_size -= size;
+	}
+
+	fn lru_increase_size(&mut self, size: usize) -> bool {
+		let storage_used_size = &mut self.1;
+		*storage_used_size += size;
+		*storage_used_size > self.2 
+	}
+
 	fn get<Q:?Sized>(&mut self, k: &Q) -> Option<&mut V>
 		where K: std::borrow::Borrow<Q>,
 			Q: StdHash + Eq {
@@ -326,6 +457,11 @@ impl<K: EstimateSize + Eq + StdHash, V: EstimateSize, B> LRUMap<K, V, B> {
 	fn used_size(&self) -> usize {
 		self.1
 	}
+
+	fn iter_mut(&mut self) -> IterMut<K, V> {
+		self.0.iter_mut()
+	}
+
 	fn clear(&mut self) {
 		self.0.clear();
 		self.1 = 0;
@@ -438,7 +574,7 @@ pub fn new_shared_cache<B: BlockT>(
 				management: TreeManagement::default(),
 				retracted: Default::default(),
 				clean_mode: mode,
-				did_gc: false,
+				did_gc: mode.did_gc_init(),
 			}))))
 		} else {
 			None
