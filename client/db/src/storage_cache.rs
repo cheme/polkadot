@@ -182,9 +182,10 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 				let mut change = false;
 				for retracted in std::mem::replace(&mut self.retracted, Default::default()) {
 					change = true;
+					let chain_remove_mapping = false; // because we run over all retracted anyway.
 					// Those change should use trait method: here we use internals TODO EMCH + put
 					// state back to private in management
-					self.management.apply_drop_state(&retracted);
+					self.management.apply_drop_state(&retracted, chain_remove_mapping);
 				}
 
 				if change {
@@ -261,6 +262,8 @@ pub struct ExperimentalCache<B: BlockT>{
 	/// store the other to avoid querying enacted blocks.
 	/// Also note that gc cannot be done on retracted because it can be enacted back (unless
 	/// invalidate cache on enacted back).
+	/// TODO this should only be needed for retracted clean mode and we can allow fail insert(or
+	///  don't insert at all when confident it is not needed).
 	retracted: BTreeSet<B::Hash>,
 	clean_mode: ExpCleanMode,
 	/// store if gc did happen.
