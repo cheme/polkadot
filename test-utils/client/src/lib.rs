@@ -23,9 +23,9 @@ pub mod client_ext;
 pub use sc_client::{blockchain, self};
 pub use sc_client_api::{
 	execution_extensions::{ExecutionStrategies, ExecutionExtensions},
-	ForkBlocks, BadBlocks, CloneableSpawn,
+	ForkBlocks, BadBlocks, CloneableSpawn, ExpCacheConf,
 };
-pub use sc_client_db::{Backend, ExpCleanMode, self};
+pub use sc_client_db::{Backend, self};
 pub use sp_consensus;
 pub use sc_executor::{NativeExecutor, WasmExecutionMethod, self};
 pub use sp_keyring::{
@@ -87,8 +87,8 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 		let backend = Arc::new(Backend::new_test(
 			std::u32::MAX,
 			std::u64::MAX,
-			// TODO EMCH ExpCleanMode::Retracted??
-			Some(ExpCleanMode::LRUOnly(std::usize::MAX)),
+			// TODO EMCH ExpCacheConf::Retracted??
+			ExpCacheConf::LRUOnly(std::usize::MAX),
 		));
 		Self::with_backend(backend)
 	}
@@ -98,7 +98,7 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 		let backend = Arc::new(Backend::new_test(
 			keep_blocks,
 			0,
-			Some(ExpCleanMode::GCRange(keep_blocks as usize)),
+			ExpCacheConf::GCRange(keep_blocks as usize),
 		));
 		Self::with_backend(backend)
 	}

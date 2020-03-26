@@ -18,7 +18,7 @@
 
 use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
-	ForkableManagement, historied::linear::Latest, UpdateResult,
+	ForkableManagement, Latest, UpdateResult,
 	historied::{InMemoryValue, Value},
 	historied::tree::MemoryOnly,
 	historied::tree_management::{Tree, TreeManagement, ForkPlan},
@@ -40,6 +40,7 @@ use log::trace;
 use log::warn;
 use crate::{utils::Meta, stats::StateUsageStats};
 use std::marker::PhantomData;
+use sc_client_api::ExpCacheConf;
 
 const STATE_CACHE_BLOCKS: usize = 12;
 
@@ -90,45 +91,6 @@ impl<B: BlockT> InMemoryStateDBRef<StorageKey, Option<StorageValue>> for SyncExp
 	}
 }
 */
-
-/// Clean mode for experimental cache.
-#[derive(Clone, Copy)]
-pub enum ExpCleanMode {
-	/// only apply lru, this will result
-	/// in memory loss in regularily used keys.
-	/// The parameter if not null indicate how many
-	/// call before next full clean (needed for mentioned
-	/// memory accumulation).
-	/// If usize is 0 we never clear: this should not be use,
-	/// only for debugging.
-	LRUOnly(usize),
-	/// Gc against a state without retracted branches.
-	/// Any enacted of non retracted branch will result
-	/// in global cache invalidation.
-	GCRetracted,
-	/// Gc against state available from the last usize blocks over current
-	/// branch.
-	/// Similar to a canonicalization window size.
-	GCRange(usize),
-}
-
-impl Default for ExpCleanMode {
-	fn default() -> Self {
-		// TODO EMCH ??(here for testing purpose, since test mostly use hardcoded default)
-		ExpCleanMode::GCRetracted
-	}
-}
-
-impl ExpCleanMode {
-	fn did_gc_init(&self) -> usize {
-		match self {
-			ExpCleanMode::LRUOnly(nb) => *nb,
-			ExpCleanMode::GCRetracted => 0,
-			ExpCleanMode::GCRange(_) => 0,
-		}
-	}
-}
-
 impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
 	type SE = Latest<(usize, usize)>;
 	// not needed as ExperimentalCache also implement management
@@ -169,7 +131,8 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 
 	fn gc(&mut self, _gc: &Self::GC) {
 		match self.clean_mode {
-			ExpCleanMode::LRUOnly(nb) => {
+			ExpCacheConf::None => (),
+			ExpCacheConf::LRUOnly(nb) => {
 				if self.did_gc == 0 {
 					self.clear();
 					debug_assert!(self.did_gc == nb);
@@ -177,7 +140,7 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 					self.did_gc -= 1;
 				}
 			},
-			ExpCleanMode::GCRetracted => {
+			ExpCacheConf::GCRetracted => {
 				// TODO it can use a migrate (for now gc is implemented)
 				let mut change = false;
 				for retracted in std::mem::replace(&mut self.retracted, Default::default()) {
@@ -213,7 +176,7 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 					}
 				}
 			},
-			ExpCleanMode::GCRange(width) => {
+			ExpCacheConf::GCRange(width) => {
 				if self.management.apply_drop_from_latest(width) {
 					let mut to_rem = Vec::new();
 					let mut decrease = 0;
@@ -265,7 +228,7 @@ pub struct ExperimentalCache<B: BlockT>{
 	/// TODO this should only be needed for retracted clean mode and we can allow fail insert(or
 	///  don't insert at all when confident it is not needed).
 	retracted: BTreeSet<B::Hash>,
-	clean_mode: ExpCleanMode,
+	clean_mode: ExpCacheConf,
 	/// store if gc did happen.
 	did_gc: usize,
 }
@@ -310,7 +273,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 			result
 		};
 
-		if let ExpCleanMode::GCRetracted = self.clean_mode {
+		if let ExpCacheConf::GCRetracted = self.clean_mode {
 			if !got_all_enacted && self.did_gc > 0 {
 				// invalidate cache since a gc can have removed those value: TODO EMCH do it only if a gc did
 				// run or if eager gc on access
@@ -552,7 +515,7 @@ const FIX_LRU_HASH_SIZE: usize = 65_536;
 pub fn new_shared_cache<B: BlockT>(
 	shared_cache_size: usize,
 	child_ratio: (usize, usize),
-	experimental: Option<ExpCleanMode>,
+	experimental: ExpCacheConf,
 ) -> (SharedCache<B>, Option<SyncExperimentalCache<B>>) {
 	let top = child_ratio.1.saturating_sub(child_ratio.0);
 	(Arc::new(
@@ -568,7 +531,7 @@ pub fn new_shared_cache<B: BlockT>(
 				modifications: VecDeque::new(),
 			}
 		)
-	), if let Some(mode) = experimental {
+	), if experimental.use_exp_cache() {
 			// TODO Mutex or RwLock
 			Some(SyncExperimentalCache(Arc::new(RwLock::new(ExperimentalCache {
 				lru_storage: LRUMap(
@@ -576,8 +539,8 @@ pub fn new_shared_cache<B: BlockT>(
 				),
 				management: TreeManagement::default(),
 				retracted: Default::default(),
-				clean_mode: mode,
-				did_gc: mode.did_gc_init(),
+				did_gc: experimental.did_gc_init(),
+				clean_mode: experimental,
 			}))))
 		} else {
 			None
@@ -1379,7 +1342,7 @@ mod tests {
 		let h3a = H256::random();
 		let h3b = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), Some(Default::default()));
+		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), Default::default());
 
 		// blocks  [ 3a(c) 2a(c) 2b 1b 1a(c) 0 ]
 		// state   [ 5     5     4  3  2     2 ]
@@ -1537,7 +1500,7 @@ mod tests {
 		let h2b = H256::random();
 		let h3b = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Some(Default::default()));
+		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Default::default());
 
 		let mut s = CachingState::qc_new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1617,7 +1580,7 @@ mod tests {
 		let h3a = H256::random();
 		let h3b = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Some(Default::default()));
+		let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Default::default());
 
 		let mut s = CachingState::qc_new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1689,7 +1652,7 @@ mod tests {
 	#[test]
 	fn should_track_used_size_correctly() {
 		let root_parent = H256::random();
-		let (shared, experimental) = new_shared_cache::<Block>(109, ((109-36), 109), Some(Default::default()));
+		let (shared, experimental) = new_shared_cache::<Block>(109, ((109-36), 109), Default::default());
 		let h0 = H256::random();
 
 		let mut s = CachingState::qc_new(
@@ -1732,7 +1695,7 @@ mod tests {
 	#[test]
 	fn should_remove_lru_items_based_on_tracking_used_size() {
 		let root_parent = H256::random();
-		let (shared, experimental) = new_shared_cache::<Block>(36*3, (2,3), Some(Default::default()));
+		let (shared, experimental) = new_shared_cache::<Block>(36*3, (2,3), Default::default());
 		let h0 = H256::random();
 
 		let mut s = CachingState::qc_new(
@@ -1781,7 +1744,7 @@ mod tests {
 		let h0 = H256::random();
 		let h1 = H256::random();
 
-		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), Some(Default::default()));
+		let (shared, experimental) = new_shared_cache::<Block>(256 * 1024, (0, 1), Default::default());
 		let mut s = CachingState::qc_new(
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
@@ -1980,7 +1943,7 @@ mod qc {
 
 	impl Mutator {
 		fn new_empty() -> Self {
-			let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Some(Default::default()));
+			let (shared, experimental) = new_shared_cache::<Block>(256*1024, (0,1), Default::default());
 
 			Self {
 				shared,

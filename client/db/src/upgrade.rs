@@ -167,7 +167,7 @@ mod tests {
 			state_cache_child_ratio: None,
 			pruning: PruningMode::ArchiveAll,
 			source: DatabaseSettingsSrc::Path { path: db_path.to_owned(), cache_size: None },
-			experimental_cache: Some(Default::default()),
+			experimental_cache: Default::default(),
 		}, DatabaseType::Full).map(|_| ())
 	}
 

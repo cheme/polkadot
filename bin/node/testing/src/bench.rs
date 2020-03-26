@@ -181,7 +181,7 @@ impl BenchDb {
 	// - This client should work with real database only.
 	fn bench_client(dir: &std::path::Path, profile: Profile, keyring: &BenchKeyring) -> (Client, std::sync::Arc<Backend>) {
 		let db_config = sc_client_db::DatabaseSettings {
-			experimental_cache: Some(sc_client_db::ExpCleanMode::GCRetracted), // TODO EMCH that is interesting tests
+			experimental_cache: sc_client_api::ExpCacheConf::GCRetracted, // TODO EMCH that is interesting tests
 			state_cache_size: 16*1024*1024,
 			state_cache_child_ratio: Some((0, 100)),
 			pruning: PruningMode::ArchiveAll,

@@ -21,7 +21,7 @@ use crate::error;
 use crate::arg_enums::{
 	WasmExecutionMethod, TracingReceiver, ExecutionStrategy, DEFAULT_EXECUTION_BLOCK_CONSTRUCTION,
 	DEFAULT_EXECUTION_IMPORT_BLOCK, DEFAULT_EXECUTION_OFFCHAIN_WORKER, DEFAULT_EXECUTION_OTHER,
-	DEFAULT_EXECUTION_SYNCING
+	DEFAULT_EXECUTION_SYNCING, ExpCacheConf,
 };
 use crate::params::PruningParams;
 
@@ -75,6 +75,22 @@ pub struct ImportParams {
 		default_value = "Log"
 	)]
 	pub tracing_receiver: TracingReceiver,
+
+	/// Define experimental cache mode.
+	#[structopt(
+		long = "experimental-cache",
+		value_name = "EXPCACHE",
+		possible_values = &ExpCacheConf::variants(),
+		case_insensitive = true,
+		default_value = "None",
+	)]
+	pub experimental_cache: ExpCacheConf,
+
+	// TODO split in two and use default values??
+	/// Define experimental cache gc
+	/// value.
+	#[structopt(long = "experimental-cache-gc-value", value_name = "Number")]
+	pub experimental_cache_value: Option<usize>,
 }
 
 impl ImportParams {
@@ -115,6 +131,8 @@ impl ImportParams {
 				exec_all_or(exec.execution_offchain_worker, DEFAULT_EXECUTION_OFFCHAIN_WORKER),
 			other: exec_all_or(exec.execution_other, DEFAULT_EXECUTION_OTHER),
 		};
+
+		config.experimental_cache = self.experimental_cache.into(self.experimental_cache_value);
 
 		Ok(())
 	}

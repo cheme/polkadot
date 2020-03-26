@@ -17,6 +17,7 @@
 //! Service configuration.
 
 pub use sc_client::ExecutionStrategies;
+pub use sc_client_api::ExpCacheConf;
 pub use sc_client_db::{kvdb::KeyValueDB, PruningMode};
 pub use sc_network::config::{ExtTransport, NetworkConfiguration, Roles};
 pub use sc_executor::WasmExecutionMethod;
@@ -127,6 +128,8 @@ pub struct Configuration {
 	///
 	/// The default value is 8.
 	pub max_runtime_instances: usize,
+	/// Experimental cache config.
+	pub experimental_cache: ExpCacheConf,
 }
 
 /// Configuration of the client keystore.
@@ -229,6 +232,7 @@ impl Default for Configuration {
 			tracing_targets: Default::default(),
 			tracing_receiver: Default::default(),
 			max_runtime_instances: 8,
+			experimental_cache: ExpCacheConf::None,
 		}
 	}
 }
