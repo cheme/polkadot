@@ -173,6 +173,35 @@ pub trait Externalities: ExtensionStore {
 	/// Returns the SCALE encoded hash.
 	fn storage_changes_root(&mut self, parent: &[u8]) -> Result<Option<Vec<u8>>, ()>;
 
+	/// Activate or disactivate a hook.
+	/// This function can also be use to check client capability.
+	///
+	/// Return true if the hook is active, and false if it is not.
+	fn activate_client_hook(
+		&self,
+		_client_id: u32,
+		_hook_id: u32,
+		_activate: bool,
+		_payload: &[u8],
+	) -> bool {
+		false
+	}
+
+	/// Main hook call. It takes an input payload
+	/// and return some output.
+	/// Output can be a given bytes value of an empty byte value,
+	/// in any case both can happen depending on client support or
+	/// external parameter, so it is the responsability of the client
+	/// to ensure that this functionality work in any situation.
+	fn call_client_hook(
+		&self,
+		_client_id: u32,
+		_hook_id: u32,
+		_payload: &[u8],
+	) -> Vec<u8> {
+		Vec::new()
+	}
+
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	/// Benchmarking related functionality and shouldn't be used anywhere else!
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

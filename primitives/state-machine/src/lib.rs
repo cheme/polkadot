@@ -216,6 +216,10 @@ impl<'a, B, H, N, Exec> StateMachine<'a, B, H, N, Exec> where
 		extensions.register(CallInWasmExt::new(exec.clone()));
 		extensions.register(sp_core::traits::TaskExecutorExt::new(spawn_handle));
 
+		// TODO EMCH -> same as storing client in previous branches: maybe skip
+		// extension for a start.
+		//extensions.register(ClientHookExt);
+
 		Self {
 			backend,
 			exec,

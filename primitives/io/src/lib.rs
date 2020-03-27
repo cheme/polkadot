@@ -875,6 +875,77 @@ pub trait Sandbox {
 	}
 }
 
+/// Interface for using custom client hook.
+/// A custom client hook allows runtime to send information to the client.
+/// The runtime can receive a reply, but the effect of this reply MUST NOT 
+/// change runtime behavior.
+/// 
+/// An example of hook usage would be a data structure cache.
+/// In this example, during a block processing the runtime do some
+/// heavy intermediate computation on data, this intermediate value
+/// is send to client with this hook. Later (next block for instance),
+/// the hook is call to fitch this value, here two thing could happen:
+/// - the value is returned (no change on data use to fetch the value
+/// and the extension is implemented), and used.
+/// - the value is not returned (empty byte array returned) and we
+/// rebuild the value from the state.
+///
+/// So this hook allow client specific implementation, but must ensure
+/// that runing with or without the hook will in any situation result in the
+/// same result. This is under the client responsability and in case of
+/// consensus issue the client hook mode disabled will be the one to trust.
+///
+/// The function of this interface uses:
+/// - a client id: this is a u32 value that define the client that specify
+/// the hook.
+/// In case of client definition conflict, client id 0 is reserved and mean
+/// that the client is define as an encoded array in the payload.
+/// - a hook id: a u32 hook that identify the hooked functionality.
+#[runtime_interface]
+pub trait ClientHook {
+	/// Activate or disactivate a hook.
+	/// This function can also be use to check client capability.
+	///
+	/// `payload` here is only for long client id, but can also be use
+	/// to target particular mode for the hook.
+	/// `activate` indicates if we want to activate the hook.
+	///
+	/// Return true if the hook is active, and false if it is not.
+	fn activate(
+		&self,
+		client_id: u32,
+		hook_id: u32,
+		activate: bool,
+		payload: &[u8],
+	) -> bool {
+		self.activate_client_hook(
+			client_id,
+			hook_id,
+			activate,
+			payload,
+		)
+	}
+
+	/// Main hook call. It takes an input payload
+	/// and return some output.
+	/// Output can be a given bytes value of an empty byte value,
+	/// in any case both can happen depending on client support or
+	/// external parameter, so it is the responsability of the client
+	/// to ensure that this functionality work in any situation.
+	fn call(
+		&self,
+		client_id: u32,
+		hook_id: u32,
+		payload: &[u8],
+	) -> Vec<u8> {
+		self.call_client_hook(
+			client_id,
+			hook_id,
+			payload,
+		)
+	}
+}
+
 /// Allocator used by Substrate when executing the Wasm runtime.
 #[cfg(not(feature = "std"))]
 struct WasmAllocator;
@@ -939,6 +1010,7 @@ pub type SubstrateHostFunctions = (
 	logging::HostFunctions,
 	sandbox::HostFunctions,
 	crate::trie::HostFunctions,
+	client_hook::HostFunctions,
 );
 
 #[cfg(test)]

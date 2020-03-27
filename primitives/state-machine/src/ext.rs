@@ -537,6 +537,36 @@ where
 		).expect(EXT_NOT_ALLOWED_TO_FAIL);
 		self.storage_transaction_cache.reset();
 	}
+
+	fn activate_client_hook(
+		&self,
+		client_id: u32,
+		hook_id: u32,
+		activate: bool,
+		payload: &[u8],
+	) -> bool {
+		self.client_hooks.activate_client_hook(
+			client_id,
+			hook_id,
+			activate,
+			payload,
+		)
+	}
+
+	fn call_client_hook(
+		&self,
+		client_id: u32,
+		hook_id: u32,
+		payload: &[u8],
+	) -> Vec<u8> {
+		// TODO maybe extension would make all easier
+		self.client_hooks.call_client_hook(
+			client_id,
+			hook_id,
+			activate,
+			payload,
+		)
+	}
 }
 
 impl<'a, H, B, N> sp_externalities::ExtensionStore for Ext<'a, H, N, B>
