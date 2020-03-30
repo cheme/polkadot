@@ -20,6 +20,7 @@ use crate::{crypto::KeyTypeId, ed25519, sr25519};
 
 use std::{
 	fmt::{Debug, Display}, panic::UnwindSafe, sync::Arc, borrow::Cow,
+	cell::RefCell,
 };
 
 pub use sp_externalities::{Externalities, ExternalitiesExt};
@@ -229,4 +230,55 @@ impl TaskExecutorExt {
 	pub fn new(spawn_handle: Box<dyn CloneableSpawn>) -> Self {
 		Self(spawn_handle)
 	}
+}
+
+/// Client hook extension.
+pub trait ClientHook: Send + Sync {
+	/// Activate or disactivate a hook.
+	/// This function can also be use to check client capability.
+	///
+	/// Return true if the hook is active, and false if it is not.
+	fn activate(
+		&mut self,
+		client_id: u32,
+		hook_id: u32,
+		activate: bool,
+		payload: &[u8],
+	) -> bool;
+
+	/// Non mutable variant of activate_client_hook.
+	/// Return true for current state, and additional
+	/// bool to indicate if change is possible (see if
+	/// getting mut handle is of any use).
+	fn query(
+		&self,
+		client_id: u32,
+		hook_id: u32,
+		activate: bool,
+		payload: &[u8],
+	) -> (bool, bool);
+
+	/// Main hook call. It takes an input payload
+	/// and return some output.
+	/// Output can be a given bytes value of an empty byte value,
+	/// in any case both can happen depending on client support or
+	/// external parameter, so it is the responsability of the client
+	/// to ensure that this functionality work in any situation.
+	fn call(
+		&mut self,
+		client_id: u32,
+		hook_id: u32,
+		payload: &[u8],
+	) -> Vec<u8>;
+}
+
+/// A pointer to the client hook. We use refcell as implementation is
+/// likelly a cache with a sync backend behind.
+//pub type BareClientHookPtr = RefCell<Box<dyn ClientHook>>;
+//pub type BareClientHookPtr = Arc<parking_lot::RwLock<dyn ClientHook>>;
+pub type BareClientHookPtr = Box<dyn ClientHook>;
+
+sp_externalities::decl_extension! {
+	/// The client hook ext extension to register/retrieve from the externalities.
+	pub struct ClientHookExt(BareClientHookPtr);
 }

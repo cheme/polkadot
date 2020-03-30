@@ -34,7 +34,7 @@ use sp_std::ops::Deref;
 #[cfg(feature = "std")]
 use sp_core::{
 	crypto::Pair,
-	traits::{KeystoreExt, CallInWasmExt},
+	traits::{KeystoreExt, CallInWasmExt, ClientHookExt},
 	offchain::{OffchainExt, TransactionPoolExt},
 	hexdisplay::HexDisplay,
 	storage::{ChildStorageKey, ChildInfo},
@@ -902,7 +902,7 @@ pub trait Sandbox {
 /// that the client is define as an encoded array in the payload.
 /// - a hook id: a u32 hook that identify the hooked functionality.
 #[runtime_interface]
-pub trait ClientHook {
+pub trait ClientHook: Send {
 	/// Activate or disactivate a hook.
 	/// This function can also be use to check client capability.
 	///
@@ -912,18 +912,25 @@ pub trait ClientHook {
 	///
 	/// Return true if the hook is active, and false if it is not.
 	fn activate(
-		&self,
+		&mut self,
 		client_id: u32,
 		hook_id: u32,
 		activate: bool,
 		payload: &[u8],
 	) -> bool {
-		self.activate_client_hook(
+		/*self.activate_client_hook(
 			client_id,
 			hook_id,
 			activate,
 			payload,
-		)
+		)*/
+		// TODO use the read only call first?? (or remove it from trait)
+		self.extension::<ClientHookExt>()
+			.expect("TODO replace by a skip, but this should no be reach if correctly used")
+//			.try_borrow_mut()
+//			.try_borrow()
+//			.activate(client_id, hook_id, activate, payload)
+			.activate(client_id, hook_id, activate, payload)
 	}
 
 	/// Main hook call. It takes an input payload
@@ -933,16 +940,21 @@ pub trait ClientHook {
 	/// external parameter, so it is the responsability of the client
 	/// to ensure that this functionality work in any situation.
 	fn call(
-		&self,
+		&mut self,
 		client_id: u32,
 		hook_id: u32,
 		payload: &[u8],
 	) -> Vec<u8> {
-		self.call_client_hook(
+	/*	self.call_client_hook(
 			client_id,
 			hook_id,
 			payload,
-		)
+		)*/
+		self.extension::<ClientHookExt>()
+			.expect("TODO replace by a skip, but this should no be reach if correctly used")
+//			.try_borrow_mut()
+//			.expect("TODO replace by a skip, but this should no be reach if correctly used")
+			.call(client_id, hook_id, payload)
 	}
 }
 

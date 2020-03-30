@@ -173,6 +173,8 @@ pub trait Externalities: ExtensionStore {
 	/// Returns the SCALE encoded hash.
 	fn storage_changes_root(&mut self, parent: &[u8]) -> Result<Option<Vec<u8>>, ()>;
 
+/* TODO EMCH using extension for hook (this is by definition optional implementation),
+ * if client extrinsinc needed, this should be use.
 	/// Activate or disactivate a hook.
 	/// This function can also be use to check client capability.
 	///
@@ -201,7 +203,7 @@ pub trait Externalities: ExtensionStore {
 	) -> Vec<u8> {
 		Vec::new()
 	}
-
+*/
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	/// Benchmarking related functionality and shouldn't be used anywhere else!
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

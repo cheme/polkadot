@@ -537,7 +537,7 @@ where
 		).expect(EXT_NOT_ALLOWED_TO_FAIL);
 		self.storage_transaction_cache.reset();
 	}
-
+/*
 	fn activate_client_hook(
 		&self,
 		client_id: u32,
@@ -567,6 +567,7 @@ where
 			payload,
 		)
 	}
+*/
 }
 
 impl<'a, H, B, N> sp_externalities::ExtensionStore for Ext<'a, H, N, B>
