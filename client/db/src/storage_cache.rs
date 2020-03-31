@@ -242,14 +242,16 @@ impl<B: BlockT> ExperimentalCache<B> {
 		commit_hash: Option<&B::Hash>,
 	) -> Option<(ForkPlan<usize, usize>, Latest<(usize, usize)>)> {
 		trace!("Syncing experimental cache, pivot = {:?}, enacted = {:?}, retracted = {:?}", pivot, enacted, retracted);
+			warn!("Syncing = {:?}", (pivot, enacted, retracted));
 		for h in retracted {
 			self.retracted.insert(h.clone());
 		}
 		let mut got_all_enacted = true;
-	
+
 
 		let state = if let Some(mut state) = pivot.and_then(|pivot| self.management.get_db_state_mut(pivot)) {
 			// TODO this should not really occur?? (get state mut on pivot returning
+			warn!("This should not happen = {:?}", (pivot, enacted, retracted));
 			for h in enacted {
 				if self.retracted.remove(h) {
 					continue;
@@ -266,7 +268,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 					got_all_enacted = false;
 				}
 			}
-	
+
 			// empty case or unregistered: TODO need a way to distinguish
 			let result = self.management.latest_state();
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
@@ -280,8 +282,9 @@ impl<B: BlockT> ExperimentalCache<B> {
 				self.clear();
 			}
 		}
-		
+
 		if let Some(h) = commit_hash {
+			warn!("actual append at = {:?}", commit_hash);
 			// TODO returning both state on this call???
 			Some((
 				self.management.append_external_state(h.clone(), &state)
@@ -411,7 +414,7 @@ impl<K: EstimateSize + Eq + StdHash, V: EstimateSize, B> LRUMap<K, V, B> {
 	fn lru_increase_size(&mut self, size: usize) -> bool {
 		let storage_used_size = &mut self.1;
 		*storage_used_size += size;
-		*storage_used_size > self.2 
+		*storage_used_size > self.2
 	}
 
 	fn get<Q:?Sized>(&mut self, k: &Q) -> Option<&mut V>
@@ -696,7 +699,7 @@ impl<B: BlockT> CacheChanges<B> {
 			if is_best {
 				let eu = &self.experimental_update;
 				let mut exp_cache = self.experimental_cache.as_mut().map(|c| c.0.write())
-					.and_then(|c| eu.as_ref().map(|eu| (c, eu))); 
+					.and_then(|c| eu.as_ref().map(|eu| (c, eu)));
 				trace!(
 					"Committing {} local, {} hashes, {} modified root entries, {} modified child entries",
 					local_cache.storage.len(),
@@ -797,7 +800,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 		result.cache.qc = true;
 		result
 	}
-	
+
 	/// Create a new instance wrapping generic State and shared cache.
 	pub(crate) fn new(
 		state: S,
@@ -816,7 +819,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 					let cache = ec.0.read();
 					cache.management.get_db_state_mut(ph)
 				}));
-	
+
 		experimental_query_plan.as_ref().map(|qp|
 			warn!("Query plan for new cache = {:?}", qp)
 		);
@@ -941,7 +944,7 @@ if !self.cache.qc && !self.cache.no_assert {
 		assert_eq!(value, exp_v);
 	}
 }
-	
+
 		RwLockUpgradableReadGuard::upgrade(local_cache).storage.insert(key.to_vec(), value.clone());
 		self.usage.tally_key_read(key, value.as_ref(), false);
 		Ok(value)
