@@ -87,7 +87,6 @@ impl<BE, Block: BlockT> AuthoritySetForFinalityProver<Block> for Arc<dyn Storage
 		BE: Backend<Block> + Send + Sync + 'static,
 {
 	fn authorities(&self, block: &BlockId<Block>) -> ClientResult<AuthorityList> {
-				warn!(target: "afg", "block authority query at: {:?}", block);
 		let storage_key = StorageKey(GRANDPA_AUTHORITIES_KEY.to_vec());
 		self.storage(block, &storage_key)?
 			.and_then(|encoded| VersionedAuthorityList::decode(&mut encoded.0.as_slice()).ok())
