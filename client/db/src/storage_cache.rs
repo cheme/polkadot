@@ -931,7 +931,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 				self.usage.tally_key_read(key, entry.as_ref(), true);
 if !self.cache.no_assert {
 	if let Some(exp_v) = exp_v {
-		assert_eq!(entry, exp_v);
+		assert_eq!(entry, exp_v, "k: {:?}", key);
 	}
 }
 				return Ok(entry)
@@ -941,7 +941,7 @@ if !self.cache.no_assert {
 		let value = self.state.storage(key)?;
 if !self.cache.qc && !self.cache.no_assert {
 	if let Some(exp_v) = exp_v {
-		assert_eq!(value, exp_v);
+		assert_eq!(value, exp_v, "k: {:?}", key);
 	}
 }
 
