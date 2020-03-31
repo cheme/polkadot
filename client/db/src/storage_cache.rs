@@ -248,17 +248,16 @@ impl<B: BlockT> ExperimentalCache<B> {
 		}
 		let mut got_all_enacted = true;
 
-
-		let state = if let Some(mut state) = pivot.and_then(|pivot| self.management.get_db_state_mut(pivot)) {
-			// TODO this should not really occur?? (get state mut on pivot returning
-			warn!("This should not happen = {:?}", (pivot, enacted, retracted));
+		let state = if let Some(mut state) = pivot.and_then(|pivot| self.management.get_db_state_for_fork(pivot)) {
 			for h in enacted {
+				// TODO this should not really occur?? (get state mut on pivot returning
+				warn!("This should not happen = {:?}", (pivot, enacted, retracted));
 				if self.retracted.remove(h) {
 					continue;
 				}
 				self.management.append_external_state(h.clone(), &state)
 					.expect("correct state resolution");
-				state = self.management.get_db_state_mut(h) // TODO bad api probably need to return SE instead of S
+				state = self.management.get_db_state_for_fork(h) // TODO bad api probably need to return SE instead of S
 					.expect("inserted above");
 			}
 			state
@@ -270,7 +269,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 			}
 
 			// empty case or unregistered: TODO need a way to distinguish
-			let result = self.management.latest_state();
+			let result = self.management.latest_state_fork();
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
 			result
 		};
@@ -284,11 +283,12 @@ impl<B: BlockT> ExperimentalCache<B> {
 		}
 
 		if let Some(h) = commit_hash {
-			warn!("actual append at = {:?}", commit_hash);
+			warn!("actual append at = {:?} for {:?}", commit_hash, state);
 			// TODO returning both state on this call???
 			Some((
 				self.management.append_external_state(h.clone(), &state)
 					.expect("correct state resolution"),
+				// TODO EMCH this should be return by append operation!!!
 				self.management.get_db_state_mut(&h)
 					.expect("correct state resolution"),
 			))
