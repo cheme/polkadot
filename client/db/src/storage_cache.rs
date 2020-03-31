@@ -900,7 +900,9 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 	type TrieBackendStorage = S::TrieBackendStorage;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-
+if key == &[95, 62, 73, 7, 247, 22, 172, 137, 182, 52, 125, 21, 236, 236, 237, 202, 128, 204, 101, 116, 40, 22, 113, 178, 153, 193, 114, 125, 122, 198, 140, 171, 92, 80, 146, 173, 32, 56, 73, 78, 98, 2, 0, 0][..] {
+	panic!("what's this");
+}
 		/* experimental cache need to use local cache (upgrade and drop is not
 		 * doable with a shared state). Generally, I think this local cache
 		 * should move into the overlay layer (most of the evaluation requires it
