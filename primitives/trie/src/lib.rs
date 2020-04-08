@@ -60,22 +60,6 @@ impl<H: BinaryHasher> TrieLayout for Layout<H> {
 }
 
 impl<H: BinaryHasher> TrieConfiguration for Layout<H> {
-	fn trie_root<I, A, B>(input: I) -> <Self::Hash as Hasher>::Out where
-		I: IntoIterator<Item = (A, B)>,
-		A: AsRef<[u8]> + Ord,
-		B: AsRef<[u8]>,
-	{
-		trie_root::trie_root_no_extension::<H, TrieStream, _, _, _>(input)
-	}
-
-	fn trie_root_unhashed<I, A, B>(input: I) -> Vec<u8> where
-		I: IntoIterator<Item = (A, B)>,
-		A: AsRef<[u8]> + Ord,
-		B: AsRef<[u8]>,
-	{
-		trie_root::unhashed_trie_no_extension::<H, TrieStream, _, _, _>(input)
-	}
-
 	fn encode_index(input: u32) -> Vec<u8> {
 		codec::Encode::encode(&codec::Compact(input))
 	}
