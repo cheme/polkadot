@@ -683,7 +683,7 @@ mod tests {
 				min_key: 5,
 				journal_key: 0,
 				value_mode: ValueMode::Index,
-				count: 100,
+				count: 3,
 			}.make_with(seed.as_fixed_bytes_mut());
 
 			let real = Layout::trie_root(x.clone());
