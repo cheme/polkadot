@@ -54,7 +54,7 @@ pub struct Layout<H>(sp_std::marker::PhantomData<H>);
 
 impl<H: BinaryHasher> TrieLayout for Layout<H> {
 	const USE_EXTENSION: bool = false;
-	const HYBRID_HASH: bool = false;
+	const HYBRID_HASH: bool = true;
 	type Hash = H;
 	type Codec = NodeCodec<Self::Hash>;
 }
