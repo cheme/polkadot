@@ -20,7 +20,9 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use codec::{Decode, Codec};
 use log::debug;
-use hash_db::{Hasher, HashDB, EMPTY_PREFIX, Prefix};
+use hash_db::{HashDB, EMPTY_PREFIX, Prefix};
+use hash_db::{Hasher as HasherT};
+use hash_db::{BinaryHasher as Hasher};
 use sp_trie::{
 	MemoryDB, default_child_trie_root, read_trie_value_with, read_child_trie_value_with,
 	record_all_keys, StorageProof,
@@ -114,7 +116,7 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 /// Global proof recorder, act as a layer over a hash db for recording queried
 /// data.
-pub type ProofRecorder<H> = Arc<RwLock<HashMap<<H as Hasher>::Out, Option<DBValue>>>>;
+pub type ProofRecorder<H> = Arc<RwLock<HashMap<<H as HasherT>::Out, Option<DBValue>>>>;
 
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.

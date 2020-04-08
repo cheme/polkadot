@@ -22,7 +22,7 @@ use crate::{
 	changes_trie::State as ChangesTrieState,
 };
 
-use hash_db::Hasher;
+use hash_db::{BinaryHasher as Hasher};
 use sp_core::{
 	storage::{ChildStorageKey, well_known_keys::is_child_storage_key, ChildInfo},
 	traits::Externalities, hexdisplay::HexDisplay,
@@ -733,6 +733,8 @@ mod tests {
 
 	#[test]
 	fn child_storage_works() {
+		use hash_db::Hasher;
+
 		let mut cache = StorageTransactionCache::default();
 		let child = || ChildStorageKey::from_slice(CHILD_KEY_1).unwrap();
 		let mut overlay = OverlayedChanges::default();

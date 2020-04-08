@@ -23,7 +23,8 @@ use crate::{
 	stats::UsageInfo,
 };
 use std::{error, fmt, collections::{BTreeMap, HashMap}, marker::PhantomData, ops};
-use hash_db::Hasher;
+use hash_db::{Hasher as HasherT};
+use hash_db::{BinaryHasher as Hasher};
 use sp_trie::{
 	MemoryDB, child_trie_root, default_child_trie_root, TrieConfiguration, trie_types::Layout,
 };
@@ -233,7 +234,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: Codec {
 	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		<H as Hasher>::Out: Ord,
+		<H as HasherT>::Out: Ord,
 	{
 		let existing_pairs = self.inner.get(&None)
 			.into_iter()

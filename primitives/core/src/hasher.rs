@@ -18,6 +18,7 @@
 
 pub mod blake2 {
 	use hash_db::Hasher;
+	use hash_db::BinaryHasher;
 	use hash256_std_hasher::Hash256StdHasher;
 	use crate::hash::H256;
 
@@ -33,5 +34,17 @@ pub mod blake2 {
 		fn hash(x: &[u8]) -> Self::Out {
 			crate::hashing::blake2_256(x).into()
 		}
+	}
+
+	impl BinaryHasher for Blake2Hasher {
+		const NULL_HASH: &'static [u8] = &[14, 87, 81, 192, 38, 229, 67,
+		178, 232, 171, 46, 176, 96, 153, 218, 161, 209, 229, 223, 71, 119,
+		143, 119, 135, 250, 171, 69, 205, 241, 47, 227, 168];
+		type Buffer = hash_db::Buffer64;
+	}
+
+	#[test]
+	fn test_blake_two_hasher() {
+		hash_db::test_binary_hasher::<Blake2Hasher>()
 	}
 }

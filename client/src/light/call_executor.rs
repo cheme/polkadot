@@ -30,7 +30,7 @@ use sp_state_machine::{
 	self, Backend as StateBackend, OverlayedChanges, ExecutionStrategy, create_proof_check_backend,
 	execution_proof_check_on_trie_backend, ExecutionManager, StorageProof, CloneableSpawn,
 };
-use hash_db::Hasher;
+use hash_db::BinaryHasher as Hasher;
 
 use sp_api::{ProofRecorder, InitializeBlock, StorageTransactionCache};
 

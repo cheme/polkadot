@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
-use hash_db::{HashDB, Hasher, EMPTY_PREFIX};
+use hash_db::{HashDB, BinaryHasher as Hasher, EMPTY_PREFIX};
 use codec::{Decode, Encode};
 use sp_core::{convert_hash, traits::CodeExecutor};
 use sp_runtime::traits::{

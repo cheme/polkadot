@@ -23,7 +23,9 @@ use sp_std::borrow::Borrow;
 use codec::{Encode, Decode, Input, Compact};
 use hash_db::Hasher;
 use trie_db::{self, node::{NibbleSlicePlan, NodePlan, NodeHandlePlan}, ChildReference,
-	nibble_ops, Partial, NodeCodec as NodeCodecT};
+	nibble_ops, Partial, NodeCodec as NodeCodecT, BinaryHasher, Bitmap, BITMAP_LENGTH,
+	NodeCodecHybrid, ChildProofHeader, HashesPlan, binary_additional_hashes,
+};
 use crate::error::Error;
 use crate::trie_constants;
 use super::{node_header::{NodeHeader, NodeKind}};
@@ -86,18 +88,14 @@ impl<'a> Input for ByteSliceInput<'a> {
 #[derive(Default, Clone)]
 pub struct NodeCodec<H>(PhantomData<H>);
 
-impl<H: Hasher> NodeCodecT for NodeCodec<H> {
-	type Error = Error;
-	type HashOut = H::Out;
-
-	fn hashed_null_node() -> <H as Hasher>::Out {
-		H::hash(<Self as NodeCodecT>::empty_node())
-	}
-
-	fn decode_plan(data: &[u8]) -> sp_std::result::Result<NodePlan, Self::Error> {
+impl<H: Hasher> NodeCodec<H> {
+	fn decode_plan_internal(
+		data: &[u8],
+		is_hybrid: bool,
+	) -> sp_std::result::Result<(NodePlan, usize), <Self as NodeCodecT>::Error> {
 		let mut input = ByteSliceInput::new(data);
-		match NodeHeader::decode(&mut input)? {
-			NodeHeader::Null => Ok(NodePlan::Empty),
+		let node = match NodeHeader::decode(&mut input)? {
+			NodeHeader::Null => NodePlan::Empty,
 			NodeHeader::Branch(has_value, nibble_count) => {
 				let padding = nibble_count % nibble_ops::NIBBLE_PER_BYTE != 0;
 				// check that the padding is valid (if any)
@@ -105,11 +103,11 @@ impl<H: Hasher> NodeCodecT for NodeCodec<H> {
 					return Err(Error::BadFormat);
 				}
 				let partial = input.take(
-					(nibble_count + (nibble_ops::NIBBLE_PER_BYTE - 1)) / nibble_ops::NIBBLE_PER_BYTE,
+					(nibble_count + (nibble_ops::NIBBLE_PER_BYTE - 1)) / nibble_ops::NIBBLE_PER_BYTE
 				)?;
 				let partial_padding = nibble_ops::number_padding(nibble_count);
 				let bitmap_range = input.take(BITMAP_LENGTH)?;
-				let bitmap = Bitmap::decode(&data[bitmap_range])?;
+				let bitmap = Bitmap::decode(&data[bitmap_range]);
 				let value = if has_value {
 					let count = <Compact<u32>>::decode(&mut input)?.0 as usize;
 					Some(input.take(count)?)
@@ -122,20 +120,24 @@ impl<H: Hasher> NodeCodecT for NodeCodec<H> {
 				];
 				for i in 0..nibble_ops::NIBBLE_LENGTH {
 					if bitmap.value_at(i) {
-						let count = <Compact<u32>>::decode(&mut input)?.0 as usize;
-						let range = input.take(count)?;
-						children[i] = Some(if count == H::LENGTH {
-							NodeHandlePlan::Hash(range)
+						if is_hybrid {
+							children[i] = Some(NodeHandlePlan::Inline(Range { start: 0, end: 0 }));
 						} else {
-							NodeHandlePlan::Inline(range)
-						});
+							let count = <Compact<u32>>::decode(&mut input)?.0 as usize;
+							let range = input.take(count)?;
+							children[i] = Some(if count == H::LENGTH {
+								NodeHandlePlan::Hash(range)
+							} else {
+								NodeHandlePlan::Inline(range)
+							});
+						}
 					}
 				}
-				Ok(NodePlan::NibbledBranch {
+				NodePlan::NibbledBranch {
 					partial: NibbleSlicePlan::new(partial, partial_padding),
 					value,
 					children,
-				})
+				}
 			}
 			NodeHeader::Leaf(nibble_count) => {
 				let padding = nibble_count % nibble_ops::NIBBLE_PER_BYTE != 0;
@@ -144,16 +146,120 @@ impl<H: Hasher> NodeCodecT for NodeCodec<H> {
 					return Err(Error::BadFormat);
 				}
 				let partial = input.take(
-					(nibble_count + (nibble_ops::NIBBLE_PER_BYTE - 1)) / nibble_ops::NIBBLE_PER_BYTE,
+					(nibble_count + (nibble_ops::NIBBLE_PER_BYTE - 1)) / nibble_ops::NIBBLE_PER_BYTE
 				)?;
 				let partial_padding = nibble_ops::number_padding(nibble_count);
 				let count = <Compact<u32>>::decode(&mut input)?.0 as usize;
-				Ok(NodePlan::Leaf {
+				let value = input.take(count)?;
+				NodePlan::Leaf {
 					partial: NibbleSlicePlan::new(partial, partial_padding),
-					value: input.take(count)?,
-				})
+					value,
+				}
 			}
-		}
+		};
+		Ok((node, input.offset))
+	}
+
+	fn branch_node_nibbled_internal(
+		partial: impl Iterator<Item = u8>,
+		number_nibble: usize,
+		children: impl Iterator<
+			Item = impl Borrow<Option<ChildReference<<Self as NodeCodecT>::HashOut>>>
+		>,
+		maybe_value: Option<&[u8]>,
+		mut register_children: Option<&mut [Option<Range<usize>>]>,
+		encode_children: bool,
+	) -> (Vec<u8>, ChildProofHeader) {
+		let mut output = if maybe_value.is_some() {
+			partial_from_iterator_encode(
+				partial,
+				number_nibble,
+				NodeKind::BranchWithValue,
+			)
+		} else {
+			partial_from_iterator_encode(
+				partial,
+				number_nibble,
+				NodeKind::BranchNoValue,
+			)
+		};
+		let bitmap_index = output.len();
+		let mut bitmap: [u8; BITMAP_LENGTH] = [0; BITMAP_LENGTH];
+		(0..BITMAP_LENGTH).for_each(|_| output.push(0));
+		if let Some(value) = maybe_value {
+			value.encode_to(&mut output);
+		};
+		let mut ix = 0;
+		let ix = &mut ix;
+		let mut register_children = register_children.as_mut();
+		let register_children = &mut register_children;
+		let common = if encode_children && register_children.is_some() {
+			ChildProofHeader::Range(Range {
+				start: 0,
+				end: output.len(),
+			})
+		} else {
+			ChildProofHeader::Unused
+		};
+
+		let mut child_ix = output.len();
+		Bitmap::encode(children.map(|maybe_child| match maybe_child.borrow() {
+			Some(ChildReference::Hash(h)) => {
+				if let Some(ranges) = register_children {
+					// this assume scale codec put len on one byte, which is the
+					// case for reasonable hash length.
+					let encode_size_offset = 1;
+					ranges[*ix] = Some(Range {
+						start: child_ix + encode_size_offset,
+						end: child_ix + encode_size_offset + h.as_ref().len(),
+					});
+					child_ix += encode_size_offset + h.as_ref().len();
+					*ix += 1;
+				}
+				if encode_children {
+					h.as_ref().encode_to(&mut output);
+				}
+				true
+			}
+			&Some(ChildReference::Inline(inline_data, len)) => {
+				if let Some(ranges) = register_children {
+					let encode_size_offset = 1;
+					ranges[*ix] = Some(Range {
+						start: child_ix + encode_size_offset,
+						end: child_ix + encode_size_offset + len,
+					});
+					child_ix += encode_size_offset + len;
+					*ix += 1;
+				}
+				if encode_children {
+					inline_data.as_ref()[..len].encode_to(&mut output);
+				}
+				true
+			}
+			None => {
+				if register_children.is_some() {
+					*ix += 1;
+				}
+				false
+			},
+		}), bitmap.as_mut());
+		output[bitmap_index..bitmap_index + BITMAP_LENGTH]
+			.copy_from_slice(&bitmap.as_ref()[..BITMAP_LENGTH]);
+		(output, common)
+	}
+}
+
+
+impl<H: Hasher> NodeCodecT for NodeCodec<H> {
+	type Error = Error;
+	type HashOut = H::Out;
+
+	fn hashed_null_node() -> <H as Hasher>::Out {
+		H::hash(<Self as NodeCodecT>::empty_node())
+	}
+
+	fn decode_plan(data: &[u8]) -> sp_std::result::Result<NodePlan, Self::Error> {
+		Ok(Self::decode_plan_internal(data, false)?.0)
 	}
 
 	fn is_empty_node(data: &[u8]) -> bool {
@@ -191,33 +297,154 @@ impl<H: Hasher> NodeCodecT for NodeCodec<H> {
 		children: impl Iterator<Item = impl Borrow<Option<ChildReference<<H as Hasher>::Out>>>>,
 		maybe_value: Option<&[u8]>,
 	) -> Vec<u8> {
-		let mut output = if maybe_value.is_some() {
-			partial_from_iterator_encode(partial, number_nibble, NodeKind::BranchWithValue)
-		} else {
-			partial_from_iterator_encode(partial, number_nibble, NodeKind::BranchNoValue)
+		Self::branch_node_nibbled_internal(
+			partial,
+			number_nibble,
+			children,
+			maybe_value,
+			None,
+			true,
+		).0
+	}
+}
+
+impl<H: Hasher> NodeCodecHybrid for NodeCodec<H> {
+	type AdditionalHashesPlan = HashesPlan;
+
+	fn decode_plan_compact_proof(data: &[u8]) -> Result<(
+		NodePlan,
+		Option<(Bitmap, Self::AdditionalHashesPlan)>,
+	), Self::Error> {
+		let (mut node, mut offset) = Self::decode_plan_internal(data, true)?;
+
+		let hashes_plan = match &mut node {
+			NodePlan::Branch { children, .. }
+				| NodePlan::NibbledBranch { children, .. } => {
+				if data.len() < offset + 3 {
+					return Err(codec::Error::from("Branch: missing proof headers").into());
+				}
+				let keys_position = Bitmap::decode(&data[offset..offset + BITMAP_LENGTH]);
+				offset += BITMAP_LENGTH;
+
+				let nb_additional;
+				// read inline nodes.
+				loop {
+					let nb = data[offset] as usize;
+					offset += 1;
+					if nb >= 128 {
+						nb_additional = nb - 128;
+						break;
+					}
+					// 2 for inline index and next elt length.
+					if data.len() < offset + nb + 2 {
+						return Err(codec::Error::from("Branch: missing proof inline data").into());
+					}
+					let ix = data[offset] as usize;
+					offset += 1;
+					let inline = offset..offset + nb;
+					if ix >= nibble_ops::NIBBLE_LENGTH {
+						return Err(codec::Error::from("Branch: invalid inline index").into());
+					}
+					children[ix] = Some(NodeHandlePlan::Inline(inline));
+					offset += nb;
+				}
+				let additional_len = nb_additional * H::LENGTH;
+				if data.len() < offset + additional_len {
+					return Err(codec::Error::from("Branch: missing child proof hashes").into());
+				}
+				Some((keys_position, HashesPlan::new(nb_additional, offset, H::LENGTH)))
+			},
+			_ => None,
 		};
-		let bitmap_index = output.len();
-		let mut bitmap: [u8; BITMAP_LENGTH] = [0; BITMAP_LENGTH];
-		(0..BITMAP_LENGTH).for_each(|_|output.push(0));
-		if let Some(value) = maybe_value {
-			value.encode_to(&mut output);
-		};
-		Bitmap::encode(children.map(|maybe_child| match maybe_child.borrow() {
-			Some(ChildReference::Hash(h)) => {
-				h.as_ref().encode_to(&mut output);
-				true
-			}
-			&Some(ChildReference::Inline(inline_data, len)) => {
-				inline_data.as_ref()[..len].encode_to(&mut output);
-				true
-			}
-			None => false,
-		}), bitmap.as_mut());
-		output[bitmap_index..bitmap_index + BITMAP_LENGTH]
-			.copy_from_slice(&bitmap[..BITMAP_LENGTH]);
-		output
+		Ok((node, hashes_plan))
 	}
 
+	fn branch_node_common(
+		_children: impl Iterator<Item = impl Borrow<Option<ChildReference<<H as Hasher>::Out>>>>,
+		_maybe_value: Option<&[u8]>,
+		_register_children: &mut [Option<Range<usize>>],
+	) -> (Vec<u8>, ChildProofHeader) {
+		unreachable!()
+	}
+
+	fn branch_node_nibbled_common(
+		partial: impl Iterator<Item = u8>,
+		number_nibble: usize,
+		children: impl Iterator<Item = impl Borrow<Option<ChildReference<Self::HashOut>>>>,
+		maybe_value: Option<&[u8]>,
+		register_children: &mut [Option<Range<usize>>],
+	) -> (Vec<u8>, ChildProofHeader) {
+		Self::branch_node_nibbled_internal(
+			partial,
+			number_nibble,
+			children,
+			maybe_value,
+			Some(register_children),
+			true,
+		)
+	}
+
+	fn branch_node_for_hash(
+		_children: impl Iterator<Item = impl Borrow<Option<ChildReference<<H as Hasher>::Out>>>>,
+		_maybe_value: Option<&[u8]>,
+	) -> Vec<u8> {
+		unreachable!()
+	}
+
+	fn branch_node_nibbled_for_hash(
+		partial: impl Iterator<Item = u8>,
+		number_nibble: usize,
+		children: impl Iterator<Item = impl Borrow<Option<ChildReference<Self::HashOut>>>>,
+		maybe_value: Option<&[u8]>,
+	) -> Vec<u8> {
+		Self::branch_node_nibbled_internal(
+			partial,
+			number_nibble,
+			children,
+			maybe_value,
+			None,
+			false,
+		).0
+	}
+
+	fn encode_compact_proof<BH: BinaryHasher>(
+		hash_proof_header: Vec<u8>,
+		children: &[Option<ChildReference<BH::Out>>],
+		hash_buf: &mut BH::Buffer,
+	) -> Vec<u8> {
+		let mut result = hash_proof_header;
+		let mut	in_proof_children = [false; nibble_ops::NIBBLE_LENGTH];
+		let bitmap_start = result.len();
+		result.push(0u8);
+		result.push(0u8);
+		// Write all inline nodes.
+		for (ix, child) in children.iter().enumerate() {
+			if let Some(ChildReference::Inline(h, nb)) = child.borrow() {
+				if *nb > 0 {
+					debug_assert!(*nb < 128);
+					result.push(*nb as u8);
+					result.push(ix as u8);
+					result.extend_from_slice(&h.as_ref()[..*nb]);
+				}
+				in_proof_children[ix] = true;
+			}
+		}
+		// We write a bitmap containing all children node that are included in the binary
+		// child proof construction.
+		// In practice, that is inline values and ommited compacted values).
+		Bitmap::encode(in_proof_children.iter().map(|b| *b), &mut result[bitmap_start..]);
+
+		let additional_hashes = binary_additional_hashes::<BH>(
+			&children[..],
+			&in_proof_children[..],
+			hash_buf,
+		);
+		result.push((additional_hashes.len() as u8) | 128); // first bit at one indicates we are on additional hashes
+		for hash in additional_hashes {
+			result.extend_from_slice(hash.as_ref());
+		}
+		result
+	}
 }
 
 // utils
@@ -260,33 +487,4 @@ fn partial_encode(partial: Partial, node_kind: NodeKind) -> Vec<u8> {
 	}
 	output.extend_from_slice(&partial.1[..]);
 	output
-}
-
-const BITMAP_LENGTH: usize = 2;
-
-/// Radix 16 trie, bitmap encoding implementation,
-/// it contains children mapping information for a branch
-/// (children presence only), it encodes into
-/// a compact bitmap encoding representation.
-pub(crate) struct Bitmap(u16);
-
-impl Bitmap {
-	pub fn decode(data: &[u8]) -> Result<Self, Error> {
-		Ok(Bitmap(u16::decode(&mut &data[..])?))
-	}
-
-	pub fn value_at(&self, i: usize) -> bool {
-		self.0 & (1u16 << i) != 0
-	}
-
-	pub fn encode<I: Iterator<Item = bool>>(has_children: I , dest: &mut [u8]) {
-		let mut bitmap: u16 = 0;
-		let mut cursor: u16 = 1;
-		for v in has_children {
-			if v { bitmap |= cursor }
-			cursor <<= 1;
-		}
-		dest[0] = (bitmap % 256) as u8;
-		dest[1] = (bitmap / 256) as u8;
-	}
 }

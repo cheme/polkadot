@@ -175,3 +175,9 @@ members = [
 [profile.release]
 # Substrate runtime requires unwinding.
 panic = "unwind"
+
+[patch.crates-io]
+trie-db = { git = "https://github.com/cheme/trie", branch="complex_proof" }
+hash-db = { git = "https://github.com/cheme/trie", branch="complex_proof" }
+memory-db = { git = "https://github.com/cheme/trie", branch="complex_proof" }
+keccak-hasher = { git = "https://github.com/cheme/trie", branch="complex_proof" }

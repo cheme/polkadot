@@ -40,6 +40,7 @@ pub use storage_proof::StorageProof;
 /// Various re-exports from the `trie-db` crate.
 pub use trie_db::{
 	Trie, TrieMut, DBValue, Recorder, CError, Query, TrieLayout, TrieConfiguration, nibble_ops, TrieDBIterator,
+	BinaryHasher, HashDBHybrid, HasherHybrid, HashDBHybridDyn,
 };
 /// Various re-exports from the `memory-db` crate.
 pub use memory_db::KeyFunction;
@@ -51,13 +52,14 @@ pub use hash_db::{HashDB as HashDBT, EMPTY_PREFIX};
 /// substrate trie layout
 pub struct Layout<H>(sp_std::marker::PhantomData<H>);
 
-impl<H: Hasher> TrieLayout for Layout<H> {
+impl<H: BinaryHasher> TrieLayout for Layout<H> {
 	const USE_EXTENSION: bool = false;
+	const HYBRID_HASH: bool = false;
 	type Hash = H;
 	type Codec = NodeCodec<Self::Hash>;
 }
 
-impl<H: Hasher> TrieConfiguration for Layout<H> {
+impl<H: BinaryHasher> TrieConfiguration for Layout<H> {
 	fn trie_root<I, A, B>(input: I) -> <Self::Hash as Hasher>::Out where
 		I: IntoIterator<Item = (A, B)>,
 		A: AsRef<[u8]> + Ord,
@@ -172,7 +174,8 @@ pub fn delta_trie_root<L: TrieConfiguration, I, A, B, DB>(
 	I: IntoIterator<Item = (A, Option<B>)>,
 	A: AsRef<[u8]> + Ord,
 	B: AsRef<[u8]>,
-	DB: hash_db::HashDB<L::Hash, trie_db::DBValue>,
+	DB: hash_db::HashDB<L::Hash, trie_db::DBValue>
+		+ HashDBHybrid<L::Hash, trie_db::DBValue>,
 {
 	{
 		let mut trie = TrieDBMut::<L>::from_existing(&mut *db, &mut root)?;
@@ -247,6 +250,7 @@ pub fn child_delta_trie_root<L: TrieConfiguration, I, A, B, DB, RD>(
 		B: AsRef<[u8]>,
 		RD: AsRef<[u8]>,
 		DB: hash_db::HashDB<L::Hash, trie_db::DBValue>
+			+ HashDBHybrid<L::Hash, trie_db::DBValue>
 			+ hash_db::PlainDB<TrieHash<L>, trie_db::DBValue>,
 {
 	let mut root = TrieHash::<L>::default();
@@ -444,6 +448,37 @@ impl<'a, DB, H, T> hash_db::HashDB<H, T> for KeySpacedDBMut<'a, DB, H> where
 	}
 }
 
+impl<'a, DB, H, T> HashDBHybrid<H, T> for KeySpacedDBMut<'a, DB, H> where
+	DB: HashDBHybrid<H, T>,
+	H: HasherHybrid,
+	T: Default + PartialEq<T> + for<'b> From<&'b [u8]> + Clone + Send + Sync,
+{
+	fn insert_hybrid<
+		I: Iterator<Item = Option<H::Out>>,
+		I2: Iterator<Item = H::Out>,
+	>(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		no_child_value: &[u8],
+		nb_children: usize,
+		children: I,
+		additional_hashes: I2,
+		proof: bool,
+	) -> H::Out {
+		let derived_prefix = keyspace_as_prefix_alloc(self.1, prefix);
+		self.0.insert_hybrid(
+			(&derived_prefix.0, derived_prefix.1),
+			value,
+			no_child_value,
+			nb_children,
+			children,
+			additional_hashes,
+			proof,
+		)
+	}
+}
+
 impl<'a, DB, H, T> hash_db::AsHashDB<H, T> for KeySpacedDBMut<'a, DB, H> where
 	DB: hash_db::HashDB<H, T>,
 	H: Hasher,
@@ -470,7 +505,7 @@ mod tests {
 	use super::*;
 	use codec::{Encode, Compact};
 	use sp_core::Blake2Hasher;
-	use hash_db::{HashDB, Hasher};
+	use hash_db::{Hasher};
 	use trie_db::{DBValue, TrieMut, Trie, NodeCodec as NodeCodecT};
 	use trie_standardmap::{Alphabet, ValueMode, StandardMap};
 	use hex_literal::hex;
@@ -629,7 +664,7 @@ mod tests {
 	}
 
 	fn populate_trie<'db, T: TrieConfiguration>(
-		db: &'db mut dyn HashDB<T::Hash, DBValue>,
+		db: &'db mut dyn HashDBHybridDyn<T::Hash, DBValue>,
 		root: &'db mut TrieHash<T>,
 		v: &[(Vec<u8>, Vec<u8>)]
 	) -> TrieDBMut<'db, T> {

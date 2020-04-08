@@ -18,7 +18,7 @@
 
 use std::any::{Any, TypeId};
 use codec::Decode;
-use hash_db::Hasher;
+use hash_db::{BinaryHasher as Hasher};
 use crate::{
 	backend::Backend, OverlayedChanges, StorageTransactionCache, ext::Ext, InMemoryBackend,
 	StorageKey, StorageValue,

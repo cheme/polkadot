@@ -20,7 +20,8 @@
 use std::ops::Deref;
 use std::sync::Arc;
 use log::{debug, warn};
-use hash_db::{self, Hasher, EMPTY_PREFIX, Prefix};
+use hash_db::{self, EMPTY_PREFIX, Prefix};
+use hash_db::{BinaryHasher as Hasher};
 use sp_trie::{Trie, MemoryDB, PrefixedMemoryDB, DBValue,
 	default_child_trie_root, read_trie_value, read_child_trie_value,
 	for_keys_in_child_trie, KeySpacedDB, TrieDBIterator};
@@ -382,6 +383,35 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDB<H, DBValue>
 	}
 }
 
+impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> trie_db::HashDBHybrid<H, DBValue>
+	for Ephemeral<'a, S, H>
+{
+	fn insert_hybrid<
+		I: Iterator<Item = Option<H::Out>>,
+		I2: Iterator<Item = H::Out>,
+	>(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		no_child_value: &[u8],
+		nb_children: usize,
+		children: I,
+		additional_hashes: I2,
+		proof: bool,
+	) -> H::Out {
+		trie_db::HashDBHybrid::insert_hybrid(
+			self.overlay,
+			prefix,
+			value,
+			no_child_value,
+			nb_children,
+			children,
+			additional_hashes,
+			proof,
+		)
+	}
+}
+
 impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDBRef<H, DBValue>
 	for Ephemeral<'a, S, H>
 {
@@ -397,7 +427,8 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDBRef<H, DBValue
 /// Key-value pairs storage that is used by trie backend essence.
 pub trait TrieBackendStorage<H: Hasher>: Send + Sync {
 	/// Type of in-memory overlay.
-	type Overlay: hash_db::HashDB<H, DBValue> + Default + Consolidate;
+	type Overlay: hash_db::HashDB<H, DBValue> + Default + Consolidate
+		+ trie_db::HashDBHybrid<H, DBValue>;
 	/// Get the value stored at key.
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String>;
 }

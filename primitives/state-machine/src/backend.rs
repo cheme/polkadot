@@ -17,7 +17,8 @@
 //! State machine backends. These manage the code and storage of contracts.
 
 use log::warn;
-use hash_db::Hasher;
+use hash_db::Hasher as HasherT;
+use hash_db::BinaryHasher as Hasher;
 use codec::{Decode, Encode};
 
 use sp_core::{traits::RuntimeCode, storage::{ChildInfo, OwnedChildInfo, well_known_keys}};
@@ -351,7 +352,7 @@ pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut MemoryDB<H>, input: I) -> Op
 		H: Hasher,
 		I: IntoIterator<Item=(StorageKey, StorageValue)>,
 {
-	let mut root = <H as Hasher>::Out::default();
+	let mut root = <H as HasherT>::Out::default();
 	{
 		let mut trie = TrieDBMut::<H>::new(mdb, &mut root);
 		for (key, value) in input {

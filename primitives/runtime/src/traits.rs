@@ -25,7 +25,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 #[cfg(feature = "std")]
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use sp_core::{self, Hasher, TypeId, RuntimeDebug};
+use sp_core::{self, Hasher, BinaryHasher, TypeId, RuntimeDebug};
 use crate::codec::{Codec, Encode, Decode};
 use crate::transaction_validity::{
 	ValidTransaction, TransactionSource, TransactionValidity, TransactionValidityError,
@@ -322,7 +322,10 @@ impl<T:
 /// Abstraction around hashing
 // Stupid bug in the Rust compiler believes derived
 // traits must be fulfilled by all type parameters.
-pub trait Hash: 'static + MaybeSerializeDeserialize + Debug + Clone + Eq + PartialEq + Hasher<Out = <Self as Hash>::Output> {
+pub trait Hash: 'static + MaybeSerializeDeserialize + Debug + Clone + Eq + PartialEq
+	+ BinaryHasher<Out = <Self as Hash>::Output>
+	+ Hasher<Out = <Self as Hash>::Output>
+{
 	/// The hash type produced.
 	type Output: Member + MaybeSerializeDeserialize + Debug + sp_std::hash::Hash
 		+ AsRef<[u8]> + AsMut<[u8]> + Copy + Default + Encode + Decode;
@@ -357,6 +360,18 @@ impl Hasher for BlakeTwo256 {
 	fn hash(s: &[u8]) -> Self::Out {
 		sp_io::hashing::blake2_256(s).into()
 	}
+}
+
+impl BinaryHasher for BlakeTwo256 {
+	const NULL_HASH: &'static [u8] = &[14, 87, 81, 192, 38, 229,
+	67, 178, 232, 171, 46, 176, 96, 153, 218, 161, 209, 229, 223,
+	71, 119, 143, 119, 135, 250, 171, 69, 205, 241, 47, 227, 168];
+	type Buffer = sp_core::Buffer64;
+}
+
+#[test]
+fn test_blake_two_hasher() {
+	sp_core::test_binary_hasher::<BlakeTwo256>()
 }
 
 impl Hash for BlakeTwo256 {

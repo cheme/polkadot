@@ -1970,8 +1970,15 @@ dependencies = [
 [[package]]
 name = "hash-db"
 version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#972a5a3f1f88ec0e484dfe2be084b05a44fdd903"
+
+[[package]]
+name = "hash256-std-hasher"
+version = "0.15.2"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#972a5a3f1f88ec0e484dfe2be084b05a44fdd903"
+dependencies = [
+ "crunchy",
+]
 
 [[package]]
 name = "hash256-std-hasher"
@@ -2463,11 +2470,11 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "keccak-hasher"
 version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3468207deea1359a0e921591ae9b4c928733d94eb9d6a2eeda994cfd59f42cf8"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#972a5a3f1f88ec0e484dfe2be084b05a44fdd903"
 dependencies = [
  "hash-db",
- "hash256-std-hasher",
+ "hash256-std-hasher 0.15.2 (git+https://github.com/cheme/trie?branch=complex_proof)",
+ "ordered-trie",
  "tiny-keccak 1.5.0",
 ]
 
@@ -3172,12 +3179,12 @@ dependencies = [
 [[package]]
 name = "memory-db"
 version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f58381b20ebe2c578e75dececd9da411414903415349548ccc46aac3209cdfbc"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#972a5a3f1f88ec0e484dfe2be084b05a44fdd903"
 dependencies = [
  "ahash",
  "hash-db",
  "hashbrown",
+ "ordered-trie",
  "parity-util-mem",
 ]
 
@@ -3878,6 +3885,15 @@ name = "openssl-probe"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77af24da69f9d9341038eba93a073b1fdaaa1b788221b00a69bce9e762cb32de"
+
+[[package]]
+name = "ordered-trie"
+version = "0.19.2"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#972a5a3f1f88ec0e484dfe2be084b05a44fdd903"
+dependencies = [
+ "hash-db",
+ "smallvec 1.2.0",
+]
 
 [[package]]
 name = "output_vt100"
@@ -7302,7 +7318,7 @@ dependencies = [
  "ed25519-dalek",
  "futures 0.3.4",
  "hash-db",
- "hash256-std-hasher",
+ "hash256-std-hasher 0.15.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "hex-literal",
  "impl-serde 0.3.0",
@@ -7465,7 +7481,7 @@ dependencies = [
 name = "sp-runtime"
 version = "2.0.0-alpha.5"
 dependencies = [
- "hash256-std-hasher",
+ "hash256-std-hasher 0.15.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "impl-trait-for-tuples",
  "log",
  "parity-scale-codec",
@@ -8701,12 +8717,12 @@ dependencies = [
 [[package]]
 name = "trie-db"
 version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de9222c50cc325855621271157c973da27a0dcd26fa06f8edf81020bd2333df0"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#972a5a3f1f88ec0e484dfe2be084b05a44fdd903"
 dependencies = [
  "hash-db",
  "hashbrown",
  "log",
+ "ordered-trie",
  "rustc-hex",
  "smallvec 1.2.0",
 ]
