@@ -3477,7 +3477,6 @@ dependencies = [
  "sp-state-machine",
  "sp-trie",
  "substrate-test-client",
- "trie-root",
  "wabt",
 ]
 
@@ -7621,7 +7620,6 @@ dependencies = [
  "sp-runtime",
  "sp-trie",
  "trie-db",
- "trie-root",
 ]
 
 [[package]]
@@ -7691,7 +7689,6 @@ dependencies = [
  "sp-std",
  "trie-bench",
  "trie-db",
- "trie-root",
  "trie-standardmap",
 ]
 

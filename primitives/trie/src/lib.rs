@@ -22,7 +22,6 @@ mod error;
 mod node_header;
 mod node_codec;
 mod storage_proof;
-mod trie_stream;
 
 use sp_std::boxed::Box;
 use sp_std::marker::PhantomData;
@@ -32,8 +31,6 @@ use trie_db::proof::{generate_proof, verify_proof};
 pub use trie_db::proof::VerifyError;
 /// Our `NodeCodec`-specific error.
 pub use error::Error;
-/// The Substrate format implementation of `TrieStream`.
-pub use trie_stream::TrieStream;
 /// The Substrate format implementation of `NodeCodec`.
 pub use node_codec::NodeCodec;
 pub use storage_proof::StorageProof;
