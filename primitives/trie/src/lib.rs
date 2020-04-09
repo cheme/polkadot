@@ -60,16 +60,34 @@ impl<H: BinaryHasher> TrieConfiguration for Layout<H> {
 	fn encode_index(input: u32) -> Vec<u8> {
 		codec::Encode::encode(&codec::Compact(input))
 	}
+
+	// Because encode index does not produce ordered index, we need to
+	// sort explicitely here.
+	// Something like libp2p varint would be way better for encode_index.
+	fn ordered_trie_root<I, A>(input: I) -> <Self::Hash as Hasher>::Out
+	where
+		I: IntoIterator<Item = A>,
+		A: AsRef<[u8]>,
+	{
+		let sorted = data_sorted_unique(input
+			.into_iter()
+			.enumerate()
+			.map(|(i, v)| (Self::encode_index(i as u32), v))
+		);
+		Self::trie_root(sorted)
+	}
 }
 
 /// Utility function, this may be to cumbersome to use
 /// at a case by case basic and directly plugged into
-/// `TrieConfiguration` `trie_root` and `trie_root_unhashed`
+/// `TrieConfiguration` `trie_root`, and `trie_root_unhashed`
 /// implementations.
 pub fn data_sorted_unique<I, A: Ord, B>(input: I) -> impl Iterator<Item = (A, B)>
 	where
 		I: IntoIterator<Item = (A, B)>,
 {
+	// TODO Vec sort_unstable_by may be faster (and typing the function with Vec input
+	// and vec output too plus having it in TrieConfiguration.
 	let mut m = sp_std::collections::btree_map::BTreeMap::new();
 	for (k,v) in input {
 		let _ = m.insert(k,v); // latest value for uniqueness
@@ -762,7 +780,7 @@ mod tests {
 
 	#[test]
 	fn codec_trie_two_tuples_disjoint_keys() {
-		let input = vec![(&[0x48, 0x19], &[0xfe]), (&[0x13, 0x14], &[0xff])];
+		let input = vec![(&[0x13, 0x14], &[0xff]), (&[0x48, 0x19], &[0xfe])];
 		let trie = Layout::trie_root_unhashed::<_, _, _>(input);
 		println!("trie: {:#x?}", trie);
 		let mut ex = Vec::<u8>::new();

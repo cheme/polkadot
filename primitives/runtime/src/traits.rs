@@ -377,7 +377,10 @@ fn test_blake_two_hasher() {
 impl Hash for BlakeTwo256 {
 	type Output = sp_core::H256;
 
-	fn trie_root(input: Vec<(Vec<u8>, Vec<u8>)>) -> Self::Output {
+	fn trie_root(mut input: Vec<(Vec<u8>, Vec<u8>)>) -> Self::Output {
+		// TODO EMCH audit this function call and assert it is called on
+		// ordered content to avoid this sort??
+		input.sort_unstable_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
 		sp_io::trie::blake2_256_root(input)
 	}
 

@@ -125,12 +125,17 @@ impl substrate_test_client::GenesisInit for GenesisParameters {
 
 		let child_roots = storage.children.iter().map(|(sk, child_content)| {
 			let state_root = <<<runtime::Block as BlockT>::Header as HeaderT>::Hashing as HashT>::trie_root(
+				// this is sorted (btree map in data
 				child_content.data.clone().into_iter().collect()
 			);
 			(sk.clone(), state_root.encode())
 		});
+
+		// update instead of iter chain to sort data
+		let mut update_top = storage.top.clone();
+		update_top.extend(child_roots);
 		let state_root = <<<runtime::Block as BlockT>::Header as HeaderT>::Hashing as HashT>::trie_root(
-			storage.top.clone().into_iter().chain(child_roots).collect()
+			update_top.into_iter().collect()
 		);
 		let block: runtime::Block = sc_client::genesis::construct_genesis_block(state_root);
 		storage.top.extend(additional_storage_with_genesis(&block));

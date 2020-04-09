@@ -252,6 +252,7 @@ impl Externalities for BasicExternalities {
 			}
 		}
 
+		// top is a sorted map, warnig changing its type break this assertion.
 		Layout::<Blake2Hasher>::trie_root(self.inner.top.clone()).as_ref().into()
 	}
 
@@ -262,6 +263,7 @@ impl Externalities for BasicExternalities {
 		if let Some(child) = self.inner.children.get(storage_key.as_ref()) {
 			let delta = child.data.clone().into_iter().map(|(k, v)| (k, Some(v)));
 
+			// child.data is a btree map no need to sort.
 			InMemoryBackend::<Blake2Hasher>::default()
 				.child_storage_root(storage_key.as_ref(), child.child_info.as_ref(), delta).0
 		} else {

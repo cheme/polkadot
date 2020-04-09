@@ -242,7 +242,8 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: Codec {
 
 		let transaction: Vec<_> = delta.into_iter().collect();
 		let root = Layout::<H>::trie_root(existing_pairs.chain(transaction.iter().cloned())
-			.collect::<HashMap<_, _>>()
+			// need sorting
+			.collect::<BTreeMap<_, _>>()
 			.into_iter()
 			.filter_map(|(k, maybe_val)| maybe_val.map(|val| (k, val)))
 		);
@@ -273,7 +274,8 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: Codec {
 		let root = child_trie_root::<Layout<H>, _, _, _>(
 			&storage_key,
 			existing_pairs.chain(transaction.iter().cloned())
-				.collect::<HashMap<_, _>>()
+				// need sorting
+				.collect::<BTreeMap<_, _>>()
 				.into_iter()
 				.filter_map(|(k, maybe_val)| maybe_val.map(|val| (k, val)))
 		);
