@@ -66,15 +66,15 @@ impl<H: BinaryHasher> TrieConfiguration for Layout<H> {
 /// at a case by case basic and directly plugged into
 /// `TrieConfiguration` `trie_root` and `trie_root_unhashed`
 /// implementations.
-pub fn data_sorted_unique<I, A: Ord, B>(input: I) -> Vec<(A, B)>
+pub fn data_sorted_unique<I, A: Ord, B>(input: I) -> impl Iterator<Item = (A, B)>
 	where
 		I: IntoIterator<Item = (A, B)>,
 {
-	let mut m = std::collections::BTreeMap::new();
+	let mut m = sp_std::collections::btree_map::BTreeMap::new();
 	for (k,v) in input {
 		let _ = m.insert(k,v); // latest value for uniqueness
 	}
-	m.into_iter().collect()
+	m.into_iter()
 }
 
 /// TrieDB error over `TrieConfiguration` trait.
@@ -702,7 +702,7 @@ mod tests {
 			// may require that TrieConfiguration trie_root function
 			// directly implement the sort (I would rather audit
 			// trie_root call at this point)
-			let x = data_sorted_unique(x.into_iter());
+			let x: Vec<_> = data_sorted_unique(x.into_iter()).collect();
 			let real = Layout::trie_root(x.clone());
 			let mut memdb = MemoryDB::default();
 			let mut root = Default::default();
