@@ -62,6 +62,21 @@ impl<H: BinaryHasher> TrieConfiguration for Layout<H> {
 	}
 }
 
+/// Utility function, this may be to cumbersome to use
+/// at a case by case basic and directly plugged into
+/// `TrieConfiguration` `trie_root` and `trie_root_unhashed`
+/// implementations.
+pub fn data_sorted_unique<I, A: Ord, B>(input: I) -> Vec<(A, B)>
+	where
+		I: IntoIterator<Item = (A, B)>,
+{
+	let mut m = std::collections::BTreeMap::new();
+	for (k,v) in input {
+		let _ = m.insert(k,v); // latest value for uniqueness
+	}
+	m.into_iter().collect()
+}
+
 /// TrieDB error over `TrieConfiguration` trait.
 pub type TrieError<L> = trie_db::TrieError<TrieHash<L>, CError<L>>;
 /// Reexport from `hash_db`, with genericity set for `Hasher` trait.
@@ -680,9 +695,14 @@ mod tests {
 				min_key: 5,
 				journal_key: 0,
 				value_mode: ValueMode::Index,
-				count: 3,
+				count: 100,
 			}.make_with(seed.as_fixed_bytes_mut());
 
+			// TODO EMCH this asumption in substrate code base
+			// may require that TrieConfiguration trie_root function
+			// directly implement the sort (I would rather audit
+			// trie_root call at this point)
+			let x = data_sorted_unique(x.into_iter());
 			let real = Layout::trie_root(x.clone());
 			let mut memdb = MemoryDB::default();
 			let mut root = Default::default();
