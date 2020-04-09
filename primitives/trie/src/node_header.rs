@@ -36,6 +36,14 @@ pub(crate) enum NodeKind {
 	BranchWithValue,
 }
 
+impl NodeHeader {
+	pub(crate) fn is_branch(first_byte: u8) -> bool {
+		let first_byte = first_byte & (0b11 << 6);
+		first_byte == trie_constants::BRANCH_WITHOUT_MASK
+			|| first_byte == trie_constants::BRANCH_WITH_MASK
+	}
+}
+
 impl Encode for NodeHeader {
 	fn encode_to<T: Output>(&self, output: &mut T) {
 		match self {

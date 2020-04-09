@@ -386,7 +386,21 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDB<H, DBValue>
 impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> trie_db::HashDBHybrid<H, DBValue>
 	for Ephemeral<'a, S, H>
 {
-	fn insert_hybrid<
+	fn insert_hybrid(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		callback: fn(&[u8]) -> std::result::Result<Option<H::Out>, ()>,
+	) -> bool {
+		trie_db::HashDBHybrid::insert_hybrid(
+			self.overlay,
+			prefix,
+			value,
+			callback,
+		)
+	}
+
+	fn insert_branch_hybrid<
 		I: Iterator<Item = Option<H::Out>>,
 		I2: Iterator<Item = H::Out>,
 	>(
@@ -399,7 +413,7 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> trie_db::HashDBHybrid<H, DBVa
 		additional_hashes: I2,
 		proof: bool,
 	) -> H::Out {
-		trie_db::HashDBHybrid::insert_hybrid(
+		trie_db::HashDBHybrid::insert_branch_hybrid(
 			self.overlay,
 			prefix,
 			value,

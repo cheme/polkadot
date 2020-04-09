@@ -163,6 +163,17 @@ pub type Lookup<'a, L, Q> = trie_db::Lookup<'a, L, Q>;
 /// Hash type for a trie layout.
 pub type TrieHash<L> = <<L as TrieLayout>::Hash as Hasher>::Out;
 
+
+/// Typed version of hybrid_hash_node_adapter.
+pub fn hybrid_hash_node_adapter<H: BinaryHasher>(
+	encoded_node: &[u8]
+) -> sp_std::result::Result<Option<H::Out>, ()> {
+	trie_db::hybrid_hash_node_adapter::<
+		NodeCodec<H>,
+		H,
+	> (encoded_node)
+}
+
 /// This module is for non generic definition of trie type.
 /// Only the `Hasher` trait is generic in this case.
 pub mod trie_types {
@@ -506,7 +517,21 @@ impl<'a, DB, H, T> HashDBHybrid<H, T> for KeySpacedDBMut<'a, DB, H> where
 	H: HasherHybrid,
 	T: Default + PartialEq<T> + for<'b> From<&'b [u8]> + Clone + Send + Sync,
 {
-	fn insert_hybrid<
+	fn insert_hybrid(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		callback: fn(&[u8]) -> sp_std::result::Result<Option<H::Out>, ()>,
+	) -> bool {
+		let derived_prefix = keyspace_as_prefix_alloc(self.1, prefix);
+		self.0.insert_hybrid(
+			(&derived_prefix.0, derived_prefix.1),
+			value,
+			callback,
+		)
+	}
+
+	fn insert_branch_hybrid<
 		I: Iterator<Item = Option<H::Out>>,
 		I2: Iterator<Item = H::Out>,
 	>(
@@ -520,7 +545,7 @@ impl<'a, DB, H, T> HashDBHybrid<H, T> for KeySpacedDBMut<'a, DB, H> where
 		proof: bool,
 	) -> H::Out {
 		let derived_prefix = keyspace_as_prefix_alloc(self.1, prefix);
-		self.0.insert_hybrid(
+		self.0.insert_branch_hybrid(
 			(&derived_prefix.0, derived_prefix.1),
 			value,
 			no_child_value,

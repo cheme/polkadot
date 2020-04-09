@@ -1970,12 +1970,12 @@ dependencies = [
 [[package]]
 name = "hash-db"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=complex_proof#00e5f7bc72bf41bb58c9f5497a445bba26f757a4"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#ea7ec16a6858dbc8ea0177a96ba065283c952e9d"
 
 [[package]]
 name = "hash256-std-hasher"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=complex_proof#00e5f7bc72bf41bb58c9f5497a445bba26f757a4"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#ea7ec16a6858dbc8ea0177a96ba065283c952e9d"
 dependencies = [
  "crunchy",
 ]
@@ -2470,7 +2470,7 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "keccak-hasher"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=complex_proof#00e5f7bc72bf41bb58c9f5497a445bba26f757a4"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#ea7ec16a6858dbc8ea0177a96ba065283c952e9d"
 dependencies = [
  "hash-db",
  "hash256-std-hasher 0.15.2 (git+https://github.com/cheme/trie?branch=complex_proof)",
@@ -3179,7 +3179,7 @@ dependencies = [
 [[package]]
 name = "memory-db"
 version = "0.20.0"
-source = "git+https://github.com/cheme/trie?branch=complex_proof#00e5f7bc72bf41bb58c9f5497a445bba26f757a4"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#ea7ec16a6858dbc8ea0177a96ba065283c952e9d"
 dependencies = [
  "ahash",
  "hash-db",
@@ -3888,7 +3888,7 @@ checksum = "77af24da69f9d9341038eba93a073b1fdaaa1b788221b00a69bce9e762cb32de"
 [[package]]
 name = "ordered-trie"
 version = "0.19.2"
-source = "git+https://github.com/cheme/trie?branch=complex_proof#00e5f7bc72bf41bb58c9f5497a445bba26f757a4"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#ea7ec16a6858dbc8ea0177a96ba065283c952e9d"
 dependencies = [
  "hash-db",
  "smallvec 1.2.0",
@@ -8714,7 +8714,7 @@ dependencies = [
 [[package]]
 name = "trie-db"
 version = "0.20.0"
-source = "git+https://github.com/cheme/trie?branch=complex_proof#00e5f7bc72bf41bb58c9f5497a445bba26f757a4"
+source = "git+https://github.com/cheme/trie?branch=complex_proof#ea7ec16a6858dbc8ea0177a96ba065283c952e9d"
 dependencies = [
  "hash-db",
  "hashbrown",

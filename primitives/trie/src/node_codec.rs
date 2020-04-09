@@ -91,8 +91,9 @@ pub struct NodeCodec<H>(PhantomData<H>);
 impl<H: Hasher> NodeCodec<H> {
 	fn decode_plan_internal(
 		data: &[u8],
-		is_hybrid: bool,
+		is_proof: bool,
 	) -> sp_std::result::Result<(NodePlan, usize), <Self as NodeCodecT>::Error> {
+		let mut result_offset = 0;
 		let mut input = ByteSliceInput::new(data);
 		let node = match NodeHeader::decode(&mut input)? {
 			NodeHeader::Null => NodePlan::Empty,
@@ -114,13 +115,14 @@ impl<H: Hasher> NodeCodec<H> {
 				} else {
 					None
 				};
+				result_offset = input.offset;
 				let mut children = [
 					None, None, None, None, None, None, None, None,
 					None, None, None, None, None, None, None, None,
 				];
 				for i in 0..nibble_ops::NIBBLE_LENGTH {
 					if bitmap.value_at(i) {
-						if is_hybrid {
+						if is_proof {
 							children[i] = Some(NodeHandlePlan::Inline(Range { start: 0, end: 0 }));
 						} else {
 							let count = <Compact<u32>>::decode(&mut input)?.0 as usize;
@@ -157,7 +159,7 @@ impl<H: Hasher> NodeCodec<H> {
 				}
 			}
 		};
-		Ok((node, input.offset))
+		Ok((node, result_offset))
 	}
 
 	fn branch_node_nibbled_internal(
@@ -444,6 +446,21 @@ impl<H: Hasher> NodeCodecHybrid for NodeCodec<H> {
 			result.extend_from_slice(hash.as_ref());
 		}
 		result
+	}
+
+	fn need_hybrid_proof(data: &[u8]) -> Option<(NodePlan, ChildProofHeader)> {
+		if data.len() > 0 {
+			if NodeHeader::is_branch(data[0]) {
+				if let Ok((node, offset)) = Self::decode_plan_internal(data, false) {
+					let header = ChildProofHeader::Range( Range {
+						start: 0,
+						end: offset,
+					});
+					return Some((node, header))
+				}
+			}
+		}
+		None
 	}
 }
 
