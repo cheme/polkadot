@@ -91,10 +91,9 @@ pub fn compute_root<Header, Hasher, I>(
 		I: IntoIterator<Item=ClientResult<Option<Header::Hash>>>,
 {
 	use sp_trie::TrieConfiguration;
-	Ok(sp_trie::trie_types::Layout::<Hasher>::trie_root(
-		build_pairs::<Header, I>(cht_size, cht_num, hashes)?
-			.sort_unstable_by(|&(ref a, _), &(ref b, _)| a.cmp(b))
-	))
+	let mut pairs = build_pairs::<Header, I>(cht_size, cht_num, hashes)?;
+	pairs.sort_unstable_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+	Ok(sp_trie::trie_types::Layout::<Hasher>::trie_root(pairs))
 }
 
 /// Build CHT-based header proof.

@@ -76,6 +76,45 @@ impl<H: BinaryHasher> TrieConfiguration for Layout<H> {
 		);
 		Self::trie_root(sorted)
 	}
+/*
+// This code can be uncommented to check if an issue may be related
+// to trie_root call on non sorted value.
+	fn trie_root<I, A, B>(input: I) -> <Self::Hash as Hasher>::Out where
+	I: IntoIterator<Item = (A, B)>,
+	A: AsRef<[u8]> + Ord,
+	B: AsRef<[u8]>,
+	{
+		use trie_db::{TrieRoot, TrieRootHybrid, trie_visit};
+		let input = data_sorted_unique(input);
+		if Self::HYBRID_HASH {
+			let mut cb = TrieRootHybrid::<Self::Hash, _>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		} else {
+			let mut cb = TrieRoot::<Self::Hash, _>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		}
+	}
+
+	fn trie_root_unhashed<I, A, B>(input: I) -> Vec<u8> where
+	I: IntoIterator<Item = (A, B)>,
+	A: AsRef<[u8]> + Ord,
+	B: AsRef<[u8]>,
+	{
+		use trie_db::{TrieRootUnhashedHybrid, TrieRootUnhashed, trie_visit};
+		let input = data_sorted_unique(input);
+		if Self::HYBRID_HASH {
+			let mut cb = TrieRootUnhashedHybrid::<Self::Hash>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		} else {
+			let mut cb = TrieRootUnhashed::<Self::Hash>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		}
+	}
+*/
 }
 
 /// Utility function, this may be to cumbersome to use
