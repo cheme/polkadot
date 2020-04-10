@@ -151,6 +151,9 @@ pub type PrefixedMemoryDB<H> = memory_db::MemoryDB<H, memory_db::PrefixedKey<H>,
 /// This uses a noops `KeyFunction` (key addressing must be hashed or using
 /// an encoding scheme that avoid key conflict).
 pub type MemoryDB<H> = memory_db::MemoryDB<H, memory_db::HashKey<H>, trie_db::DBValue>;
+/// Specialization of MemoryDB for HashDB usage, it allows being initiated from
+/// encoded node. This is preferable to memory db whenever we are storing trie node.
+pub struct HashMemoryDB<H: Hasher>(pub(crate) memory_db::MemoryDB<H, memory_db::HashKey<H>, trie_db::DBValue>);
 /// Reexport from `hash_db`, with genericity set for `Hasher` trait.
 pub type GenericMemoryDB<H, KF> = memory_db::MemoryDB<H, KF, trie_db::DBValue>;
 
@@ -163,6 +166,109 @@ pub type Lookup<'a, L, Q> = trie_db::Lookup<'a, L, Q>;
 /// Hash type for a trie layout.
 pub type TrieHash<L> = <<L as TrieLayout>::Hash as Hasher>::Out;
 
+
+impl<H: Hasher> Default for HashMemoryDB<H> {
+	fn default() -> Self {
+		HashMemoryDB(Default::default())
+	}
+}
+
+impl<H: Hasher> sp_std::ops::Deref for HashMemoryDB<H> {
+	type Target = MemoryDB<H>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl<H: Hasher> sp_std::ops::DerefMut for HashMemoryDB<H> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+
+impl<H: Hasher> hash_db::HashDB<H, trie_db::DBValue> for HashMemoryDB<H> {
+	fn get(&self, key: &H::Out, prefix: Prefix) -> Option<trie_db::DBValue> {
+		self.0.get(key, prefix)
+	}
+
+	fn contains(&self, key: &H::Out, prefix: Prefix) -> bool {
+		self.0.contains(key, prefix)
+	}
+
+	fn insert(&mut self, prefix: Prefix, value: &[u8]) -> H::Out {
+		self.0.insert(prefix, value)
+	}
+
+	fn emplace(&mut self, key: H::Out, prefix: Prefix, value: trie_db::DBValue) {
+		self.0.emplace(key, prefix, value)
+	}
+
+	fn remove(&mut self, key: &H::Out, prefix: Prefix) {
+		self.0.remove(key, prefix)
+	}
+}
+
+impl<H: Hasher> hash_db::AsHashDB<H, trie_db::DBValue> for HashMemoryDB<H> {
+	fn as_hash_db(&self) -> &dyn hash_db::HashDB<H, trie_db::DBValue> {
+		&*self
+	}
+
+	fn as_hash_db_mut<'b>(&'b mut self) -> &'b mut (dyn hash_db::HashDB<H, trie_db::DBValue> + 'b) {
+		&mut *self
+	}
+}
+
+impl<H: BinaryHasher> HashDBHybrid<H, trie_db::DBValue> for HashMemoryDB<H> {
+	fn insert_hybrid(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		callback: fn(&[u8]) -> sp_std::result::Result<Option<H::Out>, ()>,
+	) -> bool {
+		<MemoryDB<_> as HashDBHybrid<_, _>>::insert_hybrid(
+			&mut self.0,
+			prefix,
+			value,
+			callback,
+		)
+	}
+
+	fn insert_branch_hybrid<
+		I: Iterator<Item = Option<H::Out>>,
+		I2: Iterator<Item = H::Out>,
+	>(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		no_child_value: &[u8],
+		nb_children: usize,
+		children: I,
+		additional_hashes: I2,
+		proof: bool,
+	) -> H::Out {
+		<MemoryDB<_> as HashDBHybrid<_, _>>::insert_branch_hybrid(
+			&mut self.0,
+			prefix,
+			value,
+			no_child_value,
+			nb_children,
+			children,
+			additional_hashes,
+			proof,
+		)
+	}
+
+}
+
+impl<H: Hasher> HashMemoryDB<H> {
+	/// Consolidate two hash memory db.
+	pub fn consolidate(&mut self, other: Self) {
+		// TODO EMCH for compact proof this will need to merge two same hash branch children.
+		// we probably will need a flag (partial_children maybe) in HashMemoryDB as it
+		// non negligeable cost.
+		self.0.consolidate(other.0)
+	}
+}
 
 /// Typed version of hybrid_hash_node_adapter.
 pub fn hybrid_hash_node_adapter<H: BinaryHasher>(

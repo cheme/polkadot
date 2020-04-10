@@ -346,6 +346,12 @@ impl<H: Hasher, KF: sp_trie::KeyFunction<H>> Consolidate for sp_trie::GenericMem
 	}
 }
 
+impl<H: Hasher> Consolidate for sp_trie::HashMemoryDB<H> {
+	fn consolidate(&mut self, other: Self) {
+		sp_trie::HashMemoryDB::consolidate(self, other)
+	}
+}
+
 /// Insert input pairs into memory db.
 pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut MemoryDB<H>, input: I) -> Option<H::Out>
 	where

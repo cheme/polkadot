@@ -24,8 +24,8 @@ use hash_db::{HashDB, EMPTY_PREFIX, Prefix};
 use hash_db::{Hasher as HasherT};
 use hash_db::{BinaryHasher as Hasher};
 use sp_trie::{
-	MemoryDB, default_child_trie_root, read_trie_value_with, read_child_trie_value_with,
-	record_all_keys, StorageProof,
+	default_child_trie_root, read_trie_value_with, read_child_trie_value_with,
+	record_all_keys, StorageProof, HashMemoryDB,
 };
 pub use sp_trie::Recorder;
 pub use sp_trie::trie_types::{Layout, TrieError};
@@ -297,18 +297,18 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 pub fn create_proof_check_backend<H>(
 	root: H::Out,
 	proof: StorageProof,
-) -> Result<TrieBackend<MemoryDB<H>, H>, Box<dyn Error>>
+) -> Result<TrieBackend<HashMemoryDB<H>, H>, Box<dyn Error>>
 where
 	H: Hasher,
 	H::Out: Codec,
 {
-	let db = proof.into_memory_db();
-
-	if db.contains(&root, EMPTY_PREFIX) {
-		Ok(TrieBackend::new(db, root))
-	} else {
-		Err(Box::new(ExecutionError::InvalidProof))
+	if let Some(db) = proof.into_memory_db() {
+		if db.contains(&root, EMPTY_PREFIX) {
+			return Ok(TrieBackend::new(db, root))
+		}
 	}
+
+	Err(Box::new(ExecutionError::InvalidProof))
 }
 
 #[cfg(test)]

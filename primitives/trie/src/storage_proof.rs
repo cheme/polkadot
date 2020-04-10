@@ -16,7 +16,8 @@
 
 use sp_std::vec::Vec;
 use codec::{Encode, Decode};
-use hash_db::{Hasher, HashDB};
+use hash_db::{Hasher, HashDB, BinaryHasher, EMPTY_PREFIX};
+use trie_db::HashDBHybrid;
 
 /// A proof that some set of key-value pairs are included in the storage trie. The proof contains
 /// the storage values so that the partial storage backend can be reconstructed by a verifier that
@@ -57,14 +58,27 @@ impl StorageProof {
 		StorageProofNodeIterator::new(self)
 	}
 
-	/// Creates a `MemoryDB` from `Self`.
-	pub fn into_memory_db<H: Hasher>(self) -> crate::MemoryDB<H> {
-		self.into()
+	/// Creates a `HashMemoryDB` from `Self`.
+	pub fn into_memory_db<H: BinaryHasher>(self) -> Option<crate::HashMemoryDB<H>> {
+
+		let mut db = crate::MemoryDB::default();
+		for value in self.trie_nodes {
+			if !db.insert_hybrid(
+				EMPTY_PREFIX,
+				&value[..],
+				crate::hybrid_hash_node_adapter::<H>,
+			) {
+				return None;
+			}
+		}
+		Some(crate::HashMemoryDB(db))
 	}
 
 	/// Merges multiple storage proofs covering potentially different sets of keys into one proof
 	/// covering all keys. The merged proof output may be smaller than the aggregate size of the input
 	/// proofs due to deduplication of trie nodes.
+	/// TODO EMCH this will not work when proof will be produced from compact variant (at this point
+	/// this branch only produce the full proofs).
 	pub fn merge<I>(proofs: I) -> Self where I: IntoIterator<Item=Self> {
 		let trie_nodes = proofs.into_iter()
 			.flat_map(|proof| proof.iter_nodes())

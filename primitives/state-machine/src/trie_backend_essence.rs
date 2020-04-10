@@ -22,7 +22,7 @@ use std::sync::Arc;
 use log::{debug, warn};
 use hash_db::{self, EMPTY_PREFIX, Prefix};
 use hash_db::{BinaryHasher as Hasher};
-use sp_trie::{Trie, MemoryDB, PrefixedMemoryDB, DBValue,
+use sp_trie::{Trie, MemoryDB, PrefixedMemoryDB, DBValue, HashMemoryDB,
 	default_child_trie_root, read_trie_value, read_child_trie_value,
 	for_keys_in_child_trie, KeySpacedDB, TrieDBIterator};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
@@ -467,6 +467,14 @@ impl<H: Hasher> TrieBackendStorage<H> for PrefixedMemoryDB<H> {
 
 impl<H: Hasher> TrieBackendStorage<H> for MemoryDB<H> {
 	type Overlay = MemoryDB<H>;
+
+	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
+		Ok(hash_db::HashDB::get(self, key, prefix))
+	}
+}
+
+impl<H: Hasher> TrieBackendStorage<H> for HashMemoryDB<H> {
+	type Overlay = HashMemoryDB<H>;
 
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
 		Ok(hash_db::HashDB::get(self, key, prefix))
