@@ -60,7 +60,6 @@ impl StorageProof {
 
 	/// Creates a `HashMemoryDB` from `Self`.
 	pub fn into_memory_db<H: BinaryHasher>(self) -> Option<crate::HashMemoryDB<H>> {
-
 		let mut db = crate::MemoryDB::default();
 		for value in self.trie_nodes {
 			if !db.insert_hybrid(

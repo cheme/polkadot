@@ -17,13 +17,13 @@
 //! Changes trie storage utilities.
 
 use std::collections::{BTreeMap, HashSet, HashMap};
-use hash_db::{Prefix, EMPTY_PREFIX};
+use hash_db::Prefix;
 use hash_db::{BinaryHasher as Hasher};
 use sp_trie::DBValue;
-use sp_trie::MemoryDB;
+use sp_trie::{MemoryDB, HashMemoryDB};
 use parking_lot::RwLock;
 use crate::{
-	StorageKey,
+	StorageKey, StorageProof,
 	trie_backend_essence::TrieBackendStorage,
 	changes_trie::{BuildCache, RootsStorage, Storage, AnchorBlockId, BlockNumber},
 };
@@ -47,12 +47,12 @@ pub struct TrieBackendAdapter<'a, H: Hasher, Number: BlockNumber> {
 
 struct InMemoryStorageData<H: Hasher, Number: BlockNumber> {
 	roots: BTreeMap<Number, H::Out>,
-	mdb: MemoryDB<H>,
+	mdb: HashMemoryDB<H>,
 }
 
 impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 	/// Creates storage from given in-memory database.
-	pub fn with_db(mdb: MemoryDB<H>) -> Self {
+	pub fn with_db(mdb: HashMemoryDB<H>) -> Self {
 		Self {
 			data: RwLock::new(InMemoryStorageData {
 				roots: BTreeMap::new(),
@@ -68,14 +68,9 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 	}
 
 	/// Creates storage with given proof.
-	pub fn with_proof(proof: Vec<Vec<u8>>) -> Self {
-		use hash_db::HashDB;
-
- 		let mut proof_db = MemoryDB::<H>::default();
-		for item in proof {
-			proof_db.insert(EMPTY_PREFIX, &item);
-		}
-		Self::with_db(proof_db)
+	pub fn with_proof(proof: Vec<Vec<u8>>) -> Option<Self> {
+ 		StorageProof::new(proof).into_memory_db()
+			.map(|proof_db| Self::with_db(proof_db))
 	}
 
 	/// Get mutable cache reference.
@@ -88,7 +83,7 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 		Self {
 			data: RwLock::new(InMemoryStorageData {
 				roots: blocks.into_iter().collect(),
-				mdb: MemoryDB::default(),
+				mdb: HashMemoryDB::default(),
 			}),
 			cache: BuildCache::new(),
 		}
@@ -99,7 +94,7 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 		mut top_inputs: Vec<(Number, Vec<InputPair<Number>>)>,
 		children_inputs: Vec<(StorageKey, Vec<(Number, Vec<InputPair<Number>>)>)>,
 	) -> Self {
-		let mut mdb = MemoryDB::default();
+		let mut mdb = HashMemoryDB::default();
 		let mut roots = BTreeMap::new();
 		for (storage_key, child_input) in children_inputs {
 			for (block, pairs) in child_input {
@@ -138,7 +133,7 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 
 	#[cfg(test)]
 	pub fn clear_storage(&self) {
-		self.data.write().mdb = MemoryDB::default();	// use new to be more correct
+		self.data.write().mdb = HashMemoryDB::default();	// use new to be more correct
 	}
 
 	#[cfg(test)]
@@ -150,12 +145,12 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 	}
 
 	#[cfg(test)]
-	pub fn into_mdb(self) -> MemoryDB<H> {
+	pub fn into_mdb(self) -> HashMemoryDB<H> {
 		self.data.into_inner().mdb
 	}
 
 	/// Insert changes trie for given block.
-	pub fn insert(&self, block: Number, changes_trie_root: H::Out, trie: MemoryDB<H>) {
+	pub fn insert(&self, block: Number, changes_trie_root: H::Out, trie: HashMemoryDB<H>) {
 		let mut data = self.data.write();
 		data.roots.insert(block, changes_trie_root);
 		data.mdb.consolidate(trie);

@@ -26,7 +26,7 @@ use std::{error, fmt, collections::{BTreeMap, HashMap}, marker::PhantomData, ops
 use hash_db::{Hasher as HasherT};
 use hash_db::{BinaryHasher as Hasher};
 use sp_trie::{
-	MemoryDB, child_trie_root, default_child_trie_root, TrieConfiguration, trie_types::Layout,
+	HashMemoryDB, child_trie_root, default_child_trie_root, TrieConfiguration, trie_types::Layout,
 };
 use codec::Codec;
 use sp_core::storage::{ChildInfo, OwnedChildInfo, Storage};
@@ -51,7 +51,7 @@ impl error::Error for Void {
 pub struct InMemory<H: Hasher> {
 	inner: HashMap<Option<(StorageKey, OwnedChildInfo)>, BTreeMap<StorageKey, StorageValue>>,
 	// This field is only needed for returning reference in `as_trie_backend`.
-	trie: Option<TrieBackend<MemoryDB<H>, H>>,
+	trie: Option<TrieBackend<HashMemoryDB<H>, H>>,
 	_hasher: PhantomData<H>,
 }
 
@@ -180,7 +180,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: Codec {
 		Option<(StorageKey, OwnedChildInfo)>,
 		StorageCollection,
 	)>;
-	type TrieBackendStorage = MemoryDB<H>;
+	type TrieBackendStorage = HashMemoryDB<H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
 		Ok(self.inner.get(&None).and_then(|map| map.get(key).map(Clone::clone)))
@@ -335,7 +335,7 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: Codec {
 	}
 
 	fn as_trie_backend(&mut self)-> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
-		let mut mdb = MemoryDB::default();
+		let mut mdb = HashMemoryDB::default();
 		let mut new_child_roots = Vec::new();
 		let mut root_map = None;
 		for (child_info, map) in &self.inner {

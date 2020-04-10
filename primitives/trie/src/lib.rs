@@ -196,6 +196,11 @@ impl<H: Hasher> hash_db::HashDB<H, trie_db::DBValue> for HashMemoryDB<H> {
 	}
 
 	fn insert(&mut self, prefix: Prefix, value: &[u8]) -> H::Out {
+		debug_assert!({
+			use trie_db::NodeCodecHybrid;
+			node_codec::NodeCodec::<H>::need_hybrid_proof(value)
+				.is_none()
+		});
 		self.0.insert(prefix, value)
 	}
 

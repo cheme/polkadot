@@ -22,7 +22,7 @@ use hash_db::BinaryHasher as Hasher;
 use codec::{Decode, Encode};
 
 use sp_core::{traits::RuntimeCode, storage::{ChildInfo, OwnedChildInfo, well_known_keys}};
-use sp_trie::{TrieMut, MemoryDB, trie_types::TrieDBMut};
+use sp_trie::{TrieMut, HashMemoryDB, trie_types::TrieDBMut};
 
 use crate::{
 	trie_backend::TrieBackend,
@@ -353,7 +353,7 @@ impl<H: Hasher> Consolidate for sp_trie::HashMemoryDB<H> {
 }
 
 /// Insert input pairs into memory db.
-pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut MemoryDB<H>, input: I) -> Option<H::Out>
+pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut HashMemoryDB<H>, input: I) -> Option<H::Out>
 	where
 		H: Hasher,
 		I: IntoIterator<Item=(StorageKey, StorageValue)>,
