@@ -116,7 +116,8 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 
 		// and now check the key changes proof + get the changes
 		let mut result = Vec::new();
-		let proof_storage = InMemoryChangesTrieStorage::with_proof(remote_proof);
+		let proof_storage = InMemoryChangesTrieStorage::with_proof(remote_proof)
+			.ok_or_else(|| ClientError::ChangesTrieAccessFailed("Invalid proof node".to_string()))?;
 		for config_range in &request.changes_trie_configs {
 			let result_range = key_changes_proof_check_with_db::<H, _>(
 				ChangesTrieConfigurationRange {
@@ -156,7 +157,8 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 			H::Out: Ord + codec::Codec,
 	{
 		// all the checks are sharing the same storage
-		let storage = remote_roots_proof.into_memory_db();
+		let storage = remote_roots_proof.into_memory_db()
+			.ok_or_else(|| ClientError::ChangesTrieAccessFailed("Invalid proof node".to_string()))?;
 
 		// remote_roots.keys() are sorted => we can use this to group changes tries roots
 		// that are belongs to the same CHT

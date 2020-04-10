@@ -30,7 +30,7 @@ use sp_trie;
 use sp_core::{H256, convert_hash};
 use sp_runtime::traits::{Header as HeaderT, AtLeast32Bit, Zero, One};
 use sp_state_machine::{
-	MemoryDB, TrieBackend, Backend as StateBackend, StorageProof, InMemoryBackend,
+	HashMemoryDB, TrieBackend, Backend as StateBackend, StorageProof, InMemoryBackend,
 	prove_read_on_trie_backend, read_proof_check, read_proof_check_on_proving_backend
 };
 
@@ -157,7 +157,7 @@ pub fn check_proof_on_proving_backend<Header, Hasher>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	proving_backend: &TrieBackend<MemoryDB<Hasher>, Hasher>,
+	proving_backend: &TrieBackend<HashMemoryDB<Hasher>, Hasher>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,

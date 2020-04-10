@@ -130,11 +130,8 @@ pub fn key_changes_proof_check<'a, H: Hasher, Number: BlockNumber>(
 	storage_key: Option<&[u8]>,
 	key: &[u8]
 ) -> Result<Vec<(Number, u32)>, String> where H::Out: Encode {
-	let proof_db = if let Some(proof_db) = InMemoryStorage::with_proof(proof) {
-		proof_db
-	} else {
-		return Err("Invalid encoded node in proof".into());
-	};
+	let proof_db = InMemoryStorage::with_proof(proof)
+		.ok_or_else(|| "Invalid encoded node in proof".to_string())?;
 	key_changes_proof_check_with_db(
 		config,
 		roots_storage,
