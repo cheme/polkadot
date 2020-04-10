@@ -359,12 +359,6 @@ impl<H: Hasher> Backend<H> for InMemory<H> where H::Out: Codec {
 		self.trie.as_ref()
 	}
 
-	fn register_overlay_stats(&mut self, _stats: &sp_stats::StateMachineStats) { }
-
-	fn usage_info(&self) -> UsageInfo {
-		UsageInfo::empty()
-	}
-
 	fn wipe(&self) -> Result<(), Self::Error> {
 		Ok(())
 	}

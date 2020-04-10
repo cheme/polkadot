@@ -519,7 +519,7 @@ mod test_append_and_len {
 	fn default_for_option() {
 		TestExternalities::default().execute_with(|| {
 			assert_eq!(OptionVec::get(), None);
-			assert_eq!(JustVec::get(), vec![]);
+			assert_eq!(JustVec::get(), Vec::<u32>::new());
 		});
 	}
 
@@ -589,7 +589,7 @@ mod test_append_and_len {
 	fn len_works_for_default() {
 		TestExternalities::default().execute_with(|| {
 			// vec
-			assert_eq!(JustVec::get(), vec![]);
+			assert_eq!(JustVec::get(), Vec::<u32>::new());
 			assert_eq!(JustVec::decode_len(), Ok(0));
 
 			assert_eq!(JustVecWithDefault::get(), vec![6, 9]);
@@ -599,7 +599,7 @@ mod test_append_and_len {
 			assert_eq!(OptionVec::decode_len(), Ok(0));
 
 			// map
-			assert_eq!(MapVec::get(0), vec![]);
+			assert_eq!(MapVec::get(0), Vec::<u32>::new());
 			assert_eq!(MapVec::decode_len(0), Ok(0));
 
 			assert_eq!(MapVecWithDefault::get(0), vec![6, 9]);
@@ -609,7 +609,7 @@ mod test_append_and_len {
 			assert_eq!(OptionMapVec::decode_len(0), Ok(0));
 
 			// Double map
-			assert_eq!(DoubleMapVec::get(0, 0), vec![]);
+			assert_eq!(DoubleMapVec::get(0, 0), Vec::<u32>::new());
 			assert_eq!(DoubleMapVec::decode_len(0, 1), Ok(0));
 
 			assert_eq!(DoubleMapVecWithDefault::get(0, 0), vec![6, 9]);

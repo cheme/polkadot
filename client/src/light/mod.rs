@@ -29,6 +29,7 @@ use sp_runtime::BuildStorage;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use sp_blockchain::Result as ClientResult;
 use prometheus_endpoint::Registry;
+use sp_stats::state::StateUsageStats;
 
 use crate::call_executor::LocalCallExecutor;
 use crate::client::Client;
@@ -60,7 +61,7 @@ pub fn new_light<B, S, RA, E>(
 	genesis_storage: &dyn BuildStorage,
 	code_executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
-	prometheus_registry: Option<Registry>,
+	state_stats: StateUsageStats,
 ) -> ClientResult<
 		Client<
 			Backend<S, HashFor<B>>,
@@ -77,7 +78,7 @@ pub fn new_light<B, S, RA, E>(
 		S: BlockchainStorage<B> + 'static,
 		E: CodeExecutor + RuntimeInfo + Clone + 'static,
 {
-	let local_executor = LocalCallExecutor::new(backend.clone(), code_executor, spawn_handle.clone());
+	let local_executor = LocalCallExecutor::new(backend.clone(), code_executor, spawn_handle.clone(), state_stats.clone());
 	let executor = GenesisCallExecutor::new(backend.clone(), local_executor);
 	Client::new(
 		backend,
@@ -86,7 +87,7 @@ pub fn new_light<B, S, RA, E>(
 		Default::default(),
 		Default::default(),
 		Default::default(),
-		prometheus_registry,
+		state_stats,
 	)
 }
 
@@ -95,9 +96,10 @@ pub fn new_fetch_checker<E, B: BlockT, S: BlockchainStorage<B>>(
 	blockchain: Arc<Blockchain<S>>,
 	executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
+	state_stats: sp_stats::state::StateUsageStats,
 ) -> LightDataChecker<E, HashFor<B>, B, S>
 	where
 		E: CodeExecutor,
 {
-	LightDataChecker::new(blockchain, executor, spawn_handle)
+	LightDataChecker::new(blockchain, executor, spawn_handle, state_stats)
 }

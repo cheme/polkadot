@@ -217,7 +217,7 @@ fn new_full_parts<TBl, TRtApi, TExecDisp>(
 			bad_blocks,
 			extensions,
 			Box::new(tasks_builder.spawn_handle()),
-			config.prometheus_config.as_ref().map(|config| config.registry.clone()),
+			sp_stats::state::StateUsageStats::new(config.prometheus_config.as_ref().map(|config| &config.registry)),
 		)?
 	};
 
@@ -330,7 +330,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 			config.chain_spec.as_storage_builder(),
 			executor,
 			Box::new(tasks_builder.spawn_handle()),
-			config.prometheus_config.as_ref().map(|config| config.registry.clone()),
+			sp_stats::state::StateUsageStats::new(config.prometheus_config.as_ref().map(|config| &config.registry)),
 		)?);
 
 		Ok(ServiceBuilder {
@@ -1016,6 +1016,7 @@ ServiceBuilder<
 				impl_name: config.impl_name.into(),
 				impl_version: config.impl_version.into(),
 				properties: chain_spec.properties().clone(),
+				chain_type: chain_spec.chain_type().clone(),
 			};
 
 			let subscriptions = sc_rpc::Subscriptions::new(Arc::new(tasks_builder.spawn_handle()));

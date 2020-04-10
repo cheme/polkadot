@@ -22,5 +22,7 @@
 mod usage_info;
 mod state_machine_stats;
 
+#[cfg(feature = "std")]
+pub mod state;
 pub use usage_info::{UsageInfo, UsageUnit};
 pub use state_machine_stats::StateMachineStats;

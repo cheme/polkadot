@@ -60,6 +60,7 @@ prometheus-endpoint = { package = "substrate-prometheus-endpoint", path = "../..
 sc-tracing = { version = "2.0.0-alpha.5", path = "../tracing" }
 tracing = "0.1.10"
 parity-util-mem = { version = "0.6.0", default-features = false, features = ["primitive-types"] }
+sp-stats = { version = "2.0.0-alpha.5", path = "../../primitives/stats" }
 
 
 [target.'cfg(any(unix, windows))'.dependencies]

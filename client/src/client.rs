@@ -20,6 +20,7 @@ use std::{
 	marker::PhantomData, collections::{HashSet, BTreeMap, HashMap}, sync::Arc, panic::UnwindSafe,
 	result,
 };
+use crate::stats::StateUsageStats; // TODO Obviously not in the right crate
 use log::{info, trace, warn};
 use parking_lot::{Mutex, RwLock};
 use codec::{Encode, Decode};
@@ -134,7 +135,7 @@ pub fn new_in_mem<E, Block, S, RA>(
 	executor: E,
 	genesis_storage: &S,
 	keystore: Option<sp_core::traits::BareCryptoStorePtr>,
-	prometheus_registry: Option<Registry>,
+	state_state: sp_stats::state::StateUsageStats,
 	spawn_handle: Box<dyn CloneableSpawn>,
 ) -> sp_blockchain::Result<Client<
 	in_mem::Backend<Block>,
@@ -146,7 +147,7 @@ pub fn new_in_mem<E, Block, S, RA>(
 	S: BuildStorage,
 	Block: BlockT,
 {
-	new_with_backend(Arc::new(in_mem::Backend::new()), executor, genesis_storage, keystore, spawn_handle, prometheus_registry)
+	new_with_backend(Arc::new(in_mem::Backend::new()), executor, genesis_storage, keystore, spawn_handle, state_state)
 }
 
 /// Create a client with the explicitly provided backend.
@@ -157,7 +158,7 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 	build_genesis_storage: &S,
 	keystore: Option<sp_core::traits::BareCryptoStorePtr>,
 	spawn_handle: Box<dyn CloneableSpawn>,
-	prometheus_registry: Option<Registry>,
+	state_state: sp_stats::state::StateUsageStats,
 ) -> sp_blockchain::Result<Client<B, LocalCallExecutor<B, E>, Block, RA>>
 	where
 		E: CodeExecutor + RuntimeInfo,
@@ -165,7 +166,7 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 		Block: BlockT,
 		B: backend::LocalBackend<Block> + 'static,
 {
-	let call_executor = LocalCallExecutor::new(backend.clone(), executor, spawn_handle);
+	let call_executor = LocalCallExecutor::new(backend.clone(), executor, spawn_handle, state_state.clone());
 	let extensions = ExecutionExtensions::new(Default::default(), keystore);
 	Client::new(
 		backend,
@@ -174,7 +175,7 @@ pub fn new_with_backend<B, E, Block, S, RA>(
 		Default::default(),
 		Default::default(),
 		extensions,
-		prometheus_registry,
+		state_state,
 	)
 }
 
@@ -252,7 +253,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		fork_blocks: ForkBlocks<Block>,
 		bad_blocks: BadBlocks<Block>,
 		execution_extensions: ExecutionExtensions<Block>,
-		_prometheus_registry: Option<Registry>,
+		state_usage: StateUsageStats,
 	) -> sp_blockchain::Result<Self> {
 		if backend.blockchain().header(BlockId::Number(Zero::zero()))?.is_none() {
 			let genesis_storage = build_genesis_storage.build_storage()?;
@@ -3028,6 +3029,7 @@ pub(crate) mod tests {
 				}
 			},
 			u64::max_value(),
+			sp_stats::state::StateUsageStats::new(None),
 		).unwrap());
 
 		let mut client = TestClientBuilder::with_backend(backend).build();
@@ -3230,6 +3232,7 @@ pub(crate) mod tests {
 					}
 				},
 				u64::max_value(),
+				sp_stats::state::StateUsageStats::new(None),
 		).unwrap());
 
 		let mut client = TestClientBuilder::with_backend(backend).build();
@@ -3489,7 +3492,7 @@ pub(crate) mod tests {
 				substrate_test_runtime_client::new_native_executor(),
 				&substrate_test_runtime_client::GenesisParameters::default().genesis_storage(),
 				None,
-				None,
+				sp_stats::state::StateUsageStats::new(None),
 				sp_core::tasks::executor(),
 			)
 			.unwrap();

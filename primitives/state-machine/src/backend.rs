@@ -207,17 +207,6 @@ pub trait Backend<H: Hasher>: std::fmt::Debug {
 		(root, txs)
 	}
 
-	/// Register stats from overlay of state machine.
-	///
-	/// By default nothing is registered.
-	fn register_overlay_stats(&mut self, _stats: &sp_stats::StateMachineStats);
-
-	/// Query backend usage statistics (i/o, memory)
-	///
-	/// Not all implementations are expected to be able to do this. In the
-	/// case when they don't, empty statistics is returned.
-	fn usage_info(&self) -> UsageInfo;
-
 	/// Wipe the state database.
 	fn wipe(&self) -> Result<(), Self::Error> {
 		unimplemented!()
@@ -310,12 +299,6 @@ impl<'a, T: Backend<H>, H: Hasher> Backend<H> for &'a T {
 
 	fn for_key_values_with_prefix<F: FnMut(&[u8], &[u8])>(&self, prefix: &[u8], f: F) {
 		(*self).for_key_values_with_prefix(prefix, f);
-	}
-
-	fn register_overlay_stats(&mut self, _stats: &sp_stats::StateMachineStats) {	}
-
-	fn usage_info(&self) -> UsageInfo {
-		(*self).usage_info()
 	}
 }
 

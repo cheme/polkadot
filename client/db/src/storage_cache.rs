@@ -299,8 +299,6 @@ pub struct CacheChanges<B: BlockT> {
 pub struct CachingState<S, B: BlockT> {
 	/// Usage statistics
 	usage: StateUsageStats,
-	/// State machine registered stats
-	overlay_stats: sp_stats::StateMachineStats,
 	/// Backing state.
 	state: S,
 	/// Cache data.
@@ -427,10 +425,10 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 		state: S,
 		shared_cache: SharedCache<B>,
 		parent_hash: Option<B::Hash>,
+		usage: sp_stats::state::StateUsageStats,
 	) -> Self {
 		CachingState {
-			usage: StateUsageStats::new(),
-			overlay_stats: sp_stats::StateMachineStats::default(),
+			usage,
 			state,
 			cache: CacheChanges {
 				shared_cache,
@@ -665,22 +663,13 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, HashFor<B>>> {
 		self.state.as_trie_backend()
 	}
-
-	fn register_overlay_stats(&mut self, stats: &sp_stats::StateMachineStats) {
-		self.overlay_stats.add(stats);
-	}
-
-	fn usage_info(&self) -> sp_stats::UsageInfo {
-		let mut info = self.usage.take();
-		info.include_state_machine_states(&self.overlay_stats);
-		info
-	}
 }
 
 /// Extended [`CachingState`] that will sync the caches on drop.
 pub struct SyncingCachingState<S, Block: BlockT> {
 	/// The usage statistics of the backend. These will be updated on drop.
-	state_usage: Arc<StateUsageStats>,
+	/// TODO this is actually not needed with atomic change: can remove field
+	state_usage: StateUsageStats,
 	/// Reference to the meta db.
 	meta: Arc<RwLock<Meta<NumberFor<Block>, Block::Hash>>>,
 	/// Mutex to lock get exlusive access to the backend.
@@ -703,7 +692,7 @@ impl<S, B: BlockT> SyncingCachingState<S, B> {
 	/// Create new automatic syncing state.
 	pub fn new(
 		caching_state: CachingState<S, B>,
-		state_usage: Arc<StateUsageStats>,
+		state_usage: StateUsageStats,
 		meta: Arc<RwLock<Meta<NumberFor<B>, B::Hash>>>,
 		lock: Arc<RwLock<()>>,
 	) -> Self {
@@ -860,14 +849,6 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 			.expect("`caching_state` is valid for the lifetime of the object; qed")
 			.as_trie_backend()
 	}
-
-	fn register_overlay_stats(&mut self, stats: &sp_stats::StateMachineStats) {
-		self.caching_state().register_overlay_stats(stats);
-	}
-
-	fn usage_info(&self) -> sp_stats::UsageInfo {
-		self.caching_state().usage_info()
-	}
 }
 
 impl<S, B: BlockT> Drop for SyncingCachingState<S, B> {
@@ -879,7 +860,6 @@ impl<S, B: BlockT> Drop for SyncingCachingState<S, B> {
 		if let Some(mut caching_state) = self.caching_state.take() {
 			let _lock = self.lock.read();
 
-			self.state_usage.merge_sm(caching_state.usage.take());
 			if let Some(hash) = caching_state.cache.parent_hash.clone() {
 				let is_best = self.meta.read().best_hash == hash;
 				caching_state.cache.sync_cache(&[], &[], vec![], vec![], None, None, is_best);
@@ -920,6 +900,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(root_parent),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -935,6 +916,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h0),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h1a), Some(1), true);
 
@@ -942,6 +924,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h0),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -957,6 +940,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1b),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -972,6 +956,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -987,6 +972,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h2a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h3a), Some(3), true);
 
@@ -994,6 +980,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h3a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert_eq!(s.storage(&key).unwrap().unwrap(), vec![5]);
 
@@ -1001,6 +988,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert!(s.storage(&key).unwrap().is_none());
 
@@ -1008,6 +996,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h2b),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert!(s.storage(&key).unwrap().is_none());
 
@@ -1015,6 +1004,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1b),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert!(s.storage(&key).unwrap().is_none());
 
@@ -1024,6 +1014,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h2b),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[h1b, h2b, h3b],
@@ -1038,6 +1029,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h3a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert!(s.storage(&key).unwrap().is_none());
 	}
@@ -1059,6 +1051,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(root_parent),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -1074,6 +1067,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h2a), Some(2), true);
 
@@ -1081,6 +1075,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -1096,6 +1091,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h2b),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -1111,6 +1107,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h2a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert_eq!(s.storage(&key).unwrap().unwrap(), vec![2]);
 	}
@@ -1131,6 +1128,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(root_parent),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h1), Some(1), true);
 
@@ -1138,6 +1136,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h2a), Some(2), true);
 
@@ -1145,6 +1144,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h2a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -1160,6 +1160,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(&[], &[], vec![], vec![], Some(h2b), Some(2), false);
 
@@ -1167,6 +1168,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h2b),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -1182,6 +1184,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h3a),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert_eq!(s.storage(&key).unwrap().unwrap(), vec![2]);
 	}
@@ -1194,6 +1197,7 @@ mod tests {
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(), shared.clone(), Some(root_parent.clone()),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 
 		let key = H256::random()[..].to_vec();
@@ -1234,6 +1238,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(root_parent),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 
 		let key = H256::random()[..].to_vec();
@@ -1278,6 +1283,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(root_parent.clone()),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -1293,6 +1299,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h0),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		s.cache.sync_cache(
 			&[],
@@ -1308,6 +1315,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert_eq!(s.storage(&key).unwrap(), Some(vec![3]));
 
@@ -1331,6 +1339,7 @@ mod tests {
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
 			Some(h1),
+			sp_stats::state::StateUsageStats::new(None), // no metrics on test
 		);
 		assert_eq!(s.storage(&key).unwrap(), None);
 	}
@@ -1479,6 +1488,7 @@ mod qc {
 				InMemoryBackend::<BlakeTwo256>::default(),
 				self.shared.clone(),
 				Some(hash),
+				sp_stats::state::StateUsageStats::new(None), // no metrics on this mutator (test only)
 			)
 		}
 
@@ -1548,6 +1558,7 @@ mod qc {
 						InMemoryBackend::<BlakeTwo256>::default(),
 						self.shared.clone(),
 						Some(parent),
+						sp_stats::state::StateUsageStats::new(None), // no metrics on this mutator (test only)
 					);
 
 					state.cache.sync_cache(
@@ -1587,6 +1598,7 @@ mod qc {
 						InMemoryBackend::<BlakeTwo256>::default(),
 						self.shared.clone(),
 						Some(parent_hash),
+						sp_stats::state::StateUsageStats::new(None), // no metrics on this mutator (test only)
 					);
 
 					state.cache.sync_cache(
@@ -1634,6 +1646,7 @@ mod qc {
 								InMemoryBackend::<BlakeTwo256>::default(),
 								self.shared.clone(),
 								Some(fork_at),
+								sp_stats::state::StateUsageStats::new(None), // no metrics on this mutator (test only)
 							);
 
 							let height = pos as u64 + enacted.len() as u64 + 2;

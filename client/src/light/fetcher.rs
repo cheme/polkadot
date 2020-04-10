@@ -51,14 +51,20 @@ pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>> {
 	blockchain: Arc<Blockchain<S>>,
 	executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
+	state_stats: sp_stats::state::StateUsageStats,
 	_hasher: PhantomData<(B, H)>,
 }
 
 impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 	/// Create new light data checker.
-	pub fn new(blockchain: Arc<Blockchain<S>>, executor: E, spawn_handle: Box<dyn CloneableSpawn>) -> Self {
+	pub fn new(
+		blockchain: Arc<Blockchain<S>>,
+		executor: E,
+		spawn_handle: Box<dyn CloneableSpawn>,
+		state_stats: sp_stats::state::StateUsageStats,
+	) -> Self {
 		Self {
-			blockchain, executor, spawn_handle, _hasher: PhantomData
+			blockchain, executor, spawn_handle, _hasher: PhantomData, state_stats,
 		}
 	}
 
@@ -260,6 +266,7 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 			self.spawn_handle.clone(),
 			request,
 			remote_proof,
+			self.state_stats.clone(),
 		)
 	}
 

@@ -186,7 +186,7 @@ impl BenchDb {
 			pruning: PruningMode::ArchiveAll,
 			source: sc_client_db::DatabaseSettingsSrc::Path {
 				path: dir.into(),
-				cache_size: 128,
+				cache_size: 512,
 			},
 		};
 
@@ -198,7 +198,8 @@ impl BenchDb {
 			None,
 			ExecutionExtensions::new(profile.into_execution_strategies(), None),
 			sp_core::tasks::executor(),
-			None,
+			// no prometheus
+			sp_stats::state::StateUsageStats::new(None),
 		).expect("Should not fail");
 
 		(client, backend)

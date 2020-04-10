@@ -72,6 +72,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 				None => None,
 			},
 			Some(&mut self.extensions),
+			sp_stats::state::StateUsageStats::new(None), // TODO could put in place for test ext, it is just a field to add and can be interesting
 		)
 	}
 

@@ -219,6 +219,7 @@ pub fn check_execution_proof<Header, E, H>(
 	spawn_handle: Box<dyn CloneableSpawn>,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: StorageProof,
+	state_stats: sp_stats::state::StateUsageStats,
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
@@ -238,6 +239,7 @@ pub fn check_execution_proof<Header, E, H>(
 			header.hash(),
 			Default::default(),
 		),
+		state_stats,
 	)
 }
 
@@ -247,6 +249,7 @@ fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Head
 	request: &RemoteCallRequest<Header>,
 	remote_proof: StorageProof,
 	make_next_header: MakeNextHeader,
+	state_stats: sp_stats::state::StateUsageStats,
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
@@ -274,6 +277,7 @@ fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Head
 		"Core_initialize_block",
 		&next_header.encode(),
 		&runtime_code,
+		state_stats.clone(),
 	)?;
 
 	// execute method
@@ -285,6 +289,7 @@ fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader: Fn(&Head
 		&request.method,
 		&request.call_data,
 		&runtime_code,
+		state_stats,
 	)
 	.map_err(Into::into)
 }

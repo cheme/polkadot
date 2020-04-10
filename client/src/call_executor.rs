@@ -35,6 +35,7 @@ pub struct LocalCallExecutor<B, E> {
 	backend: Arc<B>,
 	executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
+	state_stats: sp_stats::state::StateUsageStats,
 }
 
 impl<B, E> LocalCallExecutor<B, E> {
@@ -43,11 +44,13 @@ impl<B, E> LocalCallExecutor<B, E> {
 		backend: Arc<B>,
 		executor: E,
 		spawn_handle: Box<dyn CloneableSpawn>,
+		state_stats: sp_stats::state::StateUsageStats,
 	) -> Self {
 		LocalCallExecutor {
 			backend,
 			executor,
 			spawn_handle,
+			state_stats,
 		}
 	}
 }
@@ -58,6 +61,7 @@ impl<B, E> Clone for LocalCallExecutor<B, E> where E: Clone {
 			backend: self.backend.clone(),
 			executor: self.executor.clone(),
 			spawn_handle: self.spawn_handle.clone(),
+			state_stats: self.state_stats.clone(),
 		}
 	}
 }
@@ -96,6 +100,7 @@ where
 			extensions.unwrap_or_default(),
 			&state_runtime_code.runtime_code()?,
 			self.spawn_handle.clone(),
+			self.state_stats.clone(),
 		).execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
 			strategy.get_manager(),
 			None,
@@ -171,6 +176,7 @@ where
 					extensions.unwrap_or_default(),
 					&runtime_code,
 					self.spawn_handle.clone(),
+					self.state_stats.clone(),
 				);
 				// TODO: https://github.com/paritytech/substrate/issues/4455
 				// .with_storage_transaction_cache(storage_transaction_cache.as_mut().map(|c| &mut **c))
@@ -190,6 +196,7 @@ where
 					extensions.unwrap_or_default(),
 					&runtime_code,
 					self.spawn_handle.clone(),
+					self.state_stats.clone(),
 				).with_storage_transaction_cache(storage_transaction_cache.as_mut().map(|c| &mut **c));
 				state_machine.execute_using_consensus_failure_handler(execution_manager, native_call)
 			}
@@ -210,6 +217,7 @@ where
 			&state,
 			changes_trie_state,
 			None,
+			self.state_stats.clone(),
 		);
 		let state_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&state);
 		self.executor.runtime_version(&mut ext, &state_runtime_code.runtime_code()?)
@@ -231,6 +239,7 @@ where
 			method,
 			call_data,
 			&sp_state_machine::backend::BackendRuntimeCode::new(trie_state).runtime_code()?,
+			self.state_stats.clone(),
 		)
 		.map_err(Into::into)
 	}

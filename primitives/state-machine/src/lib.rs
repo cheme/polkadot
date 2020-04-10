@@ -190,7 +190,7 @@ pub struct StateMachine<'a, B, H, N, Exec>
 	changes_trie_state: Option<ChangesTrieState<'a, H, N>>,
 	storage_transaction_cache: Option<&'a mut StorageTransactionCache<B::Transaction, H, N>>,
 	runtime_code: &'a RuntimeCode<'a>,
-	stats: StateMachineStats,
+	state_stats: sp_stats::state::StateUsageStats,
 }
 
 impl<'a, B, H, N, Exec> Drop for StateMachine<'a, B, H, N, Exec> where
@@ -199,7 +199,10 @@ impl<'a, B, H, N, Exec> Drop for StateMachine<'a, B, H, N, Exec> where
 	N: ChangesTrieBlockNumber,
 {
 	fn drop(&mut self) {
-		self.backend.register_overlay_stats(&self.stats);
+		// TODO consider totally removing state machine statse and directly
+		// use state_stats everywhere TODO function overlay_stat is useless but could be use to reach
+		// trie info
+		self.state_stats.register_overlay_stats(&self.overlay.stats);
 	}
 }
 
@@ -221,6 +224,7 @@ impl<'a, B, H, N, Exec> StateMachine<'a, B, H, N, Exec> where
 		mut extensions: Extensions,
 		runtime_code: &'a RuntimeCode,
 		spawn_handle: Box<dyn CloneableSpawn>,
+		state_stats: sp_stats::state::StateUsageStats,
 	) -> Self {
 		extensions.register(CallInWasmExt::new(exec.clone()));
 		extensions.register(sp_core::traits::TaskExecutorExt::new(spawn_handle));
@@ -235,7 +239,7 @@ impl<'a, B, H, N, Exec> StateMachine<'a, B, H, N, Exec> where
 			changes_trie_state,
 			storage_transaction_cache: None,
 			runtime_code,
-			stats: StateMachineStats::default(),
+			state_stats,
 		}
 	}
 
@@ -293,6 +297,7 @@ impl<'a, B, H, N, Exec> StateMachine<'a, B, H, N, Exec> where
 			self.backend,
 			self.changes_trie_state.clone(),
 			Some(&mut self.extensions),
+			self.state_stats.clone(),
 		);
 
 		let id = ext.id;
@@ -453,6 +458,7 @@ pub fn prove_execution<B, H, N, Exec>(
 	method: &str,
 	call_data: &[u8],
 	runtime_code: &RuntimeCode,
+	state_stats: sp_stats::state::StateUsageStats,
 ) -> Result<(Vec<u8>, StorageProof), Box<dyn Error>>
 where
 	B: Backend<H>,
@@ -471,6 +477,7 @@ where
 		method,
 		call_data,
 		runtime_code,
+		state_stats,
 	)
 }
 
@@ -491,6 +498,7 @@ pub fn prove_execution_on_trie_backend<S, H, N, Exec>(
 	method: &str,
 	call_data: &[u8],
 	runtime_code: &RuntimeCode,
+	state_stats: sp_stats::state::StateUsageStats,
 ) -> Result<(Vec<u8>, StorageProof), Box<dyn Error>>
 where
 	S: trie_backend_essence::TrieBackendStorage<H>,
@@ -510,6 +518,7 @@ where
 		Extensions::default(),
 		runtime_code,
 		spawn_handle,
+		state_stats,
 	);
 
 	let result = sm.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
@@ -530,6 +539,7 @@ pub fn execution_proof_check<H, N, Exec>(
 	method: &str,
 	call_data: &[u8],
 	runtime_code: &RuntimeCode,
+	state_stats: sp_stats::state::StateUsageStats,
 ) -> Result<Vec<u8>, Box<dyn Error>>
 where
 	H: Hasher,
@@ -546,6 +556,7 @@ where
 		method,
 		call_data,
 		runtime_code,
+		state_stats,
 	)
 }
 
@@ -558,6 +569,7 @@ pub fn execution_proof_check_on_trie_backend<H, N, Exec>(
 	method: &str,
 	call_data: &[u8],
 	runtime_code: &RuntimeCode,
+	state_stats: sp_stats::state::StateUsageStats,
 ) -> Result<Vec<u8>, Box<dyn Error>>
 where
 	H: Hasher,
@@ -575,6 +587,7 @@ where
 		Extensions::default(),
 		runtime_code,
 		spawn_handle,
+		state_stats,
 	);
 
 	sm.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(

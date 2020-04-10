@@ -44,6 +44,7 @@ sp-block-builder = { version = "2.0.0-alpha.5", path = "../../../primitives/bloc
 sc-block-builder = { version = "0.8.0-alpha.5", path = "../../../client/block-builder" }
 sp-inherents = { version = "2.0.0-alpha.5", path = "../../../primitives/inherents" }
 sp-blockchain = { version = "2.0.0-alpha.5", path = "../../../primitives/blockchain" }
+sp-stats = { version = "2.0.0-alpha.5", path = "../../../primitives/stats" }
 log = "0.4.8"
 tempfile = "3.1.0"
 fs_extra = "1"

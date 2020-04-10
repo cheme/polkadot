@@ -82,6 +82,7 @@ pub mod in_mem;
 pub mod genesis;
 pub mod light;
 pub mod leaves;
+pub use sp_stats::state as stats;
 mod call_executor;
 mod client;
 mod block_rules;

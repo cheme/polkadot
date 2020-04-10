@@ -240,12 +240,6 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
 		Some(self)
 	}
-
-	fn register_overlay_stats(&mut self, _stats: &sp_stats::StateMachineStats) { }
-
-	fn usage_info(&self) -> sp_stats::UsageInfo {
-		sp_stats::UsageInfo::empty()
-	}
 }
 
 #[cfg(test)]

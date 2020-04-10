@@ -28,6 +28,18 @@ pub struct UsageUnit {
 	pub bytes: u64,
 }
 
+// TODO EMCH consider saturating sub instead
+impl sp_std::ops::Sub for UsageUnit {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+			UsageUnit {
+				ops: self.ops - other.ops,
+				bytes: self.bytes - other.bytes,
+			}
+    }
+}
+
 /// Usage statistics for state backend.
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct UsageInfo {
@@ -49,6 +61,24 @@ pub struct UsageInfo {
 	/// Memory used.
 	// Encoded as u64 because wasm's usize is u64.
 	pub memory: u64,
+}
+
+// TODO EMCH consider saturating sub instead
+impl sp_std::ops::Sub for UsageInfo {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+			UsageInfo {
+				reads: self.reads - other.reads,
+				writes: self.writes - other.writes,
+				nodes_writes: self.nodes_writes - other.nodes_writes,
+				overlay_writes: self.overlay_writes - other.overlay_writes,
+				removed_nodes: self.removed_nodes - other.removed_nodes,
+				cache_reads: self.cache_reads - other.cache_reads,
+				modified_reads: self.modified_reads - other.modified_reads,
+				memory: self.memory - other.memory,
+			}
+    }
 }
 
 impl UsageInfo {

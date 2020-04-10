@@ -200,7 +200,8 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 
 			storage
 		};
-
+		// No prometheus registry
+		let state_stats = sp_stats::state::StateUsageStats::new(None);
 		let client = sc_client::Client::new(
 			self.backend.clone(),
 			executor,
@@ -211,7 +212,7 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 				self.execution_strategies,
 				self.keystore.clone(),
 			),
-			None,
+			state_stats,
 		).expect("Creates new client");
 
 		let longest_chain = sc_client::LongestChain::new(self.backend);

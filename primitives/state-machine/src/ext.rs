@@ -87,6 +87,7 @@ pub struct Ext<'a, H, N, B>
 	_phantom: std::marker::PhantomData<N>,
 	/// Extensions registered with this instance.
 	extensions: Option<&'a mut Extensions>,
+	state_usage: sp_stats::state::StateUsageStats,
 }
 
 impl<'a, H, N, B> Ext<'a, H, N, B>
@@ -104,6 +105,7 @@ where
 		backend: &'a B,
 		changes_trie_state: Option<ChangesTrieState<'a, H, N>>,
 		extensions: Option<&'a mut Extensions>,
+		state_usage: sp_stats::state::StateUsageStats,
 	) -> Self {
 		Ext {
 			overlay,
@@ -113,6 +115,7 @@ where
 			id: rand::random(),
 			_phantom: Default::default(),
 			extensions,
+			state_usage,
 		}
 	}
 
@@ -540,7 +543,7 @@ where
 	}
 
 	fn bench_usage_info(&self) -> UsageInfo {
-		self.backend.usage_info()
+		self.state_usage.take()
 	}
 }
 

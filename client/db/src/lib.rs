@@ -39,7 +39,8 @@ mod storage_cache;
 #[cfg(any(feature = "kvdb-rocksdb", test))]
 mod upgrade;
 mod utils;
-mod stats;
+// TODO remove reexport and put stats in sp_stats
+pub use sc_client::stats;
 
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -257,14 +258,6 @@ impl<B: BlockT> StateBackend<HashFor<B>> for RefTrackingState<B> {
 	{
 		self.state.as_trie_backend()
 	}
-
-	fn register_overlay_stats(&mut self, stats: &StateMachineStats) {
-		self.state.register_overlay_stats(stats);
-	}
-
-	fn usage_info(&self) -> StateUsageInfo {
-		self.state.usage_info()
-	}
 }
 
 /// Database settings.
@@ -285,7 +278,7 @@ pub enum DatabaseSettingsSrc {
 	Path {
 		/// Path to the database.
 		path: PathBuf,
-		/// Cache size in bytes.
+		/// Cache size in MiB.
 		cache_size: usize,
 	},
 
@@ -302,7 +295,7 @@ pub fn new_client<E, Block, RA>(
 	bad_blocks: BadBlocks<Block>,
 	execution_extensions: ExecutionExtensions<Block>,
 	spawn_handle: Box<dyn CloneableSpawn>,
-	prometheus_registry: Option<Registry>,
+	state_usage: sp_stats::state::StateUsageStats,
 ) -> Result<(
 		sc_client::Client<
 			Backend<Block>,
@@ -318,8 +311,8 @@ pub fn new_client<E, Block, RA>(
 		Block: BlockT,
 		E: CodeExecutor + RuntimeInfo,
 {
-	let backend = Arc::new(Backend::new(settings, CANONICALIZATION_DELAY)?);
-	let executor = sc_client::LocalCallExecutor::new(backend.clone(), executor, spawn_handle);
+	let backend = Arc::new(Backend::new(settings, CANONICALIZATION_DELAY, state_usage.clone())?);
+	let executor = sc_client::LocalCallExecutor::new(backend.clone(), executor, spawn_handle, state_usage.clone());
 	Ok((
 		sc_client::Client::new(
 			backend.clone(),
@@ -328,7 +321,7 @@ pub fn new_client<E, Block, RA>(
 			fork_blocks,
 			bad_blocks,
 			execution_extensions,
-			prometheus_registry,
+			state_usage,
 		)?,
 		backend,
 	))
@@ -768,21 +761,22 @@ pub struct Backend<Block: BlockT> {
 	import_lock: Arc<RwLock<()>>,
 	is_archive: bool,
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
-	state_usage: Arc<StateUsageStats>,
+	state_usage: StateUsageStats,
 }
 
 impl<Block: BlockT> Backend<Block> {
 	/// Create a new instance of database backend.
 	///
 	/// The pruning window is how old a block must be before the state is pruned.
-	pub fn new(config: DatabaseSettings, canonicalization_delay: u64) -> ClientResult<Self> {
+	pub fn new(config: DatabaseSettings, canonicalization_delay: u64, state_usage: StateUsageStats) -> ClientResult<Self> {
 		let db = crate::utils::open_database::<Block>(&config, DatabaseType::Full)?;
-		Self::from_kvdb(db as Arc<_>, canonicalization_delay, &config)
+		Self::from_kvdb(db as Arc<_>, canonicalization_delay, &config, state_usage)
 	}
 
 	/// Create new memory-backed client backend for tests.
 	#[cfg(any(test, feature = "test-helpers"))]
 	pub fn new_test(keep_blocks: u32, canonicalization_delay: u64) -> Self {
+		let state_usage = StateUsageStats::new(None);
 		let db = Arc::new(kvdb_memorydb::create(crate::utils::NUM_COLUMNS));
 		let db_setting = DatabaseSettings {
 			state_cache_size: 16777216,
@@ -791,13 +785,14 @@ impl<Block: BlockT> Backend<Block> {
 			source: DatabaseSettingsSrc::Custom(db),
 		};
 
-		Self::new(db_setting, canonicalization_delay).expect("failed to create test-db")
+		Self::new(db_setting, canonicalization_delay, state_usage).expect("failed to create test-db")
 	}
 
 	fn from_kvdb(
 		db: Arc<dyn KeyValueDB>,
 		canonicalization_delay: u64,
 		config: &DatabaseSettings,
+		state_usage: StateUsageStats,
 	) -> ClientResult<Self> {
 		let is_archive_pruning = config.pruning.is_archive();
 		let blockchain = BlockchainDb::new(db.clone())?;
@@ -840,7 +835,7 @@ impl<Block: BlockT> Backend<Block> {
 			import_lock: Default::default(),
 			is_archive: is_archive_pruning,
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
-			state_usage: Arc::new(StateUsageStats::new()),
+			state_usage,
 		})
 	}
 
@@ -1190,7 +1185,6 @@ impl<Block: BlockT> Backend<Block> {
 				changes_trie_config_update,
 				changes_trie_cache_ops,
 			)?);
-			self.state_usage.merge_sm(operation.old_state.usage_info());
 			// release state reference so that it can be finalized
 			let cache = operation.old_state.into_cache_changes();
 
@@ -1437,7 +1431,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 
 	fn commit_operation(&self, operation: Self::BlockImportOperation) -> ClientResult<()> {
 		let usage = operation.old_state.usage_info();
-		self.state_usage.merge_sm(usage);
 
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
@@ -1625,6 +1618,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					state,
 					self.shared_cache.clone(),
 					None,
+					self.state_usage.clone(),
 				);
 				return Ok(SyncingCachingState::new(
 					caching_state,
@@ -1658,6 +1652,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						state,
 						self.shared_cache.clone(),
 						Some(hash),
+						self.state_usage.clone(),
 					);
 					Ok(SyncingCachingState::new(
 						caching_state,
@@ -1824,7 +1819,10 @@ pub(crate) mod tests {
 			state_cache_child_ratio: Some((50, 100)),
 			pruning: PruningMode::keep_blocks(1),
 			source: DatabaseSettingsSrc::Custom(backing),
-		}, 0).unwrap();
+		},
+		0,
+		sp_stats::state::StateUsageStats::new(None), // no metrics on test
+		).unwrap();
 		assert_eq!(backend.blockchain().info().best_number, 9);
 		for i in 0..10 {
 			assert!(backend.blockchain().hash(i).unwrap().is_some())
