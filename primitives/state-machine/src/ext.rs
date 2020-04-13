@@ -608,30 +608,33 @@ mod tests {
 
 	#[test]
 	fn storage_changes_root_is_none_when_storage_is_not_provided() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut overlay = prepare_overlay_with_changes();
 		let mut cache = StorageTransactionCache::default();
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None, stats);
 		assert_eq!(ext.storage_changes_root(&H256::default().encode()).unwrap(), None);
 	}
 
 	#[test]
 	fn storage_changes_root_is_none_when_state_is_not_provided() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut overlay = prepare_overlay_with_changes();
 		let mut cache = StorageTransactionCache::default();
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None, stats);
 		assert_eq!(ext.storage_changes_root(&H256::default().encode()).unwrap(), None);
 	}
 
 	#[test]
 	fn storage_changes_root_is_some_when_extrinsic_changes_are_non_empty() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut overlay = prepare_overlay_with_changes();
 		let mut cache = StorageTransactionCache::default();
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
 		let state = Some(ChangesTrieState::new(changes_trie_config(), Zero::zero(), &storage));
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, state, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, state, None, stats);
 		assert_eq!(
 			ext.storage_changes_root(&H256::default().encode()).unwrap(),
 			Some(hex!("bb0c2ef6e1d36d5490f9766cfcc7dfe2a6ca804504c3bb206053890d6dd02376").to_vec()),
@@ -640,13 +643,14 @@ mod tests {
 
 	#[test]
 	fn storage_changes_root_is_some_when_extrinsic_changes_are_empty() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut overlay = prepare_overlay_with_changes();
 		let mut cache = StorageTransactionCache::default();
 		overlay.prospective.top.get_mut(&vec![1]).unwrap().value = None;
 		let storage = TestChangesTrieStorage::with_blocks(vec![(99, Default::default())]);
 		let state = Some(ChangesTrieState::new(changes_trie_config(), Zero::zero(), &storage));
 		let backend = TestBackend::default();
-		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, state, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, state, None, stats);
 		assert_eq!(
 			ext.storage_changes_root(&H256::default().encode()).unwrap(),
 			Some(hex!("96f5aae4690e7302737b6f9b7f8567d5bbb9eac1c315f80101235a92d9ec27f4").to_vec()),
@@ -655,6 +659,7 @@ mod tests {
 
 	#[test]
 	fn next_storage_key_works() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut cache = StorageTransactionCache::default();
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_storage(vec![20], None);
@@ -668,7 +673,7 @@ mod tests {
 			children: map![]
 		}.into();
 
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None, stats.clone());
 
 		// next_backend < next_overlay
 		assert_eq!(ext.next_storage_key(&[5]), Some(vec![10]));
@@ -684,7 +689,7 @@ mod tests {
 
 		drop(ext);
 		overlay.set_storage(vec![50], Some(vec![50]));
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None, stats);
 
 		// next_overlay exist but next_backend doesn't exist
 		assert_eq!(ext.next_storage_key(&[40]), Some(vec![50]));
@@ -697,6 +702,7 @@ mod tests {
 		const CHILD_UUID_1: &[u8] = b"unique_id_1";
 		const CHILD_INFO_1: ChildInfo<'static> = ChildInfo::new_default(CHILD_UUID_1);
 
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut cache = StorageTransactionCache::default();
 		let child = || ChildStorageKey::from_slice(CHILD_KEY_1).unwrap();
 		let mut overlay = OverlayedChanges::default();
@@ -717,7 +723,7 @@ mod tests {
 		}.into();
 
 
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None, stats.clone());
 
 		// next_backend < next_overlay
 		assert_eq!(ext.next_child_storage_key(child(), CHILD_INFO_1, &[5]), Some(vec![10]));
@@ -733,7 +739,7 @@ mod tests {
 
 		drop(ext);
 		overlay.set_child_storage(child().as_ref().to_vec(), CHILD_INFO_1, vec![50], Some(vec![50]));
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None, stats);
 
 		// next_overlay exist but next_backend doesn't exist
 		assert_eq!(ext.next_child_storage_key(child(), CHILD_INFO_1, &[40]), Some(vec![50]));
@@ -741,6 +747,7 @@ mod tests {
 
 	#[test]
 	fn child_storage_works() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut cache = StorageTransactionCache::default();
 		let child = || ChildStorageKey::from_slice(CHILD_KEY_1).unwrap();
 		let mut overlay = OverlayedChanges::default();
@@ -760,7 +767,7 @@ mod tests {
 			],
 		}.into();
 
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None, stats.clone());
 
 		assert_eq!(ext.child_storage(child(), CHILD_INFO_1, &[10]), Some(vec![10]));
 		assert_eq!(

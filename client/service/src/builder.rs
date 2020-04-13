@@ -282,6 +282,9 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	>, Error> {
 		let tasks_builder = TaskManagerBuilder::new();
 
+		let state_stats =	sp_stats::state::StateUsageStats::new(
+			config.prometheus_config.as_ref().map(|config| &config.registry)
+		);
 		let keystore = match &config.keystore {
 			KeystoreConfig::Path { path, password } => Keystore::open(
 				path.clone(),
@@ -320,6 +323,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 				light_blockchain.clone(),
 				executor.clone(),
 				Box::new(tasks_builder.spawn_handle()),
+				state_stats.clone(),
 			),
 		);
 		let fetcher = Arc::new(sc_network::config::OnDemand::new(fetch_checker));
@@ -330,7 +334,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 			config.chain_spec.as_storage_builder(),
 			executor,
 			Box::new(tasks_builder.spawn_handle()),
-			sp_stats::state::StateUsageStats::new(config.prometheus_config.as_ref().map(|config| &config.registry)),
+			state_stats.clone(),
 		)?);
 
 		Ok(ServiceBuilder {

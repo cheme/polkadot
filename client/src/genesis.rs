@@ -76,6 +76,8 @@ mod tests {
 	) -> (Vec<u8>, Hash) {
 		use sp_trie::{TrieConfiguration, trie_types::Layout};
 
+		// Not registering genesis (stats is dropped).
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let transactions = txs.into_iter().map(|tx| tx.into_signed_tx()).collect::<Vec<_>>();
 
 		let iter = transactions.iter().map(Encode::encode);
@@ -103,6 +105,7 @@ mod tests {
 			Default::default(),
 			&runtime_code,
 			tasks_executor(),
+			stats.clone(),
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		).unwrap();
@@ -118,6 +121,7 @@ mod tests {
 				Default::default(),
 				&runtime_code,
 				tasks_executor(),
+				stats.clone(),
 			).execute(
 				ExecutionStrategy::NativeElseWasm,
 			).unwrap();
@@ -133,6 +137,7 @@ mod tests {
 			Default::default(),
 			&runtime_code,
 			tasks_executor(),
+			stats,
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		).unwrap();
@@ -173,6 +178,7 @@ mod tests {
 		let backend_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&backend);
 		let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
 
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut overlay = OverlayedChanges::default();
 		let _ = StateMachine::new(
 			&backend,
@@ -184,6 +190,7 @@ mod tests {
 			Default::default(),
 			&runtime_code,
 			tasks_executor(),
+			stats,
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		).unwrap();
@@ -206,6 +213,7 @@ mod tests {
 		let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
 
 		let mut overlay = OverlayedChanges::default();
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let _ = StateMachine::new(
 			&backend,
 			sp_state_machine::disabled_changes_trie_state::<_, u64>(),
@@ -216,6 +224,7 @@ mod tests {
 			Default::default(),
 			&runtime_code,
 			tasks_executor(),
+			stats,
 		).execute(
 			ExecutionStrategy::AlwaysWasm,
 		).unwrap();
@@ -238,6 +247,7 @@ mod tests {
 		let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
 
 		let mut overlay = OverlayedChanges::default();
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let r = StateMachine::new(
 			&backend,
 			sp_state_machine::disabled_changes_trie_state::<_, u64>(),
@@ -248,6 +258,7 @@ mod tests {
 			Default::default(),
 			&runtime_code,
 			tasks_executor(),
+			stats,
 		).execute(
 			ExecutionStrategy::NativeElseWasm,
 		);

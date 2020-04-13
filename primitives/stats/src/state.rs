@@ -268,12 +268,14 @@ impl StateUsageStats {
 	}
 
 	/// Returns the collected `UsageInfo` and resets the internal state.
+	#[must_use]
 	pub fn take(&self) -> crate::UsageInfo {
-		let last = self.last_take.read().clone();
 		// here all counter nay not be in synch but it is deemed negligeable
 		let current =  self.counters.stat_at();
-		*self.last_take.write() = current.clone();
-		current - last
+		let mut last = self.last_take.write();
+		let result = current.clone() - last.clone();
+		*last = current.clone();
+		result
 	}
 
 	pub fn register_overlay_stats(&mut self, stats: &crate::StateMachineStats) {

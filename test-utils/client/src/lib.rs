@@ -72,6 +72,7 @@ pub struct TestClientBuilder<Block: BlockT, Executor, Backend, G: GenesisInit> {
 	keystore: Option<BareCryptoStorePtr>,
 	fork_blocks: ForkBlocks<Block>,
 	bad_blocks: BadBlocks<Block>,
+	state_stats: sp_stats::state::StateUsageStats,
 }
 
 impl<Block: BlockT, Executor, G: GenesisInit> Default
@@ -98,6 +99,7 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, Executor, Backend, G> {
 	/// Create a new instance of the test client builder.
 	pub fn with_backend(backend: Arc<Backend>) -> Self {
+		let state_stats = sp_stats::state::StateUsageStats::new(None);
 		TestClientBuilder {
 			backend,
 			execution_strategies: ExecutionStrategies::default(),
@@ -107,6 +109,7 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 			keystore: None,
 			fork_blocks: None,
 			bad_blocks: None,
+			state_stats,
 		}
 	}
 
@@ -140,6 +143,15 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 				child_info: child_info.to_owned(),
 			});
 		entry.data.insert(child_key.as_ref().to_vec(), value.as_ref().to_vec());
+		self
+	}
+
+	/// Set the global stats.
+	pub fn set_state_stats(
+		mut self,
+		state_stats: sp_stats::state::StateUsageStats,
+	) -> Self {
+		self.state_stats = state_stats;
 		self
 	}
 
@@ -200,8 +212,6 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 
 			storage
 		};
-		// No prometheus registry
-		let state_stats = sp_stats::state::StateUsageStats::new(None);
 		let client = sc_client::Client::new(
 			self.backend.clone(),
 			executor,
@@ -212,7 +222,7 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 				self.execution_strategies,
 				self.keystore.clone(),
 			),
-			state_stats,
+			self.state_stats.clone(),
 		).expect("Creates new client");
 
 		let longest_chain = sc_client::LongestChain::new(self.backend);
@@ -244,10 +254,11 @@ impl<Block: BlockT, E, Backend, G: GenesisInit> TestClientBuilder<
 		E: sc_executor::NativeExecutionDispatch + 'static,
 		Backend: sc_client_api::backend::Backend<Block> + 'static,
 	{
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let executor = executor.into().unwrap_or_else(||
 			NativeExecutor::new(WasmExecutionMethod::Interpreted, None, 8)
 		);
-		let executor = LocalCallExecutor::new(self.backend.clone(), executor, tasks_executor());
+		let executor = LocalCallExecutor::new(self.backend.clone(), executor, tasks_executor(), stats);
 
 		self.build_with_executor(executor)
 	}

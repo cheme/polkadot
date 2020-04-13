@@ -1462,6 +1462,7 @@ dependencies = [
  "sp-externalities",
  "sp-runtime",
  "sp-state-machine",
+ "sp-stats",
  "structopt",
 ]
 
@@ -7153,6 +7154,7 @@ dependencies = [
  "sp-core",
  "sp-runtime",
  "sp-state-machine",
+ "sp-stats",
  "sp-version",
  "substrate-test-runtime-client",
  "trybuild",
@@ -8071,6 +8073,7 @@ dependencies = [
  "sp-blockchain",
  "sp-core",
  "sp-runtime",
+ "sp-stats",
  "substrate-test-client",
  "substrate-test-runtime",
 ]

@@ -55,6 +55,8 @@ impl BenchmarkCmd {
 		let mut extensions = Extensions::default();
 		extensions.register(KeystoreExt(KeyStore::new()));
 
+		// no prometheus registering on bench.
+		let state_stats = sp_stats::state::StateUsageStats::new(None);
 		let result = StateMachine::<_, _, NumberFor<BB>, _>::new(
 			&state,
 			None,
@@ -72,12 +74,15 @@ impl BenchmarkCmd {
 			extensions,
 			&sp_state_machine::backend::BackendRuntimeCode::new(&state).runtime_code()?,
 			tasks::executor(),
+			state_stats.clone(),
 		)
 		.execute(strategy.into())
 		.map_err(|e| format!("Error executing runtime benchmark: {:?}", e))?;
 
 		let results = <std::result::Result<Vec<BenchmarkBatch>, String> as Decode>::decode(&mut &result[..])
 			.map_err(|e| format!("Failed to decode benchmark results: {:?}", e))?;
+		let state_results = state_stats.take(); // TODO EMCH do something with those. or should be done at lower level
+		// at each iter call and fill results.
 
 		match results {
 			Ok(batches) => for batch in batches.into_iter() {

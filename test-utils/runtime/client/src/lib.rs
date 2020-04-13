@@ -345,11 +345,17 @@ pub fn new_light() -> (
 	Arc<LightBackend>,
 ) {
 
+	let stats = sp_stats::state::StateUsageStats::new(None);
 	let storage = sc_client_db::light::LightStorage::new_test();
 	let blockchain = Arc::new(sc_client::light::blockchain::Blockchain::new(storage));
 	let backend = Arc::new(LightBackend::new(blockchain.clone()));
 	let executor = new_native_executor();
-	let local_call_executor = sc_client::LocalCallExecutor::new(backend.clone(), executor, sp_core::tasks::executor());
+	let local_call_executor = sc_client::LocalCallExecutor::new(
+		backend.clone(),
+		executor,
+		sp_core::tasks::executor(),
+		stats.clone(),
+	);
 	let call_executor = LightExecutor::new(
 		backend.clone(),
 		local_call_executor,
@@ -357,6 +363,7 @@ pub fn new_light() -> (
 
 	(
 		TestClientBuilder::with_backend(backend.clone())
+			.set_state_stats(stats)
 			.build_with_executor(call_executor)
 			.0,
 		backend,

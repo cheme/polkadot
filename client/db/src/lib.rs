@@ -1430,8 +1430,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	}
 
 	fn commit_operation(&self, operation: Self::BlockImportOperation) -> ClientResult<()> {
-		let usage = operation.old_state.usage_info();
-
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
 				self.storage.state_db.apply_pending();

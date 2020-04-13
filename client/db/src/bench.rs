@@ -82,7 +82,6 @@ impl<B: BlockT> BenchmarkingState<B> {
 			record: Default::default(),
 
 			state_usage_stats: StateUsageStats::new(None), // no prometheus registry
-			overlay_stats: StateMachineStats::default(),
 
 			shared_cache: new_shared_cache(0, (1, 10)),
 

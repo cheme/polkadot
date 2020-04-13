@@ -381,6 +381,7 @@ pub mod tests {
 	}
 
 	fn prepare_for_read_proof_check() -> (TestChecker, Header, StorageProof, u32) {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		// prepare remote client
 		let remote_client = substrate_test_runtime_client::new();
 		let remote_block_id = BlockId::Number(0);
@@ -411,11 +412,13 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 		(local_checker, remote_block_header, remote_read_proof, heap_pages)
 	}
 
 	fn prepare_for_read_child_proof_check() -> (TestChecker, Header, StorageProof, Vec<u8>) {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		use substrate_test_runtime_client::DefaultTestClientBuilderExt;
 		use substrate_test_runtime_client::TestClientBuilderExt;
 		// prepare remote client
@@ -460,11 +463,13 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 		(local_checker, remote_block_header, remote_read_proof, child_value)
 	}
 
 	fn prepare_for_header_proof_check(insert_cht: bool) -> (TestChecker, Hash, Header, StorageProof) {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		// prepare remote client
 		let mut remote_client = substrate_test_runtime_client::new();
 		let mut local_headers_hashes = Vec::new();
@@ -491,6 +496,7 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 		(local_checker, local_cht_root, remote_block_header, remote_header_proof)
 	}
@@ -572,11 +578,13 @@ pub mod tests {
 
 	#[test]
 	fn changes_proof_is_generated_and_checked_when_headers_are_not_pruned() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let (remote_client, local_roots, test_cases) = prepare_client_with_key_changes();
 		let local_checker = TestChecker::new(
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 		let local_checker = &local_checker as &dyn FetchChecker<Block>;
 		let max = remote_client.chain_info().best_number;
@@ -627,6 +635,7 @@ pub mod tests {
 
 	#[test]
 	fn changes_proof_is_generated_and_checked_when_headers_are_pruned() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		// we're testing this test case here:
 		// (1, 4, dave.clone(), vec![(4, 0), (1, 1), (1, 0)]),
 		let (remote_client, remote_roots, _) = prepare_client_with_key_changes();
@@ -652,6 +661,7 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(local_storage)),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 
 		// check proof on local client
@@ -682,11 +692,13 @@ pub mod tests {
 
 	#[test]
 	fn check_changes_proof_fails_if_proof_is_wrong() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let (remote_client, local_roots, test_cases) = prepare_client_with_key_changes();
 		let local_checker = TestChecker::new(
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 		let local_checker = &local_checker as &dyn FetchChecker<Block>;
 		let max = remote_client.chain_info().best_number;
@@ -751,6 +763,7 @@ pub mod tests {
 
 	#[test]
 	fn check_changes_tries_proof_fails_if_proof_is_wrong() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		// we're testing this test case here:
 		// (1, 4, dave.clone(), vec![(4, 0), (1, 1), (1, 0)]),
 		let (remote_client, remote_roots, _) = prepare_client_with_key_changes();
@@ -775,6 +788,7 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats.clone(),
 		);
 		assert!(local_checker.check_changes_tries_proof(4, &remote_proof.roots,
 			remote_proof.roots_proof.clone()).is_err());
@@ -786,6 +800,7 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(local_storage)),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 		let result = local_checker.check_changes_tries_proof(
 			4, &remote_proof.roots, StorageProof::empty()
@@ -795,6 +810,7 @@ pub mod tests {
 
 	#[test]
 	fn check_body_proof_faulty() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let header = header_with_computed_extrinsics_root(
 			vec![Extrinsic::IncludeData(vec![1, 2, 3, 4])]
 		);
@@ -804,6 +820,7 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 
 		let body_request = RemoteBodyRequest {
@@ -819,6 +836,7 @@ pub mod tests {
 
 	#[test]
 	fn check_body_proof_of_same_data_should_succeed() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let extrinsics = vec![Extrinsic::IncludeData(vec![1, 2, 3, 4, 5, 6, 7, 8, 255])];
 
 		let header = header_with_computed_extrinsics_root(extrinsics.clone());
@@ -828,6 +846,7 @@ pub mod tests {
 			Arc::new(DummyBlockchain::new(DummyStorage::new())),
 			local_executor(),
 			tasks_executor(),
+			stats,
 		);
 
 		let body_request = RemoteBodyRequest {

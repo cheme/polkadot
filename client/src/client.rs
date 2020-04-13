@@ -100,6 +100,7 @@ pub struct Client<B, E, Block, RA> where Block: BlockT {
 	importing_block: RwLock<Option<Block::Hash>>,
 	block_rules: BlockRules<Block>,
 	execution_extensions: ExecutionExtensions<Block>,
+	state_usage: StateUsageStats,
 	_phantom: PhantomData<RA>,
 }
 
@@ -283,8 +284,14 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			importing_block: Default::default(),
 			block_rules: BlockRules::new(fork_blocks, bad_blocks),
 			execution_extensions,
+			state_usage,
 			_phantom: Default::default(),
 		})
+	}
+
+	/// Get a reference to the globabl state usage.
+	pub fn state_usage(&self) -> &StateUsageStats {
+		&self.state_usage
 	}
 
 	/// Get a reference to the state at a given block.
@@ -3015,6 +3022,7 @@ pub(crate) mod tests {
 	fn doesnt_import_blocks_that_revert_finality() {
 		let _ = env_logger::try_init();
 		let tmp = tempfile::tempdir().unwrap();
+		let state_stats = sp_stats::state::StateUsageStats::new(None);
 
 		// we need to run with archive pruning to avoid pruning non-canonical
 		// states
@@ -3029,10 +3037,12 @@ pub(crate) mod tests {
 				}
 			},
 			u64::max_value(),
-			sp_stats::state::StateUsageStats::new(None),
+			state_stats.clone(),
 		).unwrap());
 
-		let mut client = TestClientBuilder::with_backend(backend).build();
+		let mut client = TestClientBuilder::with_backend(backend)
+			.set_state_stats(state_stats)
+			.build();
 
 		//    -> C1
 		//   /
@@ -3219,6 +3229,7 @@ pub(crate) mod tests {
 		let _ = env_logger::try_init();
 		let tmp = tempfile::tempdir().unwrap();
 
+		let state_stats = sp_stats::state::StateUsageStats::new(None);
 		// set to prune after 1 block
 		// states
 		let backend = Arc::new(Backend::new(
@@ -3232,10 +3243,12 @@ pub(crate) mod tests {
 					}
 				},
 				u64::max_value(),
-				sp_stats::state::StateUsageStats::new(None),
+				state_stats.clone(),
 		).unwrap());
 
-		let mut client = TestClientBuilder::with_backend(backend).build();
+		let mut client = TestClientBuilder::with_backend(backend)
+			.set_state_stats(state_stats)
+			.build();
 
 		let a1 = client.new_block_at(&BlockId::Number(0), Default::default(), false)
 			.unwrap().build().unwrap().block;

@@ -157,7 +157,10 @@ fn initialize_block_is_skipped() {
 
 #[test]
 fn record_proof_works() {
+
+	let state_stats = sp_stats::state::StateUsageStats::new(None);
 	let (client, longest_chain) = TestClientBuilder::new()
+		.set_state_stats(state_stats.clone())
 		.set_execution_strategy(ExecutionStrategy::Both)
 		.build_with_longest_chain();
 
@@ -204,5 +207,6 @@ fn record_proof_works() {
 		"Core_execute_block",
 		&block.encode(),
 		&runtime_code,
+		state_stats.clone(),
 	).expect("Executes block while using the proof backend");
 }

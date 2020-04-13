@@ -835,6 +835,7 @@ mod tests {
 
 	#[test]
 	fn execute_works() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let backend = trie_backend::tests::test_trie();
 		let mut overlayed_changes = Default::default();
 		let wasm_code = RuntimeCode::empty();
@@ -854,6 +855,7 @@ mod tests {
 			Default::default(),
 			&wasm_code,
 			sp_core::tasks::executor(),
+			stats,
 		);
 
 		assert_eq!(
@@ -865,6 +867,7 @@ mod tests {
 
 	#[test]
 	fn execute_works_with_native_else_wasm() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let backend = trie_backend::tests::test_trie();
 		let mut overlayed_changes = Default::default();
 		let wasm_code = RuntimeCode::empty();
@@ -884,6 +887,7 @@ mod tests {
 			Default::default(),
 			&wasm_code,
 			sp_core::tasks::executor(),
+			stats,
 		);
 
 		assert_eq!(state_machine.execute(ExecutionStrategy::NativeElseWasm).unwrap(), vec![66]);
@@ -891,6 +895,7 @@ mod tests {
 
 	#[test]
 	fn dual_execution_strategy_detects_consensus_failure() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut consensus_failed = false;
 		let backend = trie_backend::tests::test_trie();
 		let mut overlayed_changes = Default::default();
@@ -911,6 +916,7 @@ mod tests {
 			Default::default(),
 			&wasm_code,
 			sp_core::tasks::executor(),
+			stats.clone(),
 		);
 
 		assert!(
@@ -927,6 +933,7 @@ mod tests {
 
 	#[test]
 	fn prove_execution_and_proof_check_works() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let executor = DummyCodeExecutor {
 			change_changes_trie_config: false,
 			native_available: true,
@@ -945,6 +952,7 @@ mod tests {
 			"test",
 			&[],
 			&RuntimeCode::empty(),
+			stats.clone(),
 		).unwrap();
 
 		// check proof locally
@@ -957,6 +965,7 @@ mod tests {
 			"test",
 			&[],
 			&RuntimeCode::empty(),
+			stats.clone(),
 		).unwrap();
 
 		// check that both results are correct
@@ -966,6 +975,7 @@ mod tests {
 
 	#[test]
 	fn clear_prefix_in_ext_works() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let initial: BTreeMap<_, _> = map![
 			b"aaa".to_vec() => b"0".to_vec(),
 			b"abb".to_vec() => b"1".to_vec(),
@@ -994,6 +1004,7 @@ mod tests {
 				backend,
 				changes_trie::disabled_state::<_, u64>(),
 				None,
+				stats,
 			);
 			ext.clear_prefix(b"ab");
 		}
@@ -1015,6 +1026,7 @@ mod tests {
 
 	#[test]
 	fn set_child_storage_works() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		let mut state = InMemoryBackend::<BlakeTwo256>::default();
 		let backend = state.as_trie_backend().unwrap();
 		let mut overlay = OverlayedChanges::default();
@@ -1025,6 +1037,7 @@ mod tests {
 			backend,
 			changes_trie::disabled_state::<_, u64>(),
 			None,
+			stats,
 		);
 
 		ext.set_child_storage(
@@ -1111,6 +1124,7 @@ mod tests {
 
 	#[test]
 	fn child_storage_uuid() {
+		let stats = sp_stats::state::StateUsageStats::new(None);
 		const CHILD_INFO_1: ChildInfo<'static> = ChildInfo::new_default(b"unique_id_1");
 		const CHILD_INFO_2: ChildInfo<'static> = ChildInfo::new_default(b"unique_id_2");
 		use crate::trie_backend::tests::test_trie;
@@ -1127,6 +1141,7 @@ mod tests {
 				&backend,
 				changes_trie::disabled_state::<_, u64>(),
 				None,
+				stats,
 			);
 			ext.set_child_storage(subtrie1, CHILD_INFO_1, b"abc".to_vec(), b"def".to_vec());
 			ext.set_child_storage(subtrie2, CHILD_INFO_2, b"abc".to_vec(), b"def".to_vec());

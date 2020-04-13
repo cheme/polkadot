@@ -406,6 +406,7 @@ mod tests {
 					retry_count: None,
 				},
 				remote_execution_proof,
+				remote_client.state_usage().clone(),
 			).unwrap();
 
 			(remote_result, local_result)
@@ -441,6 +442,7 @@ mod tests {
 					header.hash(),
 					header.digest().clone(), // this makes next header wrong
 				),
+				remote_client.state_usage().clone(),
 			);
 			match execution_result {
 				Err(sp_blockchain::Error::Execution(_)) => (),
