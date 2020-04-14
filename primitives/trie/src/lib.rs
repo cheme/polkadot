@@ -223,6 +223,17 @@ impl<H: Hasher> hash_db::AsHashDB<H, trie_db::DBValue> for HashMemoryDB<H> {
 	}
 }
 
+impl<H: Hasher> hash_db::HashDBRef<H, trie_db::DBValue> for HashMemoryDB<H> {
+	fn get(&self, key: &H::Out, prefix: Prefix) -> Option<trie_db::DBValue> {
+		<memory_db::MemoryDB<_, _, _> as hash_db::HashDBRef<_, _>>::get(&self.0, key, prefix)
+	}
+
+	fn contains(&self, key: &H::Out, prefix: Prefix) -> bool {
+		<memory_db::MemoryDB<_, _, _> as hash_db::HashDBRef<_, _>>::contains(&self.0, key, prefix)
+	}
+}
+
+
 impl<H: BinaryHasher> HashDBHybrid<H, trie_db::DBValue> for HashMemoryDB<H> {
 	fn insert_hybrid(
 		&mut self,

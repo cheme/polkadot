@@ -31,7 +31,7 @@ use sp_runtime::{KeyTypeId, RuntimeDebug};
 use sp_runtime::traits::{Convert, OpaqueKeys};
 use frame_support::{decl_module, decl_storage};
 use frame_support::{Parameter, print};
-use sp_trie::{MemoryDB, Trie, TrieMut, Recorder, EMPTY_PREFIX};
+use sp_trie::{HashMemoryDB as MemoryDB, Trie, TrieMut, Recorder, StorageProof};
 use sp_trie::trie_types::{TrieDBMut, TrieDB};
 use super::{SessionIndex, Module as SessionModule};
 
@@ -200,18 +200,16 @@ impl<T: Trait> ProvingTrie<T> {
 		})
 	}
 
-	fn from_nodes(root: T::Hash, nodes: &[Vec<u8>]) -> Self {
-		use sp_trie::HashDBT;
+	fn from_nodes(root: T::Hash, nodes: Vec<Vec<u8>>) -> Option<Self> {
+		let proof = StorageProof::new(nodes);
+		let memory_db = proof.into_memory_db::<T::Hashing>();
 
-		let mut memory_db = MemoryDB::default();
-		for node in nodes {
-			HashDBT::insert(&mut memory_db, EMPTY_PREFIX, &node[..]);
-		}
-
-		ProvingTrie {
-			db: memory_db,
-			root,
-		}
+		memory_db.map(|db|
+			ProvingTrie {
+				db,
+				root,
+			}
+		)
 	}
 
 	/// Prove the full verification data for a given key and key ID.
@@ -299,9 +297,9 @@ impl<T: Trait, D: AsRef<[u8]>> frame_support::traits::KeyOwnerProofSystem<(KeyTy
 			)
 		} else {
 			let (root, _) = <HistoricalSessions<T>>::get(&proof.session)?;
-			let trie = ProvingTrie::<T>::from_nodes(root, &proof.trie_nodes);
+			let trie = ProvingTrie::<T>::from_nodes(root, proof.trie_nodes);
 
-			trie.query(id, data.as_ref())
+			trie.and_then(|trie| trie.query(id, data.as_ref()))
 		}
 	}
 }
