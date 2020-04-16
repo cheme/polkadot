@@ -68,7 +68,9 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where H::Out: Codec 
 			dest.insert(ChildInfoProof::top_trie(), self.essence.root().encode());
 			let read_lock = register_roots.read();
 			for (child_info, root) in read_lock.iter() {
-				dest.insert(child_info.proof_info(), root.encode());
+				if let Some(root) = root {
+					dest.insert(child_info.proof_info(), root.encode());
+				}
 			}
 			Some(dest)
 		} else {
