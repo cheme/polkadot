@@ -21,7 +21,7 @@ use sp_runtime::{
 };
 use sp_state_machine::{
 	self, OverlayedChanges, Ext, ExecutionManager, StateMachine, ExecutionStrategy,
-	backend::Backend as _, StorageProof,
+	backend::Backend as _, StorageProof, ProvingMode,
 };
 use sc_executor::{RuntimeVersion, RuntimeInfo, NativeVersion};
 use sp_externalities::Extensions;
@@ -227,6 +227,7 @@ where
 			&state,
 			changes_trie_state,
 			None,
+			ProvingMode::default(),
 		);
 		let state_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&state);
 		self.executor.runtime_version(&mut ext, &state_runtime_code.runtime_code()?)

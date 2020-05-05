@@ -75,6 +75,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 				None => None,
 			},
 			Some(&mut self.extensions),
+			crate::ProvingMode::Standard,
 		)
 	}
 

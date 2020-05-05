@@ -113,7 +113,9 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 /// Global proof recorder, act as a layer over a hash db for recording queried
 /// data.
-pub type ProofRecorder<H> = Arc<RwLock<HashMap<<H as Hasher>::Out, Option<DBValue>>>>;
+/// The hash map record queried nodes, and the boolean indicate if the nodes needs
+/// recorded can be skipped (set to true for skipping unnecessary node recording).
+pub type ProofRecorder<H> = Arc<RwLock<(HashMap<<H as Hasher>::Out, Option<DBValue>>, bool)>>;
 
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
@@ -154,6 +156,7 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 	pub fn extract_proof(&self) -> StorageProof {
 		let trie_nodes = self.0.essence().backend_storage().proof_recorder
 			.read()
+			.0
 			.iter()
 			.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
 			.collect();
@@ -167,11 +170,14 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> TrieBackendStorage<H>
 	type Overlay = S::Overlay;
 
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
-		if let Some(v) = self.proof_recorder.read().get(key) {
+		if let Some(v) = self.proof_recorder.read().0.get(key) {
 			return Ok(v.clone());
 		}
 		let backend_value =  self.backend.get(key, prefix)?;
-		self.proof_recorder.write().insert(key.clone(), backend_value.clone());
+		let mut proof_recorder = self.proof_recorder.write();
+		if !proof_recorder.1 {
+			proof_recorder.0.insert(key.clone(), backend_value.clone());
+		}
 		Ok(backend_value)
 	}
 }
@@ -281,6 +287,16 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 
 	fn usage_info(&self) -> crate::stats::UsageInfo {
 		self.0.usage_info()
+	}
+
+	fn disable_recording(&self) {
+		self.0.essence().backend_storage().proof_recorder
+			.write().1 = true;
+	}
+
+	fn enable_recording(&self) {
+		self.0.essence().backend_storage().proof_recorder
+			.write().1 = false;
 	}
 }
 

@@ -61,6 +61,12 @@ pub struct OverlayedChanges {
 	pub(crate) collect_extrinsics: bool,
 	/// Collect statistic on this execution.
 	pub(crate) stats: StateMachineStats,
+
+	/// when running in proving mode without transaction some content need to be filtered.
+	pub(crate) proof_overlay: Option<WithoutTransactionModeFilter>,
+
+	/// previous overlay state, to allow dropping state.
+	pub(crate) previous_proof_overlay: Option<WithoutTransactionModeFilter>,
 }
 
 /// The storage value, used inside OverlayedChanges.
@@ -214,6 +220,11 @@ impl OverlayedChanges {
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
 	pub fn storage(&self, key: &[u8]) -> Option<Option<&[u8]>> {
+		if let Some(changes) = self.proof_overlay.as_ref()
+			.and_then(|o| o.deleted_prefix_changes(key)) {
+			return Some(changes.get(key).map(|k| k.as_ref()));
+		}
+
 		self.prospective.top.get(key)
 			.or_else(|| self.committed.top.get(key))
 			.map(|x| {
@@ -442,13 +453,25 @@ impl OverlayedChanges {
 		}
 	}
 
+	/// Run for `ProvingMode::WithoutTransaction`.
+	pub fn use_without_transaction_proof(&mut self) {
+		if self.previous_proof_overlay.is_none() {
+			self.previous_proof_overlay = Some(Default::default());
+		}
+		if self.proof_overlay.is_none() {
+			self.proof_overlay = Some(Default::default());
+		}
+	}
+
 	/// Discard prospective changes to state.
 	pub fn discard_prospective(&mut self) {
 		self.prospective.clear();
+		self.proof_overlay = self.previous_proof_overlay.clone();
 	}
 
 	/// Commit prospective changes to state.
 	pub fn commit_prospective(&mut self) {
+		self.previous_proof_overlay = self.proof_overlay.clone();
 		if self.committed.is_empty() {
 			mem::swap(&mut self.prospective, &mut self.committed);
 		} else {
@@ -712,6 +735,60 @@ impl OverlayedChanges {
 	}
 }
 
+type Changes = BTreeMap<StorageKey, StorageValue>;
+
+// TODO this is additional querying, and when code gets
+// right should be merge into overlay existing maps.
+#[derive(Default, Clone, Debug)]
+pub struct WithoutTransactionModeFilter {
+	deleted_child_trie: HashMap<StorageKey, Changes>,
+	// This would need a radix trie to be efficient.
+	deleted_prefix: BTreeSet<StorageKey>,
+	// we could have a different one with partial key per prefix,
+	// but this make this first inefficient implementation simpliest.
+	deleted_prefix_changes: Changes,
+}
+
+impl WithoutTransactionModeFilter {
+	fn is_deleted_trie(&self, child_info: &ChildInfo) -> bool {
+		self.deleted_trie_changes(child_info).is_some()
+	}
+
+	fn deleted_trie_changes(&self, child_info: &ChildInfo) -> Option<&Changes> {
+		self.deleted_child_trie.get(child_info.storage_key())
+	}
+
+	fn deleted_trie_changes_mut(&mut self, child_info: &ChildInfo) -> Option<&mut Changes> {
+		self.deleted_child_trie.get_mut(child_info.storage_key())
+	}
+
+	fn in_deleted_prefix(&self, key: &[u8]) -> bool {
+		// TODO we need a radix trie iterator by key here, btreemap is wrong
+		for i in 0..key.len() {
+			if self.deleted_prefix.contains(&key[..i]) {
+				return true;
+			}
+		}
+		false
+	}
+
+	fn deleted_prefix_changes(&self, key: &[u8]) -> Option<&Changes> {
+		if self.in_deleted_prefix(key) {
+			Some(&self.deleted_prefix_changes)
+		} else {
+			None
+		}
+	}
+
+	fn deleted_prefix_changes_mut(&mut self, key: &[u8]) -> Option<&mut Changes> {
+		if self.in_deleted_prefix(key) {
+			Some(&mut self.deleted_prefix_changes)
+		} else {
+			None
+		}
+	}
+}
+
 #[cfg(test)]
 impl From<Option<StorageValue>> for OverlayedValue {
 	fn from(value: Option<StorageValue>) -> OverlayedValue {
@@ -796,6 +873,7 @@ mod tests {
 			&backend,
 			crate::changes_trie::disabled_state::<_, u64>(),
 			None,
+			Default::default(),
 		);
 		const ROOT: [u8; 32] = hex!("39245109cef3758c2eed2ccba8d9b370a917850af3824bc8348d505df2c298fa");
 

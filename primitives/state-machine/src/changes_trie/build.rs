@@ -468,6 +468,8 @@ mod test {
 			},
 			collect_extrinsics: true,
 			stats: Default::default(),
+			previous_proof_overlay: None,
+			proof_overlay: None,
 		};
 		let config = Configuration { digest_interval: 4, digest_levels: 2 };
 

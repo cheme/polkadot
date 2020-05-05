@@ -289,6 +289,7 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 					.take()
 					.map(|recorder| {
 						let trie_nodes = recorder.read()
+							.0
 							.iter()
 							.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
 							.collect();

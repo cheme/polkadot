@@ -196,6 +196,14 @@ pub trait Backend<H: Hasher>: std::fmt::Debug {
 		(root, txs)
 	}
 
+	/// Switch off proof recording.
+	/// Most backend do not need this.
+	fn disable_recording(&self) { }
+
+	/// Switch on proof recording.
+	/// Most backend do not need this.
+	fn enable_recording(&self) { }
+
 	/// Register stats from overlay of state machine.
 	///
 	/// By default nothing is registered.
@@ -216,6 +224,7 @@ pub trait Backend<H: Hasher>: std::fmt::Debug {
 	fn commit(&self, _storage_root: H::Out, _transaction: Self::Transaction) -> Result<(), Self::Error> {
 		unimplemented!()
 	}
+
 }
 
 impl<'a, T: Backend<H>, H: Hasher> Backend<H> for &'a T {
