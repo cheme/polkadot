@@ -27,7 +27,7 @@ use crate::{
 
 #[cfg(test)]
 use std::iter::FromIterator;
-use std::collections::{HashMap, BTreeMap, BTreeSet};
+use std::collections::{HashMap, BTreeMap, BTreeSet, HashSet};
 use codec::{Decode, Encode};
 use sp_core::storage::{well_known_keys::EXTRINSIC_INDEX, ChildInfo};
 use sp_core::offchain::storage::OffchainOverlayedChanges;
@@ -220,9 +220,14 @@ impl OverlayedChanges {
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
 	pub fn storage(&self, key: &[u8]) -> Option<Option<&[u8]>> {
-		if let Some(changes) = self.proof_overlay.as_ref()
-			.and_then(|o| o.deleted_prefix_changes(key)) {
-			return Some(changes.get(key).map(|k| k.as_ref()));
+		if self.proof_overlay.as_ref().map(|o| o.is_deleted_prefix(key)).unwrap_or(false) {
+			// always in change
+			return Some(self.prospective.top.get(key)
+				.and_then(|x| {
+					let size_read = x.value.as_ref().map(|x| x.len() as u64).unwrap_or(0);
+					self.stats.tally_read_modified(size_read);
+					x.value.as_ref().map(AsRef::as_ref)
+				}));
 		}
 
 		self.prospective.top.get(key)
@@ -271,6 +276,7 @@ impl OverlayedChanges {
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
 	pub fn child_storage(&self, child_info: &ChildInfo, key: &[u8]) -> Option<Option<&[u8]>> {
+
 		if let Some(map) = self.prospective.children_default.get(child_info.storage_key()) {
 			if let Some(val) = map.0.get(key) {
 				let size_read = val.value.as_ref().map(|x| x.len() as u64).unwrap_or(0);
@@ -287,7 +293,11 @@ impl OverlayedChanges {
 			}
 		}
 
-		None
+		if self.proof_overlay.as_ref().map(|o| o.is_deleted_trie(child_info)).unwrap_or(false) {
+			Some(None)
+		} else {
+			None
+		}
 	}
 
 	/// Inserts the given key-value pair into the prospective change set.
@@ -343,6 +353,10 @@ impl OverlayedChanges {
 		&mut self,
 		child_info: &ChildInfo,
 	) {
+		if let Some(proof_overlay) = self.proof_overlay.as_mut() {
+			// add filter
+			proof_overlay.add_deleted_trie(child_info);
+		}
 		let extrinsic_index = self.extrinsic_index();
 		let storage_key = child_info.storage_key();
 		let map_entry = self.prospective.children_default.entry(storage_key.to_vec())
@@ -385,6 +399,10 @@ impl OverlayedChanges {
 	pub(crate) fn clear_prefix(&mut self, prefix: &[u8]) {
 		let extrinsic_index = self.extrinsic_index();
 
+		if let Some(proof_overlay) = self.proof_overlay.as_mut() {
+			proof_overlay.add_deleted_prefix(prefix);
+		}
+
 		// Iterate over all prospective and mark all keys that share
 		// the given prefix as removed (None).
 		for (key, entry) in self.prospective.top.iter_mut() {
@@ -418,6 +436,7 @@ impl OverlayedChanges {
 		child_info: &ChildInfo,
 		prefix: &[u8],
 	) {
+		unimplemented!("TODO child prefix filter and same logic as top");
 		let extrinsic_index = self.extrinsic_index();
 		let storage_key = child_info.storage_key();
 		let map_entry = self.prospective.children_default.entry(storage_key.to_vec())
@@ -530,7 +549,7 @@ impl OverlayedChanges {
 		changes_trie_state: Option<&ChangesTrieState<H, N>>,
 		parent_hash: H::Out,
 		mut cache: StorageTransactionCache<B::Transaction, H, N>,
-	) -> Result<StorageChanges<B::Transaction, H, N>, String> where H::Out: Ord + Encode + 'static {
+	) -> Result<StorageChanges<B::Transaction, H, N>, String> where H::Out: Ord + Encode + Decode + 'static {
 		self.drain_storage_changes(backend, changes_trie_state, parent_hash, &mut cache)
 	}
 
@@ -541,7 +560,7 @@ impl OverlayedChanges {
 		changes_trie_state: Option<&ChangesTrieState<H, N>>,
 		parent_hash: H::Out,
 		mut cache: &mut StorageTransactionCache<B::Transaction, H, N>,
-	) -> Result<StorageChanges<B::Transaction, H, N>, String> where H::Out: Ord + Encode + 'static {
+	) -> Result<StorageChanges<B::Transaction, H, N>, String> where H::Out: Ord + Encode + Decode + 'static {
 		// If the transaction does not exist, we generate it.
 		if cache.transaction.is_none() {
 			self.storage_root(backend, &mut cache);
@@ -612,10 +631,42 @@ impl OverlayedChanges {
 		backend: &B,
 		cache: &mut StorageTransactionCache<B::Transaction, H, N>,
 	) -> H::Out
-		where H::Out: Ord + Encode,
+		where H::Out: Ord + Encode + Decode,
 	{
 		let child_storage_keys = self.prospective.children_default.keys()
-				.chain(self.committed.children_default.keys());
+				.chain(self.committed.children_default.keys())
+				.filter(|storage_key| !self.proof_overlay.as_ref().map(|proof_overlay| {
+					let child_info = ChildInfo::new_default(storage_key);
+					proof_overlay.is_deleted_trie(&child_info)
+				}).unwrap_or(false));
+		let mut child_deleted = Vec::new();
+		if let Some(proof_overlay) = self.proof_overlay.as_ref() {
+			// this check should be handle in overlayed change, but it feels way more
+			// straightforward to write it here directly. But it is the same for the
+			// existing code.
+			let empty_backend = crate::in_memory_backend::new_in_mem::<H>();
+			for storage_key in proof_overlay.deleted_child_trie.iter() {
+				let delta = self.committed.children_default.get(storage_key)
+						.into_iter()
+						.flat_map(|(map, _)| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
+						.chain(
+							self.prospective.children_default.get(storage_key)
+								.into_iter()
+								.flat_map(|(map, _)| map.iter().map(|(k, v)| (k.clone(), v.value.clone())))
+						);
+				let child_info = ChildInfo::new_default(storage_key);
+				let (root, is_empty, _) = empty_backend.child_storage_root(&child_info, delta);
+
+				if is_empty {
+					child_deleted.push((child_info.prefixed_storage_key().into_inner(), None));
+				} else {
+					child_deleted.push((child_info.prefixed_storage_key().into_inner(), Some(root.encode())));
+				}
+			}
+			// TODO change for prefix are processed in ext call, but this is producing bigger proof on
+			// root calculation. The target is to add those prefix in the delta here and get some
+			// specific trie root code.
+		}
 		let child_delta_iter = child_storage_keys.map(|storage_key|
 			(
 				self.default_child_info(storage_key).cloned()
@@ -633,10 +684,16 @@ impl OverlayedChanges {
 
 		// compute and memoize
 		let delta = self.committed.top.iter().map(|(k, v)| (k.clone(), v.value.clone()))
-			.chain(self.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())));
+			.chain(self.prospective.top.iter().map(|(k, v)| (k.clone(), v.value.clone())))
+			.chain(child_deleted.into_iter());
 
-		let (root, transaction) = backend.full_storage_root(delta, child_delta_iter);
+		let (root, mut transaction) = backend.full_storage_root(delta, child_delta_iter);
 
+		if self.proof_overlay.is_some() {
+			// no transaction support: TODO we need two variant of this
+			// function: with or without transfaction and panic here.
+			transaction = Default::default();
+		}
 		cache.transaction = Some(transaction);
 		cache.transaction_storage_root = Some(root);
 
@@ -658,6 +715,9 @@ impl OverlayedChanges {
 		panic_on_storage_error: bool,
 		cache: &mut StorageTransactionCache<B::Transaction, H, N>,
 	) -> Result<Option<H::Out>, ()> where H::Out: Ord + Encode + 'static {
+		if self.proof_overlay.is_some() {
+			panic!("Unsupported change trie for this proving mode");
+		}
 		build_changes_trie::<_, H, N>(
 			backend,
 			changes_trie_state,
@@ -686,7 +746,8 @@ impl OverlayedChanges {
 
 	/// Returns the next (in lexicographic order) storage key in the overlayed alongside its value.
 	/// If no value is next then `None` is returned.
-	pub fn next_storage_key_change(&self, key: &[u8]) -> Option<(&[u8], &OverlayedValue)> {
+	/// It also return a possible prefix deleted key
+	pub fn next_storage_key_change(&self, key: &[u8]) -> (Option<(&[u8], &OverlayedValue)>, Option<&[u8]>) {
 		let range = (ops::Bound::Excluded(key), ops::Bound::Unbounded);
 
 		let next_prospective_key = self.prospective.top
@@ -699,93 +760,104 @@ impl OverlayedChanges {
 			.next()
 			.map(|(k, v)| (&k[..], v));
 
-		match (next_committed_key, next_prospective_key) {
+		let in_deleted_prefix = if let Some(proof_overlay) = self.proof_overlay.as_ref() {
+			proof_overlay.in_deleted_prefix(key)
+		} else {
+			None
+		};
+
+		(match (next_committed_key, next_prospective_key) {
 			// Committed is strictly less than prospective
 			(Some(committed_key), Some(prospective_key)) if committed_key.0 < prospective_key.0 =>
 				Some(committed_key),
 			(committed_key, None) => committed_key,
 			// Prospective key is less or equal to committed or committed doesn't exist
 			(_, prospective_key) => prospective_key,
-		}
+		}, in_deleted_prefix)
 	}
 
 	/// Returns the next (in lexicographic order) child storage key in the overlayed alongside its
 	/// value.  If no value is next then `None` is returned.
+	/// Also return a boolean indicating if the child trie got deleted previously.
 	pub fn next_child_storage_key_change(
 		&self,
-		storage_key: &[u8],
+		child_info: &ChildInfo,
 		key: &[u8]
-	) -> Option<(&[u8], &OverlayedValue)> {
+	) -> (Option<(&[u8], &OverlayedValue)>, bool) {
 		let range = (ops::Bound::Excluded(key), ops::Bound::Unbounded);
 
-		let next_prospective_key = self.prospective.children_default.get(storage_key)
+		let next_prospective_key = self.prospective.children_default.get(child_info.storage_key())
 			.and_then(|(map, _)| map.range::<[u8], _>(range).next().map(|(k, v)| (&k[..], v)));
 
-		let next_committed_key = self.committed.children_default.get(storage_key)
+		let next_committed_key = self.committed.children_default.get(child_info.storage_key())
 			.and_then(|(map, _)| map.range::<[u8], _>(range).next().map(|(k, v)| (&k[..], v)));
 
-		match (next_committed_key, next_prospective_key) {
+		let is_deleted_trie = if let Some(proof_overlay) = self.proof_overlay.as_ref() {
+			proof_overlay.is_deleted_trie(child_info)
+		} else {
+			false
+		};
+
+		(match (next_committed_key, next_prospective_key) {
 			// Committed is strictly less than prospective
 			(Some(committed_key), Some(prospective_key)) if committed_key.0 < prospective_key.0 =>
 				Some(committed_key),
 			(committed_key, None) => committed_key,
 			// Prospective key is less or equal to committed or committed doesn't exist
 			(_, prospective_key) => prospective_key,
-		}
+		}, is_deleted_trie)
 	}
 }
 
-type Changes = BTreeMap<StorageKey, StorageValue>;
-
-// TODO this is additional querying, and when code gets
+// TODO this is additional querying (at least child trie deleted), and when code gets
 // right should be merge into overlay existing maps.
 #[derive(Default, Clone, Debug)]
 pub struct WithoutTransactionModeFilter {
-	deleted_child_trie: HashMap<StorageKey, Changes>,
-	// This would need a radix trie to be efficient.
-	deleted_prefix: BTreeSet<StorageKey>,
-	// we could have a different one with partial key per prefix,
-	// but this make this first inefficient implementation simpliest.
-	deleted_prefix_changes: Changes,
+	deleted_child_trie: HashSet<StorageKey>,
+	// This would need a radix trie to be efficient,
+	// I did not find some ok implementation in rust but did not look
+	// very long.
+	// TODO pub(crate) is only for temporary code
+	pub(crate) deleted_prefix: BTreeSet<StorageKey>,
 }
 
 impl WithoutTransactionModeFilter {
-	fn is_deleted_trie(&self, child_info: &ChildInfo) -> bool {
-		self.deleted_trie_changes(child_info).is_some()
+	fn add_deleted_trie(&mut self, child_info: &ChildInfo) {
+		let _ = self.deleted_child_trie.insert(child_info.storage_key().to_vec());
 	}
 
-	fn deleted_trie_changes(&self, child_info: &ChildInfo) -> Option<&Changes> {
-		self.deleted_child_trie.get(child_info.storage_key())
+	pub(crate) fn is_deleted_trie(&self, child_info: &ChildInfo) -> bool {
+		self.deleted_child_trie.contains(child_info.storage_key())
 	}
 
-	fn deleted_trie_changes_mut(&mut self, child_info: &ChildInfo) -> Option<&mut Changes> {
-		self.deleted_child_trie.get_mut(child_info.storage_key())
-	}
-
-	fn in_deleted_prefix(&self, key: &[u8]) -> bool {
+	fn in_deleted_prefix(&self, key: &[u8]) -> Option<&[u8]> {
 		// TODO we need a radix trie iterator by key here, btreemap is wrong
 		for i in 0..key.len() {
-			if self.deleted_prefix.contains(&key[..i]) {
-				return true;
+			let p = self.deleted_prefix.get(&key[..i]);
+			if p.is_some() {
+				return p.map(|p| p.as_ref());
 			}
 		}
-		false
+		None
 	}
 
-	fn deleted_prefix_changes(&self, key: &[u8]) -> Option<&Changes> {
-		if self.in_deleted_prefix(key) {
-			Some(&self.deleted_prefix_changes)
-		} else {
-			None
-		}
+	fn is_deleted_prefix(&self, key: &[u8]) -> bool {
+		self.in_deleted_prefix(key).is_some()
 	}
 
-	fn deleted_prefix_changes_mut(&mut self, key: &[u8]) -> Option<&mut Changes> {
-		if self.in_deleted_prefix(key) {
-			Some(&mut self.deleted_prefix_changes)
-		} else {
-			None
+
+	fn add_deleted_prefix(&mut self, key: &[u8]) {
+		// TODO this also is highly inefficient and a trie impl is needed.
+		let mut to_delete = Vec::new();
+		for prefix in self.deleted_prefix.iter() {
+			if prefix.starts_with(key) {
+				to_delete.push(prefix.to_vec());
+			}
 		}
+		for to_delete in to_delete.into_iter() {
+			self.deleted_prefix.remove(&to_delete);
+		}
+		self.deleted_prefix.insert(key.to_vec());
 	}
 }
 
@@ -959,28 +1031,28 @@ mod tests {
 		overlay.set_storage(vec![30], None);
 
 		// next_prospective < next_committed
-		let next_to_5 = overlay.next_storage_key_change(&[5]).unwrap();
+		let next_to_5 = overlay.next_storage_key_change(&[5]).0.unwrap();
 		assert_eq!(next_to_5.0.to_vec(), vec![10]);
 		assert_eq!(next_to_5.1.value, Some(vec![10]));
 
 		// next_committed < next_prospective
-		let next_to_10 = overlay.next_storage_key_change(&[10]).unwrap();
+		let next_to_10 = overlay.next_storage_key_change(&[10]).0.unwrap();
 		assert_eq!(next_to_10.0.to_vec(), vec![20]);
 		assert_eq!(next_to_10.1.value, Some(vec![20]));
 
 		// next_committed == next_prospective
-		let next_to_20 = overlay.next_storage_key_change(&[20]).unwrap();
+		let next_to_20 = overlay.next_storage_key_change(&[20]).0.unwrap();
 		assert_eq!(next_to_20.0.to_vec(), vec![30]);
 		assert_eq!(next_to_20.1.value, None);
 
 		// next_committed, no next_prospective
-		let next_to_30 = overlay.next_storage_key_change(&[30]).unwrap();
+		let next_to_30 = overlay.next_storage_key_change(&[30]).0.unwrap();
 		assert_eq!(next_to_30.0.to_vec(), vec![40]);
 		assert_eq!(next_to_30.1.value, Some(vec![40]));
 
 		overlay.set_storage(vec![50], Some(vec![50]));
 		// next_prospective, no next_committed
-		let next_to_40 = overlay.next_storage_key_change(&[40]).unwrap();
+		let next_to_40 = overlay.next_storage_key_change(&[40]).0.unwrap();
 		assert_eq!(next_to_40.0.to_vec(), vec![50]);
 		assert_eq!(next_to_40.1.value, Some(vec![50]));
 	}
@@ -999,28 +1071,28 @@ mod tests {
 		overlay.set_child_storage(child_info, vec![30], None);
 
 		// next_prospective < next_committed
-		let next_to_5 = overlay.next_child_storage_key_change(child, &[5]).unwrap();
+		let next_to_5 = overlay.next_child_storage_key_change(child_info, &[5]).0.unwrap();
 		assert_eq!(next_to_5.0.to_vec(), vec![10]);
 		assert_eq!(next_to_5.1.value, Some(vec![10]));
 
 		// next_committed < next_prospective
-		let next_to_10 = overlay.next_child_storage_key_change(child, &[10]).unwrap();
+		let next_to_10 = overlay.next_child_storage_key_change(child_info, &[10]).0.unwrap();
 		assert_eq!(next_to_10.0.to_vec(), vec![20]);
 		assert_eq!(next_to_10.1.value, Some(vec![20]));
 
 		// next_committed == next_prospective
-		let next_to_20 = overlay.next_child_storage_key_change(child, &[20]).unwrap();
+		let next_to_20 = overlay.next_child_storage_key_change(child_info, &[20]).0.unwrap();
 		assert_eq!(next_to_20.0.to_vec(), vec![30]);
 		assert_eq!(next_to_20.1.value, None);
 
 		// next_committed, no next_prospective
-		let next_to_30 = overlay.next_child_storage_key_change(child, &[30]).unwrap();
+		let next_to_30 = overlay.next_child_storage_key_change(child_info, &[30]).0.unwrap();
 		assert_eq!(next_to_30.0.to_vec(), vec![40]);
 		assert_eq!(next_to_30.1.value, Some(vec![40]));
 
 		overlay.set_child_storage(child_info, vec![50], Some(vec![50]));
 		// next_prospective, no next_committed
-		let next_to_40 = overlay.next_child_storage_key_change(child, &[40]).unwrap();
+		let next_to_40 = overlay.next_child_storage_key_change(child_info, &[40]).0.unwrap();
 		assert_eq!(next_to_40.0.to_vec(), vec![50]);
 		assert_eq!(next_to_40.1.value, Some(vec![50]));
 	}

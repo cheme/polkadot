@@ -238,6 +238,10 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		Some(self)
 	}
 
+	fn disable_recording(&self) { }
+
+	fn enable_recording(&self) { }
+
 	fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats) { }
 
 	fn usage_info(&self) -> crate::UsageInfo {

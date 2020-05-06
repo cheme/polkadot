@@ -290,8 +290,18 @@ where
 	}
 
 	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
-		let next_backend_key = self.backend.next_storage_key(key).expect(EXT_NOT_ALLOWED_TO_FAIL);
-		let next_overlay_key_change = self.overlay.next_storage_key_change(key);
+		let (next_overlay_key_change, deleted_prefix) = self.overlay.next_storage_key_change(key);
+		let next_backend_key = if let Some(prefix) = deleted_prefix {
+			if prefix.len() == 0 {
+				None
+			} else {
+				key_after_prefix(prefix).and_then(|key|
+					self.backend.next_storage_key(&key).expect(EXT_NOT_ALLOWED_TO_FAIL)
+				)
+			}
+		} else {
+			self.backend.next_storage_key(key).expect(EXT_NOT_ALLOWED_TO_FAIL)
+		};
 
 		match (next_backend_key, next_overlay_key_change) {
 			(Some(backend_key), Some(overlay_key)) if &backend_key[..] < overlay_key.0 => Some(backend_key),
@@ -309,14 +319,18 @@ where
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageKey> {
-		let next_backend_key = self.backend
-			.next_child_storage_key(child_info, key)
-			.expect(EXT_NOT_ALLOWED_TO_FAIL);
-		let next_overlay_key_change = self.overlay.next_child_storage_key_change(
-			child_info.storage_key(),
+		let (next_overlay_key_change, is_deleted_trie) = self.overlay.next_child_storage_key_change(
+			child_info,
 			key
 		);
 
+		let next_backend_key = if is_deleted_trie {
+			None
+		} else {
+			self.backend
+				.next_child_storage_key(child_info, key)
+				.expect(EXT_NOT_ALLOWED_TO_FAIL)
+		};
 		match (next_backend_key, next_overlay_key_change) {
 			(Some(backend_key), Some(overlay_key)) if &backend_key[..] < overlay_key.0 => Some(backend_key),
 			(backend_key, None) => backend_key,
@@ -385,10 +399,6 @@ where
 			},
 			ProvingMode::WithTransaction => {
 				self.overlay.clear_child_storage(child_info);
-//				// Touch child node (we need to access it in WithoutTransaction). TODO removi this
-//				comment, in fact it does not matter, will only be needed if we calculate root at some
-//				point
-//				self.backend.storage(child_info.prefixed_storage_key());
 
 				self.backend.disable_recording();
 				self.backend.for_keys_in_child_storage(child_info, |key| {
@@ -414,10 +424,25 @@ where
 		}
 
 		self.mark_dirty();
-		self.overlay.clear_prefix(prefix);
-		self.backend.for_keys_with_prefix(prefix, |key| {
-			self.overlay.set_storage(key.to_vec(), None);
-		});
+		match self.proof_mode {
+			ProvingMode::Standard => {
+				self.overlay.clear_prefix(prefix);
+				self.backend.for_keys_with_prefix(prefix, |key| {
+					self.overlay.set_storage(key.to_vec(), None);
+				});
+			},
+			ProvingMode::WithTransaction => {
+				self.overlay.clear_prefix(prefix);
+				self.backend.disable_recording();
+				self.backend.for_keys_with_prefix(prefix, |key| {
+					self.overlay.set_storage(key.to_vec(), None);
+				});
+				self.backend.enable_recording();
+			},
+			ProvingMode::WithoutTransaction => {
+				self.overlay.clear_prefix(prefix);
+			},
+		}
 	}
 
 	fn clear_child_prefix(
@@ -433,6 +458,7 @@ where
 		let _guard = sp_panic_handler::AbortGuard::force_abort();
 
 		self.mark_dirty();
+		unimplemented!("TODO redundant code with clear prefix from top to use in overlay and here");
 		self.overlay.clear_child_prefix(child_info, prefix);
 		self.backend.for_child_keys_with_prefix(child_info, prefix, |key| {
 			self.overlay.set_child_storage(child_info, key.to_vec(), None);
@@ -469,6 +495,28 @@ where
 			return root.encode();
 		}
 
+		match self.proof_mode {
+			ProvingMode::Standard
+			| ProvingMode::WithTransaction => (),
+			ProvingMode::WithoutTransaction => {
+				// TODO This breaks design, correct design is to use a specific trie instruction
+				// in the root calculation from overlay. We are doing this to keep thing simple here
+				// results.
+				if let Some(proof_overlay) = self.overlay.proof_overlay.as_ref() {
+					self.backend.disable_recording();
+					for prefix in proof_overlay.deleted_prefix.clone().iter() {
+						self.backend.for_keys_with_prefix(prefix, |key| {
+							// do not overwrite content in overlay
+							if self.overlay.storage(key).is_none() {
+								self.overlay.set_storage(key.to_vec(), None);
+							}
+						});
+					}
+					self.backend.enable_recording();
+				}
+			},
+		}
+
 		let root = self.overlay.storage_root(self.backend, self.storage_transaction_cache);
 		trace!(target: "state", "{:04x}: Root {}", self.id, HexDisplay::from(&root.as_ref()));
 		root.encode()
@@ -496,8 +544,9 @@ where
 			root.encode()
 		} else {
 
+
 			if let Some(child_info) = self.overlay.default_child_info(storage_key).cloned() {
-				let (root, is_empty, _) = {
+				let (root, is_empty) = {
 					let delta = self.overlay.committed.children_default.get(storage_key)
 						.into_iter()
 						.flat_map(|(map, _)| map.clone().into_iter().map(|(k, v)| (k, v.value)))
@@ -507,7 +556,20 @@ where
 								.flat_map(|(map, _)| map.clone().into_iter().map(|(k, v)| (k, v.value)))
 						);
 
-					self.backend.child_storage_root(&child_info, delta)
+					match self.overlay.proof_overlay.as_ref() {
+						Some(proof_overlay) if proof_overlay.is_deleted_trie(&child_info) => {
+							// this check should be handle in overlayed change, but it feels way more
+							// straightforward to write it here directly. But it is the same for the
+							// existing code.
+							let empty_backend = crate::in_memory_backend::new_in_mem::<H>();
+							let res = empty_backend.child_storage_root(&child_info, delta);
+							(res.0, res.1)
+						},
+						_ => {
+							let res = self.backend.child_storage_root(&child_info, delta);
+							(res.0, res.1)
+						},
+					}
 				};
 
 				let root = root.encode();
@@ -548,6 +610,9 @@ where
 
 	fn storage_changes_root(&mut self, parent_hash: &[u8]) -> Result<Option<Vec<u8>>, ()> {
 		let _guard = sp_panic_handler::AbortGuard::force_abort();
+		if let ProvingMode::WithoutTransaction = self.proof_mode {
+			panic!("Unsupported Ext function when building or verifying a proof without transaction processing");
+		}
 		let root = self.overlay.changes_trie_root(
 			self.backend,
 			self.changes_trie_state.as_ref(),
@@ -684,6 +749,19 @@ where
 		} else {
 			Err(sp_externalities::Error::ExtensionsAreNotSupported)
 		}
+	}
+}
+
+fn key_after_prefix(prefix: &[u8]) -> Option<Vec<u8>> {
+	let mut end_range = prefix.to_vec();
+	while let Some(0xff) = end_range.last() {
+		end_range.pop();
+	}
+	if let Some(byte) = end_range.last_mut() {
+		*byte += 1;
+		Some(end_range)
+	} else {
+		None
 	}
 }
 
