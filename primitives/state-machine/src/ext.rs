@@ -611,7 +611,9 @@ where
 	fn storage_changes_root(&mut self, parent_hash: &[u8]) -> Result<Option<Vec<u8>>, ()> {
 		let _guard = sp_panic_handler::AbortGuard::force_abort();
 		if let ProvingMode::WithoutTransaction = self.proof_mode {
-			panic!("Unsupported Ext function when building or verifying a proof without transaction processing");
+			// we are skipping change trie, this only work as long as change trie root
+			// is only use as an output of block processing.
+			return Ok(None)
 		}
 		let root = self.overlay.changes_trie_root(
 			self.backend,
