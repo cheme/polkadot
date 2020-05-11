@@ -23,7 +23,7 @@
 //! - [`ClassifyDispatch`]: class of the dispatch.
 //! - [`PaysFee`]: weather this weight should be translated to fee and deducted upon dispatch.
 //!
-//! Substrate then bundles then output information of the two traits into [`DispatchInfo`] struct
+//! Substrate then bundles output information of the two traits into [`DispatchInfo`] struct
 //! and provides it by implementing the [`GetDispatchInfo`] for all `Call` both inner and outer call
 //! types.
 //!
