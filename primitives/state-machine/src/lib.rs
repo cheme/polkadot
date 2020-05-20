@@ -183,6 +183,7 @@ fn always_untrusted_wasm<E, R: Decode>() -> ExecutionManager<DefaultHandler<R, E
 pub struct StateMachine<'a, B, H, N, Exec>
 	where
 		H: Hasher,
+		H::Out: Encode,
 		B: Backend<H>,
 		N: ChangesTrieBlockNumber,
 {
@@ -201,6 +202,7 @@ pub struct StateMachine<'a, B, H, N, Exec>
 
 impl<'a, B, H, N, Exec> Drop for StateMachine<'a, B, H, N, Exec> where
 	H: Hasher,
+	H::Out: Encode,
 	B: Backend<H>,
 	N: ChangesTrieBlockNumber,
 {

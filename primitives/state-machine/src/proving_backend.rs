@@ -266,16 +266,16 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 		self.0.storage_root(delta)
 	}
 
-	fn child_storage_root<I>(
+	fn child_storage_encoded_root<I>(
 		&self,
 		child_info: &ChildInfo,
 		delta: I,
-	) -> (H::Out, bool, Self::Transaction)
+	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 		H::Out: Ord
 	{
-		self.0.child_storage_root(child_info, delta)
+		self.0.child_storage_encoded_root(child_info, delta)
 	}
 
 	fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats) { }

@@ -353,12 +353,12 @@ pub trait StorageProvider<Block: BlockT, B: Backend<Block>> {
 	) -> sp_blockchain::Result<Vec<StorageKey>>;
 
 	/// Given a `BlockId`, a key and a child storage key, return the hash under the key in that block.
-	fn child_storage_hash(
+	fn child_storage_encoded_hash(
 		&self,
 		id: &BlockId<Block>,
 		child_info: &ChildInfo,
 		key: &StorageKey
-	) -> sp_blockchain::Result<Option<Block::Hash>>;
+	) -> sp_blockchain::Result<Option<Vec<u8>>>;
 
 	/// Get longest range within [first; last] that is possible to use in `key_changes`
 	/// and `key_changes_proof` calls.

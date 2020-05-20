@@ -123,8 +123,8 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 		self.state.borrow().as_ref().ok_or_else(state_err)?.storage(key)
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<B::Hash>, Self::Error> {
-		self.state.borrow().as_ref().ok_or_else(state_err)?.storage_hash(key)
+	fn storage_encoded_hash(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+		self.state.borrow().as_ref().ok_or_else(state_err)?.storage_encoded_hash(key)
 	}
 
 	fn child_storage(
@@ -198,14 +198,15 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 		self.state.borrow().as_ref().map_or(Default::default(), |s| s.storage_root(delta))
 	}
 
-	fn child_storage_root<I>(
+	fn child_storage_encoded_root<I>(
 		&self,
 		child_info: &ChildInfo,
 		delta: I,
-	) -> (B::Hash, bool, Self::Transaction) where
+	) -> (Vec<u8>, bool, Self::Transaction) where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 	{
-		self.state.borrow().as_ref().map_or(Default::default(), |s| s.child_storage_root(child_info, delta))
+		self.state.borrow().as_ref()
+			.map_or(Default::default(), |s| s.child_storage_encoded_root(child_info, delta))
 	}
 
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {

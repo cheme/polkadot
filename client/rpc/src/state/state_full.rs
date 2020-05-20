@@ -544,12 +544,12 @@ impl<BE, Block, Client> ChildStateBackend<Block, Client> for FullState<BE, Block
 				.map_err(client_err)))
 	}
 
-	fn storage_hash(
+	fn storage_encoded_hash(
 		&self,
 		block: Option<Block::Hash>,
 		storage_key: PrefixedStorageKey,
 		key: StorageKey,
-	) -> FutureResult<Option<Block::Hash>> {
+	) -> FutureResult<Option<Vec<u8>>> {
 		Box::new(result(
 			self.block_or_best(block)
 				.and_then(|block| {
@@ -557,7 +557,7 @@ impl<BE, Block, Client> ChildStateBackend<Block, Client> for FullState<BE, Block
 						Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
 						None => return Err("Invalid child storage key".into()),
 					};
-					self.client.child_storage_hash(
+					self.client.child_storage_encoded_hash(
 						&BlockId::Hash(block),
 						&child_info,
 						&key,

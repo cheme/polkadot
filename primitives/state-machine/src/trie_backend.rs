@@ -22,7 +22,7 @@ use hash_db::Hasher;
 use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use sp_core::storage::{ChildInfo, ChildType};
-use codec::{Codec, Decode};
+use codec::{Codec, Encode, Decode};
 use crate::{
 	StorageKey, StorageValue, Backend,
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
@@ -189,14 +189,14 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		(root, write_overlay)
 	}
 
-	fn child_storage_root<I>(
+	fn child_storage_encoded_root<I>(
 		&self,
 		child_info: &ChildInfo,
 		delta: I,
-	) -> (H::Out, bool, Self::Transaction)
+	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(StorageKey, Option<StorageValue>)>,
-		H::Out: Ord,
+		H::Out: Encode,
 	{
 		let default_root = match child_info.child_type() {
 			ChildType::ParentKeyId => empty_child_trie_root::<Layout<H>>()
@@ -232,7 +232,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 		let is_default = root == default_root;
 
-		(root, is_default, write_overlay)
+		(root.encode(), is_default, write_overlay)
 	}
 
 	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {

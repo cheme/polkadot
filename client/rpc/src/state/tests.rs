@@ -103,7 +103,7 @@ fn should_return_child_storage() {
 		Ok(Some(StorageData(ref d))) if d[0] == 42 && d.len() == 1
 	);
 	assert_matches!(
-		child.storage_hash(
+		child.storage_encoded_hash(
 			child_key.clone(),
 			key.clone(),
 			Some(genesis_hash).into(),

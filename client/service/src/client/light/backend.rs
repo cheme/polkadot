@@ -470,21 +470,21 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 		}
 	}
 
-	fn child_storage_root<I>(
+	fn child_storage_encoded_root<I>(
 		&self,
 		child_info: &ChildInfo,
 		delta: I,
-	) -> (H::Out, bool, Self::Transaction)
+	) -> (Vec<u8>, bool, Self::Transaction)
 	where
 		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		match *self {
 			GenesisOrUnavailableState::Genesis(ref state) => {
-				let (root, is_equal, _) = state.child_storage_root(child_info, delta);
+				let (root, is_equal, _) = state.child_storage_encoded_root(child_info, delta);
 				(root, is_equal, Default::default())
 			},
 			GenesisOrUnavailableState::Unavailable =>
-				(H::Out::default(), true, Default::default()),
+				(H::Out::default().encode(), true, Default::default()),
 		}
 	}
 

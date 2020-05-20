@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::hash::Hash as StdHash;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use linked_hash_map::{LinkedHashMap, Entry};
-use hash_db::Hasher;
 use sp_runtime::traits::{Block as BlockT, Header, HashFor, NumberFor};
 use sp_core::hexdisplay::HexDisplay;
 use sp_core::storage::ChildInfo;
@@ -41,7 +40,7 @@ pub struct Cache<B: BlockT> {
 	/// Storage cache. `None` indicates that key is known to be missing.
 	lru_storage: LRUMap<StorageKey, Option<StorageValue>>,
 	/// Storage hashes cache. `None` indicates that key is known to be missing.
-	lru_hashes: LRUMap<StorageKey, OptionHOut<B::Hash>>,
+	lru_hashes: LRUMap<StorageKey, OptionHOut<Vec<u8>>>,
 	/// Storage cache for child trie. `None` indicates that key is known to be missing.
 	lru_child_storage: LRUMap<ChildStorageKey, Option<StorageValue>>,
 	/// Information on the modifications in recently committed blocks; specifically which keys
@@ -261,7 +260,7 @@ struct BlockChanges<B: Header> {
 }
 
 /// Cached values specific to a state.
-struct LocalCache<H: Hasher> {
+struct LocalCache {
 	/// Storage cache.
 	///
 	/// `None` indicates that key is known to be missing.
@@ -269,7 +268,7 @@ struct LocalCache<H: Hasher> {
 	/// Storage hashes cache.
 	///
 	/// `None` indicates that key is known to be missing.
-	hashes: HashMap<StorageKey, Option<H::Out>>,
+	hashes: HashMap<StorageKey, Option<Vec<u8>>>,
 	/// Child storage cache.
 	///
 	/// `None` indicates that key is known to be missing.
@@ -281,7 +280,7 @@ pub struct CacheChanges<B: BlockT> {
 	/// Shared canonical state cache.
 	shared_cache: SharedCache<B>,
 	/// Local cache of values for this state.
-	local_cache: RwLock<LocalCache<HashFor<B>>>,
+	local_cache: RwLock<LocalCache>,
 	/// Hash of the block on top of which this instance was created or
 	/// `None` if cache is disabled
 	pub parent_hash: Option<B::Hash>,
@@ -521,7 +520,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		Ok(value)
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<B::Hash>, Self::Error> {
+	fn storage_encoded_hash(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		let local_cache = self.cache.local_cache.upgradable_read();
 		if let Some(entry) = local_cache.hashes.get(key).cloned() {
 			trace!("Found hash in local cache: {:?}", HexDisplay::from(&key));
@@ -535,8 +534,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 			}
 		}
 		trace!("Cache hash miss: {:?}", HexDisplay::from(&key));
-		let hash = self.state.storage_hash(key)?;
-		RwLockUpgradableReadGuard::upgrade(local_cache).hashes.insert(key.to_vec(), hash);
+		let hash = self.state.storage_encoded_hash(key)?;
+		RwLockUpgradableReadGuard::upgrade(local_cache).hashes.insert(key.to_vec(), hash.clone());
 		Ok(hash)
 	}
 
@@ -628,15 +627,15 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		self.state.storage_root(delta)
 	}
 
-	fn child_storage_root<I>(
+	fn child_storage_encoded_root<I>(
 		&self,
 		child_info: &ChildInfo,
 		delta: I,
-	) -> (B::Hash, bool, Self::Transaction)
+	) -> (Vec<u8>, bool, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 	{
-		self.state.child_storage_root(child_info, delta)
+		self.state.child_storage_encoded_root(child_info, delta)
 	}
 
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -745,8 +744,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 		self.caching_state().storage(key)
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<B::Hash>, Self::Error> {
-		self.caching_state().storage_hash(key)
+	fn storage_encoded_hash(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+		self.caching_state().storage_encoded_hash(key)
 	}
 
 	fn child_storage(
@@ -813,15 +812,15 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 		self.caching_state().storage_root(delta)
 	}
 
-	fn child_storage_root<I>(
+	fn child_storage_encoded_root<I>(
 		&self,
 		child_info: &ChildInfo,
 		delta: I,
-	) -> (B::Hash, bool, Self::Transaction)
+	) -> (Vec<u8>, bool, Self::Transaction)
 		where
 			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
 	{
-		self.caching_state().child_storage_root(child_info, delta)
+		self.caching_state().child_storage_encoded_root(child_info, delta)
 	}
 
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
