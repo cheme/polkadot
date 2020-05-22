@@ -145,6 +145,7 @@ impl<B: BlockT> StateBackend<HashFor<B>> for RefTrackingState<B> {
 	type Error =  <DbState<B> as StateBackend<HashFor<B>>>::Error;
 	type Transaction = <DbState<B> as StateBackend<HashFor<B>>>::Transaction;
 	type TrieBackendStorage = <DbState<B> as StateBackend<HashFor<B>>>::TrieBackendStorage;
+	type ProofBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.state.storage(key)
@@ -249,6 +250,13 @@ impl<B: BlockT> StateBackend<HashFor<B>> for RefTrackingState<B> {
 		-> Option<&sp_state_machine::TrieBackend<Self::TrieBackendStorage, HashFor<B>>>
 	{
 		self.state.as_trie_backend()
+	}
+
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		let root = self.state.root().clone();
+		let storage = self.state.backend_storage().clone();
+		let state = sp_state_machine::TrieBackend::new(storage, root);
+		state.as_proof_backend()
 	}
 
 	fn register_overlay_stats(&mut self, stats: &StateMachineStats) {

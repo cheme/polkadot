@@ -29,7 +29,7 @@ use sp_trie::{
 pub use sp_trie::Recorder;
 pub use sp_trie::trie_types::{Layout, TrieError};
 use crate::trie_backend::TrieBackend;
-use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
+use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage, ProofBackend};
 use crate::{Error, ExecutionError, Backend};
 use std::collections::HashMap;
 use crate::DBValue;
@@ -118,17 +118,17 @@ pub type ProofRecorder<H> = Arc<RwLock<HashMap<<H as Hasher>::Out, Option<DBValu
 
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
-pub struct ProvingBackend<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> (
-	TrieBackend<ProofRecorderBackend<'a, S, H>, H>,
+pub struct ProvingBackend<S: TrieBackendStorage<H>, H: Hasher> (
+	pub TrieBackend<ProofRecorderBackend<S, H>, H>,
 );
 
 /// Trie backend storage with its proof recorder.
-pub struct ProofRecorderBackend<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
-	backend: &'a S,
+pub struct ProofRecorderBackend<S: TrieBackendStorage<H>, H: Hasher> {
+	backend: S,
 	proof_recorder: ProofRecorder<H>,
 }
 
-impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
+impl<'a, S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<&'a S, H>
 	where H::Out: Codec
 {
 	/// Create new proving backend.
@@ -150,7 +150,28 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 		};
 		ProvingBackend(TrieBackend::new(recorder, root))
 	}
+}
 
+impl<S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<S, H>
+	where H::Out: Codec
+{
+	/// Create new proving backend with the given recorder.
+	pub fn from_backend_with_recorder(
+		backend: S,
+		root: H::Out,
+		proof_recorder: ProofRecorder<H>,
+	) -> Self {
+		let recorder = ProofRecorderBackend {
+			backend,
+			proof_recorder,
+		};
+		ProvingBackend(TrieBackend::new(recorder, root))
+	}
+}
+
+impl<S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<S, H>
+	where H::Out: Codec
+{
 	/// Extracting the gathered unordered proof.
 	pub fn extract_proof(&self) -> StorageProof {
 		let trie_nodes = self.0.essence().backend_storage().proof_recorder
@@ -162,8 +183,8 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 	}
 }
 
-impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> TrieBackendStorage<H>
-	for ProofRecorderBackend<'a, S, H>
+impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendStorage<H>
+	for ProofRecorderBackend<S, H>
 {
 	type Overlay = S::Overlay;
 
@@ -177,23 +198,37 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> TrieBackendStorage<H>
 	}
 }
 
-impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> std::fmt::Debug
-	for ProvingBackend<'a, S, H>
+impl<S: TrieBackendStorage<H>, H: Hasher> std::fmt::Debug
+	for ProvingBackend<S, H>
 {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "ProvingBackend")
 	}
 }
 
-impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
+impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
 	where
-		S: 'a + TrieBackendStorage<H>,
-		H: 'a + Hasher,
+		S: TrieBackendStorage<H>,
+		H: Hasher,
+		H::Out: Ord + Codec,
+{
+	type StorageProof = sp_trie::StorageProof;
+
+	fn extract_proof(&self) -> Self::StorageProof {
+		self.extract_proof()
+	}
+}
+
+impl<S, H> Backend<H> for ProvingBackend<S, H>
+	where
+		S: TrieBackendStorage<H>,
+		H: Hasher,
 		H::Out: Ord + Codec,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
+	type ProofBackend = Self;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.0.storage(key)
@@ -283,6 +318,12 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 	fn usage_info(&self) -> crate::stats::UsageInfo {
 		self.0.usage_info()
 	}
+
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		Some(self)
+		// self.as_trie_backend().map(|t| crate::proving_backend::ProvingBackend::new(t))
+		// Note that type differs.
+	}
 }
 
 /// Create proof check backend.
@@ -314,7 +355,7 @@ mod tests {
 
 	fn test_proving<'a>(
 		trie_backend: &'a TrieBackend<PrefixedMemoryDB<BlakeTwo256>,BlakeTwo256>,
-	) -> ProvingBackend<'a, PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256> {
+	) -> ProvingBackend<&'a PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256> {
 		ProvingBackend::new(trie_backend)
 	}
 

@@ -377,6 +377,7 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 	type Error = ClientError;
 	type Transaction = <InMemoryBackend<H> as StateBackend<H>>::Transaction;
 	type TrieBackendStorage = <InMemoryBackend<H> as StateBackend<H>>::TrieBackendStorage;
+	type ProofBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofBackend;
 
 	fn storage(&self, key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
 		match *self {
@@ -414,7 +415,7 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 		match *self {
 			GenesisOrUnavailableState::Genesis(ref state) => Ok(
 				state.next_child_storage_key(child_info, key)
-					.expect(IN_MEMORY_EXPECT_PROOF)
+				.expect(IN_MEMORY_EXPECT_PROOF)
 			),
 			GenesisOrUnavailableState::Unavailable => Err(ClientError::NotAvailableOnLightClient),
 		}
@@ -461,7 +462,7 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 
 	fn storage_root<I>(&self, delta: I) -> (H::Out, Self::Transaction)
 	where
-		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
+			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		match *self {
 			GenesisOrUnavailableState::Genesis(ref state) =>
@@ -476,7 +477,7 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 		delta: I,
 	) -> (Vec<u8>, bool, Self::Transaction)
 	where
-		I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
+			I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		match *self {
 			GenesisOrUnavailableState::Genesis(ref state) => {
@@ -511,6 +512,13 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
 		match self {
 			GenesisOrUnavailableState::Genesis(ref mut state) => state.as_trie_backend(),
+			GenesisOrUnavailableState::Unavailable => None,
+		}
+	}
+
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		match self {
+			GenesisOrUnavailableState::Genesis(state) => state.as_proof_backend(),
 			GenesisOrUnavailableState::Unavailable => None,
 		}
 	}

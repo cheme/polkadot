@@ -24,6 +24,7 @@ use sp_core::{traits::RuntimeCode, storage::{ChildInfo, well_known_keys}};
 use crate::{
 	trie_backend::TrieBackend,
 	trie_backend_essence::TrieBackendStorage,
+	trie_backend_essence::ProofBackend,
 	UsageInfo, StorageKey, StorageValue, StorageCollection,
 };
 
@@ -43,9 +44,11 @@ pub trait Backend<H>: std::fmt::Debug
 	type Transaction: Consolidate + Default + Send;
 
 	/// Type of trie backend storage.
-	/// TODO EMCH rename top state backend + create a variant
-	/// that is for proofs with proof trait.
+	/// TODO EMCH remove.
 	type TrieBackendStorage: TrieBackendStorage<H>;
+
+	/// Type of proof backend.
+	type ProofBackend: ProofBackend<H>;
 
 	/// Get keyed storage or None if there is nothing associated.
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error>;
@@ -177,6 +180,13 @@ pub trait Backend<H>: std::fmt::Debug
 		None
 	}
 
+	/// Try convert into a proof backend.
+	/// If one do not want to consume the backend, calling on '&self' is fine
+	/// since '&Backend' implement 'Backend'.
+	/// TODO EMCH consider not returning an option (and use a noop proof backend
+	/// when needed).
+	fn as_proof_backend(self) -> Option<Self::ProofBackend>;
+
 	/// Calculate the storage root, with given delta over what is already stored
 	/// in the backend, and produce a "transaction" that can be used to commit.
 	/// Does include child storage updates.
@@ -243,6 +253,7 @@ impl<'a, T, H> Backend<H> for &'a T
 	type Error = T::Error;
 	type Transaction = T::Transaction;
 	type TrieBackendStorage = T::TrieBackendStorage;
+	type ProofBackend = T::ProofBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
 		(*self).storage(key)
@@ -320,6 +331,12 @@ impl<'a, T, H> Backend<H> for &'a T
 
 	fn usage_info(&self) -> UsageInfo {
 		(*self).usage_info()
+	}
+
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		// cannot move out of reference, consider cloning or
+		// if needed.
+		None
 	}
 }
 

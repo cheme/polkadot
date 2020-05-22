@@ -79,6 +79,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
+	type ProofBackend = crate::proving_backend::ProvingBackend<S, H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
 		self.essence.storage(key)
@@ -237,6 +238,16 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
 		Some(self)
+	}
+
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		let root = self.essence.root().clone();
+		let recorder = Default::default();
+		Some(crate::proving_backend::ProvingBackend::from_backend_with_recorder(
+			self.essence.into_storage(),
+			root,
+			recorder,
+		))
 	}
 
 	fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats) { }

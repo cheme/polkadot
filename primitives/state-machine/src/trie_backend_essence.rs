@@ -340,6 +340,29 @@ pub trait TrieBackendStorage<H: Hasher>: Send + Sync {
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String>;
 }
 
+impl<'a, H: Hasher, S: TrieBackendStorage<H>> TrieBackendStorage<H> for &'a S {
+	type Overlay = S::Overlay;
+
+	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
+		<S as TrieBackendStorage<H>>::get(self, key, prefix)
+	}
+}
+
+/// Backend used to produce proof.
+/// TODO move trait location
+pub trait ProofBackend<H>: crate::backend::Backend<H> 
+	where
+		H: Hasher,
+		H::Out: Encode,
+{
+	/// The actual proof produced.
+	type StorageProof;
+
+	/// Extract proof when run.
+	fn extract_proof(&self) -> Self::StorageProof;
+}
+
+
 // This implementation is used by normal storage trie clients.
 impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {
 	type Overlay = PrefixedMemoryDB<H>;

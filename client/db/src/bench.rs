@@ -118,6 +118,7 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 	type Error =  <DbState<B> as StateBackend<HashFor<B>>>::Error;
 	type Transaction = <DbState<B> as StateBackend<HashFor<B>>>::Transaction;
 	type TrieBackendStorage = <DbState<B> as StateBackend<HashFor<B>>>::TrieBackendStorage;
+	type ProofBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.state.borrow().as_ref().ok_or_else(state_err)?.storage(key)
@@ -282,6 +283,10 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 
 	fn usage_info(&self) -> sp_state_machine::UsageInfo {
 		self.state.borrow().as_ref().map_or(sp_state_machine::UsageInfo::empty(), |s| s.usage_info())
+	}
+
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		self.state.borrow_mut().take().and_then(|s| s.as_proof_backend())
 	}
 }
 

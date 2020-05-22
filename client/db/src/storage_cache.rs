@@ -495,6 +495,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 	type Error = S::Error;
 	type Transaction = S::Transaction;
 	type TrieBackendStorage = S::TrieBackendStorage;
+	type ProofBackend = S::ProofBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		let local_cache = self.cache.local_cache.upgradable_read();
@@ -658,6 +659,10 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		self.state.as_trie_backend()
 	}
 
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		self.state.as_proof_backend()
+	}
+
 	fn register_overlay_stats(&mut self, stats: &sp_state_machine::StateMachineStats) {
 		self.overlay_stats.add(stats);
 	}
@@ -739,6 +744,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 	type Error = S::Error;
 	type Transaction = S::Transaction;
 	type TrieBackendStorage = S::TrieBackendStorage;
+	type ProofBackend = S::ProofBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.caching_state().storage(key)
@@ -853,12 +859,22 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 	fn usage_info(&self) -> sp_state_machine::UsageInfo {
 		self.caching_state().usage_info()
 	}
+
+	fn as_proof_backend(mut self) -> Option<Self::ProofBackend> {
+		self.sync().and_then(|s| s.as_proof_backend())
+	}
 }
 
 impl<S, B: BlockT> Drop for SyncingCachingState<S, B> {
 	fn drop(&mut self) {
+		let _ = self.sync();
+	}
+}
+
+impl<S, B: BlockT> SyncingCachingState<S, B> {
+	fn sync(&mut self) -> Option<CachingState<S, B>> {
 		if self.disable_syncing {
-			return;
+			return None;
 		}
 
 		if let Some(mut caching_state) = self.caching_state.take() {
@@ -869,6 +885,9 @@ impl<S, B: BlockT> Drop for SyncingCachingState<S, B> {
 				let is_best = self.meta.read().best_hash == hash;
 				caching_state.cache.sync_cache(&[], &[], vec![], vec![], None, None, is_best);
 			}
+			Some(caching_state)
+		} else {
+			None
 		}
 	}
 }

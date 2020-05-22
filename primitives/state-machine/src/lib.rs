@@ -70,7 +70,7 @@ pub use overlayed_changes::{
 pub use proving_backend::{
 	create_proof_check_backend, ProofRecorder, ProvingBackend, ProvingBackendRecorder,
 };
-pub use trie_backend_essence::{TrieBackendStorage, Storage};
+pub use trie_backend_essence::{TrieBackendStorage, Storage, ProofBackend};
 pub use trie_backend::TrieBackend;
 pub use error::{Error, ExecutionError};
 pub use in_memory_backend::new_in_mem;
@@ -510,6 +510,53 @@ where
 	let proving_backend = proving_backend::ProvingBackend::new(trie_backend);
 	let mut sm = StateMachine::<_, H, N, Exec>::new(
 		&proving_backend,
+		None,
+		overlay,
+		&mut offchain_overlay,
+		exec,
+		method,
+		call_data,
+		Extensions::default(),
+		runtime_code,
+		spawn_handle,
+	);
+
+	let result = sm.execute_using_consensus_failure_handler::<_, NeverNativeValue, fn() -> _>(
+		always_wasm(),
+		None,
+	)?;
+	let proof = sm.backend.extract_proof();
+	Ok((result.into_encoded(), proof))
+}
+
+/// Prove execution using the given trie backend, overlayed changes, and call executor.
+/// Produces a state-backend-specific "transaction" which can be used to apply the changes
+/// to the backing store, such as the disk.
+/// Execution proof is the set of all 'touched' storage DBValues from the backend.
+///
+/// On an error, no prospective changes are written to the overlay.
+///
+/// Note: changes to code will be in place if this call is made again. For running partial
+/// blocks (e.g. a transaction at a time), ensure a different method is used.
+pub fn prove_execution_on_proof_backend<P, H, N, Exec>(
+	proving_backend: &P,
+	overlay: &mut OverlayedChanges,
+	exec: &Exec,
+	spawn_handle: Box<dyn CloneableSpawn>,
+	method: &str,
+	call_data: &[u8],
+	runtime_code: &RuntimeCode,
+) -> Result<(Vec<u8>, P::StorageProof), Box<dyn Error>>
+where
+	H: Hasher,
+	H::Out: Ord + 'static + codec::Codec,
+	Exec: CodeExecutor + 'static + Clone,
+	N: crate::changes_trie::BlockNumber,
+	P: ProofBackend<H>,
+{
+	let mut offchain_overlay = OffchainOverlayedChanges::default();
+	let mut sm = StateMachine::<_, H, N, Exec>::new(
+		proving_backend,
 		None,
 		overlay,
 		&mut offchain_overlay,
