@@ -49,10 +49,11 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
+use sp_trie::BackendStorageProof as StorageProof;
 use zeroize::Zeroize;
 
 /// Network initialization parameters.
-pub struct Params<B: BlockT, H: ExHashT> {
+pub struct Params<B: BlockT, H: ExHashT, P: StorageProof> {
 	/// Assigned role for our node (full, light, ...).
 	pub role: Role,
 
@@ -64,7 +65,7 @@ pub struct Params<B: BlockT, H: ExHashT> {
 	pub network_config: NetworkConfiguration,
 
 	/// Client that contains the blockchain.
-	pub chain: Arc<dyn Client<B>>,
+	pub chain: Arc<dyn Client<B, P>>,
 
 	/// Finality proof provider.
 	///
@@ -86,7 +87,7 @@ pub struct Params<B: BlockT, H: ExHashT> {
 	///
 	/// The network worker will fetch transactions from this object in order to propagate them on
 	/// the network.
-	pub transaction_pool: Arc<dyn TransactionPool<H, B>>,
+	pub transaction_pool: Arc<dyn TransactionPool<H, B, P>>,
 
 	/// Name of the protocol to use on the wire. Should be different for each chain.
 	pub protocol_id: ProtocolId,
@@ -185,7 +186,7 @@ pub enum TransactionImport {
 pub type TransactionImportFuture = Pin<Box<dyn Future<Output=TransactionImport> + Send>>;
 
 /// Transaction pool interface
-pub trait TransactionPool<H: ExHashT, B: BlockT>: Send + Sync {
+pub trait TransactionPool<H: ExHashT, B: BlockT, P: StorageProof>: Send + Sync {
 	/// Get transactions from the pool that are ready to be propagated.
 	fn transactions(&self) -> Vec<(H, B::Extrinsic)>;
 	/// Get hash of transaction.
@@ -211,7 +212,7 @@ pub trait TransactionPool<H: ExHashT, B: BlockT>: Send + Sync {
 /// Useful for testing purposes.
 pub struct EmptyTransactionPool;
 
-impl<H: ExHashT + Default, B: BlockT> TransactionPool<H, B> for EmptyTransactionPool {
+impl<H: ExHashT + Default, B: BlockT, P: StorageProof> TransactionPool<H, B, P> for EmptyTransactionPool {
 	fn transactions(&self) -> Vec<(H, B::Extrinsic)> {
 		Vec::new()
 	}

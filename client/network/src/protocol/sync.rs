@@ -34,6 +34,7 @@ use sp_consensus::{BlockOrigin, BlockStatus,
 	block_validation::{BlockAnnounceValidator, Validation},
 	import_queue::{IncomingBlock, BlockImportResult, BlockImportError}
 };
+use sp_trie::BackendStorageProof as StorageProof;
 use crate::{
 	config::BoxFinalityProofRequestBuilder,
 	protocol::message::{self, generic::FinalityProofRequest, BlockAnnounce, BlockAttributes, BlockRequest, BlockResponse,
@@ -153,9 +154,9 @@ impl Default for PendingRequests {
 
 /// The main data structure which contains all the state for a chains
 /// active syncing strategy.
-pub struct ChainSync<B: BlockT> {
+pub struct ChainSync<B: BlockT, P: StorageProof> {
 	/// Chain client.
-	client: Arc<dyn crate::chain::Client<B>>,
+	client: Arc<dyn crate::chain::Client<B, P>>,
 	/// The active peers that we are using to sync and their PeerSync status
 	peers: HashMap<PeerId, PeerSync<B>>,
 	/// A `BlockCollection` of blocks that are being downloaded from peers
@@ -342,11 +343,11 @@ pub enum OnBlockFinalityProof<B: BlockT> {
 	}
 }
 
-impl<B: BlockT> ChainSync<B> {
+impl<B: BlockT, P: StorageProof> ChainSync<B, P> {
 	/// Create a new instance.
 	pub fn new(
 		role: Roles,
-		client: Arc<dyn crate::chain::Client<B>>,
+		client: Arc<dyn crate::chain::Client<B, P>>,
 		info: &BlockchainInfo<B>,
 		request_builder: Option<BoxFinalityProofRequestBuilder<B>>,
 		block_announce_validator: Box<dyn BlockAnnounceValidator<B> + Send>,

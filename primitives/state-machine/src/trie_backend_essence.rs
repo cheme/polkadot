@@ -350,18 +350,26 @@ impl<'a, H: Hasher, S: TrieBackendStorage<H>> TrieBackendStorage<H> for &'a S {
 
 /// Backend used to produce proof.
 /// TODO move trait location
-pub trait ProofBackend<H>: crate::backend::Backend<H> 
+pub trait ProofBackend<H>: crate::backend::Backend<H>
 	where
 		H: Hasher,
 		H::Out: Encode,
 {
 	/// The actual proof produced.
-	type StorageProof;
+	type StorageProof: sp_trie::BackendStorageProof;
+
+	/// Backend for checking proof against.
+	type ProofCheckBackend: crate::backend::Backend<H>;
 
 	/// Extract proof when run.
 	fn extract_proof(&self) -> Self::StorageProof;
-}
 
+	/// Instantiate backend from proof.
+	fn create_proof_check_backend(
+		root: H::Out,
+		proof: Self::StorageProof,
+	) -> Result<<Self as ProofBackend<H>>::ProofCheckBackend, Box<dyn crate::Error>>;
+}
 
 // This implementation is used by normal storage trie clients.
 impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {

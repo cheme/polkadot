@@ -69,7 +69,7 @@ pub trait AuthoritySetForFinalityProver<Block: BlockT>: Send + Sync {
 }
 
 /// Trait that combines `StorageProvider` and `ProofProvider`
-pub trait StorageAndProofProvider<Block, BE>: StorageProvider<Block, BE> + ProofProvider<Block> + Send + Sync
+pub trait StorageAndProofProvider<Block, BE>: StorageProvider<Block, BE> + ProofProvider<Block, StorageProof> + Send + Sync
 	where
 		Block: BlockT,
 		BE: Backend<Block> + Send + Sync,
@@ -80,7 +80,7 @@ impl<Block, BE, P> StorageAndProofProvider<Block, BE> for P
 	where
 		Block: BlockT,
 		BE: Backend<Block> + Send + Sync,
-		P: StorageProvider<Block, BE> + ProofProvider<Block> + Send + Sync,
+		P: StorageProvider<Block, BE> + ProofProvider<Block, StorageProof> + Send + Sync,
 {}
 
 /// Implementation of AuthoritySetForFinalityProver.

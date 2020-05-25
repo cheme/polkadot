@@ -52,6 +52,13 @@ pub type TransactionForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::Trans
 /// Extracts the transaction for the given backend.
 pub type TransactionFor<B, Block> = TransactionForSB<StateBackendFor<B, Block>, Block>;
 
+/// Extracts the proof backend for the given state backend.
+pub type ProofBackendForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::ProofBackend;
+/// Extracts the proof backend for the given backend.
+pub type ProofBackendFor<B, Block> = ProofBackendForSB<StateBackendFor<B, Block>, Block>;
+/// Extracts the proof for the given backend.
+pub type ProofFor<B, Block> = <ProofBackendFor<B, Block> as sp_state_machine::ProofBackend<HashFor<Block>>>::StorageProof;
+
 /// Import operation summary.
 ///
 /// Contains information about the block that just got imported,

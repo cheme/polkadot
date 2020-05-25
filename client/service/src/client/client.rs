@@ -17,6 +17,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 //! Substrate Client
 
+use sc_client_api::backend::ProofFor;
 use std::{
 	marker::PhantomData,
 	collections::{HashSet, BTreeMap, HashMap},
@@ -56,7 +57,7 @@ use sp_blockchain::{
 	well_known_cache_keys::Id as CacheKeyId,
 	HeaderMetadata, CachedHeaderMetadata,
 };
-use sp_trie::StorageProof;
+use sp_trie::{StorageProof, BackendStorageProof};
 use sp_api::{
 	CallApiAt, ConstructRuntimeApi, Core as CoreApi, ApiExt, ApiRef, ProvideRuntimeApi,
 	CallApiAtParams,
@@ -1173,7 +1174,7 @@ impl<B, E, Block, RA> UsageProvider<Block> for Client<B, E, Block, RA> where
 	}
 }
 
-impl<B, E, Block, RA> ProofProvider<Block> for Client<B, E, Block, RA> where
+impl<B, E, Block, RA> ProofProvider<Block, ProofFor<B, Block>> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block>,
 	E: CallExecutor<Block>,
 	Block: BlockT,
@@ -1182,7 +1183,7 @@ impl<B, E, Block, RA> ProofProvider<Block> for Client<B, E, Block, RA> where
 		&self,
 		id: &BlockId<Block>,
 		keys: &mut dyn Iterator<Item=&[u8]>,
-	) -> sp_blockchain::Result<StorageProof> {
+	) -> sp_blockchain::Result<ProofFor<B, Block>> {
 		self.state_at(id)
 			.and_then(|state| prove_read(state, keys)
 				.map_err(Into::into))
@@ -1193,7 +1194,7 @@ impl<B, E, Block, RA> ProofProvider<Block> for Client<B, E, Block, RA> where
 		id: &BlockId<Block>,
 		child_info: &ChildInfo,
 		keys: &mut dyn Iterator<Item=&[u8]>,
-	) -> sp_blockchain::Result<StorageProof> {
+	) -> sp_blockchain::Result<ProofFor<B, Block>> {
 		self.state_at(id)
 			.and_then(|state| prove_child_read(state, child_info, keys)
 				.map_err(Into::into))
@@ -1204,7 +1205,7 @@ impl<B, E, Block, RA> ProofProvider<Block> for Client<B, E, Block, RA> where
 		id: &BlockId<Block>,
 		method: &str,
 		call_data: &[u8]
-	) -> sp_blockchain::Result<(Vec<u8>, StorageProof)> {
+	) -> sp_blockchain::Result<(Vec<u8>, ProofFor<B, Block>)> {
 		// Make sure we include the `:code` and `:heap_pages` in the execution proof to be
 		// backwards compatible.
 		//
@@ -1223,7 +1224,7 @@ impl<B, E, Block, RA> ProofProvider<Block> for Client<B, E, Block, RA> where
 			method,
 			call_data,
 		).map(|(r, p)| {
-			(r, StorageProof::merge(vec![p, code_proof]))
+			(r, <ProofFor<B, Block>>::merge(vec![p, code_proof]))
 		})
 	}
 

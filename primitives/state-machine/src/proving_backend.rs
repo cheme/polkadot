@@ -169,20 +169,6 @@ impl<S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<S, H>
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<S, H>
-	where H::Out: Codec
-{
-	/// Extracting the gathered unordered proof.
-	pub fn extract_proof(&self) -> StorageProof {
-		let trie_nodes = self.0.essence().backend_storage().proof_recorder
-			.read()
-			.iter()
-			.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
-			.collect();
-		StorageProof::new(trie_nodes)
-	}
-}
-
 impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendStorage<H>
 	for ProofRecorderBackend<S, H>
 {
@@ -214,8 +200,22 @@ impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
 {
 	type StorageProof = sp_trie::StorageProof;
 
+	type ProofCheckBackend = TrieBackend<MemoryDB<H>, H>;
+
 	fn extract_proof(&self) -> Self::StorageProof {
-		self.extract_proof()
+		let trie_nodes = self.0.essence().backend_storage().proof_recorder
+			.read()
+			.iter()
+			.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
+			.collect();
+		StorageProof::new(trie_nodes)
+	}
+
+	fn create_proof_check_backend(
+		root: H::Out,
+		proof: Self::StorageProof,
+	) -> Result<<Self as ProofBackend<H>>::ProofCheckBackend, Box<dyn crate::Error>> {
+		create_proof_check_backend(root, proof)
 	}
 }
 
@@ -327,7 +327,7 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 }
 
 /// Create proof check backend.
-pub fn create_proof_check_backend<H>(
+fn create_proof_check_backend<H>(
 	root: H::Out,
 	proof: StorageProof,
 ) -> Result<TrieBackend<MemoryDB<H>, H>, Box<dyn Error>>
@@ -352,6 +352,7 @@ mod tests {
 	use crate::proving_backend::create_proof_check_backend;
 	use sp_trie::PrefixedMemoryDB;
 	use sp_runtime::traits::BlakeTwo256;
+	use sp_trie::BackendStorageProof;
 
 	fn test_proving<'a>(
 		trie_backend: &'a TrieBackend<PrefixedMemoryDB<BlakeTwo256>,BlakeTwo256>,

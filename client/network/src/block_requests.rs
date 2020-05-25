@@ -30,6 +30,7 @@ use crate::{
 	protocol::{message::{self, BlockAttributes}},
 	schema,
 };
+use sp_trie::BackendStorageProof as StorageProof;
 use futures::{future::BoxFuture, prelude::*, stream::FuturesUnordered};
 use futures_timer::Delay;
 use libp2p::{
@@ -183,11 +184,11 @@ impl Config {
 }
 
 /// The block request handling behaviour.
-pub struct BlockRequests<B: Block> {
+pub struct BlockRequests<B: Block, P: StorageProof> {
 	/// This behaviour's configuration.
 	config: Config,
 	/// Blockchain client.
-	chain: Arc<dyn Client<B>>,
+	chain: Arc<dyn Client<B, P>>,
 	/// List of all active connections and the requests we've sent.
 	peers: HashMap<PeerId, Vec<Connection<B>>>,
 	/// Futures sending back the block request response. Returns the `PeerId` we sent back to, and
@@ -232,11 +233,12 @@ pub enum SendRequestOutcome<B: Block> {
 	EncodeError(prost::EncodeError),
 }
 
-impl<B> BlockRequests<B>
+impl<B, P> BlockRequests<B, P>
 where
 	B: Block,
+	P: StorageProof,
 {
-	pub fn new(cfg: Config, chain: Arc<dyn Client<B>>) -> Self {
+	pub fn new(cfg: Config, chain: Arc<dyn Client<B, P>>) -> Self {
 		BlockRequests {
 			config: cfg,
 			chain,
@@ -449,9 +451,10 @@ where
 	}
 }
 
-impl<B> NetworkBehaviour for BlockRequests<B>
+impl<B, P> NetworkBehaviour for BlockRequests<B, P>
 where
-	B: Block
+	B: Block,
+	P: StorageProof,
 {
 	type ProtocolsHandler = OneShotHandler<InboundProtocol<B>, OutboundProtocol<B>, NodeEvent<B, NegotiatedSubstream>>;
 	type OutEvent = Event<B>;

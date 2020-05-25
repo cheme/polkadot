@@ -23,9 +23,9 @@ use futures::{future, StreamExt as _, TryStreamExt as _};
 use log::warn;
 use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId};
 use rpc::{Result as RpcResult, futures::{stream, Future, Sink, Stream, future::result}};
-
 use sc_rpc_api::{Subscriptions, state::ReadProof};
 use sc_client_api::backend::Backend;
+use sc_client_api::backend::ProofFor;
 use sp_blockchain::{Result as ClientResult, Error as ClientError, HeaderMetadata, CachedHeaderMetadata, HeaderBackend};
 use sc_client_api::BlockchainEvents;
 use sp_core::{
@@ -36,7 +36,7 @@ use sp_version::RuntimeVersion;
 use sp_runtime::{
 	generic::BlockId, traits::{Block as BlockT, NumberFor, SaturatedConversion, CheckedSub},
 };
-
+use codec::Encode;
 use sp_api::{Metadata, ProvideRuntimeApi, CallApiAt};
 
 use super::{StateBackend, ChildStateBackend, error::{FutureResult, Error, Result}, client_err};
@@ -219,7 +219,7 @@ impl<BE, Block: BlockT, Client> FullState<BE, Block, Client>
 impl<BE, Block, Client> StateBackend<Block, Client> for FullState<BE, Block, Client> where
 	Block: BlockT + 'static,
 	BE: Backend<Block> + 'static,
-	Client: ExecutorProvider<Block> + StorageProvider<Block, BE> + ProofProvider<Block> + HeaderBackend<Block>
+	Client: ExecutorProvider<Block> + StorageProvider<Block, BE> + ProofProvider<Block, ProofFor<BE, Block>> + HeaderBackend<Block>
 		+ HeaderMetadata<Block, Error = sp_blockchain::Error> + BlockchainEvents<Block>
 		+ CallApiAt<Block, Error = sp_blockchain::Error> + ProvideRuntimeApi<Block>
 		+ Send + Sync + 'static,
@@ -364,7 +364,7 @@ impl<BE, Block, Client> StateBackend<Block, Client> for FullState<BE, Block, Cli
 							&BlockId::Hash(block),
 							&mut keys.iter().map(|key| key.0.as_ref()),
 						)
-						.map(|proof| proof.iter_nodes().map(|node| node.into()).collect())
+						.map(|proof| proof.encode().into())
 						.map(|proof| ReadProof { at: block, proof })
 				})
 				.map_err(client_err),

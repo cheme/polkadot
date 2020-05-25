@@ -22,7 +22,7 @@ use sp_runtime::{
 };
 use sp_state_machine::{
 	self, OverlayedChanges, Ext, ExecutionManager, StateMachine, ExecutionStrategy,
-	backend::Backend as _, StorageProof,
+	backend::Backend as _,
 };
 use sc_executor::{RuntimeVersion, RuntimeInfo, NativeVersion};
 use sp_externalities::Extensions;
@@ -234,21 +234,21 @@ where
 			.map_err(|e| sp_blockchain::Error::VersionInvalid(format!("{:?}", e)).into())
 	}
 
-	fn prove_at_trie_state<S: sp_state_machine::TrieBackendStorage<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::ProofBackend<HashFor<Block>>>(
 		&self,
-		trie_state: &sp_state_machine::TrieBackend<S, HashFor<Block>>,
+		proof_backend: &P,
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
-	) -> Result<(Vec<u8>, StorageProof), sp_blockchain::Error> {
-		sp_state_machine::prove_execution_on_trie_backend::<_, _, NumberFor<Block>, _>(
-			trie_state,
+	) -> Result<(Vec<u8>, P::StorageProof), sp_blockchain::Error> {
+		sp_state_machine::prove_execution_on_proof_backend::<_, _, NumberFor<Block>, _>(
+			proof_backend,
 			overlay,
 			&self.executor,
 			self.spawn_handle.clone(),
 			method,
 			call_data,
-			&sp_state_machine::backend::BackendRuntimeCode::new(trie_state).runtime_code()?,
+			&sp_state_machine::backend::BackendRuntimeCode::new(proof_backend).runtime_code()?,
 		)
 		.map_err(Into::into)
 	}

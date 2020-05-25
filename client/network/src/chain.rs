@@ -20,15 +20,16 @@
 use sp_blockchain::{Error, HeaderBackend, HeaderMetadata};
 use sc_client_api::{BlockBackend, ProofProvider};
 use sp_runtime::traits::{Block as BlockT, BlockIdTo};
+use sp_trie::BackendStorageProof as StorageProof;
 
 /// Local client abstraction for the network.
-pub trait Client<Block: BlockT>: HeaderBackend<Block> + ProofProvider<Block> + BlockIdTo<Block, Error = Error>
+pub trait Client<Block: BlockT, Proof: StorageProof>: HeaderBackend<Block> + ProofProvider<Block, Proof> + BlockIdTo<Block, Error = Error>
 	+ BlockBackend<Block> + HeaderMetadata<Block, Error = Error> + Send + Sync
 {}
 
-impl<Block: BlockT, T> Client<Block> for T
+impl<Block: BlockT, Proof: StorageProof, T> Client<Block, Proof> for T
 	where
-		T: HeaderBackend<Block> + ProofProvider<Block> + BlockIdTo<Block, Error = Error>
+		T: HeaderBackend<Block> + ProofProvider<Block, Proof> + BlockIdTo<Block, Error = Error>
 			+ BlockBackend<Block> + HeaderMetadata<Block, Error = Error> + Send + Sync
 {}
 

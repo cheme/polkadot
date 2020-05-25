@@ -58,6 +58,8 @@ use substrate_test_runtime_client::{
 
 use sp_core::{blake2_256, ChangesTrieConfiguration, storage::{well_known_keys, StorageKey, ChildInfo}};
 use sp_state_machine::Backend as _;
+#[cfg(test)]
+use sp_trie::BackendStorageProof;
 
 pub type DummyBlockchain = Blockchain<DummyStorage>;
 
@@ -235,13 +237,13 @@ impl CallExecutor<Block> for DummyCallExecutor {
 		unreachable!()
 	}
 
-	fn prove_at_trie_state<S: sp_state_machine::TrieBackendStorage<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::ProofBackend<HashFor<Block>>>(
 		&self,
-		_trie_state: &sp_state_machine::TrieBackend<S, HashFor<Block>>,
+		_proof_backend: &P,
 		_overlay: &mut OverlayedChanges,
 		_method: &str,
 		_call_data: &[u8]
-	) -> Result<(Vec<u8>, StorageProof), ClientError> {
+	) -> Result<(Vec<u8>, P::StorageProof), sp_blockchain::Error> {
 		unreachable!()
 	}
 

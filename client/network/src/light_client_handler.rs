@@ -62,6 +62,7 @@ use sc_client_api::{
 		RemoteCallRequest, RemoteChangesRequest, RemoteHeaderRequest,
 	}
 };
+use sp_trie::BackendStorageProof;
 use sc_peerset::ReputationChange;
 use sp_core::{
 	storage::{ChildInfo, ChildType,StorageKey, PrefixedStorageKey},
@@ -283,11 +284,11 @@ enum PeerStatus {
 }
 
 /// The light client handler behaviour.
-pub struct LightClientHandler<B: Block> {
+pub struct LightClientHandler<B: Block, P: BackendStorageProof> {
 	/// This behaviour's configuration.
 	config: Config,
 	/// Blockchain client.
-	chain: Arc<dyn Client<B>>,
+	chain: Arc<dyn Client<B, P>>,
 	/// Verifies that received responses are correct.
 	checker: Arc<dyn light::FetchChecker<B>>,
 	/// Peer information (addresses, their best block, etc.)
@@ -304,14 +305,15 @@ pub struct LightClientHandler<B: Block> {
 	peerset: sc_peerset::PeersetHandle,
 }
 
-impl<B> LightClientHandler<B>
+impl<B, P> LightClientHandler<B, P>
 where
 	B: Block,
+	P: BackendStorageProof,
 {
 	/// Construct a new light client handler.
 	pub fn new(
 		cfg: Config,
-		chain: Arc<dyn Client<B>>,
+		chain: Arc<dyn Client<B, P>>,
 		checker: Arc<dyn light::FetchChecker<B>>,
 		peerset: sc_peerset::PeersetHandle,
 	) -> Self {
@@ -554,7 +556,7 @@ where
 					request.block,
 					e,
 				);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 
@@ -592,7 +594,7 @@ where
 					fmt_keys(request.keys.first(), request.keys.last()),
 					request.block,
 					error);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 
@@ -641,7 +643,7 @@ where
 					fmt_keys(request.keys.first(), request.keys.last()),
 					request.block,
 					error);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 
@@ -743,9 +745,10 @@ where
 	}
 }
 
-impl<B> NetworkBehaviour for LightClientHandler<B>
+impl<B, P> NetworkBehaviour for LightClientHandler<B, P>
 where
-	B: Block
+	B: Block,
+	P: BackendStorageProof,
 {
 	type ProtocolsHandler = OneShotHandler<InboundProtocol, OutboundProtocol, Event<NegotiatedSubstream>>;
 	type OutEvent = Void;
@@ -1338,7 +1341,7 @@ mod tests {
 	use void::Void;
 
 	type Block = sp_runtime::generic::Block<Header<u64, BlakeTwo256>, substrate_test_runtime::Extrinsic>;
-	type Handler = LightClientHandler<Block>;
+	type Handler = LightClientHandler<Block, sp_trie::StorageProof>;
 	type Swarm = libp2p::swarm::Swarm<Handler>;
 
 	fn empty_proof() -> Vec<u8> {
@@ -1498,7 +1501,7 @@ mod tests {
 		( ok: bool
 		, ps: sc_peerset::PeersetHandle
 		, cf: super::Config
-		) -> LightClientHandler<Block>
+		) -> LightClientHandler<Block, sp_trie::StorageProof>
 	{
 		let client = Arc::new(substrate_test_runtime_client::new());
 		let checker = Arc::new(DummyFetchChecker { ok, _mark: std::marker::PhantomData });
@@ -1509,7 +1512,7 @@ mod tests {
 		ConnectedPoint::Dialer { address: Multiaddr::empty() }
 	}
 
-	fn poll(mut b: &mut LightClientHandler<Block>) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
+	fn poll(mut b: &mut LightClientHandler<Block, sp_trie::StorageProof>) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
 		let mut p = EmptyPollParams(PeerId::random());
 		match future::poll_fn(|cx| Pin::new(&mut b).poll(cx, &mut p)).now_or_never() {
 			Some(a) => Poll::Ready(a),

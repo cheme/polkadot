@@ -234,7 +234,7 @@ fn two_nodes_transfer_lots_of_packets() {
 					for n in 0 .. NUM_PACKETS {
 						service1.send_packet(
 							&peer_id,
-							Message::<Block>::BlockResponse(BlockResponse {
+							Message::<Block, sp_trie::StorageProof>::BlockResponse(BlockResponse {
 								id: n as _,
 								blocks: Vec::new(),
 							}).encode()
@@ -252,8 +252,8 @@ fn two_nodes_transfer_lots_of_packets() {
 			match ready!(service2.poll_next_unpin(cx)) {
 				Some(GenericProtoOut::CustomProtocolOpen { .. }) => {},
 				Some(GenericProtoOut::LegacyMessage { message, .. }) => {
-					match Message::<Block>::decode(&mut &message[..]).unwrap() {
-						Message::<Block>::BlockResponse(BlockResponse { id: _, blocks }) => {
+					match Message::<Block, sp_trie::StorageProof>::decode(&mut &message[..]).unwrap() {
+						Message::<Block, sp_trie::StorageProof>::BlockResponse(BlockResponse { id: _, blocks }) => {
 							assert!(blocks.is_empty());
 							packet_counter += 1;
 							if packet_counter == NUM_PACKETS {
@@ -292,7 +292,7 @@ fn basic_two_nodes_requests_in_parallel() {
 				}
 			};
 
-			to_send.push(Message::<Block>::BlockResponse(
+			to_send.push(Message::<Block, sp_trie::StorageProof>::BlockResponse(
 				BlockResponse { id: req_id, blocks: Vec::new() }
 			));
 		}

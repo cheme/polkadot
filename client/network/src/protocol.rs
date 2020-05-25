@@ -39,6 +39,7 @@ use sp_consensus::{
 	block_validation::BlockAnnounceValidator,
 	import_queue::{BlockImportResult, BlockImportError, IncomingBlock, Origin}
 };
+use sp_trie::BackendStorageProof;
 use codec::{Decode, Encode};
 use sp_runtime::{generic::BlockId, ConsensusEngineId, Justification};
 use sp_runtime::traits::{
@@ -212,7 +213,7 @@ impl Future for PendingTransaction {
 }
 
 // Lock must always be taken in order declared here.
-pub struct Protocol<B: BlockT, H: ExHashT> {
+pub struct Protocol<B: BlockT, H: ExHashT, P: BackendStorageProof> {
 	/// Interval at which we call `tick`.
 	tick_timeout: Pin<Box<dyn Stream<Item = ()> + Send>>,
 	/// Interval at which we call `propagate_extrinsics`.
@@ -223,8 +224,8 @@ pub struct Protocol<B: BlockT, H: ExHashT> {
 	pending_transactions: FuturesUnordered<PendingTransaction>,
 	config: ProtocolConfig,
 	genesis_hash: B::Hash,
-	sync: ChainSync<B>,
-	context_data: ContextData<B, H>,
+	sync: ChainSync<B, P>,
+	context_data: ContextData<B, H, P>,
 	/// List of nodes for which we perform additional logging because they are important for the
 	/// user.
 	important_peers: HashSet<PeerId>,
@@ -232,7 +233,7 @@ pub struct Protocol<B: BlockT, H: ExHashT> {
 	handshaking_peers: HashMap<PeerId, HandshakingPeer>,
 	/// Used to report reputation changes.
 	peerset_handle: sc_peerset::PeersetHandle,
-	transaction_pool: Arc<dyn TransactionPool<H, B>>,
+	transaction_pool: Arc<dyn TransactionPool<H, B, P>>,
 	/// When asked for a proof of finality, we use this struct to build one.
 	finality_proof_provider: Option<Arc<dyn FinalityProofProvider<B>>>,
 	/// Handles opening the unique substream and sending and receiving raw messages.
@@ -298,11 +299,11 @@ pub struct PeerInfo<B: BlockT> {
 }
 
 /// Data necessary to create a context.
-struct ContextData<B: BlockT, H: ExHashT> {
+struct ContextData<B: BlockT, H: ExHashT, P: BackendStorageProof> {
 	// All connected peers
 	peers: HashMap<PeerId, Peer<B, H>>,
 	stats: HashMap<&'static str, PacketStats>,
-	pub chain: Arc<dyn Client<B>>,
+	pub chain: Arc<dyn Client<B, P>>,
 }
 
 /// Configuration for the Substrate-specific part of the networking layer.
@@ -337,7 +338,7 @@ struct BlockAnnouncesHandshake<B: BlockT> {
 }
 
 impl<B: BlockT> BlockAnnouncesHandshake<B> {
-	fn build(protocol_config: &ProtocolConfig, chain: &Arc<dyn Client<B>>) -> Self {
+	fn build<P: BackendStorageProof>(protocol_config: &ProtocolConfig, chain: &Arc<dyn Client<B, P>>) -> Self {
 		let info = chain.info();
 		BlockAnnouncesHandshake {
 			genesis_hash: info.genesis_hash,
@@ -359,13 +360,13 @@ enum Fallback {
 	BlockAnnounce,
 }
 
-impl<B: BlockT, H: ExHashT> Protocol<B, H> {
+impl<B: BlockT, H: ExHashT, P: BackendStorageProof> Protocol<B, H, P> {
 	/// Create a new instance.
 	pub fn new(
 		config: ProtocolConfig,
 		local_peer_id: PeerId,
-		chain: Arc<dyn Client<B>>,
-		transaction_pool: Arc<dyn TransactionPool<H, B>>,
+		chain: Arc<dyn Client<B, P>>,
+		transaction_pool: Arc<dyn TransactionPool<H, B, P>>,
 		finality_proof_provider: Option<Arc<dyn FinalityProofProvider<B>>>,
 		finality_proof_request_builder: Option<BoxFinalityProofRequestBuilder<B>>,
 		protocol_id: ProtocolId,
@@ -375,7 +376,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 		boot_node_ids: Arc<HashSet<PeerId>>,
 		use_new_block_requests_protocol: bool,
 		queue_size_report: Option<HistogramVec>,
-	) -> error::Result<(Protocol<B, H>, sc_peerset::PeersetHandle)> {
+	) -> error::Result<(Protocol<B, H, P>, sc_peerset::PeersetHandle)> {
 		let info = chain.info();
 		let sync = ChainSync::new(
 			config.roles,
@@ -568,7 +569,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 		data: BytesMut,
 	) -> CustomMessageOutcome<B> {
 
-		let message = match <Message<B> as Decode>::decode(&mut &data[..]) {
+		let message = match <Message<B, P> as Decode>::decode(&mut &data[..]) {
 			Ok(message) => message,
 			Err(err) => {
 				debug!(target: "sync", "Couldn't decode packet sent by {}: {:?}: {}", who, data, err.what());
@@ -654,8 +655,8 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 		CustomMessageOutcome::None
 	}
 
-	fn send_request(&mut self, who: &PeerId, message: Message<B>) {
-		send_request::<B, H>(
+	fn send_request(&mut self, who: &PeerId, message: Message<B, P>) {
+		send_request::<B, H, P>(
 			&mut self.behaviour,
 			&mut self.context_data.stats,
 			&mut self.context_data.peers,
@@ -668,9 +669,9 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 		&mut self,
 		who: &PeerId,
 		message: Option<(Cow<'static, [u8]>, Vec<u8>)>,
-		legacy: Message<B>,
+		legacy: Message<B, P>,
 	) {
-		send_message::<B>(
+		send_message::<B, P>(
 			&mut self.behaviour,
 			&mut self.context_data.stats,
 			who,
@@ -718,7 +719,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 
 	/// Called as a back-pressure mechanism if the networking detects that the peer cannot process
 	/// our messaging rate fast enough.
-	pub fn on_clogged_peer(&self, who: PeerId, _msg: Option<Message<B>>) {
+	pub fn on_clogged_peer(&self, who: PeerId, _msg: Option<Message<B, P>>) {
 		self.peerset_handle.report_peer(who.clone(), rep::CLOGGED_PEER);
 
 		// Print some diagnostics.
@@ -1118,7 +1119,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 	) {
 		if let Some(protocol_name) = self.protocol_name_by_engine.get(&engine_id) {
 			let message = message.into();
-			let fallback = GenericMessage::<(), (), (), ()>::Consensus(ConsensusMessage {
+			let fallback = GenericMessage::<(), (), (), (), StorageProof>::Consensus(ConsensusMessage {
 				engine_id,
 				data: message.clone(),
 			}).encode();
@@ -1250,7 +1251,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 				}
 				trace!(target: "sync", "Sending {} transactions to {}", to_send.len(), who);
 				let encoded = to_send.encode();
-				send_message::<B> (
+				send_message::<B, P> (
 					&mut self.behaviour,
 					&mut self.context_data.stats,
 					&who,
@@ -1329,12 +1330,12 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 
 				let encoded = message.encode();
 
-				send_message::<B> (
+				send_message::<B, P> (
 					&mut self.behaviour,
 					&mut self.context_data.stats,
 					&who,
 					Some((self.block_announces_protocol.clone(), encoded)),
-					Message::<B>::BlockAnnounce(message),
+					Message::<B, P>::BlockAnnounce(message),
 				)
 			}
 		}
@@ -1470,7 +1471,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 					error
 				);
 				self.peerset_handle.report_peer(who.clone(), rep::RPC_FAILED);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 
@@ -1535,7 +1536,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 						});
 					} else {
 						let msg = GenericMessage::BlockRequest(req);
-						send_request(
+						send_request::<_, _, P>(
 							&mut self.behaviour,
 							&mut self.context_data.stats,
 							&mut self.context_data.peers,
@@ -1616,7 +1617,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 					request.block,
 					error
 				);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 		self.send_message(
@@ -1672,7 +1673,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 					request.block,
 					error
 				);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 		self.send_message(
@@ -1921,12 +1922,12 @@ pub enum CustomMessageOutcome<B: BlockT> {
 	None,
 }
 
-fn send_request<B: BlockT, H: ExHashT>(
+fn send_request<B: BlockT, H: ExHashT, P: BackendStorageProof>(
 	behaviour: &mut GenericProto,
 	stats: &mut HashMap<&'static str, PacketStats>,
 	peers: &mut HashMap<PeerId, Peer<B, H>>,
 	who: &PeerId,
-	mut message: Message<B>,
+	mut message: Message<B, P>,
 ) {
 	if let GenericMessage::BlockRequest(ref mut r) = message {
 		if let Some(ref mut peer) = peers.get_mut(who) {
@@ -1939,7 +1940,7 @@ fn send_request<B: BlockT, H: ExHashT>(
 			peer.block_request = Some((Instant::now(), r.clone()));
 		}
 	}
-	send_message::<B>(behaviour, stats, who, None, message)
+	send_message::<B, P>(behaviour, stats, who, None, message)
 }
 
 fn update_peer_request<B: BlockT, H: ExHashT>(
@@ -1958,12 +1959,12 @@ fn update_peer_request<B: BlockT, H: ExHashT>(
 	}
 }
 
-fn send_message<B: BlockT>(
+fn send_message<B: BlockT, P: BackendStorageProof>(
 	behaviour: &mut GenericProto,
 	stats: &mut HashMap<&'static str, PacketStats>,
 	who: &PeerId,
 	message: Option<(Cow<'static, [u8]>, Vec<u8>)>,
-	legacy_message: Message<B>,
+	legacy_message: Message<B, P>,
 ) {
 	let encoded = legacy_message.encode();
 	let mut stats = stats.entry(legacy_message.id()).or_default();
@@ -1976,7 +1977,7 @@ fn send_message<B: BlockT>(
 	}
 }
 
-impl<B: BlockT, H: ExHashT> NetworkBehaviour for Protocol<B, H> {
+impl<B: BlockT, H: ExHashT, P: BackendStorageProof> NetworkBehaviour for Protocol<B, H, P> {
 	type ProtocolsHandler = <GenericProto as NetworkBehaviour>::ProtocolsHandler;
 	type OutEvent = CustomMessageOutcome<B>;
 
@@ -2044,7 +2045,7 @@ impl<B: BlockT, H: ExHashT> NetworkBehaviour for Protocol<B, H> {
 				};
 				self.pending_messages.push_back(event);
 			} else {
-				send_request(
+				send_request::<_, _, P>(
 					&mut self.behaviour,
 					&mut self.context_data.stats,
 					&mut self.context_data.peers,
@@ -2062,7 +2063,7 @@ impl<B: BlockT, H: ExHashT> NetworkBehaviour for Protocol<B, H> {
 				};
 				self.pending_messages.push_back(event);
 			} else {
-				send_request(
+				send_request::<_, _, P>(
 					&mut self.behaviour,
 					&mut self.context_data.stats,
 					&mut self.context_data.peers,
@@ -2080,7 +2081,7 @@ impl<B: BlockT, H: ExHashT> NetworkBehaviour for Protocol<B, H> {
 				};
 				self.pending_messages.push_back(event);
 			} else {
-				send_request(
+				send_request::<_, _, P>(
 					&mut self.behaviour,
 					&mut self.context_data.stats,
 					&mut self.context_data.peers,
@@ -2153,7 +2154,7 @@ impl<B: BlockT, H: ExHashT> NetworkBehaviour for Protocol<B, H> {
 			GenericProtoOut::Clogged { peer_id, messages } => {
 				debug!(target: "sync", "{} clogging messages:", messages.len());
 				for msg in messages.into_iter().take(5) {
-					let message: Option<Message<B>> = Decode::decode(&mut &msg[..]).ok();
+					let message: Option<Message<B, P>> = Decode::decode(&mut &msg[..]).ok();
 					debug!(target: "sync", "{:?}", message);
 					self.on_clogged_peer(peer_id.clone(), message);
 				}
@@ -2202,7 +2203,7 @@ impl<B: BlockT, H: ExHashT> NetworkBehaviour for Protocol<B, H> {
 	}
 }
 
-impl<B: BlockT, H: ExHashT> Drop for Protocol<B, H> {
+impl<B: BlockT, H: ExHashT, P: BackendStorageProof> Drop for Protocol<B, H, P> {
 	fn drop(&mut self) {
 		debug!(target: "sync", "Network stats:\n{}", self.format_stats());
 	}
@@ -2223,7 +2224,7 @@ mod tests {
 	fn no_handshake_no_notif_closed() {
 		let client = Arc::new(TestClientBuilder::with_default_backend().build_with_longest_chain().0);
 
-		let (mut protocol, _) = Protocol::<Block, Hash>::new(
+		let (mut protocol, _) = Protocol::<Block, Hash, sp_trie::StorageProof>::new(
 			ProtocolConfig::default(),
 			PeerId::random(),
 			client.clone(),

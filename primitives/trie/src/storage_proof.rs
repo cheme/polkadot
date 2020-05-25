@@ -15,7 +15,7 @@
 // along with Parity.  If not, see <http://www.gnu.org/licenses/>.
 
 use sp_std::vec::Vec;
-use codec::{Encode, Decode};
+use codec::{Codec, Encode, Decode};
 use hash_db::{Hasher, HashDB};
 
 /// A proof that some set of key-value pairs are included in the storage trie. The proof contains
@@ -30,25 +30,27 @@ pub struct StorageProof {
 	trie_nodes: Vec<Vec<u8>>,
 }
 
-impl StorageProof {
-	/// Constructs a storage proof from a subset of encoded trie nodes in a storage backend.
-	pub fn new(trie_nodes: Vec<Vec<u8>>) -> Self {
-		StorageProof { trie_nodes }
-	}
+/// Trait for proofs that can be use as a partial backend for verification. 
+pub trait BackendStorageProof: Codec + sp_std::fmt::Debug + Sized + 'static {
+	/// Merges multiple storage proofs covering potentially different sets of keys into one proof
+	/// covering all keys. The merged proof output may be smaller than the aggregate size of the input
+	/// proofs due to deduplication of trie nodes.
+	fn merge<I>(proofs: I) -> Self where I: IntoIterator<Item=Self>;
 
 	/// Returns a new empty proof.
 	///
 	/// An empty proof is capable of only proving trivial statements (ie. that an empty set of
 	/// key-value pairs exist in storage).
-	pub fn empty() -> Self {
-		StorageProof {
-			trie_nodes: Vec::new(),
-		}
-	}
+	fn empty() -> Self;
 
 	/// Returns whether this is an empty proof.
-	pub fn is_empty(&self) -> bool {
-		self.trie_nodes.is_empty()
+	fn is_empty(&self) -> bool;
+}
+
+impl StorageProof {
+	/// Constructs a storage proof from a subset of encoded trie nodes in a storage backend.
+	pub fn new(trie_nodes: Vec<Vec<u8>>) -> Self {
+		StorageProof { trie_nodes }
 	}
 
 	/// Create an iterator over trie nodes constructed from the proof. The nodes are not guaranteed
@@ -61,11 +63,10 @@ impl StorageProof {
 	pub fn into_memory_db<H: Hasher>(self) -> crate::MemoryDB<H> {
 		self.into()
 	}
+}
 
-	/// Merges multiple storage proofs covering potentially different sets of keys into one proof
-	/// covering all keys. The merged proof output may be smaller than the aggregate size of the input
-	/// proofs due to deduplication of trie nodes.
-	pub fn merge<I>(proofs: I) -> Self where I: IntoIterator<Item=Self> {
+impl BackendStorageProof for StorageProof {
+	fn merge<I>(proofs: I) -> Self where I: IntoIterator<Item=Self> {
 		let trie_nodes = proofs.into_iter()
 			.flat_map(|proof| proof.iter_nodes())
 			.collect::<sp_std::collections::btree_set::BTreeSet<_>>()
@@ -73,6 +74,16 @@ impl StorageProof {
 			.collect();
 
 		Self { trie_nodes }
+	}
+
+	fn empty() -> Self {
+		StorageProof {
+			trie_nodes: Vec::new(),
+		}
+	}
+
+	fn is_empty(&self) -> bool {
+		self.trie_nodes.is_empty()
 	}
 }
 
