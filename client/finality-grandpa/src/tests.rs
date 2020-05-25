@@ -42,7 +42,7 @@ use sp_runtime::traits::{Block as BlockT, Header as HeaderT, HashFor};
 use sp_runtime::generic::{BlockId, DigestItem};
 use sp_core::{H256, crypto::Public};
 use sp_finality_grandpa::{GRANDPA_ENGINE_ID, AuthorityList, EquivocationProof, GrandpaApi, OpaqueKeyOwnershipProof};
-use sp_state_machine::{InMemoryBackend, prove_read, read_proof_check};
+use sp_state_machine::{InMemoryBackend, prove_read, read_proof_check, MemoryDB};
 
 use authorities::AuthoritySet;
 use finality_proof::{
@@ -52,6 +52,7 @@ use consensus_changes::ConsensusChanges;
 use sc_block_builder::BlockBuilderProvider;
 use sc_consensus::LongestChain;
 
+type ProvingBackend<H> = sp_state_machine::ProvingBackend<MemoryDB<H>, H>;
 type PeerData =
 	Mutex<
 		Option<
@@ -261,7 +262,7 @@ impl AuthoritySetForFinalityChecker<Block> for TestApi {
 		header: <Block as BlockT>::Header,
 		proof: StorageProof,
 	) -> Result<AuthorityList> {
-		let results = read_proof_check::<HashFor<Block>, _>(
+		let results = read_proof_check::<ProvingBackend<HashFor<Block>>, HashFor<Block>, _>(
 			*header.state_root(), proof, vec![b"authorities"]
 		)
 			.expect("failure checking read proof for authorities");

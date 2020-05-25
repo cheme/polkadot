@@ -37,7 +37,6 @@ use sp_state_machine::{
 
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 
-
 type ProvingBackend<H> = sp_state_machine::ProvingBackend<MemoryDB<H>, H>;
 
 /// The size of each CHT. This value is passed to every CHT-related function from

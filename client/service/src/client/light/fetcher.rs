@@ -48,6 +48,9 @@ pub use sc_client_api::{
 use super::blockchain::{Blockchain};
 use super::call_executor::check_execution_proof;
 
+/// On check proof type is statically define.
+type ProvingBackend<H> = sp_state_machine::ProvingBackend<sp_trie::MemoryDB<H>, H>;
+
 /// Remote data checker.
 pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>> {
 	blockchain: Arc<Blockchain<S>>,
@@ -232,7 +235,7 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 		request: &RemoteReadRequest<Block::Header>,
 		remote_proof: StorageProof,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
-		read_proof_check::<H, _>(
+		read_proof_check::<ProvingBackend<H>, H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			request.keys.iter(),
@@ -248,7 +251,7 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 			Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
 			None => return Err("Invalid child type".into()),
 		};
-		read_child_proof_check::<H, _>(
+		read_child_proof_check::<ProvingBackend<H>, H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			&child_info,
@@ -261,7 +264,7 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 		request: &RemoteCallRequest<Block::Header>,
 		remote_proof: StorageProof,
 	) -> ClientResult<Vec<u8>> {
-		check_execution_proof::<_, _, H>(
+		check_execution_proof::<ProvingBackend<H>, _, _, H>(
 			&self.executor,
 			self.spawn_handle.clone(),
 			request,

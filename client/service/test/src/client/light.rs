@@ -61,6 +61,7 @@ use sp_state_machine::Backend as _;
 #[cfg(test)]
 use sp_trie::BackendStorageProof;
 
+type ProvingBackend = sp_state_machine::ProvingBackend<sp_trie::MemoryDB<BlakeTwo256>, BlakeTwo256>;
 pub type DummyBlockchain = Blockchain<DummyStorage>;
 
 pub struct DummyStorage {
@@ -311,7 +312,7 @@ fn execution_proof_is_generated_and_checked() {
 		).unwrap();
 
 		// check remote execution proof locally
-		let local_result = check_execution_proof::<_, _, BlakeTwo256>(
+		let local_result = check_execution_proof::<ProvingBackend, _, _, BlakeTwo256>(
 			&local_executor(),
 			tasks_executor(),
 			&RemoteCallRequest {
@@ -339,7 +340,7 @@ fn execution_proof_is_generated_and_checked() {
 		).unwrap();
 
 		// check remote execution proof locally
-		let execution_result = check_execution_proof_with_make_header::<_, _, BlakeTwo256, _>(
+		let execution_result = check_execution_proof_with_make_header::<ProvingBackend, _, _, BlakeTwo256, _>(
 			&local_executor(),
 			tasks_executor(),
 			&RemoteCallRequest {
