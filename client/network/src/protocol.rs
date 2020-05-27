@@ -39,7 +39,7 @@ use sp_consensus::{
 	block_validation::BlockAnnounceValidator,
 	import_queue::{BlockImportResult, BlockImportError, IncomingBlock, Origin}
 };
-use sp_trie::BackendStorageProof;
+use sp_state_machine::BackendStorageProof;
 use codec::{Decode, Encode};
 use sp_runtime::{generic::BlockId, ConsensusEngineId, Justification};
 use sp_runtime::traits::{
@@ -2224,7 +2224,7 @@ mod tests {
 	fn no_handshake_no_notif_closed() {
 		let client = Arc::new(TestClientBuilder::with_default_backend().build_with_longest_chain().0);
 
-		let (mut protocol, _) = Protocol::<Block, Hash, sp_trie::StorageProof>::new(
+		let (mut protocol, _) = Protocol::<Block, Hash, sc_client_api::StorageProof>::new(
 			ProtocolConfig::default(),
 			PeerId::random(),
 			client.clone(),

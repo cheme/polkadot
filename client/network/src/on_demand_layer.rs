@@ -25,6 +25,7 @@ use sc_client_api::{
 	FetchChecker, Fetcher, RemoteBodyRequest, RemoteCallRequest, RemoteChangesRequest,
 	RemoteHeaderRequest, RemoteReadChildRequest, RemoteReadRequest, StorageProof, ChangesProof,
 };
+use sp_state_machine::BackendStorageProof;
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
 use sp_blockchain::Error as ClientError;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT, NumberFor};
@@ -35,9 +36,9 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, task::Context, task::Poll};
 ///
 /// This implementation stores all the requests in a queue. The network, in parallel, is then
 /// responsible for pulling elements out of that queue and fulfilling them.
-pub struct OnDemand<B: BlockT> {
+pub struct OnDemand<B: BlockT, P: BackendStorageProof> {
 	/// Objects that checks whether what has been retrieved is correct.
-	checker: Arc<dyn FetchChecker<B>>,
+	checker: Arc<dyn FetchChecker<B, P>>,
 
 	/// Queue of requests. Set to `Some` at initialization, then extracted by the network.
 	///
@@ -57,7 +58,7 @@ pub struct OnDemand<B: BlockT> {
 #[derive(Default, Clone)]
 pub struct AlwaysBadChecker;
 
-impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
+impl<Block: BlockT, Proof: BackendStorageProof> FetchChecker<Block, Proof> for AlwaysBadChecker {
 	fn check_header_proof(
 		&self,
 		_request: &RemoteHeaderRequest<Block::Header>,
@@ -70,7 +71,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 	fn check_read_proof(
 		&self,
 		_request: &RemoteReadRequest<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: Proof,
 	) -> Result<HashMap<Vec<u8>,Option<Vec<u8>>>, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -78,7 +79,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 	fn check_read_child_proof(
 		&self,
 		_request: &RemoteReadChildRequest<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: Proof,
 	) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -86,7 +87,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 	fn check_execution_proof(
 		&self,
 		_request: &RemoteCallRequest<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: Proof,
 	) -> Result<Vec<u8>, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -108,12 +109,12 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 	}
 }
 
-impl<B: BlockT> OnDemand<B>
+impl<B: BlockT, P: BackendStorageProof> OnDemand<B, P>
 where
 	B::Header: HeaderT,
 {
 	/// Creates new on-demand service.
-	pub fn new(checker: Arc<dyn FetchChecker<B>>) -> Self {
+	pub fn new(checker: Arc<dyn FetchChecker<B, P>>) -> Self {
 		let (requests_send, requests_queue) = tracing_unbounded("mpsc_ondemand");
 		let requests_queue = Mutex::new(Some(requests_queue));
 
@@ -125,7 +126,7 @@ where
 	}
 
 	/// Get checker reference.
-	pub fn checker(&self) -> &Arc<dyn FetchChecker<B>> {
+	pub fn checker(&self) -> &Arc<dyn FetchChecker<B, P>> {
 		&self.checker
 	}
 
@@ -143,10 +144,11 @@ where
 	}
 }
 
-impl<B> Fetcher<B> for OnDemand<B>
+impl<B, P> Fetcher<B> for OnDemand<B, P>
 where
 	B: BlockT,
 	B::Header: HeaderT,
+	P: BackendStorageProof,
 {
 	type RemoteHeaderResult = RemoteResponse<B::Header>;
 	type RemoteReadResult = RemoteResponse<HashMap<Vec<u8>, Option<Vec<u8>>>>;

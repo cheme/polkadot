@@ -182,7 +182,7 @@ pub fn prove_execution<Block, S, E>(
 	method: &str,
 	call_data: &[u8],
 	// TODO EMCH creat a prooffor alias from state (exist in sc_api).
-) -> ClientResult<(Vec<u8>, <S::ProofBackend as sp_state_machine::ProofBackend<HashFor<Block>>>::StorageProof)>
+) -> ClientResult<(Vec<u8>, S::StorageProof)>
 	where
 		Block: BlockT,
 		S: StateBackend<HashFor<Block>>,
@@ -210,7 +210,7 @@ pub fn prove_execution<Block, S, E>(
 		method,
 		call_data,
 	)?;
-	let total_proof = <S::ProofBackend as sp_state_machine::ProofBackend<_>>::StorageProof::merge(vec![init_proof, exec_proof]);
+	let total_proof = S::StorageProof::merge(vec![init_proof, exec_proof]);
 
 	Ok((result, total_proof))
 }
@@ -226,7 +226,7 @@ pub fn check_execution_proof<P, Header, E, H>(
 	remote_proof: P::StorageProof,
 ) -> ClientResult<Vec<u8>>
 	where
-		P: sp_state_machine::ProofBackend<H>,
+		P: sp_state_machine::ProofCheckBackend<H>,
 		Header: HeaderT,
 		E: CodeExecutor + Clone + 'static,
 		H: Hasher,
@@ -259,7 +259,7 @@ pub fn check_execution_proof_with_make_header<P, Header, E, H, MakeNextHeader>(
 	make_next_header: MakeNextHeader,
 ) -> ClientResult<Vec<u8>>
 	where
-		P: sp_state_machine::ProofBackend<H>,
+		P: sp_state_machine::ProofCheckBackend<H>,
 		E: CodeExecutor + Clone + 'static,
 		H: Hasher,
 		Header: HeaderT,
@@ -278,7 +278,7 @@ pub fn check_execution_proof_with_make_header<P, Header, E, H, MakeNextHeader>(
 	let backend_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&trie_backend);
 	let runtime_code = backend_runtime_code.runtime_code()?;
 
-	execution_proof_check_on_proof_backend::<P::ProofCheckBackend, H, Header::Number, _>(
+	execution_proof_check_on_proof_backend::<P, H, Header::Number, _>(
 		&trie_backend,
 		&mut changes,
 		executor,
@@ -289,7 +289,7 @@ pub fn check_execution_proof_with_make_header<P, Header, E, H, MakeNextHeader>(
 	)?;
 
 	// execute method
-	execution_proof_check_on_proof_backend::<P::ProofCheckBackend, H, Header::Number, _>(
+	execution_proof_check_on_proof_backend::<P, H, Header::Number, _>(
 		&trie_backend,
 		&mut changes,
 		executor,

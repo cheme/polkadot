@@ -62,7 +62,7 @@ use sc_client_api::{
 		RemoteCallRequest, RemoteChangesRequest, RemoteHeaderRequest,
 	}
 };
-use sp_trie::BackendStorageProof;
+use sp_state_machine::BackendStorageProof;
 use sc_peerset::ReputationChange;
 use sp_core::{
 	storage::{ChildInfo, ChildType,StorageKey, PrefixedStorageKey},
@@ -290,7 +290,7 @@ pub struct LightClientHandler<B: Block, P: BackendStorageProof> {
 	/// Blockchain client.
 	chain: Arc<dyn Client<B, P>>,
 	/// Verifies that received responses are correct.
-	checker: Arc<dyn light::FetchChecker<B>>,
+	checker: Arc<dyn light::FetchChecker<B, P>>,
 	/// Peer information (addresses, their best block, etc.)
 	peers: HashMap<PeerId, PeerInfo<B>>,
 	/// Futures sending back response to remote clients.
@@ -314,7 +314,7 @@ where
 	pub fn new(
 		cfg: Config,
 		chain: Arc<dyn Client<B, P>>,
-		checker: Arc<dyn light::FetchChecker<B>>,
+		checker: Arc<dyn light::FetchChecker<B, P>>,
 		peerset: sc_peerset::PeersetHandle,
 	) -> Self {
 		LightClientHandler {
@@ -1341,7 +1341,7 @@ mod tests {
 	use void::Void;
 
 	type Block = sp_runtime::generic::Block<Header<u64, BlakeTwo256>, substrate_test_runtime::Extrinsic>;
-	type Handler = LightClientHandler<Block, sp_trie::StorageProof>;
+	type Handler = LightClientHandler<Block, StorageProof>;
 	type Swarm = libp2p::swarm::Swarm<Handler>;
 
 	fn empty_proof() -> Vec<u8> {
@@ -1369,7 +1369,7 @@ mod tests {
 		_mark: std::marker::PhantomData<B>
 	}
 
-	impl<B: BlockT> light::FetchChecker<B> for DummyFetchChecker<B> {
+	impl<B: BlockT, P: BackendStorageProof> light::FetchChecker<B, P> for DummyFetchChecker<B> {
 		fn check_header_proof(
 			&self,
 			_request: &RemoteHeaderRequest<B::Header>,
@@ -1385,7 +1385,7 @@ mod tests {
 		fn check_read_proof(
 			&self,
 			request: &RemoteReadRequest<B::Header>,
-			_: StorageProof,
+			_: P,
 		) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 			match self.ok {
 				true => Ok(request.keys
@@ -1401,7 +1401,7 @@ mod tests {
 		fn check_read_child_proof(
 			&self,
 			request: &RemoteReadChildRequest<B::Header>,
-			_: StorageProof,
+			_: P,
 		) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 			match self.ok {
 				true => Ok(request.keys
@@ -1417,7 +1417,7 @@ mod tests {
 		fn check_execution_proof(
 			&self,
 			_: &RemoteCallRequest<B::Header>,
-			_: StorageProof,
+			_: P,
 		) -> Result<Vec<u8>, ClientError> {
 			match self.ok {
 				true => Ok(vec![42]),
@@ -1501,7 +1501,7 @@ mod tests {
 		( ok: bool
 		, ps: sc_peerset::PeersetHandle
 		, cf: super::Config
-		) -> LightClientHandler<Block, sp_trie::StorageProof>
+		) -> LightClientHandler<Block, StorageProof>
 	{
 		let client = Arc::new(substrate_test_runtime_client::new());
 		let checker = Arc::new(DummyFetchChecker { ok, _mark: std::marker::PhantomData });
@@ -1512,7 +1512,7 @@ mod tests {
 		ConnectedPoint::Dialer { address: Multiaddr::empty() }
 	}
 
-	fn poll(mut b: &mut LightClientHandler<Block, sp_trie::StorageProof>) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
+	fn poll(mut b: &mut LightClientHandler<Block, StorageProof>) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
 		let mut p = EmptyPollParams(PeerId::random());
 		match future::poll_fn(|cx| Pin::new(&mut b).poll(cx, &mut p)).now_or_never() {
 			Some(a) => Poll::Ready(a),

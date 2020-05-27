@@ -72,7 +72,7 @@ use std::{
 	},
 	task::Poll,
 };
-use sp_trie::BackendStorageProof as StorageProof;
+use sp_state_machine::BackendStorageProof as StorageProof;
 
 mod out_events;
 #[cfg(test)]

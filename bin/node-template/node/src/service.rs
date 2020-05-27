@@ -34,7 +34,7 @@ macro_rules! new_full_start {
 		let inherent_data_providers = sp_inherents::InherentDataProviders::new();
 
 		let builder = sc_service::ServiceBuilder::new_full::<
-			node_template_runtime::opaque::Block, node_template_runtime::RuntimeApi, crate::service::Executor
+			node_template_runtime::opaque::Block, node_template_runtime::RuntimeApi, crate::service::Executor, sc_client_api::StorageProof,
 		>($config)?
 			.with_select_chain(|_config, backend| {
 				Ok(sc_consensus::LongestChain::new(backend.clone()))
@@ -195,7 +195,7 @@ pub fn new_full(config: Configuration) -> Result<impl AbstractService, ServiceEr
 pub fn new_light(config: Configuration) -> Result<impl AbstractService, ServiceError> {
 	let inherent_data_providers = InherentDataProviders::new();
 
-	ServiceBuilder::new_light::<Block, RuntimeApi, Executor>(config)?
+	ServiceBuilder::new_light::<Block, RuntimeApi, Executor, sc_client_api::ProvingCheckBackend<Block>>(config)?
 		.with_select_chain(|_config, backend| {
 			Ok(LongestChain::new(backend.clone()))
 		})?

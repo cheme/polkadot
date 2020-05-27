@@ -113,7 +113,7 @@ pub trait AuthoritySetForFinalityChecker<Block: BlockT>: Send + Sync {
 }
 
 /// FetchChecker-based implementation of AuthoritySetForFinalityChecker.
-impl<Block: BlockT> AuthoritySetForFinalityChecker<Block> for Arc<dyn FetchChecker<Block>> {
+impl<Block: BlockT> AuthoritySetForFinalityChecker<Block> for Arc<dyn FetchChecker<Block, StorageProof>> {
 	fn check_authorities_proof(
 		&self,
 		hash: Block::Hash,

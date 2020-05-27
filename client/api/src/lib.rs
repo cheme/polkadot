@@ -37,8 +37,11 @@ pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
 
-pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn};
+pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn, ProofCheckBackend};
+use sp_runtime::traits::HashFor;
 
+/// Trie backend proof check.
+pub type ProvingCheckBackend<Block> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<HashFor<Block>>, HashFor<Block>>;
 /// Usage Information Provider interface
 ///
 pub trait UsageProvider<Block: sp_runtime::traits::Block> {

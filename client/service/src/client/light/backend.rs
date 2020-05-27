@@ -377,7 +377,9 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 	type Error = ClientError;
 	type Transaction = <InMemoryBackend<H> as StateBackend<H>>::Transaction;
 	type TrieBackendStorage = <InMemoryBackend<H> as StateBackend<H>>::TrieBackendStorage;
+	type StorageProof = <InMemoryBackend<H> as StateBackend<H>>::StorageProof;
 	type ProofBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofBackend;
+	type ProofCheckBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
 		match *self {

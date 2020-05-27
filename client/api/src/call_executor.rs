@@ -111,7 +111,7 @@ pub trait CallExecutor<B: BlockT> {
 		overlay: &mut OverlayedChanges,
 		method: &str,
 		call_data: &[u8]
-	) -> Result<(Vec<u8>, <S::ProofBackend as sp_state_machine::ProofBackend<HashFor<B>>>::StorageProof), sp_blockchain::Error> {
+	) -> Result<(Vec<u8>, S::StorageProof), sp_blockchain::Error> {
 		let proof_state = state.as_proof_backend()
 			.ok_or_else(||
 				Box::new(sp_state_machine::ExecutionError::UnableToGenerateProof)

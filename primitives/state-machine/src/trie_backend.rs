@@ -24,7 +24,7 @@ use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use sp_core::storage::{ChildInfo, ChildType};
 use codec::{Codec, Encode, Decode};
 use crate::{
-	StorageKey, StorageValue, Backend,
+	StorageKey, StorageValue, Backend, ProofCheckBackend,
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 };
 
@@ -79,7 +79,9 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
+	type StorageProof = sp_trie::StorageProof;
 	type ProofBackend = crate::proving_backend::ProvingBackend<S, H>;
+	type ProofCheckBackend = TrieBackend<crate::MemoryDB<H>, H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
 		self.essence.storage(key)
@@ -258,6 +260,24 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 	fn wipe(&self) -> Result<(), Self::Error> {
 		Ok(())
+	}
+}
+
+impl<H: Hasher> ProofCheckBackend<H> for TrieBackend<crate::MemoryDB<H>, H> where
+	H::Out: Ord + Codec,
+{
+	fn create_proof_check_backend(
+		root: H::Out,
+		proof: Self::StorageProof,
+	) -> Result<Self, Box<dyn crate::Error>> {
+		use hash_db::HashDB;
+		let db = proof.into_memory_db();
+
+		if db.contains(&root, hash_db::EMPTY_PREFIX) {
+			Ok(TrieBackend::new(db, root))
+		} else {
+			Err(Box::new(crate::ExecutionError::InvalidProof))
+		}
 	}
 }
 

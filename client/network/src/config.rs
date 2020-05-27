@@ -49,7 +49,7 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
-use sp_trie::BackendStorageProof as StorageProof;
+use sp_state_machine::BackendStorageProof as StorageProof;
 use zeroize::Zeroize;
 
 /// Network initialization parameters.
@@ -81,7 +81,7 @@ pub struct Params<B: BlockT, H: ExHashT, P: StorageProof> {
 	/// The `OnDemand` object acts as a "receiver" for block data requests from the client.
 	/// If `Some`, the network worker will process these requests and answer them.
 	/// Normally used only for light clients.
-	pub on_demand: Option<Arc<OnDemand<B>>>,
+	pub on_demand: Option<Arc<OnDemand<B, P>>>,
 
 	/// Pool of transactions.
 	///

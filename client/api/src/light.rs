@@ -27,12 +27,13 @@ use sp_runtime::{
 	generic::BlockId
 };
 use sp_core::{ChangesTrieConfigurationRange, storage::PrefixedStorageKey};
-use sp_state_machine::StorageProof;
 use sp_blockchain::{
 	HeaderMetadata, well_known_cache_keys, HeaderBackend, Cache as BlockchainCache,
 	Error as ClientError, Result as ClientResult,
 };
 use crate::{backend::{AuxStore, NewBlockState}, UsageInfo};
+use sp_state_machine::StorageProof;
+use sp_state_machine::BackendStorageProof;
 
 /// Remote call request.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -190,7 +191,7 @@ pub trait Fetcher<Block: BlockT>: Send + Sync {
 ///
 /// Implementations of this trait should not use any prunable blockchain data
 /// except that is passed to its methods.
-pub trait FetchChecker<Block: BlockT>: Send + Sync {
+pub trait FetchChecker<Block: BlockT, P: BackendStorageProof>: Send + Sync {
 	/// Check remote header proof.
 	fn check_header_proof(
 		&self,
@@ -202,19 +203,19 @@ pub trait FetchChecker<Block: BlockT>: Send + Sync {
 	fn check_read_proof(
 		&self,
 		request: &RemoteReadRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>>;
 	/// Check remote storage read proof.
 	fn check_read_child_proof(
 		&self,
 		request: &RemoteReadChildRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>>;
 	/// Check remote method execution proof.
 	fn check_execution_proof(
 		&self,
 		request: &RemoteCallRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P,
 	) -> ClientResult<Vec<u8>>;
 	/// Check remote changes query proof.
 	fn check_changes_proof(

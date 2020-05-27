@@ -45,8 +45,11 @@ use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, BlakeTwo256};
 use sc_service::client::{LocalCallExecutor, ClientConfig};
 
-/// Static definition of the verification backend
+/// Static definition of the proving backend
 pub type ProvingBackend<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, H>;
+
+/// Static definition of the verification backend
+pub type ProofCheckBackend<H> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<H>, H>;
 
 /// Test client light database backend.
 pub type LightBackend<Block> = client::light::backend::Backend<

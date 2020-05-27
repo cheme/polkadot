@@ -41,6 +41,7 @@ use sp_consensus::BlockOrigin;
 use parking_lot::RwLock;
 
 pub use sp_state_machine::Backend as StateBackend;
+pub use sp_state_machine::BackendStorageProof;
 use std::marker::PhantomData;
 
 /// Extracts the state backend type for the given backend.
@@ -57,7 +58,7 @@ pub type ProofBackendForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::Proo
 /// Extracts the proof backend for the given backend.
 pub type ProofBackendFor<B, Block> = ProofBackendForSB<StateBackendFor<B, Block>, Block>;
 /// Extracts the proof for the given backend.
-pub type ProofFor<B, Block> = <ProofBackendFor<B, Block> as sp_state_machine::ProofBackend<HashFor<Block>>>::StorageProof;
+pub type ProofFor<B, Block> = <ProofBackendFor<B, Block> as StateBackend<HashFor<Block>>>::StorageProof;
 
 /// Import operation summary.
 ///

@@ -52,7 +52,8 @@ use consensus_changes::ConsensusChanges;
 use sc_block_builder::BlockBuilderProvider;
 use sc_consensus::LongestChain;
 
-type ProvingBackend<H> = sp_state_machine::ProvingBackend<MemoryDB<H>, H>;
+type ProvingBackend<H> = sp_state_machine::TrieBackend<MemoryDB<H>, H>;
+
 type PeerData =
 	Mutex<
 		Option<

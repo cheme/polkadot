@@ -21,7 +21,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use codec::{Decode, Codec};
 use log::debug;
-use hash_db::{Hasher, HashDB, EMPTY_PREFIX, Prefix};
+use hash_db::{Hasher, Prefix};
 use sp_trie::{
 	MemoryDB, empty_child_trie_root, read_trie_value_with, read_child_trie_value_with,
 	record_all_keys, StorageProof,
@@ -30,7 +30,7 @@ pub use sp_trie::Recorder;
 pub use sp_trie::trie_types::{Layout, TrieError};
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage, ProofBackend};
-use crate::{Error, ExecutionError, Backend};
+use crate::Backend;
 use std::collections::HashMap;
 use crate::DBValue;
 use sp_core::storage::ChildInfo;
@@ -198,10 +198,6 @@ impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
 		H: Hasher,
 		H::Out: Ord + Codec,
 {
-	type StorageProof = sp_trie::StorageProof;
-
-	type ProofCheckBackend = TrieBackend<MemoryDB<H>, H>;
-
 	fn extract_proof(&self) -> Self::StorageProof {
 		let trie_nodes = self.0.essence().backend_storage().proof_recorder
 			.read()
@@ -209,13 +205,6 @@ impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
 			.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
 			.collect();
 		StorageProof::new(trie_nodes)
-	}
-
-	fn create_proof_check_backend(
-		root: H::Out,
-		proof: Self::StorageProof,
-	) -> Result<<Self as ProofBackend<H>>::ProofCheckBackend, Box<dyn crate::Error>> {
-		create_proof_check_backend(root, proof)
 	}
 }
 
@@ -228,7 +217,9 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 	type Error = String;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
+	type StorageProof = sp_trie::StorageProof;
 	type ProofBackend = Self;
+	type ProofCheckBackend = TrieBackend<MemoryDB<H>, H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.0.storage(key)
@@ -326,33 +317,17 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 	}
 }
 
-/// Create proof check backend.
-fn create_proof_check_backend<H>(
-	root: H::Out,
-	proof: StorageProof,
-) -> Result<TrieBackend<MemoryDB<H>, H>, Box<dyn Error>>
-where
-	H: Hasher,
-	H::Out: Codec,
-{
-	let db = proof.into_memory_db();
-
-	if db.contains(&root, EMPTY_PREFIX) {
-		Ok(TrieBackend::new(db, root))
-	} else {
-		Err(Box::new(ExecutionError::InvalidProof))
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use crate::InMemoryBackend;
 	use crate::trie_backend::tests::test_trie;
 	use super::*;
-	use crate::proving_backend::create_proof_check_backend;
 	use sp_trie::PrefixedMemoryDB;
 	use sp_runtime::traits::BlakeTwo256;
 	use sp_trie::BackendStorageProof;
+	use crate::trie_backend_essence::ProofCheckBackend as _;
+
+	type ProofCheckBackend = crate::trie_backend::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
 
 	fn test_proving<'a>(
 		trie_backend: &'a TrieBackend<PrefixedMemoryDB<BlakeTwo256>,BlakeTwo256>,
@@ -377,7 +352,7 @@ mod tests {
 	#[test]
 	fn proof_is_invalid_when_does_not_contains_root() {
 		use sp_core::H256;
-		let result = create_proof_check_backend::<BlakeTwo256>(
+		let result = ProofCheckBackend::create_proof_check_backend(
 			H256::from_low_u64_be(1),
 			StorageProof::empty()
 		);
@@ -415,7 +390,7 @@ mod tests {
 
 		let proof = proving.extract_proof();
 
-		let proof_check = create_proof_check_backend::<BlakeTwo256>(in_memory_root.into(), proof).unwrap();
+		let proof_check = ProofCheckBackend::create_proof_check_backend(in_memory_root.into(), proof).unwrap();
 		assert_eq!(proof_check.storage(&[42]).unwrap().unwrap(), vec![42]);
 	}
 
@@ -465,7 +440,7 @@ mod tests {
 
 		let proof = proving.extract_proof();
 
-		let proof_check = create_proof_check_backend::<BlakeTwo256>(
+		let proof_check = ProofCheckBackend::create_proof_check_backend(
 			in_memory_root.into(),
 			proof
 		).unwrap();
@@ -479,7 +454,7 @@ mod tests {
 		assert_eq!(proving.child_storage(child_info_1, &[64]), Ok(Some(vec![64])));
 
 		let proof = proving.extract_proof();
-		let proof_check = create_proof_check_backend::<BlakeTwo256>(
+		let proof_check = ProofCheckBackend::create_proof_check_backend(
 			in_memory_root.into(),
 			proof
 		).unwrap();

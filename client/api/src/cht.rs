@@ -37,7 +37,7 @@ use sp_state_machine::{
 
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 
-type ProvingBackend<H> = sp_state_machine::ProvingBackend<MemoryDB<H>, H>;
+type ProofCheckBackend<H> = sp_state_machine::TrieBackend<MemoryDB<H>, H>;
 
 /// The size of each CHT. This value is passed to every CHT-related function from
 /// production code. Other values are passed from tests.
@@ -143,7 +143,7 @@ pub fn check_proof<Header, Hasher>(
 		local_number,
 		remote_hash,
 		move |local_root, local_cht_key|
-			read_proof_check::<ProvingBackend<Hasher>, Hasher, _>(
+			read_proof_check::<ProofCheckBackend<Hasher>, Hasher, _>(
 				local_root,
 				remote_proof,
 				::std::iter::once(local_cht_key),

@@ -25,6 +25,7 @@ use crate::{
 	trie_backend::TrieBackend,
 	trie_backend_essence::TrieBackendStorage,
 	trie_backend_essence::ProofBackend,
+	trie_backend_essence::ProofCheckBackend,
 	UsageInfo, StorageKey, StorageValue, StorageCollection,
 };
 
@@ -47,8 +48,14 @@ pub trait Backend<H>: std::fmt::Debug
 	/// TODO EMCH remove.
 	type TrieBackendStorage: TrieBackendStorage<H>;
 
+	/// The actual proof produced.
+	type StorageProof: sp_trie::BackendStorageProof;
+
 	/// Type of proof backend.
-	type ProofBackend: ProofBackend<H>;
+	type ProofBackend: ProofBackend<H, StorageProof = Self::StorageProof>;
+
+	/// Type of proof backend.
+	type ProofCheckBackend: ProofCheckBackend<H, StorageProof = Self::StorageProof>;
 
 	/// Get keyed storage or None if there is nothing associated.
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error>;
@@ -253,7 +260,9 @@ impl<'a, T, H> Backend<H> for &'a T
 	type Error = T::Error;
 	type Transaction = T::Transaction;
 	type TrieBackendStorage = T::TrieBackendStorage;
+	type StorageProof = T::StorageProof;
 	type ProofBackend = T::ProofBackend;
+	type ProofCheckBackend = T::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
 		(*self).storage(key)

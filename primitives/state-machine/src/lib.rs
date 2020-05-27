@@ -43,7 +43,7 @@ mod trie_backend;
 mod trie_backend_essence;
 mod stats;
 
-pub use sp_trie::{trie_types::{Layout, TrieDBMut}, StorageProof, TrieMut, DBValue, MemoryDB};
+pub use sp_trie::{trie_types::{Layout, TrieDBMut}, StorageProof, TrieMut, DBValue, MemoryDB, BackendStorageProof};
 pub use testing::TestExternalities;
 pub use basic::BasicExternalities;
 pub use ext::Ext;
@@ -70,7 +70,7 @@ pub use overlayed_changes::{
 pub use proving_backend::{
 	ProofRecorder, ProvingBackend, ProvingBackendRecorder,
 };
-pub use trie_backend_essence::{TrieBackendStorage, Storage, ProofBackend};
+pub use trie_backend_essence::{TrieBackendStorage, Storage, ProofBackend, ProofCheckBackend};
 pub use trie_backend::TrieBackend;
 pub use error::{Error, ExecutionError};
 pub use in_memory_backend::new_in_mem;
@@ -461,7 +461,7 @@ pub fn prove_execution<B, H, N, Exec>(
 	method: &str,
 	call_data: &[u8],
 	runtime_code: &RuntimeCode,
-) -> Result<(Vec<u8>, <B::ProofBackend as ProofBackend<H>>::StorageProof), Box<dyn Error>>
+) -> Result<(Vec<u8>, B::StorageProof), Box<dyn Error>>
 where
 	B: Backend<H>,
 	H: Hasher,
@@ -541,14 +541,14 @@ pub fn execution_proof_check<P, H, N, Exec>(
 	runtime_code: &RuntimeCode,
 ) -> Result<Vec<u8>, Box<dyn Error>>
 where
-	P: ProofBackend<H>,
+	P: ProofCheckBackend<H>,
 	H: Hasher,
 	Exec: CodeExecutor + Clone + 'static,
 	H::Out: Ord + 'static + codec::Codec,
 	N: crate::changes_trie::BlockNumber,
 {
 	let trie_backend = P::create_proof_check_backend(root.into(), proof)?;
-	execution_proof_check_on_proof_backend::<P::ProofCheckBackend, _, N, _>(
+	execution_proof_check_on_proof_backend::<P, _, N, _>(
 		&trie_backend,
 		overlay,
 		exec,
@@ -600,7 +600,7 @@ where
 pub fn prove_read<B, H, I>(
 	backend: B,
 	keys: I,
-) -> Result<<B::ProofBackend as ProofBackend<H>>::StorageProof, Box<dyn Error>>
+) -> Result<B::StorageProof, Box<dyn Error>>
 where
 	B: Backend<H>,
 	H: Hasher,
@@ -620,7 +620,7 @@ pub fn prove_child_read<B, H, I>(
 	backend: B,
 	child_info: &ChildInfo,
 	keys: I,
-) -> Result<<B::ProofBackend as ProofBackend<H>>::StorageProof, Box<dyn Error>>
+) -> Result<B::StorageProof, Box<dyn Error>>
 where
 	B: Backend<H>,
 	H: Hasher,
@@ -681,7 +681,7 @@ pub fn read_proof_check<P, H, I>(
 	keys: I,
 ) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, Box<dyn Error>>
 where
-	P: ProofBackend<H>,
+	P: ProofCheckBackend<H>,
 	H: Hasher,
 	H::Out: Ord + Codec,
 	I: IntoIterator,
@@ -704,7 +704,7 @@ pub fn read_child_proof_check<P, H, I>(
 	keys: I,
 ) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, Box<dyn Error>>
 where
-	P: ProofBackend<H>,
+	P: ProofCheckBackend<H>,
 	H: Hasher,
 	H::Out: Ord + Codec,
 	I: IntoIterator,
@@ -761,7 +761,7 @@ mod tests {
 	use sp_core::{map, traits::{Externalities, RuntimeCode}};
 	use sp_runtime::traits::BlakeTwo256;
 
-	type ProvingBackend = super::ProvingBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
+	type ProvingBackend = super::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
 
 	#[derive(Clone)]
 	struct DummyCodeExecutor {

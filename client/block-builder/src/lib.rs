@@ -218,10 +218,8 @@ mod tests {
 	use super::*;
 	use sp_blockchain::HeaderBackend;
 	use sp_core::Blake2Hasher;
-	use sp_state_machine::{Backend, ProofBackend};
-	use substrate_test_runtime_client::{DefaultTestClientBuilderExt, TestClientBuilderExt};
-
-	type ProvingBackend<H> = sp_state_machine::ProvingBackend<sp_trie::MemoryDB<H>, H>;
+	use sp_state_machine::{Backend, ProofCheckBackend as _};
+	use substrate_test_runtime_client::{DefaultTestClientBuilderExt, TestClientBuilderExt, ProofCheckBackend};
 
 	#[test]
 	fn block_building_storage_proof_does_not_include_runtime_by_default() {
@@ -240,7 +238,7 @@ mod tests {
 
 		let proof = block.proof.expect("Proof is build on request");
 
-		let backend = ProvingBackend::<Blake2Hasher>::create_proof_check_backend(
+		let backend = ProofCheckBackend::<Blake2Hasher>::create_proof_check_backend(
 			block.storage_changes.transaction_storage_root,
 			proof,
 		).unwrap();

@@ -32,7 +32,7 @@ use sp_runtime::traits::{
 use sp_state_machine::{
 	ChangesTrieRootsStorage, ChangesTrieAnchorBlockId, ChangesTrieConfigurationRange,
 	InMemoryChangesTrieStorage, TrieBackend, read_proof_check, key_changes_proof_check_with_db,
-	read_child_proof_check, CloneableSpawn,
+	read_child_proof_check, CloneableSpawn, ProofCheckBackend,
 };
 pub use sp_state_machine::StorageProof;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
@@ -48,18 +48,15 @@ pub use sc_client_api::{
 use super::blockchain::{Blockchain};
 use super::call_executor::check_execution_proof;
 
-/// On check proof type is statically define.
-type ProvingBackend<H> = sp_state_machine::ProvingBackend<sp_trie::MemoryDB<H>, H>;
-
 /// Remote data checker.
-pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>> {
+pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>, P> {
 	blockchain: Arc<Blockchain<S>>,
 	executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
-	_hasher: PhantomData<(B, H)>,
+	_hasher: PhantomData<(B, H, P)>,
 }
 
-impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
+impl<E, H, B: BlockT, S: BlockchainStorage<B>, P> LightDataChecker<E, H, B, S, P> {
 	/// Create new light data checker.
 	pub fn new(blockchain: Arc<Blockchain<S>>, executor: E, spawn_handle: Box<dyn CloneableSpawn>) -> Self {
 		Self {
@@ -205,13 +202,14 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 	}
 }
 
-impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
+impl<E, Block, H, S, P> FetchChecker<Block, P::StorageProof> for LightDataChecker<E, H, Block, S, P>
 	where
 		Block: BlockT,
 		E: CodeExecutor + Clone + 'static,
 		H: Hasher,
 		H::Out: Ord + codec::Codec + 'static,
 		S: BlockchainStorage<Block>,
+		P: ProofCheckBackend<H> + Send + Sync,
 {
 	fn check_header_proof(
 		&self,
@@ -233,9 +231,9 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 	fn check_read_proof(
 		&self,
 		request: &RemoteReadRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P::StorageProof,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
-		read_proof_check::<ProvingBackend<H>, H, _>(
+		read_proof_check::<P, H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			request.keys.iter(),
@@ -245,13 +243,13 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 	fn check_read_child_proof(
 		&self,
 		request: &RemoteReadChildRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P::StorageProof,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
 		let child_info = match ChildType::from_prefixed_key(&request.storage_key) {
 			Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
 			None => return Err("Invalid child type".into()),
 		};
-		read_child_proof_check::<ProvingBackend<H>, H, _>(
+		read_child_proof_check::<P, H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			&child_info,
@@ -262,9 +260,9 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 	fn check_execution_proof(
 		&self,
 		request: &RemoteCallRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P::StorageProof,
 	) -> ClientResult<Vec<u8>> {
-		check_execution_proof::<ProvingBackend<H>, _, _, H>(
+		check_execution_proof::<P, _, _, H>(
 			&self.executor,
 			self.spawn_handle.clone(),
 			request,

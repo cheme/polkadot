@@ -29,6 +29,7 @@ use sp_core::traits::CodeExecutor;
 use sp_runtime::BuildStorage;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use sp_blockchain::Result as ClientResult;
+use sp_state_machine::ProofCheckBackend;
 use prometheus_endpoint::Registry;
 
 use super::call_executor::LocalCallExecutor;
@@ -93,11 +94,11 @@ pub fn new_light<B, S, RA, E>(
 }
 
 /// Create an instance of fetch data checker.
-pub fn new_fetch_checker<E, B: BlockT, S: BlockchainStorage<B>>(
+pub fn new_fetch_checker<E, B: BlockT, S: BlockchainStorage<B>, P: ProofCheckBackend<HashFor<B>>>(
 	blockchain: Arc<Blockchain<S>>,
 	executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
-) -> LightDataChecker<E, HashFor<B>, B, S>
+) -> LightDataChecker<E, HashFor<B>, B, S, P>
 	where
 		E: CodeExecutor,
 {

@@ -22,7 +22,8 @@ use crate::config::{Configuration, KeystoreConfig, PrometheusConfig, OffchainWor
 use crate::metrics::MetricsService;
 use sc_client_api::{
 	self, BlockchainEvents, backend::RemoteBackend, light::RemoteBlockchain, execution_extensions::ExtensionsFactory,
-	ExecutorProvider, CallExecutor, ForkBlocks, BadBlocks, CloneableSpawn, UsageProvider,
+	ExecutorProvider, CallExecutor, ForkBlocks, BadBlocks, CloneableSpawn, UsageProvider, StateBackend, BackendStorageProof,
+	ProofCheckBackend,
 };
 use crate::client::{Client, ClientConfig};
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedSender};
@@ -279,13 +280,13 @@ pub fn new_client<E, Block, RA>(
 
 impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	/// Start the service builder with a configuration.
-	pub fn new_full<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static>(
+	pub fn new_full<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static, TProof: BackendStorageProof>(
 		config: Configuration,
 	) -> Result<ServiceBuilder<
 		TBl,
 		TRtApi,
 		TFullClient<TBl, TRtApi, TExecDisp>,
-		Arc<OnDemand<TBl>>,
+		Arc<OnDemand<TBl, TProof>>,
 		(),
 		(),
 		BoxFinalityProofRequestBuilder<TBl>,
@@ -318,13 +319,13 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	}
 
 	/// Start the service builder with a configuration.
-	pub fn new_light<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static>(
+	pub fn new_light<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static, TProof: ProofCheckBackend<HashFor<TBl>> + Send + Sync + 'static>(
 		config: Configuration,
 	) -> Result<ServiceBuilder<
 		TBl,
 		TRtApi,
 		TLightClient<TBl, TRtApi, TExecDisp>,
-		Arc<OnDemand<TBl>>,
+		Arc<OnDemand<TBl, TProof::StorageProof>>,
 		(),
 		(),
 		BoxFinalityProofRequestBuilder<TBl>,
@@ -364,7 +365,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 		};
 		let light_blockchain = crate::client::light::new_light_blockchain(db_storage);
 		let fetch_checker = Arc::new(
-			crate::client::light::new_fetch_checker::<_, TBl, _>(
+			crate::client::light::new_fetch_checker::<_, TBl, _, TProof>(
 				light_blockchain.clone(),
 				executor.clone(),
 				Box::new(task_manager.spawn_handle()),
@@ -791,7 +792,7 @@ ServiceBuilder<
 	TBl,
 	TRtApi,
 	Client<TBackend, TExec, TBl, TRtApi>,
-	Arc<OnDemand<TBl>>,
+	Arc<OnDemand<TBl, <TBackend::State as StateBackend<HashFor<TBl>>>::StorageProof>>,
 	TSc,
 	TImpQu,
 	BoxFinalityProofRequestBuilder<TBl>,
