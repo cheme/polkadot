@@ -22,18 +22,19 @@ use codec::{Decode, Encode};
 use sp_core::{traits::RuntimeCode, storage::{ChildInfo, well_known_keys}};
 
 use crate::{
-	trie_backend::TrieBackend,
-	trie_backend_essence::TrieBackendStorage,
 	trie_backend_essence::ProofBackend,
 	trie_backend_essence::ProofCheckBackend,
 	UsageInfo, StorageKey, StorageValue, StorageCollection,
 };
 
+/// Access the state of the proof backend of a backend.
+pub type ProofBackendStateFor<B, H> = <<B as Backend<H>>::ProofBackend as ProofBackend<H>>::State;
+
 /// A state backend is used to read state data and can have changes committed
 /// to it.
 ///
 /// The clone operation (if implemented) should be cheap.
-pub trait Backend<H>: std::fmt::Debug
+pub trait Backend<H>: std::fmt::Debug + Sized
 	where
 		H: Hasher,
 		H::Out: Encode,
@@ -43,10 +44,6 @@ pub trait Backend<H>: std::fmt::Debug
 
 	/// Storage changes to be applied if committing
 	type Transaction: Consolidate + Default + Send;
-
-	/// Type of trie backend storage.
-	/// TODO EMCH remove.
-	type TrieBackendStorage: TrieBackendStorage<H>;
 
 	/// The actual proof produced.
 	type StorageProof: sp_trie::BackendStorageProof;
@@ -181,18 +178,18 @@ pub trait Backend<H>: std::fmt::Debug
 		all
 	}
 
-	/// Try convert into trie backend.
-	/// TODO EMCH as proof backend
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
-		None
-	}
-
 	/// Try convert into a proof backend.
 	/// If one do not want to consume the backend, calling on '&self' is fine
 	/// since '&Backend' implement 'Backend'.
-	/// TODO EMCH consider not returning an option (and use a noop proof backend
-	/// when needed).
-	fn as_proof_backend(self) -> Option<Self::ProofBackend>;
+	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+		self.from_proof_backend(Default::default())
+	}
+
+	/// Try convert into a proof backend.
+	/// We can optionally use a previous proof backend to avoid having to merge
+	/// proof later.
+	/// TODO rename to make it clear it is some proof backend state.
+	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend>;
 
 	/// Calculate the storage root, with given delta over what is already stored
 	/// in the backend, and produce a "transaction" that can be used to commit.
@@ -259,7 +256,6 @@ impl<'a, T, H> Backend<H> for &'a T
 {
 	type Error = T::Error;
 	type Transaction = T::Transaction;
-	type TrieBackendStorage = T::TrieBackendStorage;
 	type StorageProof = T::StorageProof;
 	type ProofBackend = T::ProofBackend;
 	type ProofCheckBackend = T::ProofCheckBackend;
@@ -342,7 +338,7 @@ impl<'a, T, H> Backend<H> for &'a T
 		(*self).usage_info()
 	}
 
-	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+	fn from_proof_backend(self, _previous: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend> {
 		// cannot move out of reference, consider cloning or
 		// if needed.
 		None

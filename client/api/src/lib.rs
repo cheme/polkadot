@@ -37,7 +37,7 @@ pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
 
-pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn, ProofCheckBackend};
+pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn, ProofCheckBackend, ProofBackendStateFor};
 use sp_runtime::traits::HashFor;
 
 /// Trie backend proof check.

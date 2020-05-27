@@ -94,7 +94,7 @@ pub struct Proposal<Block: BlockT, Transaction> {
 	/// The block that was build.
 	pub block: Block,
 	/// Optional proof that was recorded while building the block.
-	pub proof: Option<sp_state_machine::StorageProof>,
+	pub encoded_proof: Option<Vec<u8>>,
 	/// The storage changes while building this block.
 	pub storage_changes: sp_state_machine::StorageChanges<Transaction, HashFor<Block>, NumberFor<Block>>,
 }

@@ -29,8 +29,8 @@ use sp_core::ChangesTrieConfiguration;
 use sp_core::storage::{well_known_keys, ChildInfo};
 use sp_core::offchain::storage::InMemOffchainStorage;
 use sp_state_machine::{
-	Backend as StateBackend, TrieBackend, InMemoryBackend, ChangesTrieTransaction,
-	StorageCollection, ChildStorageCollection,
+	Backend as StateBackend, InMemoryBackend, ChangesTrieTransaction,
+	StorageCollection, ChildStorageCollection, ProofBackendStateFor,
 };
 use sp_runtime::{generic::BlockId, Justification, Storage};
 use sp_runtime::traits::{Block as BlockT, NumberFor, Zero, Header, HashFor};
@@ -376,7 +376,6 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 {
 	type Error = ClientError;
 	type Transaction = <InMemoryBackend<H> as StateBackend<H>>::Transaction;
-	type TrieBackendStorage = <InMemoryBackend<H> as StateBackend<H>>::TrieBackendStorage;
 	type StorageProof = <InMemoryBackend<H> as StateBackend<H>>::StorageProof;
 	type ProofBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofBackend;
 	type ProofCheckBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofCheckBackend;
@@ -511,16 +510,9 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 		sp_state_machine::UsageInfo::empty()
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, H>> {
+	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend> {
 		match self {
-			GenesisOrUnavailableState::Genesis(ref mut state) => state.as_trie_backend(),
-			GenesisOrUnavailableState::Unavailable => None,
-		}
-	}
-
-	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
-		match self {
-			GenesisOrUnavailableState::Genesis(state) => state.as_proof_backend(),
+			GenesisOrUnavailableState::Genesis(state) => state.from_proof_backend(previous),
 			GenesisOrUnavailableState::Unavailable => None,
 		}
 	}

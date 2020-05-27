@@ -23,13 +23,13 @@ use sp_runtime::{
 	generic::BlockId, traits::{Block as BlockT, HashFor},
 };
 use sp_state_machine::{
-	OverlayedChanges, ExecutionManager, ExecutionStrategy,
+	OverlayedChanges, ExecutionManager, ExecutionStrategy, ProofBackendStateFor,
 };
 use sc_executor::{RuntimeVersion, NativeVersion};
 use sp_externalities::Extensions;
 use sp_core::{NativeOrEncoded,offchain::storage::OffchainOverlayedChanges};
 
-use sp_api::{ProofRecorder, InitializeBlock, StorageTransactionCache};
+use sp_api::{InitializeBlock, StorageTransactionCache};
 use crate::execution_extensions::ExecutionExtensions;
 
 /// Executor Provider
@@ -92,7 +92,7 @@ pub trait CallExecutor<B: BlockT> {
 		initialize_block: InitializeBlock<'a, B>,
 		execution_manager: ExecutionManager<EM>,
 		native_call: Option<NC>,
-		proof_recorder: &Option<ProofRecorder<B>>,
+		recorder: Option<ProofBackendStateFor<<Self::Backend as crate::backend::Backend<B>>::State, HashFor<B>>>,
 		extensions: Option<Extensions>,
 	) -> sp_blockchain::Result<NativeOrEncoded<R>> where ExecutionManager<EM>: Clone;
 
@@ -104,7 +104,6 @@ pub trait CallExecutor<B: BlockT> {
 	/// Execute a call to a contract on top of given state, gathering execution proof.
 	///
 	/// No changes are made.
-	/// TODO really consider encoded proof
 	fn prove_at_state<S: sp_state_machine::Backend<HashFor<B>>>(
 		&self,
 		state: S,
@@ -130,7 +129,7 @@ pub trait CallExecutor<B: BlockT> {
 		method: &str,
 		call_data: &[u8]
 	) -> Result<(Vec<u8>, P::StorageProof), sp_blockchain::Error>;
-	
+
 	/// Get runtime version if supported.
 	fn native_runtime_version(&self) -> Option<&NativeVersion>;
 }

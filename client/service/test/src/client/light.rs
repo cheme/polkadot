@@ -36,11 +36,11 @@ use parking_lot::Mutex;
 use substrate_test_runtime_client::{
 	runtime::{Hash, Block, Header}, TestClient, ClientBlockImportExt, ProofCheckBackend,
 };
-use sp_api::{InitializeBlock, StorageTransactionCache, ProofRecorder, OffchainOverlayedChanges};
+use sp_api::{InitializeBlock, StorageTransactionCache, OffchainOverlayedChanges};
 use sp_consensus::{BlockOrigin};
 use sc_executor::{NativeExecutor, WasmExecutionMethod, RuntimeVersion, NativeVersion};
 use sp_core::{H256, tasks::executor as tasks_executor, NativeOrEncoded};
-use sc_client_api::{blockchain::Info, backend::NewBlockState, Backend as ClientBackend, ProofProvider, in_mem::{Backend as InMemBackend, Blockchain as InMemoryBlockchain}, AuxStore, Storage, CallExecutor, cht, ExecutionStrategy, BlockImportOperation, RemoteCallRequest, StorageProvider, ChangesProof, RemoteBodyRequest, RemoteReadRequest, RemoteChangesRequest, FetchChecker, RemoteReadChildRequest, RemoteHeaderRequest};
+use sc_client_api::{blockchain::Info, backend::NewBlockState, Backend as ClientBackend, ProofProvider, in_mem::{Backend as InMemBackend, Blockchain as InMemoryBlockchain}, AuxStore, Storage, CallExecutor, cht, ExecutionStrategy, BlockImportOperation, RemoteCallRequest, StorageProvider, ChangesProof, RemoteBodyRequest, RemoteReadRequest, RemoteChangesRequest, FetchChecker, RemoteReadChildRequest, RemoteHeaderRequest, ProofBackendStateFor};
 use sp_externalities::Extensions;
 use sc_block_builder::BlockBuilderProvider;
 use sp_blockchain::{
@@ -228,7 +228,7 @@ impl CallExecutor<Block> for DummyCallExecutor {
 		_initialize_block: InitializeBlock<'a, Block>,
 		_execution_manager: ExecutionManager<EM>,
 		_native_call: Option<NC>,
-		_proof_recorder: &Option<ProofRecorder<Block>>,
+		_proof_recorder: Option<ProofBackendStateFor<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, HashFor<Block>>>,
 		_extensions: Option<Extensions>,
 	) -> ClientResult<NativeOrEncoded<R>> where ExecutionManager<EM>: Clone {
 		unreachable!()

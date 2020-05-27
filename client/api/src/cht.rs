@@ -119,7 +119,7 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 		.collect::<Vec<_>>();
 	let storage = InMemoryBackend::<Hasher>::default().update(vec![(None, transaction)]);
 	let proof_backend = storage.as_proof_backend()
-		.expect("InMemoryState::as_trie_backend always returns Some; qed");
+		.expect("InMemoryState::as_proof_backend always returns Some; qed");
 	prove_read_on_proof_backend(
 		&proof_backend,
 		blocks.into_iter().map(|number| encode_cht_key(number)),

@@ -355,8 +355,15 @@ pub trait ProofBackend<H>: crate::backend::Backend<H>
 		H: Hasher,
 		H::Out: Encode,
 {
+	/// State of a backend.
+	type State: Default + Send + Sync + Clone;
+
 	/// Extract proof when run.
 	fn extract_proof(&self) -> Self::StorageProof;
+
+	/// Extract proof when run.
+	/// TODO probably useless (state is sync)
+	fn current_state(self) -> Self::State;
 }
 
 /// Backend used to produce proof.
@@ -372,7 +379,6 @@ pub trait ProofCheckBackend<H>: Sized + crate::backend::Backend<H>
 		proof: Self::StorageProof,
 	) -> Result<Self, Box<dyn crate::Error>>;
 }
-
 
 // This implementation is used by normal storage trie clients.
 impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {

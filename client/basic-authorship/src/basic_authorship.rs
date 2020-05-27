@@ -22,7 +22,7 @@
 
 use std::{time, sync::Arc};
 use sc_client_api::backend;
-use codec::Decode;
+use codec::{Encode, Decode};
 use sp_consensus::{evaluation, Proposal, RecordProof};
 use sp_inherents::InherentData;
 use log::{error, info, debug, trace, warn};
@@ -330,7 +330,8 @@ impl<A, B, Block, C> ProposerInner<B, Block, C, A>
 			error!("Failed to evaluate authored block: {:?}", err);
 		}
 
-		Ok(Proposal { block, proof, storage_changes })
+		let encoded_proof = proof.as_ref().map(Encode::encode);
+		Ok(Proposal { block, encoded_proof, storage_changes })
 	}
 }
 

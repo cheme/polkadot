@@ -33,7 +33,7 @@ use sp_runtime::{
 };
 use sp_blockchain::{ApplyExtrinsicFailed, Error};
 use sp_core::ExecutionContext;
-use sp_api::{Core, ApiExt, ApiErrorFor, ApiRef, ProvideRuntimeApi, StorageChanges, StorageProof};
+use sp_api::{Core, ApiExt, ApiErrorFor, ApiRef, ProvideRuntimeApi, StorageChanges};
 use sp_consensus::RecordProof;
 
 pub use sp_block_builder::BlockBuilder as BlockBuilderApi;
@@ -52,12 +52,12 @@ pub struct BuiltBlock<Block: BlockT, StateBackend: backend::StateBackend<HashFor
 	/// The changes that need to be applied to the backend to get the state of the build block.
 	pub storage_changes: StorageChanges<StateBackend, Block>,
 	/// An optional proof that was recorded while building the block.
-	pub proof: Option<StorageProof>,
+	pub proof: Option<<StateBackend as backend::StateBackend<HashFor<Block>>>::StorageProof>,
 }
 
 impl<Block: BlockT, StateBackend: backend::StateBackend<HashFor<Block>>> BuiltBlock<Block, StateBackend> {
 	/// Convert into the inner values.
-	pub fn into_inner(self) -> (Block, StorageChanges<StateBackend, Block>, Option<StorageProof>) {
+	pub fn into_inner(self) -> (Block, StorageChanges<StateBackend, Block>, Option<<StateBackend as backend::StateBackend<HashFor<Block>>>::StorageProof>) {
 		(self.block, self.storage_changes, self.proof)
 	}
 }
@@ -190,8 +190,13 @@ where
 			),
 		);
 
-		let proof = self.api.extract_proof();
+		let proof_recorder = self.api.extract_proof_recorder();
 
+		let state = self.backend.state_at(self.block_id)?;
+		let proof = proof_recorder.and_then(|backend| {
+			use backend::{StateBackend, ProofBackend};
+			state.from_proof_backend(backend).map(|backend| backend.extract_proof())
+		});
 		let state = self.backend.state_at(self.block_id)?;
 		let changes_trie_state = backend::changes_tries_state_at_block(
 			&self.block_id,

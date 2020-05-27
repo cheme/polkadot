@@ -25,8 +25,8 @@ use sp_runtime::traits::{Block as BlockT, Header, HashFor, NumberFor};
 use sp_core::hexdisplay::HexDisplay;
 use sp_core::storage::ChildInfo;
 use sp_state_machine::{
-	backend::Backend as StateBackend, TrieBackend, StorageKey, StorageValue,
-	StorageCollection, ChildStorageCollection,
+	backend::Backend as StateBackend, StorageKey, StorageValue,
+	StorageCollection, ChildStorageCollection, ProofBackendStateFor,
 };
 use log::trace;
 use crate::{utils::Meta, stats::StateUsageStats};
@@ -494,7 +494,6 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for CachingState<S, B> {
 	type Error = S::Error;
 	type Transaction = S::Transaction;
-	type TrieBackendStorage = S::TrieBackendStorage;
 	type StorageProof = S::StorageProof;
 	type ProofBackend = S::ProofBackend;
 	type ProofCheckBackend = S::ProofCheckBackend;
@@ -657,12 +656,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		self.state.child_keys(child_info, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, HashFor<B>>> {
-		self.state.as_trie_backend()
-	}
-
-	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
-		self.state.as_proof_backend()
+	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
+		self.state.from_proof_backend(previous)
 	}
 
 	fn register_overlay_stats(&mut self, stats: &sp_state_machine::StateMachineStats) {
@@ -745,7 +740,6 @@ impl<S, B: BlockT> std::fmt::Debug for SyncingCachingState<S, B> {
 impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for SyncingCachingState<S, B> {
 	type Error = S::Error;
 	type Transaction = S::Transaction;
-	type TrieBackendStorage = S::TrieBackendStorage;
 	type StorageProof = S::StorageProof;
 	type ProofBackend = S::ProofBackend;
 	type ProofCheckBackend = S::ProofCheckBackend;
@@ -849,13 +843,6 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 		self.caching_state().child_keys(child_info, prefix)
 	}
 
-	fn as_trie_backend(&mut self) -> Option<&TrieBackend<Self::TrieBackendStorage, HashFor<B>>> {
-		self.caching_state
-			.as_mut()
-			.expect("`caching_state` is valid for the lifetime of the object; qed")
-			.as_trie_backend()
-	}
-
 	fn register_overlay_stats(&mut self, stats: &sp_state_machine::StateMachineStats) {
 		self.caching_state().register_overlay_stats(stats);
 	}
@@ -864,8 +851,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 		self.caching_state().usage_info()
 	}
 
-	fn as_proof_backend(mut self) -> Option<Self::ProofBackend> {
-		self.sync().and_then(|s| s.as_proof_backend())
+	fn from_proof_backend(mut self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
+		self.sync().and_then(|s| s.from_proof_backend(previous))
 	}
 }
 

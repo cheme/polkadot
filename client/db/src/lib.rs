@@ -76,7 +76,7 @@ use sp_runtime::traits::{
 use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
 	StorageCollection, ChildStorageCollection,
-	backend::Backend as StateBackend, StateMachineStats,
+	backend::Backend as StateBackend, StateMachineStats, ProofBackendStateFor,
 };
 use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
@@ -144,7 +144,6 @@ impl<Block: BlockT> std::fmt::Debug for RefTrackingState<Block> {
 impl<B: BlockT> StateBackend<HashFor<B>> for RefTrackingState<B> {
 	type Error =  <DbState<B> as StateBackend<HashFor<B>>>::Error;
 	type Transaction = <DbState<B> as StateBackend<HashFor<B>>>::Transaction;
-	type TrieBackendStorage = <DbState<B> as StateBackend<HashFor<B>>>::TrieBackendStorage;
 	type StorageProof = <DbState<B> as StateBackend<HashFor<B>>>::StorageProof;
 	type ProofBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofBackend;
 	type ProofCheckBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofCheckBackend;
@@ -248,17 +247,11 @@ impl<B: BlockT> StateBackend<HashFor<B>> for RefTrackingState<B> {
 		self.state.child_keys(child_info, prefix)
 	}
 
-	fn as_trie_backend(&mut self)
-		-> Option<&sp_state_machine::TrieBackend<Self::TrieBackendStorage, HashFor<B>>>
-	{
-		self.state.as_trie_backend()
-	}
-
-	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
 		let root = self.state.root().clone();
 		let storage = self.state.backend_storage().clone();
 		let state = sp_state_machine::TrieBackend::new(storage, root);
-		state.as_proof_backend()
+		state.from_proof_backend(previous)
 	}
 
 	fn register_overlay_stats(&mut self, stats: &StateMachineStats) {

@@ -22,14 +22,14 @@ use sp_runtime::{
 };
 use sp_state_machine::{
 	self, OverlayedChanges, Ext, ExecutionManager, StateMachine, ExecutionStrategy,
-	backend::Backend as _,
 };
 use sc_executor::{RuntimeVersion, RuntimeInfo, NativeVersion};
 use sp_externalities::Extensions;
 use sp_core::{NativeOrEncoded, NeverNativeValue, traits::CodeExecutor, offchain::storage::OffchainOverlayedChanges};
-use sp_api::{ProofRecorder, InitializeBlock, StorageTransactionCache};
+use sp_api::{InitializeBlock, StorageTransactionCache};
 use sc_client_api::{backend, call_executor::CallExecutor, CloneableSpawn};
 use super::client::ClientConfig;
+use backend::{StateBackend, ProofBackendStateFor};
 
 /// Call executor that executes methods locally, querying all required
 /// data from local backend.
@@ -139,7 +139,7 @@ where
 		initialize_block: InitializeBlock<'a, Block>,
 		execution_manager: ExecutionManager<EM>,
 		native_call: Option<NC>,
-		recorder: &Option<ProofRecorder<Block>>,
+		recorder: Option<ProofBackendStateFor<B::State, HashFor<Block>>>,
 		extensions: Option<Extensions>,
 	) -> Result<NativeOrEncoded<R>, sp_blockchain::Error> where ExecutionManager<EM>: Clone {
 		match initialize_block {
@@ -154,27 +154,24 @@ where
 		let changes_trie_state = backend::changes_tries_state_at_block(at, self.backend.changes_trie_storage())?;
 		let mut storage_transaction_cache = storage_transaction_cache.map(|c| c.borrow_mut());
 
-		let mut state = self.backend.state_at(*at)?;
+		let state = self.backend.state_at(*at)?;
 
 		let changes = &mut *changes.borrow_mut();
 		let offchain_changes = &mut *offchain_changes.borrow_mut();
 
 		match recorder {
 			Some(recorder) => {
-				let trie_state = state.as_trie_backend()
-					.ok_or_else(||
-						Box::new(sp_state_machine::ExecutionError::UnableToGenerateProof) as Box<dyn sp_state_machine::Error>
-					)?;
-
-				let state_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&trie_state);
+				let state_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&state);
 				// It is important to extract the runtime code here before we create the proof
 				// recorder.
 				let runtime_code = state_runtime_code.runtime_code()?;
 
-				let backend = sp_state_machine::ProvingBackend::new_with_recorder(
-					trie_state,
-					recorder.clone(),
-				);
+				let state = self.backend.state_at(*at)?;
+
+				let backend = state.from_proof_backend(recorder)
+					.ok_or_else(||
+						Box::new(sp_state_machine::ExecutionError::UnableToGenerateProof) as Box<dyn sp_state_machine::Error>
+					)?;
 
 				let mut state_machine = StateMachine::new(
 					&backend,

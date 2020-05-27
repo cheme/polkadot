@@ -30,8 +30,8 @@ pub use sp_trie::Recorder;
 pub use sp_trie::trie_types::{Layout, TrieError};
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage, ProofBackend};
-use crate::Backend;
-use std::collections::HashMap;
+use crate::{Backend, ProofBackendStateFor};
+use std::collections::{HashMap, hash_map::Entry};
 use crate::DBValue;
 use sp_core::storage::ChildInfo;
 
@@ -116,6 +116,27 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 /// data.
 pub type ProofRecorder<H> = Arc<RwLock<HashMap<<H as Hasher>::Out, Option<DBValue>>>>;
 
+/// Try merging two proof recorder, fails when both recorder records different entries.
+fn merge_proof_recorder<H: Hasher>(first: ProofRecorder<H>, second: ProofRecorder<H>) -> Option<ProofRecorder<H>> {
+	{
+		let mut first = first.write();
+		let mut second = second.write();
+		for (key, value) in std::mem::replace(&mut *second, Default::default()) {
+			match first.entry(key) {
+				Entry::Occupied(entry) => {
+					if entry.get() != &value {
+						return None;
+					}
+				},
+				Entry::Vacant(entry) => {
+					entry.insert(value);
+				},
+			}
+		}
+	}
+	Some(first)
+}
+
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
 pub struct ProvingBackend<S: TrieBackendStorage<H>, H: Hasher> (
@@ -137,8 +158,7 @@ impl<'a, S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<&'a S, H>
 		Self::new_with_recorder(backend, proof_recorder)
 	}
 
-	/// Create new proving backend with the given recorder.
-	pub fn new_with_recorder(
+	fn new_with_recorder(
 		backend: &'a TrieBackend<S, H>,
 		proof_recorder: ProofRecorder<H>,
 	) -> Self {
@@ -166,6 +186,12 @@ impl<S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<S, H>
 			proof_recorder,
 		};
 		ProvingBackend(TrieBackend::new(recorder, root))
+	}
+
+	/// Extract current recording state.
+	/// This is sharing a rc over a sync reference.
+	pub fn extract_recorder(&self) -> ProofRecorder<H> {
+		self.0.backend_storage().proof_recorder.clone()
 	}
 }
 
@@ -198,6 +224,8 @@ impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
 		H: Hasher,
 		H::Out: Ord + Codec,
 {
+	type State = ProofRecorder<H>;
+
 	fn extract_proof(&self) -> Self::StorageProof {
 		let trie_nodes = self.0.essence().backend_storage().proof_recorder
 			.read()
@@ -205,6 +233,10 @@ impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
 			.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
 			.collect();
 		StorageProof::new(trie_nodes)
+	}
+
+	fn current_state(self) -> Self::State {
+		self.0.into_storage().proof_recorder
 	}
 }
 
@@ -216,7 +248,6 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 {
 	type Error = String;
 	type Transaction = S::Overlay;
-	type TrieBackendStorage = S;
 	type StorageProof = sp_trie::StorageProof;
 	type ProofBackend = Self;
 	type ProofCheckBackend = TrieBackend<MemoryDB<H>, H>;
@@ -312,8 +343,16 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 
 	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
 		Some(self)
-		// self.as_trie_backend().map(|t| crate::proving_backend::ProvingBackend::new(t))
-		// Note that type differs.
+	}
+
+	fn from_proof_backend(self, previous_recorder: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend> {
+		let root = self.0.essence().root().clone();
+		let storage = self.0.into_storage();
+		let current_recorder = storage.proof_recorder;
+		let backend = storage.backend;
+		merge_proof_recorder::<H>(current_recorder, previous_recorder).map(|merged_recorder|
+			ProvingBackend::<S, H>::from_backend_with_recorder(backend, root, merged_recorder)
+		)
 	}
 }
 
@@ -376,16 +415,17 @@ mod tests {
 	fn proof_recorded_and_checked() {
 		let contents = (0..64).map(|i| (vec![i], Some(vec![i]))).collect::<Vec<_>>();
 		let in_memory = InMemoryBackend::<BlakeTwo256>::default();
-		let mut in_memory = in_memory.update(vec![(None, contents)]);
+		let in_memory = in_memory.update(vec![(None, contents)]);
 		let in_memory_root = in_memory.storage_root(::std::iter::empty()).0;
 		(0..64).for_each(|i| assert_eq!(in_memory.storage(&[i]).unwrap().unwrap(), vec![i]));
 
-		let trie = in_memory.as_trie_backend().unwrap();
+		let trie = &in_memory;
 		let trie_root = trie.storage_root(::std::iter::empty()).0;
 		assert_eq!(in_memory_root, trie_root);
 		(0..64).for_each(|i| assert_eq!(trie.storage(&[i]).unwrap().unwrap(), vec![i]));
 
-		let proving = ProvingBackend::new(trie);
+		// clone to avoid &TrieBackend implementation
+		let proving = trie.clone().as_proof_backend().unwrap();
 		assert_eq!(proving.storage(&[42]).unwrap().unwrap(), vec![42]);
 
 		let proof = proving.extract_proof();
@@ -408,7 +448,7 @@ mod tests {
 				(10..15).map(|i| (vec![i], Some(vec![i]))).collect()),
 		];
 		let in_memory = InMemoryBackend::<BlakeTwo256>::default();
-		let mut in_memory = in_memory.update(contents);
+		let in_memory = in_memory.update(contents);
 		let child_storage_keys = vec![child_info_1.to_owned(), child_info_2.to_owned()];
 		let in_memory_root = in_memory.full_storage_root::<_, Vec<_>, _>(
 			::std::iter::empty(),
@@ -427,7 +467,7 @@ mod tests {
 			vec![i]
 		));
 
-		let trie = in_memory.as_trie_backend().unwrap();
+		let trie = &in_memory;
 		let trie_root = trie.storage_root(::std::iter::empty()).0;
 		assert_eq!(in_memory_root, trie_root);
 		(0..64).for_each(|i| assert_eq!(
@@ -435,7 +475,7 @@ mod tests {
 			vec![i]
 		));
 
-		let proving = ProvingBackend::new(trie);
+		let proving = trie.clone().as_proof_backend().unwrap();
 		assert_eq!(proving.storage(&[42]).unwrap().unwrap(), vec![42]);
 
 		let proof = proving.extract_proof();

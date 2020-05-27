@@ -30,11 +30,12 @@ use sp_externalities::Extensions;
 use sp_state_machine::{
 	self, Backend as StateBackend, OverlayedChanges, ExecutionStrategy,
 	execution_proof_check_on_proof_backend, ExecutionManager, CloneableSpawn,
+	ProofBackendStateFor,
 };
 use hash_db::Hasher;
 use sp_trie::BackendStorageProof;
 
-use sp_api::{ProofRecorder, InitializeBlock, StorageTransactionCache};
+use sp_api::{InitializeBlock, StorageTransactionCache};
 
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 
@@ -115,7 +116,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 		initialize_block: InitializeBlock<'a, Block>,
 		_manager: ExecutionManager<EM>,
 		native_call: Option<NC>,
-		recorder: &Option<ProofRecorder<Block>>,
+		_recorder: Option<ProofBackendStateFor<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, HashFor<Block>>>,
 		extensions: Option<Extensions>,
 	) -> ClientResult<NativeOrEncoded<R>> where ExecutionManager<EM>: Clone {
 		// there's no actual way/need to specify native/wasm execution strategy on light node
@@ -142,7 +143,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 				initialize_block,
 				ExecutionManager::NativeWhenPossible,
 				native_call,
-				recorder,
+				None,
 				extensions,
 			).map_err(|e| ClientError::Execution(Box::new(e.to_string()))),
 			false => Err(ClientError::NotAvailableOnLightClient),

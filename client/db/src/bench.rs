@@ -26,7 +26,7 @@ use sp_trie::{MemoryDB, prefixed_key};
 use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use sp_runtime::Storage;
-use sp_state_machine::{DBValue, backend::Backend as StateBackend};
+use sp_state_machine::{DBValue, backend::Backend as StateBackend, ProofBackendStateFor};
 use kvdb::{KeyValueDB, DBTransaction};
 use crate::storage_cache::{CachingState, SharedCache, new_shared_cache};
 
@@ -117,7 +117,6 @@ fn state_err() -> String {
 impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 	type Error =  <DbState<B> as StateBackend<HashFor<B>>>::Error;
 	type Transaction = <DbState<B> as StateBackend<HashFor<B>>>::Transaction;
-	type TrieBackendStorage = <DbState<B> as StateBackend<HashFor<B>>>::TrieBackendStorage;
 	type StorageProof = <DbState<B> as StateBackend<HashFor<B>>>::StorageProof;
 	type ProofBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofBackend;
 	type ProofCheckBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofCheckBackend;
@@ -228,12 +227,6 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 		self.state.borrow().as_ref().map_or(Default::default(), |s| s.child_keys(child_info, prefix))
 	}
 
-	fn as_trie_backend(&mut self)
-		-> Option<&sp_state_machine::TrieBackend<Self::TrieBackendStorage, HashFor<B>>>
-	{
-		None
-	}
-
 	fn commit(&self, storage_root: <HashFor<B> as Hasher>::Out, mut transaction: Self::Transaction)
 		-> Result<(), Self::Error>
 	{
@@ -287,8 +280,8 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 		self.state.borrow().as_ref().map_or(sp_state_machine::UsageInfo::empty(), |s| s.usage_info())
 	}
 
-	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
-		self.state.borrow_mut().take().and_then(|s| s.as_proof_backend())
+	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
+		self.state.borrow_mut().take().and_then(|s| s.from_proof_backend(previous))
 	}
 }
 
