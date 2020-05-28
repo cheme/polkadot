@@ -28,7 +28,7 @@ use substrate_test_runtime_client::{
 	BlockBuilderExt, DefaultTestClientBuilderExt, TestClientBuilderExt, ClientExt,
 };
 use sc_client_api::{
-	StorageProvider, BlockBackend, in_mem, BlockchainEvents,
+	StorageProvider, BlockBackend, in_mem, BlockchainEvents,TrieStateBackend,
 };
 use sc_client_db::{Backend, DatabaseSettings, DatabaseSettingsSrc, PruningMode};
 use sc_block_builder::BlockBuilderProvider;
@@ -1270,7 +1270,7 @@ fn doesnt_import_blocks_that_revert_finality() {
 
 	// we need to run with archive pruning to avoid pruning non-canonical
 	// states
-	let backend = Arc::new(Backend::new(
+	let backend = Arc::new(Backend::<_, TrieStateBackend<Block>>::new(
 		DatabaseSettings {
 			state_cache_size: 1 << 20,
 			state_cache_child_ratio: None,
@@ -1471,7 +1471,7 @@ fn returns_status_for_pruned_blocks() {
 
 	// set to prune after 1 block
 	// states
-	let backend = Arc::new(Backend::new(
+	let backend = Arc::new(Backend::<_, TrieStateBackend<Block>>::new(
 		DatabaseSettings {
 			state_cache_size: 1 << 20,
 			state_cache_child_ratio: None,
@@ -1800,4 +1800,3 @@ fn cleans_up_closed_notification_sinks_on_block_import() {
 	assert_eq!(client.import_notification_sinks().lock().len(), 0);
 	assert_eq!(client.finality_notification_sinks().lock().len(), 0);
 }
-

@@ -27,7 +27,7 @@ pub use substrate_test_client::*;
 pub type Executor = sc_executor::NativeExecutor<node_executor::Executor>;
 
 /// Default backend type.
-pub type Backend = sc_client_db::Backend<node_primitives::Block>;
+pub type Backend = sc_client_db::Backend<node_primitives::Block, DbState<node_primitives::Block>>;
 
 /// Test client type.
 pub type Client = client::Client<

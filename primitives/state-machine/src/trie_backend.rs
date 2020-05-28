@@ -24,6 +24,7 @@ use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use sp_core::storage::{ChildInfo, ChildType};
 use codec::{Codec, Encode, Decode};
 use crate::{
+	backend::InstantiableStateBackend,
 	StorageKey, StorageValue, Backend, ProofCheckBackend, ProofBackendStateFor,
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 };
@@ -272,6 +273,23 @@ impl<H: Hasher> ProofCheckBackend<H> for TrieBackend<crate::MemoryDB<H>, H> wher
 		} else {
 			Err(Box::new(crate::ExecutionError::InvalidProof))
 		}
+	}
+}
+
+impl<S: TrieBackendStorage<H>, H: Hasher> InstantiableStateBackend<H> for TrieBackend<S, H>
+	where
+		H::Out: Ord + Codec,
+{
+	type Storage = S;
+
+	fn new(storage: Self::Storage, state: H::Out) -> Self {
+		TrieBackend::new(storage, state)
+	}
+
+	fn extract_state(self) -> (Self::Storage, H::Out) {
+		let root = self.essence().root().clone();
+		let storage = self.into_storage();
+		(storage, root)
 	}
 }
 

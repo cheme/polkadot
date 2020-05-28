@@ -350,6 +350,7 @@ impl<'a, H: Hasher, S: TrieBackendStorage<H>> TrieBackendStorage<H> for &'a S {
 
 /// Backend used to produce proof.
 /// TODO move trait location TODO rename ProofRegisterBackend
+/// TODO consider making it an instantiable backend (state is similar?)
 pub trait ProofBackend<H>: crate::backend::Backend<H>
 	where
 		H: Hasher,
@@ -386,6 +387,40 @@ impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {
 
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
 		Storage::<H>::get(self.deref(), key, prefix)
+	}
+}
+
+impl<H: Hasher> crate::backend::HashDBNodesTransaction<Vec<u8>, DBValue> for PrefixedMemoryDB<H> {
+	fn extract_changes(mut self, prefix_keys: bool) -> (Vec<(Vec<u8>, DBValue)>, Vec<Vec<u8>>) {
+		// this code originates from client/db/src/lib.rs
+		// The rc adding of key is rather 
+		let mut inserted = Vec::new();
+		let mut deleted = Vec::new();
+		for (mut key, (val, rc)) in self.drain() {
+			if !prefix_keys {
+				// Strip prefix
+				key.drain(0 .. key.len() - H::LENGTH);
+			};
+			if rc > 0 {
+				if rc == 1 {
+					inserted.push((key, val.to_vec()));
+				} else {
+					inserted.push((key.clone(), val.to_vec()));
+					for _ in 0 .. rc - 1 {
+						inserted.push((key.clone(), Default::default()));
+					}
+				}
+			} else if rc < 0 {
+				if rc == -1 {
+					deleted.push(key);
+				} else {
+					for _ in 0 .. -rc {
+						deleted.push(key.clone());
+					}
+				}
+			}
+		}
+		(inserted, deleted)
 	}
 }
 

@@ -30,6 +30,14 @@ use crate::{
 /// Access the state of the proof backend of a backend.
 pub type ProofBackendStateFor<B, H> = <<B as Backend<H>>::ProofBackend as ProofBackend<H>>::State;
 
+/// Transaction containing a set of key values updates.
+pub trait HashDBNodesTransaction<K, V> {
+	/// First pair element is new values, and second is deleted keys.
+	/// `prefix_keys` indicate if keys with prefixes should be use, this is mainly
+	/// for trie_db where this is used for some backends.
+	fn extract_changes(self, prefix_keys: bool) -> (Vec<(K, V)>, Vec<K>);
+}
+
 /// A state backend is used to read state data and can have changes committed
 /// to it.
 ///
@@ -246,6 +254,22 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	fn commit(&self, _storage_root: H::Out, _transaction: Self::Transaction) -> Result<(), Self::Error> {
 		unimplemented!()
 	}
+}
+
+/// Backend that can be instantiated from a few elements.
+pub trait InstantiableStateBackend<H>: Backend<H>
+	where
+		H: Hasher,
+		H::Out: Encode,
+{
+	/// Storage to use to instantiate.
+	type Storage;
+
+	/// Instantiation method.
+	fn new(storage: Self::Storage, state: H::Out) -> Self;
+
+	/// Extract state out of the backend.
+	fn extract_state(self) -> (Self::Storage, H::Out);
 }
 
 impl<'a, T, H> Backend<H> for &'a T

@@ -527,6 +527,7 @@ mod tests {
 	use sc_client_api::backend::{
 		Backend as ClientBackend, NewBlockState, BlockImportOperation, PrunableStateChangesTrieStorage,
 	};
+	use sc_client_api::TrieStateBackend;
 	use sp_blockchain::HeaderBackend as BlockchainHeaderBackend;
 	use sp_core::H256;
 	use sp_runtime::testing::{Digest, Header};
@@ -541,7 +542,7 @@ mod tests {
 	}
 
 	fn insert_header_with_configuration_change(
-		backend: &Backend<Block>,
+		backend: &Backend<Block, TrieStateBackend<Block>>,
 		number: u64,
 		parent_hash: H256,
 		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
@@ -581,10 +582,10 @@ mod tests {
 
 	#[test]
 	fn changes_trie_storage_works() {
-		let backend = Backend::<Block>::new_test(1000, 100);
+		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1000, 100);
 		backend.changes_tries_storage.meta.write().finalized_number = 1000;
 
-		let check_changes = |backend: &Backend<Block>, block: u64, changes: Vec<(Vec<u8>, Vec<u8>)>| {
+		let check_changes = |backend: &Backend<Block, TrieStateBackend<Block>>, block: u64, changes: Vec<(Vec<u8>, Vec<u8>)>| {
 			let (changes_root, mut changes_trie_update) = prepare_changes(changes);
 			let anchor = sp_state_machine::ChangesTrieAnchorBlockId {
 				hash: backend.blockchain().header(BlockId::Number(block)).unwrap().unwrap().hash(),
@@ -617,7 +618,7 @@ mod tests {
 
 	#[test]
 	fn changes_trie_storage_works_with_forks() {
-		let backend = Backend::<Block>::new_test(1000, 100);
+		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1000, 100);
 
 		let changes0 = vec![(b"k0".to_vec(), b"v0".to_vec())];
 		let changes1 = vec![(b"k1".to_vec(), b"v1".to_vec())];
@@ -673,7 +674,7 @@ mod tests {
 
 	#[test]
 	fn changes_tries_are_pruned_on_finalization() {
-		let mut backend = Backend::<Block>::new_test(1000, 100);
+		let mut backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1000, 100);
 		backend.changes_tries_storage.min_blocks_to_keep = Some(8);
 
 		let parent_hash = |number| {
@@ -823,7 +824,7 @@ mod tests {
 
 	#[test]
 	fn changes_tries_configuration_is_updated_on_block_insert() {
-		let backend = Backend::<Block>::new_test(1000, 100);
+		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1000, 100);
 
 		// configurations at blocks
 		let config_at_1 = Some(ChangesTrieConfiguration {
@@ -884,7 +885,7 @@ mod tests {
 
 	#[test]
 	fn test_finalize_several_configuration_change_blocks_in_single_operation() {
-		let mut backend = Backend::<Block>::new_test(10, 10);
+		let mut backend = Backend::<Block, TrieStateBackend<Block>>::new_test(10, 10);
 		backend.changes_tries_storage.min_blocks_to_keep = Some(8);
 
 		let configs = (0..=7).map(|i| Some(ChangesTrieConfiguration::new(2, i))).collect::<Vec<_>>();
@@ -947,7 +948,7 @@ mod tests {
 
 	#[test]
 	fn changes_tries_configuration_is_reverted() {
-		let backend = Backend::<Block>::new_test(10, 10);
+		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(10, 10);
 
 		let config0 = Some(ChangesTrieConfiguration::new(2, 5));
 		let block0 = insert_header_with_configuration_change(&backend, 0, Default::default(), None, config0);

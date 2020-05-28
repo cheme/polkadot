@@ -57,8 +57,10 @@ pub type TransactionFor<B, Block> = TransactionForSB<StateBackendFor<B, Block>, 
 
 /// Extracts the proof backend for the given state backend.
 pub type ProofBackendForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::ProofBackend;
+
 /// Extracts the proof backend for the given backend.
 pub type ProofBackendFor<B, Block> = ProofBackendForSB<StateBackendFor<B, Block>, Block>;
+
 /// Extracts the proof for the given backend.
 pub type ProofFor<B, Block> = <ProofBackendFor<B, Block> as StateBackend<HashFor<Block>>>::StorageProof;
 

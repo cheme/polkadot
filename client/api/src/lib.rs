@@ -37,11 +37,19 @@ pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
 
-pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn, ProofCheckBackend, ProofBackendStateFor};
-use sp_runtime::traits::HashFor;
+pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn, ProofCheckBackend, ProofBackendStateFor,
+	backend::InstantiableStateBackend, backend::HashDBNodesTransaction};
+pub use sp_runtime::traits::HashFor;
+
+/// DB backend for state supported by client db implementation.
+pub type DbStorage<Block> = std::sync::Arc<dyn sp_state_machine::Storage<HashFor<Block>>>;
 
 /// Trie backend proof check.
 pub type ProvingCheckBackend<Block> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<HashFor<Block>>, HashFor<Block>>;
+
+/// State backend configuration for default `sp_trie` patricia trie.
+pub type TrieStateBackend<Block> = sp_state_machine::TrieBackend<DbStorage<Block>, HashFor<Block>>;
+
 /// Usage Information Provider interface
 ///
 pub trait UsageProvider<Block: sp_runtime::traits::Block> {

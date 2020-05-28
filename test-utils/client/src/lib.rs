@@ -42,8 +42,14 @@ pub use self::client_ext::{ClientExt, ClientBlockImportExt};
 use std::sync::Arc;
 use std::collections::HashMap;
 use sp_core::storage::ChildInfo;
-use sp_runtime::traits::{Block as BlockT, BlakeTwo256};
+use sp_runtime::traits::{Block as BlockT, BlakeTwo256, HashFor};
 use sc_service::client::{LocalCallExecutor, ClientConfig};
+
+/// Static definition of the state backend to use with tests.
+/// TODO rename to TrieBackendState
+pub type DbState<B> = sp_state_machine::TrieBackend<
+	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
+>;
 
 /// Static definition of the proving backend
 pub type ProvingBackend<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, H>;
@@ -84,13 +90,13 @@ pub struct TestClientBuilder<Block: BlockT, Executor, Backend, G: GenesisInit> {
 }
 
 impl<Block: BlockT, Executor, G: GenesisInit> Default
-	for TestClientBuilder<Block, Executor, Backend<Block>, G> {
+	for TestClientBuilder<Block, Executor, Backend<Block, DbState<Block>>, G> {
 	fn default() -> Self {
 		Self::with_default_backend()
 	}
 }
 
-impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block>, G> {
+impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block, DbState<Block>>, G> {
 	/// Create new `TestClientBuilder` with default backend.
 	pub fn with_default_backend() -> Self {
 		let backend = Arc::new(Backend::new_test(std::u32::MAX, std::u64::MAX));

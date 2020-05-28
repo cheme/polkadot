@@ -66,7 +66,10 @@ sc_executor::native_executor_instance! {
 }
 
 /// Test client database backend.
-pub type Backend = substrate_test_client::Backend<substrate_test_runtime::Block>;
+pub type Backend = substrate_test_client::Backend<
+	substrate_test_runtime::Block,
+	substrate_test_client::DbState<substrate_test_runtime::Block>,
+>;
 
 /// Test client executor.
 pub type Executor = client::LocalCallExecutor<

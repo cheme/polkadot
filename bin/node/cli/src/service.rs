@@ -49,7 +49,10 @@ macro_rules! new_full_start {
 		let inherent_data_providers = sp_inherents::InherentDataProviders::new();
 
 		let builder = sc_service::ServiceBuilder::new_full::<
-			node_primitives::Block, node_runtime::RuntimeApi, node_executor::Executor, sc_client_api::StorageProof,
+			node_primitives::Block,
+			node_runtime::RuntimeApi,
+			node_executor::Executor,
+			sc_client_api::TrieStateBackend<node_primitives::Block>,
 		>($config)?
 			.with_select_chain(|_config, backend| {
 				Ok(sc_consensus::LongestChain::new(backend.clone()))

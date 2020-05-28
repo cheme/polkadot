@@ -32,9 +32,11 @@ macro_rules! new_full_start {
 
 		let mut import_setup = None;
 		let inherent_data_providers = sp_inherents::InherentDataProviders::new();
-
 		let builder = sc_service::ServiceBuilder::new_full::<
-			node_template_runtime::opaque::Block, node_template_runtime::RuntimeApi, crate::service::Executor, sc_client_api::StorageProof,
+			node_template_runtime::opaque::Block,
+			node_template_runtime::RuntimeApi,
+			crate::service::Executor,
+			sc_client_api::TrieStateBackend<node_template_runtime::opaque::Block>,
 		>($config)?
 			.with_select_chain(|_config, backend| {
 				Ok(sc_consensus::LongestChain::new(backend.clone()))
