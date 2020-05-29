@@ -29,9 +29,10 @@ use sp_core::ChangesTrieConfiguration;
 use sp_core::storage::{well_known_keys, ChildInfo};
 use sp_core::offchain::storage::InMemOffchainStorage;
 use sp_state_machine::{
-	Backend as StateBackend, InMemoryBackend, ChangesTrieTransaction,
-	StorageCollection, ChildStorageCollection, ProofBackendStateFor,
+	InMemoryBackend, ChangesTrieTransaction,
+	StorageCollection, ChildStorageCollection,
 };
+use sp_state_machine::backend::{Backend as StateBackend, ProofBackendStateFor};
 use sp_runtime::{generic::BlockId, Justification, Storage};
 use sp_runtime::traits::{Block as BlockT, NumberFor, Zero, Header, HashFor};
 use sp_blockchain::{Error as ClientError, Result as ClientResult};

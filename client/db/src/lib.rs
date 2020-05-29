@@ -75,9 +75,9 @@ use sp_runtime::traits::{
 };
 use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
-	StorageCollection, ChildStorageCollection, backend::InstantiableStateBackend,
-	backend::HashDBNodesTransaction,
-	backend::Backend as StateBackend, StateMachineStats, ProofBackendStateFor,
+	StorageCollection, ChildStorageCollection, StateMachineStats,
+	backend::{InstantiableStateBackend, HashDBNodesTransaction, Backend as StateBackend,
+		ProofBackendStateFor},
 };
 use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
@@ -1386,7 +1386,7 @@ impl<Block, State> sc_client_api::backend::Backend<Block> for Backend<Block, Sta
 
 	type BlockImportOperation = BlockImportOperation<Block, State>;
 	type Blockchain = BlockchainDb<Block>;
-	type State = SyncingCachingState<RefTrackingState<Block, State>, Block>; // TODO EMCH put that as generic param
+	type State = SyncingCachingState<RefTrackingState<Block, State>, Block>;
 	type OffchainStorage = offchain::LocalStorage;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {

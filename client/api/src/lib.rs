@@ -37,18 +37,36 @@ pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
 
-pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn, ProofCheckBackend, ProofBackendStateFor,
-	backend::InstantiableStateBackend, backend::HashDBNodesTransaction};
+pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn};
+pub use sp_state_machine::backend::{ProofCheckBackend as ProofCheckBackendT,
+	ProofBackendStateFor, InstantiableStateBackend, HashDBNodesTransaction};
 pub use sp_runtime::traits::HashFor;
 
 /// DB backend for state supported by client db implementation.
-pub type DbStorage<Block> = std::sync::Arc<dyn sp_state_machine::Storage<HashFor<Block>>>;
+pub type DbStorage<Block> = DbStorageHash<HashFor<Block>>;
+/// DB backend for state supported by client db implementation.
+pub type DbStorageHash<H> = std::sync::Arc<dyn sp_state_machine::Storage<H>>;
+
+/// Static definition of the proving backend
+pub type ProvingBackend<Block> = ProvingBackendHash<HashFor<Block>>;
+/// Static definition of the proving backend
+pub type ProvingBackendHash<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, H>;
 
 /// Trie backend proof check.
-pub type ProvingCheckBackend<Block> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<HashFor<Block>>, HashFor<Block>>;
+pub type ProofCheckBackend<Block> = ProofCheckBackendHash<HashFor<Block>>;
+/// Static definition of the verification backend
+pub type ProofCheckBackendHash<H> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<H>, H>;
 
 /// State backend configuration for default `sp_trie` patricia trie.
-pub type TrieStateBackend<Block> = sp_state_machine::TrieBackend<DbStorage<Block>, HashFor<Block>>;
+pub type TrieStateBackend<Block> = TrieStateBackendHash<HashFor<Block>>;
+/// State backend configuration for default `sp_trie` patricia trie.
+pub type TrieStateBackendHash<H> = sp_state_machine::TrieBackend<DbStorageHash<H>, H>;
+
+/// Static definition of the state backend to use with tests.
+/// TODO EMCH rename to TrieBackendState + the same alias in bench
+pub type DbState<B> = sp_state_machine::TrieBackend<
+	std::sync::Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
+>;
 
 /// Usage Information Provider interface
 ///

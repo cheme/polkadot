@@ -308,7 +308,7 @@ pub fn new_light(config: Configuration)
 	type RpcExtension = jsonrpc_core::IoHandler<sc_rpc::Metadata>;
 	let inherent_data_providers = InherentDataProviders::new();
 
-	let service = ServiceBuilder::new_light::<Block, RuntimeApi, node_executor::Executor, sc_client_api::ProvingCheckBackend<Block>>(config)?
+	let service = ServiceBuilder::new_light::<Block, RuntimeApi, node_executor::Executor, sc_client_api::ProofCheckBackend<Block>>(config)?
 		.with_select_chain(|_config, backend| {
 			Ok(LongestChain::new(backend.clone()))
 		})?

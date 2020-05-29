@@ -47,7 +47,6 @@ pub use sp_trie::{trie_types::{Layout, TrieDBMut}, StorageProof, TrieMut, DBValu
 pub use testing::TestExternalities;
 pub use basic::BasicExternalities;
 pub use ext::Ext;
-pub use backend::{Backend, ProofBackendStateFor};
 pub use changes_trie::{
 	AnchorBlockId as ChangesTrieAnchorBlockId,
 	State as ChangesTrieState,
@@ -70,12 +69,14 @@ pub use overlayed_changes::{
 pub use proving_backend::{
 	ProofRecorder, ProvingBackend, ProvingBackendRecorder,
 };
-pub use trie_backend_essence::{TrieBackendStorage, Storage, ProofBackend, ProofCheckBackend};
+pub use trie_backend_essence::{TrieBackendStorage, Storage};
 pub use trie_backend::TrieBackend;
 pub use error::{Error, ExecutionError};
 pub use in_memory_backend::new_in_mem;
 pub use stats::{UsageInfo, UsageUnit, StateMachineStats};
 pub use sp_core::traits::CloneableSpawn;
+
+use backend::{Backend, ProofBackend, ProofCheckBackend};
 
 type CallResult<R, E> = Result<NativeOrEncoded<R>, E>;
 

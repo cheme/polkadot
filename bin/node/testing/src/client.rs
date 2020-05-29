@@ -20,6 +20,7 @@
 
 use sp_runtime::BuildStorage;
 use sc_service::client;
+use sc_client_api::TrieStateBackend;
 /// Re-export test-client utilities.
 pub use substrate_test_client::*;
 
@@ -27,7 +28,7 @@ pub use substrate_test_client::*;
 pub type Executor = sc_executor::NativeExecutor<node_executor::Executor>;
 
 /// Default backend type.
-pub type Backend = sc_client_db::Backend<node_primitives::Block, DbState<node_primitives::Block>>;
+pub type Backend = sc_client_db::Backend<node_primitives::Block, TrieStateBackend<node_primitives::Block>>;
 
 /// Test client type.
 pub type Client = client::Client<

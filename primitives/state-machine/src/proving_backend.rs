@@ -29,8 +29,8 @@ use sp_trie::{
 pub use sp_trie::Recorder;
 pub use sp_trie::trie_types::{Layout, TrieError};
 use crate::trie_backend::TrieBackend;
-use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage, ProofBackend};
-use crate::{Backend, ProofBackendStateFor};
+use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
+use crate::backend::{Backend, ProofBackendStateFor, ProofBackend};
 use std::collections::{HashMap, hash_map::Entry};
 use crate::DBValue;
 use sp_core::storage::ChildInfo;
@@ -364,7 +364,7 @@ mod tests {
 	use sp_trie::PrefixedMemoryDB;
 	use sp_runtime::traits::BlakeTwo256;
 	use sp_trie::BackendStorageProof;
-	use crate::trie_backend_essence::ProofCheckBackend as _;
+	use crate::backend::ProofCheckBackend as _;
 
 	type ProofCheckBackend = crate::trie_backend::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
 

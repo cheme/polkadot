@@ -23,7 +23,8 @@ pub mod client_ext;
 
 pub use sc_client_api::{
 	execution_extensions::{ExecutionStrategies, ExecutionExtensions},
-	ForkBlocks, BadBlocks, CloneableSpawn,
+	ForkBlocks, BadBlocks, CloneableSpawn, TrieStateBackend, ProvingBackend,
+	ProvingBackendHash, ProofCheckBackend, ProofCheckBackendHash, DbState,
 };
 pub use sc_client_db::{Backend, self};
 pub use sp_consensus;
@@ -42,20 +43,8 @@ pub use self::client_ext::{ClientExt, ClientBlockImportExt};
 use std::sync::Arc;
 use std::collections::HashMap;
 use sp_core::storage::ChildInfo;
-use sp_runtime::traits::{Block as BlockT, BlakeTwo256, HashFor};
+use sp_runtime::traits::{Block as BlockT, BlakeTwo256};
 use sc_service::client::{LocalCallExecutor, ClientConfig};
-
-/// Static definition of the state backend to use with tests.
-/// TODO rename to TrieBackendState
-pub type DbState<B> = sp_state_machine::TrieBackend<
-	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
->;
-
-/// Static definition of the proving backend
-pub type ProvingBackend<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, H>;
-
-/// Static definition of the verification backend
-pub type ProofCheckBackend<H> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<H>, H>;
 
 /// Test client light database backend.
 pub type LightBackend<Block> = client::light::backend::Backend<

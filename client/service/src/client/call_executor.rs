@@ -231,7 +231,7 @@ where
 			.map_err(|e| sp_blockchain::Error::VersionInvalid(format!("{:?}", e)).into())
 	}
 
-	fn prove_at_proof_backend_state<P: sp_state_machine::ProofBackend<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofBackend<HashFor<Block>>>(
 		&self,
 		proof_backend: &P,
 		overlay: &mut OverlayedChanges,

@@ -21,11 +21,9 @@ use substrate_test_runtime_client::{
 	DefaultTestClientBuilderExt, TestClientBuilder,
 	runtime::{TestAPI, DecodeFails, Transfer, Block},
 };
-use sp_runtime::{generic::BlockId, traits::{Header as HeaderT, HashFor}};
-use sp_state_machine::{
-	ExecutionStrategy, ProofCheckBackend as _,
-	execution_proof_check_on_proof_backend,
-};
+use sp_runtime::{generic::BlockId, traits::Header as HeaderT};
+use sp_state_machine::{ExecutionStrategy, execution_proof_check_on_proof_backend};
+use sp_state_machine::backend::ProofCheckBackend as _;
 
 use sp_consensus::SelectChain;
 use codec::Encode;
@@ -185,7 +183,7 @@ fn record_proof_works() {
 	builder.push(transaction.clone()).unwrap();
 	let (block, _, proof) = builder.build().expect("Bake block").into_inner();
 
-	let backend = ProofCheckBackend::<HashFor<Block>>::create_proof_check_backend(
+	let backend = ProofCheckBackend::<Block>::create_proof_check_backend(
 		storage_root,
 		proof.expect("Proof was generated"),
 	).expect("Creates proof backend.");
@@ -197,7 +195,7 @@ fn record_proof_works() {
 		None,
 		8,
 	);
-	execution_proof_check_on_proof_backend::<ProofCheckBackend<HashFor<Block>>, _, u64, _>(
+	execution_proof_check_on_proof_backend::<ProofCheckBackend<Block>, _, u64, _>(
 		&backend,
 		&mut overlay,
 		&executor,

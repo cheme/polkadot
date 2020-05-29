@@ -20,7 +20,7 @@
 use std::{
 	collections::BTreeMap, any::{TypeId, Any}, iter::FromIterator, ops::Bound
 };
-use crate::{Backend, StorageKey, StorageValue};
+use crate::{backend::Backend, StorageKey, StorageValue};
 use hash_db::Hasher;
 use sp_trie::{TrieConfiguration, empty_child_trie_root};
 use sp_trie::trie_types::Layout;

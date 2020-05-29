@@ -29,7 +29,7 @@ use sp_core::traits::CodeExecutor;
 use sp_runtime::BuildStorage;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use sp_blockchain::Result as ClientResult;
-use sp_state_machine::ProofCheckBackend;
+use sp_state_machine::backend::ProofCheckBackend;
 use prometheus_endpoint::Registry;
 
 use super::call_executor::LocalCallExecutor;

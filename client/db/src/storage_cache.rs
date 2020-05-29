@@ -25,8 +25,8 @@ use sp_runtime::traits::{Block as BlockT, Header, HashFor, NumberFor};
 use sp_core::hexdisplay::HexDisplay;
 use sp_core::storage::ChildInfo;
 use sp_state_machine::{
-	backend::Backend as StateBackend, StorageKey, StorageValue,
-	StorageCollection, ChildStorageCollection, ProofBackendStateFor,
+	backend::{Backend as StateBackend, ProofBackendStateFor},
+	StorageKey, StorageValue, StorageCollection, ChildStorageCollection,
 };
 use log::trace;
 use crate::{utils::Meta, stats::StateUsageStats};

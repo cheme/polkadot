@@ -24,9 +24,9 @@ use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use sp_core::storage::{ChildInfo, ChildType};
 use codec::{Codec, Encode, Decode};
 use crate::{
-	backend::InstantiableStateBackend,
-	StorageKey, StorageValue, Backend, ProofCheckBackend, ProofBackendStateFor,
+	backend::{InstantiableStateBackend, Backend, ProofBackendStateFor, ProofCheckBackend},
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
+	StorageKey, StorageValue,
 };
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.

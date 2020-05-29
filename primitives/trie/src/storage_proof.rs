@@ -30,7 +30,8 @@ pub struct StorageProof {
 	trie_nodes: Vec<Vec<u8>>,
 }
 
-/// Trait for proofs that can be use as a partial backend for verification. 
+/// Trait for proofs that can be use as a partial backend for verification.
+/// TODO EMCH rename backend got nothing to do with that, pbly state.
 pub trait BackendStorageProof: Codec + sp_std::fmt::Debug + Sized + 'static {
 	/// Merges multiple storage proofs covering potentially different sets of keys into one proof
 	/// covering all keys. The merged proof output may be smaller than the aggregate size of the input

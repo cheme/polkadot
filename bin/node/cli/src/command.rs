@@ -22,7 +22,7 @@ use node_runtime::{Block, RuntimeApi};
 use sc_cli::{Result, SubstrateCli};
 
 /// State backend type
-pub type State = sc_client_api::TrieStateBackend<Block>; 
+pub type State = sc_client_api::TrieStateBackend<Block>;
 
 impl SubstrateCli for Cli {
 	fn impl_name() -> &'static str {

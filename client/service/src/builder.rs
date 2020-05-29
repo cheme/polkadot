@@ -23,7 +23,7 @@ use crate::metrics::MetricsService;
 use sc_client_api::{
 	self, BlockchainEvents, backend::RemoteBackend, light::RemoteBlockchain, execution_extensions::ExtensionsFactory,
 	ExecutorProvider, CallExecutor, ForkBlocks, BadBlocks, CloneableSpawn, UsageProvider, StateBackend,
-	ProofCheckBackend, InstantiableStateBackend, HashDBNodesTransaction, DbStorage,
+	ProofCheckBackendT, InstantiableStateBackend, HashDBNodesTransaction, DbStorage,
 };
 use crate::client::{Client, ClientConfig};
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedSender};
@@ -331,7 +331,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	}
 
 	/// Start the service builder with a configuration.
-	pub fn new_light<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static, TProof: ProofCheckBackend<HashFor<TBl>> + Send + Sync + 'static>(
+	pub fn new_light<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static, TProof: ProofCheckBackendT<HashFor<TBl>> + Send + Sync + 'static>(
 		config: Configuration,
 	) -> Result<ServiceBuilder<
 		TBl,

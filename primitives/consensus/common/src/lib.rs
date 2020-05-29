@@ -55,7 +55,7 @@ pub use block_import::{
 	ImportResult, JustificationImport, FinalityProofImport,
 };
 pub use select_chain::SelectChain;
-pub use sp_state_machine::Backend as StateBackend;
+pub use sp_state_machine::backend::Backend as StateBackend;
 
 /// Block status.
 #[derive(Debug, PartialEq, Eq)]

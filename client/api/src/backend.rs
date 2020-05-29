@@ -40,10 +40,10 @@ use sp_blockchain;
 use sp_consensus::BlockOrigin;
 use parking_lot::RwLock;
 
-pub use sp_state_machine::Backend as StateBackend;
-pub use sp_state_machine::ProofBackend;
+pub use sp_state_machine::backend::{Backend as StateBackend, ProofBackend,
+	ProofBackendStateFor,
+};
 pub use sp_state_machine::BackendStorageProof;
-pub use sp_state_machine::ProofBackendStateFor;
 use std::marker::PhantomData;
 
 /// Extracts the state backend type for the given backend.

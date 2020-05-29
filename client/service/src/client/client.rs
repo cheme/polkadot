@@ -41,7 +41,7 @@ use sp_runtime::{
 	},
 };
 use sp_state_machine::{
-	DBValue, Backend as StateBackend, ChangesTrieAnchorBlockId,
+	DBValue, backend::Backend as StateBackend, ChangesTrieAnchorBlockId,
 	prove_read, prove_child_read, ChangesTrieRootsStorage, ChangesTrieStorage,
 	ChangesTrieConfigurationRange, key_changes, key_changes_proof,
 };

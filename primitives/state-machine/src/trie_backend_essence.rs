@@ -348,39 +348,6 @@ impl<'a, H: Hasher, S: TrieBackendStorage<H>> TrieBackendStorage<H> for &'a S {
 	}
 }
 
-/// Backend used to produce proof.
-/// TODO move trait location TODO rename ProofRegisterBackend
-/// TODO consider making it an instantiable backend (state is similar?)
-pub trait ProofBackend<H>: crate::backend::Backend<H>
-	where
-		H: Hasher,
-		H::Out: Encode,
-{
-	/// State of a backend.
-	type State: Default + Send + Sync + Clone;
-
-	/// Extract proof when run.
-	fn extract_proof(&self) -> Self::StorageProof;
-
-	/// Extract proof when run.
-	/// TODO probably useless (state is sync)
-	fn current_state(self) -> Self::State;
-}
-
-/// Backend used to produce proof.
-/// TODO move trait location
-pub trait ProofCheckBackend<H>: Sized + crate::backend::Backend<H>
-	where
-		H: Hasher,
-		H::Out: Encode,
-{
-	/// Instantiate backend from proof.
-	fn create_proof_check_backend(
-		root: H::Out,
-		proof: Self::StorageProof,
-	) -> Result<Self, Box<dyn crate::Error>>;
-}
-
 // This implementation is used by normal storage trie clients.
 impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {
 	type Overlay = PrefixedMemoryDB<H>;

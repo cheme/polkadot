@@ -28,10 +28,10 @@ use sp_runtime::{
 };
 use sp_externalities::Extensions;
 use sp_state_machine::{
-	self, Backend as StateBackend, OverlayedChanges, ExecutionStrategy,
-	execution_proof_check_on_proof_backend, ExecutionManager, CloneableSpawn,
-	ProofBackendStateFor,
+	self, OverlayedChanges, ExecutionStrategy, execution_proof_check_on_proof_backend,
+	ExecutionManager, CloneableSpawn,
 };
+use sp_state_machine::backend::{Backend as StateBackend, ProofBackendStateFor};
 use hash_db::Hasher;
 use sp_trie::BackendStorageProof;
 
@@ -157,7 +157,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 		}
 	}
 
-	fn prove_at_proof_backend_state<P: sp_state_machine::ProofBackend<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofBackend<HashFor<Block>>>(
 		&self,
 		_proof_backend: &P,
 		_overlay: &mut OverlayedChanges,
@@ -227,7 +227,7 @@ pub fn check_execution_proof<P, Header, E, H>(
 	remote_proof: P::StorageProof,
 ) -> ClientResult<Vec<u8>>
 	where
-		P: sp_state_machine::ProofCheckBackend<H>,
+		P: sp_state_machine::backend::ProofCheckBackend<H>,
 		Header: HeaderT,
 		E: CodeExecutor + Clone + 'static,
 		H: Hasher,
@@ -260,7 +260,7 @@ pub fn check_execution_proof_with_make_header<P, Header, E, H, MakeNextHeader>(
 	make_next_header: MakeNextHeader,
 ) -> ClientResult<Vec<u8>>
 	where
-		P: sp_state_machine::ProofCheckBackend<H>,
+		P: sp_state_machine::backend::ProofCheckBackend<H>,
 		E: CodeExecutor + Clone + 'static,
 		H: Hasher,
 		Header: HeaderT,

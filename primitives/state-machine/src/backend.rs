@@ -22,8 +22,6 @@ use codec::{Decode, Encode};
 use sp_core::{traits::RuntimeCode, storage::{ChildInfo, well_known_keys}};
 
 use crate::{
-	trie_backend_essence::ProofBackend,
-	trie_backend_essence::ProofCheckBackend,
 	UsageInfo, StorageKey, StorageValue, StorageCollection,
 };
 
@@ -271,6 +269,39 @@ pub trait InstantiableStateBackend<H>: Backend<H>
 	/// Extract state out of the backend.
 	fn extract_state(self) -> (Self::Storage, H::Out);
 }
+
+/// Backend used to produce proof.
+/// TODO rename ProofRegisterBackend or Proving backend
+pub trait ProofBackend<H>: crate::backend::Backend<H>
+	where
+		H: Hasher,
+		H::Out: Encode,
+{
+	/// State of a backend.
+	type State: Default + Send + Sync + Clone;
+
+	/// Extract proof when run.
+	fn extract_proof(&self) -> Self::StorageProof;
+
+	/// Extract proof when run.
+	/// TODO probably useless (state is sync)
+	fn current_state(self) -> Self::State;
+}
+
+/// Backend used to produce proof.
+/// TODO move trait location
+pub trait ProofCheckBackend<H>: Sized + crate::backend::Backend<H>
+	where
+		H: Hasher,
+		H::Out: Encode,
+{
+	/// Instantiate backend from proof.
+	fn create_proof_check_backend(
+		root: H::Out,
+		proof: Self::StorageProof,
+	) -> Result<Self, Box<dyn crate::Error>>;
+}
+
 
 impl<'a, T, H> Backend<H> for &'a T
 	where

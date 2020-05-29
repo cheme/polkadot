@@ -34,7 +34,7 @@ use sp_runtime::{
 use std::collections::HashMap;
 use parking_lot::Mutex;
 use substrate_test_runtime_client::{
-	runtime::{Hash, Block, Header}, TestClient, ClientBlockImportExt, ProofCheckBackend,
+	runtime::{Hash, Block, Header}, TestClient, ClientBlockImportExt, ProofCheckBackendHash,
 };
 use sp_api::{InitializeBlock, StorageTransactionCache, OffchainOverlayedChanges};
 use sp_consensus::{BlockOrigin};
@@ -57,7 +57,7 @@ use substrate_test_runtime_client::{
 };
 
 use sp_core::{blake2_256, ChangesTrieConfiguration, storage::{well_known_keys, StorageKey, ChildInfo}};
-use sp_state_machine::Backend as _;
+use sp_state_machine::backend::Backend as _;
 #[cfg(test)]
 use sp_trie::BackendStorageProof;
 
@@ -238,7 +238,7 @@ impl CallExecutor<Block> for DummyCallExecutor {
 		unreachable!()
 	}
 
-	fn prove_at_proof_backend_state<P: sp_state_machine::ProofBackend<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofBackend<HashFor<Block>>>(
 		&self,
 		_proof_backend: &P,
 		_overlay: &mut OverlayedChanges,
@@ -444,7 +444,7 @@ type TestChecker = LightDataChecker<
 	BlakeTwo256,
 	Block,
 	DummyStorage,
-	ProofCheckBackend<BlakeTwo256>,
+	ProofCheckBackendHash<BlakeTwo256>,
 >;
 
 fn prepare_for_read_proof_check() -> (TestChecker, Header, StorageProof, u32) {
