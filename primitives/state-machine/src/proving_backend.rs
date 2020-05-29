@@ -24,13 +24,13 @@ use log::debug;
 use hash_db::{Hasher, Prefix};
 use sp_trie::{
 	MemoryDB, empty_child_trie_root, read_trie_value_with, read_child_trie_value_with,
-	record_all_keys, StorageProof,
+	record_all_keys, TrieNodesStorageProof,
 };
 pub use sp_trie::Recorder;
 pub use sp_trie::trie_types::{Layout, TrieError};
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
-use crate::backend::{Backend, ProofBackendStateFor, ProofBackend};
+use crate::backend::{Backend, ProofRegStateFor, ProofRegBackend};
 use std::collections::{HashMap, hash_map::Entry};
 use crate::DBValue;
 use sp_core::storage::ChildInfo;
@@ -218,7 +218,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> std::fmt::Debug
 	}
 }
 
-impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
+impl<S, H> ProofRegBackend<H> for ProvingBackend<S, H>
 	where
 		S: TrieBackendStorage<H>,
 		H: Hasher,
@@ -232,11 +232,7 @@ impl<S, H> ProofBackend<H> for ProvingBackend<S, H>
 			.iter()
 			.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
 			.collect();
-		StorageProof::new(trie_nodes)
-	}
-
-	fn current_state(self) -> Self::State {
-		self.0.into_storage().proof_recorder
+		TrieNodesStorageProof::new(trie_nodes)
 	}
 }
 
@@ -248,8 +244,8 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 {
 	type Error = String;
 	type Transaction = S::Overlay;
-	type StorageProof = sp_trie::StorageProof;
-	type ProofBackend = Self;
+	type StorageProof = sp_trie::TrieNodesStorageProof;
+	type ProofRegBackend = Self;
 	type ProofCheckBackend = TrieBackend<MemoryDB<H>, H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
@@ -341,11 +337,11 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 		self.0.usage_info()
 	}
 
-	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
+	fn as_proof_backend(self) -> Option<Self::ProofRegBackend> {
 		Some(self)
 	}
 
-	fn from_proof_backend(self, previous_recorder: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend> {
+	fn from_reg_state(self, previous_recorder: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend> {
 		let root = self.0.essence().root().clone();
 		let storage = self.0.into_storage();
 		let current_recorder = storage.proof_recorder;
@@ -363,7 +359,7 @@ mod tests {
 	use super::*;
 	use sp_trie::PrefixedMemoryDB;
 	use sp_runtime::traits::BlakeTwo256;
-	use sp_trie::BackendStorageProof;
+	use sp_trie::StorageProof;
 	use crate::backend::ProofCheckBackend as _;
 
 	type ProofCheckBackend = crate::trie_backend::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
@@ -393,7 +389,7 @@ mod tests {
 		use sp_core::H256;
 		let result = ProofCheckBackend::create_proof_check_backend(
 			H256::from_low_u64_be(1),
-			StorageProof::empty()
+			TrieNodesStorageProof::empty()
 		);
 		assert!(result.is_err());
 	}

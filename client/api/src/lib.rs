@@ -37,9 +37,9 @@ pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
 
-pub use sp_state_machine::{StorageProof, ExecutionStrategy, CloneableSpawn};
+pub use sp_state_machine::{TrieNodesStorageProof, ExecutionStrategy, CloneableSpawn};
 pub use sp_state_machine::backend::{ProofCheckBackend as ProofCheckBackendT,
-	ProofBackendStateFor, InstantiableStateBackend, HashDBNodesTransaction};
+	ProofRegStateFor, InstantiableStateBackend, HashDBNodesTransaction};
 pub use sp_runtime::traits::HashFor;
 
 /// DB backend for state supported by client db implementation.
@@ -63,8 +63,7 @@ pub type TrieStateBackend<Block> = TrieStateBackendHash<HashFor<Block>>;
 pub type TrieStateBackendHash<H> = sp_state_machine::TrieBackend<DbStorageHash<H>, H>;
 
 /// Static definition of the state backend to use with tests.
-/// TODO EMCH rename to TrieBackendState + the same alias in bench
-pub type DbState<B> = sp_state_machine::TrieBackend<
+pub type TrieBackendState<B> = sp_state_machine::TrieBackend<
 	std::sync::Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
 >;
 

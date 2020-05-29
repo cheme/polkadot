@@ -212,7 +212,7 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 			storage_transaction_cache: std::cell::RefCell<
 				#crate_::StorageTransactionCache<Block, C::StateBackend>
 			>,
-			recorder: Option<#crate_::ProofBackendStateFor<C::StateBackend, #crate_::HashFor<Block>>>,
+			recorder: Option<#crate_::ProofRegStateFor<C::StateBackend, #crate_::HashFor<Block>>>,
 		}
 
 		// `RuntimeApi` itself is not threadsafe. However, an instance is only available in a
@@ -285,7 +285,7 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 				self.recorder = Some(Default::default());
 			}
 
-			fn extract_proof_recorder(&mut self) -> Option<#crate_::ProofBackendStateFor<C::StateBackend, #crate_::HashFor<Block>>> {
+			fn extract_proof_recorder(&mut self) -> Option<#crate_::ProofRegStateFor<C::StateBackend, #crate_::HashFor<Block>>> {
 				self.recorder
 					.take()
 			}
@@ -352,7 +352,7 @@ fn generate_runtime_api_base_structures() -> Result<TokenStream> {
 					&std::cell::RefCell<#crate_::OffchainOverlayedChanges>,
 					&std::cell::RefCell<#crate_::StorageTransactionCache<Block, C::StateBackend>>,
 					&std::cell::RefCell<Option<#crate_::BlockId<Block>>>,
-					Option<#crate_::ProofBackendStateFor<C::StateBackend, #crate_::HashFor<Block>>>,
+					Option<#crate_::ProofRegStateFor<C::StateBackend, #crate_::HashFor<Block>>>,
 				) -> std::result::Result<#crate_::NativeOrEncoded<R>, E>,
 				E,
 			>(

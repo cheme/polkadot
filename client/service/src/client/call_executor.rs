@@ -29,7 +29,7 @@ use sp_core::{NativeOrEncoded, NeverNativeValue, traits::CodeExecutor, offchain:
 use sp_api::{InitializeBlock, StorageTransactionCache};
 use sc_client_api::{backend, call_executor::CallExecutor, CloneableSpawn};
 use super::client::ClientConfig;
-use backend::{StateBackend, ProofBackendStateFor};
+use backend::{StateBackend, ProofRegStateFor};
 
 /// Call executor that executes methods locally, querying all required
 /// data from local backend.
@@ -139,7 +139,7 @@ where
 		initialize_block: InitializeBlock<'a, Block>,
 		execution_manager: ExecutionManager<EM>,
 		native_call: Option<NC>,
-		recorder: Option<ProofBackendStateFor<B::State, HashFor<Block>>>,
+		recorder: Option<ProofRegStateFor<B::State, HashFor<Block>>>,
 		extensions: Option<Extensions>,
 	) -> Result<NativeOrEncoded<R>, sp_blockchain::Error> where ExecutionManager<EM>: Clone {
 		match initialize_block {
@@ -168,7 +168,7 @@ where
 
 				let state = self.backend.state_at(*at)?;
 
-				let backend = state.from_proof_backend(recorder)
+				let backend = state.from_reg_state(recorder)
 					.ok_or_else(||
 						Box::new(sp_state_machine::ExecutionError::UnableToGenerateProof) as Box<dyn sp_state_machine::Error>
 					)?;
@@ -231,7 +231,7 @@ where
 			.map_err(|e| sp_blockchain::Error::VersionInvalid(format!("{:?}", e)).into())
 	}
 
-	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofBackend<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofRegBackend<HashFor<Block>>>(
 		&self,
 		proof_backend: &P,
 		overlay: &mut OverlayedChanges,

@@ -24,7 +24,7 @@ pub mod client_ext;
 pub use sc_client_api::{
 	execution_extensions::{ExecutionStrategies, ExecutionExtensions},
 	ForkBlocks, BadBlocks, CloneableSpawn, TrieStateBackend, ProvingBackend,
-	ProvingBackendHash, ProofCheckBackend, ProofCheckBackendHash, DbState,
+	ProvingBackendHash, ProofCheckBackend, ProofCheckBackendHash, TrieBackendState,
 };
 pub use sc_client_db::{Backend, self};
 pub use sp_consensus;
@@ -79,13 +79,13 @@ pub struct TestClientBuilder<Block: BlockT, Executor, Backend, G: GenesisInit> {
 }
 
 impl<Block: BlockT, Executor, G: GenesisInit> Default
-	for TestClientBuilder<Block, Executor, Backend<Block, DbState<Block>>, G> {
+	for TestClientBuilder<Block, Executor, Backend<Block, TrieBackendState<Block>>, G> {
 	fn default() -> Self {
 		Self::with_default_backend()
 	}
 }
 
-impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block, DbState<Block>>, G> {
+impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block, TrieBackendState<Block>>, G> {
 	/// Create new `TestClientBuilder` with default backend.
 	pub fn with_default_backend() -> Self {
 		let backend = Arc::new(Backend::new_test(std::u32::MAX, std::u64::MAX));

@@ -39,7 +39,7 @@ use sp_consensus::{
 	block_validation::BlockAnnounceValidator,
 	import_queue::{BlockImportResult, BlockImportError, IncomingBlock, Origin}
 };
-use sp_state_machine::BackendStorageProof;
+use sp_state_machine::StorageProof;
 use codec::{Decode, Encode};
 use sp_runtime::{generic::BlockId, ConsensusEngineId, Justification};
 use sp_runtime::traits::{
@@ -56,7 +56,7 @@ use std::sync::Arc;
 use std::fmt::Write;
 use std::{cmp, io, num::NonZeroUsize, pin::Pin, task::Poll, time};
 use log::{log, Level, trace, debug, warn, error};
-use sc_client_api::{ChangesProof, StorageProof};
+use sc_client_api::{ChangesProof, TrieNodesStorageProof};
 use util::LruHashSet;
 use wasm_timer::Instant;
 
@@ -213,7 +213,7 @@ impl Future for PendingTransaction {
 }
 
 // Lock must always be taken in order declared here.
-pub struct Protocol<B: BlockT, H: ExHashT, P: BackendStorageProof> {
+pub struct Protocol<B: BlockT, H: ExHashT, P: StorageProof> {
 	/// Interval at which we call `tick`.
 	tick_timeout: Pin<Box<dyn Stream<Item = ()> + Send>>,
 	/// Interval at which we call `propagate_extrinsics`.
@@ -299,7 +299,7 @@ pub struct PeerInfo<B: BlockT> {
 }
 
 /// Data necessary to create a context.
-struct ContextData<B: BlockT, H: ExHashT, P: BackendStorageProof> {
+struct ContextData<B: BlockT, H: ExHashT, P: StorageProof> {
 	// All connected peers
 	peers: HashMap<PeerId, Peer<B, H>>,
 	stats: HashMap<&'static str, PacketStats>,
@@ -338,7 +338,7 @@ struct BlockAnnouncesHandshake<B: BlockT> {
 }
 
 impl<B: BlockT> BlockAnnouncesHandshake<B> {
-	fn build<P: BackendStorageProof>(protocol_config: &ProtocolConfig, chain: &Arc<dyn Client<B, P>>) -> Self {
+	fn build<P: StorageProof>(protocol_config: &ProtocolConfig, chain: &Arc<dyn Client<B, P>>) -> Self {
 		let info = chain.info();
 		BlockAnnouncesHandshake {
 			genesis_hash: info.genesis_hash,
@@ -360,7 +360,7 @@ enum Fallback {
 	BlockAnnounce,
 }
 
-impl<B: BlockT, H: ExHashT, P: BackendStorageProof> Protocol<B, H, P> {
+impl<B: BlockT, H: ExHashT, P: StorageProof> Protocol<B, H, P> {
 	/// Create a new instance.
 	pub fn new(
 		config: ProtocolConfig,
@@ -1119,7 +1119,7 @@ impl<B: BlockT, H: ExHashT, P: BackendStorageProof> Protocol<B, H, P> {
 	) {
 		if let Some(protocol_name) = self.protocol_name_by_engine.get(&engine_id) {
 			let message = message.into();
-			let fallback = GenericMessage::<(), (), (), (), StorageProof>::Consensus(ConsensusMessage {
+			let fallback = GenericMessage::<(), (), (), (), TrieNodesStorageProof>::Consensus(ConsensusMessage {
 				engine_id,
 				data: message.clone(),
 			}).encode();
@@ -1702,7 +1702,7 @@ impl<B: BlockT, H: ExHashT, P: BackendStorageProof> Protocol<B, H, P> {
 					request.block,
 					error
 				);
-				(Default::default(), StorageProof::empty())
+				(Default::default(), TrieNodesStorageProof::empty())
 			}
 		};
 		self.send_message(
@@ -1762,7 +1762,7 @@ impl<B: BlockT, H: ExHashT, P: BackendStorageProof> Protocol<B, H, P> {
 					max_block: Zero::zero(),
 					proof: vec![],
 					roots: BTreeMap::new(),
-					roots_proof: StorageProof::empty(),
+					roots_proof: TrieNodesStorageProof::empty(),
 				}
 			}
 		};
@@ -1922,7 +1922,7 @@ pub enum CustomMessageOutcome<B: BlockT> {
 	None,
 }
 
-fn send_request<B: BlockT, H: ExHashT, P: BackendStorageProof>(
+fn send_request<B: BlockT, H: ExHashT, P: StorageProof>(
 	behaviour: &mut GenericProto,
 	stats: &mut HashMap<&'static str, PacketStats>,
 	peers: &mut HashMap<PeerId, Peer<B, H>>,
@@ -1959,7 +1959,7 @@ fn update_peer_request<B: BlockT, H: ExHashT>(
 	}
 }
 
-fn send_message<B: BlockT, P: BackendStorageProof>(
+fn send_message<B: BlockT, P: StorageProof>(
 	behaviour: &mut GenericProto,
 	stats: &mut HashMap<&'static str, PacketStats>,
 	who: &PeerId,
@@ -1977,7 +1977,7 @@ fn send_message<B: BlockT, P: BackendStorageProof>(
 	}
 }
 
-impl<B: BlockT, H: ExHashT, P: BackendStorageProof> NetworkBehaviour for Protocol<B, H, P> {
+impl<B: BlockT, H: ExHashT, P: StorageProof> NetworkBehaviour for Protocol<B, H, P> {
 	type ProtocolsHandler = <GenericProto as NetworkBehaviour>::ProtocolsHandler;
 	type OutEvent = CustomMessageOutcome<B>;
 
@@ -2203,7 +2203,7 @@ impl<B: BlockT, H: ExHashT, P: BackendStorageProof> NetworkBehaviour for Protoco
 	}
 }
 
-impl<B: BlockT, H: ExHashT, P: BackendStorageProof> Drop for Protocol<B, H, P> {
+impl<B: BlockT, H: ExHashT, P: StorageProof> Drop for Protocol<B, H, P> {
 	fn drop(&mut self) {
 		debug!(target: "sync", "Network stats:\n{}", self.format_stats());
 	}
@@ -2224,7 +2224,7 @@ mod tests {
 	fn no_handshake_no_notif_closed() {
 		let client = Arc::new(TestClientBuilder::with_default_backend().build_with_longest_chain().0);
 
-		let (mut protocol, _) = Protocol::<Block, Hash, sc_client_api::StorageProof>::new(
+		let (mut protocol, _) = Protocol::<Block, Hash, sc_client_api::TrieNodesStorageProof>::new(
 			ProtocolConfig::default(),
 			PeerId::random(),
 			client.clone(),

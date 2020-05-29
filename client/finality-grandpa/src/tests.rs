@@ -30,7 +30,7 @@ use tokio::runtime::{Runtime, Handle};
 use sp_keyring::Ed25519Keyring;
 use sc_client_api::backend::TransactionFor;
 use sp_blockchain::Result;
-use sp_api::{ApiRef, StorageProof, ProvideRuntimeApi};
+use sp_api::{ApiRef, TrieNodesStorageProof, ProvideRuntimeApi};
 use substrate_test_runtime_client::runtime::BlockNumber;
 use sp_consensus::{
 	BlockOrigin, ForkChoiceStrategy, ImportedAux, BlockImportParams, ImportResult, BlockImport,
@@ -245,7 +245,7 @@ impl AuthoritySetForFinalityProver<Block> for TestApi {
 		Ok(self.genesis_authorities.clone())
 	}
 
-	fn prove_authorities(&self, block: &BlockId<Block>) -> Result<StorageProof> {
+	fn prove_authorities(&self, block: &BlockId<Block>) -> Result<TrieNodesStorageProof> {
 		let authorities = self.authorities(block)?;
 		let backend = <InMemoryBackend<HashFor<Block>>>::from(vec![
 			(None, vec![(b"authorities".to_vec(), Some(authorities.encode()))])
@@ -261,7 +261,7 @@ impl AuthoritySetForFinalityChecker<Block> for TestApi {
 		&self,
 		_hash: <Block as BlockT>::Hash,
 		header: <Block as BlockT>::Header,
-		proof: StorageProof,
+		proof: TrieNodesStorageProof,
 	) -> Result<AuthorityList> {
 		let results = read_proof_check::<ProvingBackend<HashFor<Block>>, HashFor<Block>, _>(
 			*header.state_root(), proof, vec![b"authorities"]

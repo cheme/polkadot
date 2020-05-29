@@ -31,8 +31,9 @@ use sp_trie;
 use sp_core::{H256, convert_hash};
 use sp_runtime::traits::{Header as HeaderT, AtLeast32Bit, Zero, One};
 use sp_state_machine::{
-	MemoryDB, TrieBackend, backend::Backend as StateBackend, StorageProof, InMemoryBackend,
-	prove_read_on_proof_backend, read_proof_check, read_proof_check_on_proving_backend
+	MemoryDB, TrieBackend, backend::Backend as StateBackend,
+	TrieNodesStorageProof as StorageProof, InMemoryBackend,
+	prove_read_on_proof_backend, read_proof_check, read_proof_check_on_proving_backend,
 };
 
 use sp_blockchain::{Error as ClientError, Result as ClientResult};

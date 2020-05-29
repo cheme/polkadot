@@ -24,7 +24,7 @@ use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use sp_core::storage::{ChildInfo, ChildType};
 use codec::{Codec, Encode, Decode};
 use crate::{
-	backend::{InstantiableStateBackend, Backend, ProofBackendStateFor, ProofCheckBackend},
+	backend::{InstantiableStateBackend, Backend, ProofRegStateFor, ProofCheckBackend},
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 	StorageKey, StorageValue,
 };
@@ -79,8 +79,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 {
 	type Error = String;
 	type Transaction = S::Overlay;
-	type StorageProof = sp_trie::StorageProof;
-	type ProofBackend = crate::proving_backend::ProvingBackend<S, H>;
+	type StorageProof = sp_trie::TrieNodesStorageProof;
+	type ProofRegBackend = crate::proving_backend::ProvingBackend<S, H>;
 	type ProofCheckBackend = TrieBackend<crate::MemoryDB<H>, H>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
@@ -238,7 +238,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		(root.encode(), is_default, write_overlay)
 	}
 
-	fn from_proof_backend(self, recorder: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend> {
+	fn from_reg_state(self, recorder: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend> {
 		let root = self.essence.root().clone();
 		Some(crate::proving_backend::ProvingBackend::from_backend_with_recorder(
 			self.essence.into_storage(),

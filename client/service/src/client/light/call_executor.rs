@@ -31,9 +31,9 @@ use sp_state_machine::{
 	self, OverlayedChanges, ExecutionStrategy, execution_proof_check_on_proof_backend,
 	ExecutionManager, CloneableSpawn,
 };
-use sp_state_machine::backend::{Backend as StateBackend, ProofBackendStateFor};
+use sp_state_machine::backend::{Backend as StateBackend, ProofRegStateFor};
 use hash_db::Hasher;
-use sp_trie::BackendStorageProof;
+use sp_trie::StorageProof;
 
 use sp_api::{InitializeBlock, StorageTransactionCache};
 
@@ -116,7 +116,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 		initialize_block: InitializeBlock<'a, Block>,
 		_manager: ExecutionManager<EM>,
 		native_call: Option<NC>,
-		_recorder: Option<ProofBackendStateFor<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, HashFor<Block>>>,
+		_recorder: Option<ProofRegStateFor<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, HashFor<Block>>>,
 		extensions: Option<Extensions>,
 	) -> ClientResult<NativeOrEncoded<R>> where ExecutionManager<EM>: Clone {
 		// there's no actual way/need to specify native/wasm execution strategy on light node
@@ -157,7 +157,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 		}
 	}
 
-	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofBackend<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofRegBackend<HashFor<Block>>>(
 		&self,
 		_proof_backend: &P,
 		_overlay: &mut OverlayedChanges,
@@ -182,7 +182,6 @@ pub fn prove_execution<Block, S, E>(
 	executor: &E,
 	method: &str,
 	call_data: &[u8],
-	// TODO EMCH creat a prooffor alias from state (exist in sc_api).
 ) -> ClientResult<(Vec<u8>, S::StorageProof)>
 	where
 		Block: BlockT,

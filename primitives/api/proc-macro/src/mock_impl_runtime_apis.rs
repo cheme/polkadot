@@ -99,7 +99,7 @@ fn implement_common_api_traits(
 				unimplemented!("`record_proof` not implemented for runtime api mocks")
 			}
 
-			fn extract_proof_recorder(&mut self) -> Option<#crate_::ProofBackendStateFor<Self::StateBackend, #crate_::HashFor<Block>>> {
+			fn extract_proof_recorder(&mut self) -> Option<#crate_::ProofRegStateFor<Self::StateBackend, #crate_::HashFor<Block>>> {
 				unimplemented!("`extract_proof_recorder` not implemented for runtime api mocks")
 			}
 

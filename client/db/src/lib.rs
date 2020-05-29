@@ -77,7 +77,7 @@ use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
 	StorageCollection, ChildStorageCollection, StateMachineStats,
 	backend::{InstantiableStateBackend, HashDBNodesTransaction, Backend as StateBackend,
-		ProofBackendStateFor},
+		ProofRegStateFor},
 };
 use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
@@ -155,7 +155,7 @@ impl<B, S> StateBackend<HashFor<B>> for RefTrackingState<B, S>
 	type Error =  <S	as StateBackend<HashFor<B>>>::Error;
 	type Transaction = <S as StateBackend<HashFor<B>>>::Transaction;
 	type StorageProof = <S as StateBackend<HashFor<B>>>::StorageProof;
-	type ProofBackend = <S as StateBackend<HashFor<B>>>::ProofBackend;
+	type ProofRegBackend = <S as StateBackend<HashFor<B>>>::ProofRegBackend;
 	type ProofCheckBackend = <S as StateBackend<HashFor<B>>>::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
@@ -257,13 +257,10 @@ impl<B, S> StateBackend<HashFor<B>> for RefTrackingState<B, S>
 		self.state().child_keys(child_info, prefix)
 	}
 
-	fn from_proof_backend(mut self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
+	fn from_reg_state(mut self, previous: ProofRegStateFor<Self, HashFor<B>>) -> Option<Self::ProofRegBackend> {
 		let state = std::mem::replace(&mut self.state, None).expect("Non dropped state").extract_state();
-/*		let root = self.state.root().clone();
-		let storage = self.state.backend_storage().clone();
-		let state = sp_state_machine::TrieBackend::new(storage, root);*/
 		let state = S::new(state.0, state.1);
-		state.from_proof_backend(previous)
+		state.from_reg_state(previous)
 	}
 
 	fn register_overlay_stats(&mut self, stats: &StateMachineStats) {

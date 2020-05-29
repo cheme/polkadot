@@ -25,7 +25,7 @@ use sp_runtime::traits::{Block as BlockT, Header, HashFor, NumberFor};
 use sp_core::hexdisplay::HexDisplay;
 use sp_core::storage::ChildInfo;
 use sp_state_machine::{
-	backend::{Backend as StateBackend, ProofBackendStateFor},
+	backend::{Backend as StateBackend, ProofRegStateFor},
 	StorageKey, StorageValue, StorageCollection, ChildStorageCollection,
 };
 use log::trace;
@@ -495,7 +495,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 	type Error = S::Error;
 	type Transaction = S::Transaction;
 	type StorageProof = S::StorageProof;
-	type ProofBackend = S::ProofBackend;
+	type ProofRegBackend = S::ProofRegBackend;
 	type ProofCheckBackend = S::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
@@ -656,8 +656,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		self.state.child_keys(child_info, prefix)
 	}
 
-	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
-		self.state.from_proof_backend(previous)
+	fn from_reg_state(self, previous: ProofRegStateFor<Self, HashFor<B>>) -> Option<Self::ProofRegBackend> {
+		self.state.from_reg_state(previous)
 	}
 
 	fn register_overlay_stats(&mut self, stats: &sp_state_machine::StateMachineStats) {
@@ -741,7 +741,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 	type Error = S::Error;
 	type Transaction = S::Transaction;
 	type StorageProof = S::StorageProof;
-	type ProofBackend = S::ProofBackend;
+	type ProofRegBackend = S::ProofRegBackend;
 	type ProofCheckBackend = S::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
@@ -851,8 +851,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 		self.caching_state().usage_info()
 	}
 
-	fn from_proof_backend(mut self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
-		self.sync().and_then(|s| s.from_proof_backend(previous))
+	fn from_reg_state(mut self, previous: ProofRegStateFor<Self, HashFor<B>>) -> Option<Self::ProofRegBackend> {
+		self.sync().and_then(|s| s.from_reg_state(previous))
 	}
 }
 

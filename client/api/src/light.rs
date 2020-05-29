@@ -32,8 +32,8 @@ use sp_blockchain::{
 	Error as ClientError, Result as ClientResult,
 };
 use crate::{backend::{AuxStore, NewBlockState}, UsageInfo};
+use sp_state_machine::TrieNodesStorageProof;
 use sp_state_machine::StorageProof;
-use sp_state_machine::BackendStorageProof;
 
 /// Remote call request.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -125,7 +125,7 @@ pub struct ChangesProof<Header: HeaderT> {
 	pub roots: BTreeMap<Header::Number, Header::Hash>,
 	/// The proofs for all changes tries roots that have been touched AND are
 	/// missing from the requester' node. It is a map of CHT number => proof.
-	pub roots_proof: StorageProof,
+	pub roots_proof: TrieNodesStorageProof,
 }
 
 /// Remote block body request
@@ -191,13 +191,13 @@ pub trait Fetcher<Block: BlockT>: Send + Sync {
 ///
 /// Implementations of this trait should not use any prunable blockchain data
 /// except that is passed to its methods.
-pub trait FetchChecker<Block: BlockT, P: BackendStorageProof>: Send + Sync {
+pub trait FetchChecker<Block: BlockT, P: StorageProof>: Send + Sync {
 	/// Check remote header proof.
 	fn check_header_proof(
 		&self,
 		request: &RemoteHeaderRequest<Block::Header>,
 		header: Option<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: TrieNodesStorageProof,
 	) -> ClientResult<Block::Header>;
 	/// Check remote storage read proof.
 	fn check_read_proof(

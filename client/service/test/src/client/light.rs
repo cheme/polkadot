@@ -40,7 +40,7 @@ use sp_api::{InitializeBlock, StorageTransactionCache, OffchainOverlayedChanges}
 use sp_consensus::{BlockOrigin};
 use sc_executor::{NativeExecutor, WasmExecutionMethod, RuntimeVersion, NativeVersion};
 use sp_core::{H256, tasks::executor as tasks_executor, NativeOrEncoded};
-use sc_client_api::{blockchain::Info, backend::NewBlockState, Backend as ClientBackend, ProofProvider, in_mem::{Backend as InMemBackend, Blockchain as InMemoryBlockchain}, AuxStore, Storage, CallExecutor, cht, ExecutionStrategy, BlockImportOperation, RemoteCallRequest, StorageProvider, ChangesProof, RemoteBodyRequest, RemoteReadRequest, RemoteChangesRequest, FetchChecker, RemoteReadChildRequest, RemoteHeaderRequest, ProofBackendStateFor};
+use sc_client_api::{blockchain::Info, backend::NewBlockState, Backend as ClientBackend, ProofProvider, in_mem::{Backend as InMemBackend, Blockchain as InMemoryBlockchain}, AuxStore, Storage, CallExecutor, cht, ExecutionStrategy, BlockImportOperation, RemoteCallRequest, StorageProvider, ChangesProof, RemoteBodyRequest, RemoteReadRequest, RemoteChangesRequest, FetchChecker, RemoteReadChildRequest, RemoteHeaderRequest, ProofRegStateFor};
 use sp_externalities::Extensions;
 use sc_block_builder::BlockBuilderProvider;
 use sp_blockchain::{
@@ -49,7 +49,7 @@ use sp_blockchain::{
 };
 use std::panic::UnwindSafe;
 use std::cell::RefCell;
-use sp_state_machine::{OverlayedChanges, ExecutionManager, StorageProof};
+use sp_state_machine::{OverlayedChanges, ExecutionManager, TrieNodesStorageProof};
 use parity_scale_codec::{Decode, Encode};
 use super::prepare_client_with_key_changes;
 use substrate_test_runtime_client::{
@@ -59,7 +59,7 @@ use substrate_test_runtime_client::{
 use sp_core::{blake2_256, ChangesTrieConfiguration, storage::{well_known_keys, StorageKey, ChildInfo}};
 use sp_state_machine::backend::Backend as _;
 #[cfg(test)]
-use sp_trie::BackendStorageProof;
+use sp_trie::StorageProof;
 
 type ProvingBackend = sp_state_machine::TrieBackend<sp_trie::MemoryDB<BlakeTwo256>, BlakeTwo256>;
 pub type DummyBlockchain = Blockchain<DummyStorage>;
@@ -228,7 +228,7 @@ impl CallExecutor<Block> for DummyCallExecutor {
 		_initialize_block: InitializeBlock<'a, Block>,
 		_execution_manager: ExecutionManager<EM>,
 		_native_call: Option<NC>,
-		_proof_recorder: Option<ProofBackendStateFor<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, HashFor<Block>>>,
+		_proof_recorder: Option<ProofRegStateFor<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, HashFor<Block>>>,
 		_extensions: Option<Extensions>,
 	) -> ClientResult<NativeOrEncoded<R>> where ExecutionManager<EM>: Clone {
 		unreachable!()
@@ -238,7 +238,7 @@ impl CallExecutor<Block> for DummyCallExecutor {
 		unreachable!()
 	}
 
-	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofBackend<HashFor<Block>>>(
+	fn prove_at_proof_backend_state<P: sp_state_machine::backend::ProofRegBackend<HashFor<Block>>>(
 		&self,
 		_proof_backend: &P,
 		_overlay: &mut OverlayedChanges,
@@ -447,7 +447,7 @@ type TestChecker = LightDataChecker<
 	ProofCheckBackendHash<BlakeTwo256>,
 >;
 
-fn prepare_for_read_proof_check() -> (TestChecker, Header, StorageProof, u32) {
+fn prepare_for_read_proof_check() -> (TestChecker, Header, TrieNodesStorageProof, u32) {
 	// prepare remote client
 	let remote_client = substrate_test_runtime_client::new();
 	let remote_block_id = BlockId::Number(0);
@@ -482,7 +482,7 @@ fn prepare_for_read_proof_check() -> (TestChecker, Header, StorageProof, u32) {
 	(local_checker, remote_block_header, remote_read_proof, heap_pages)
 }
 
-fn prepare_for_read_child_proof_check() -> (TestChecker, Header, StorageProof, Vec<u8>) {
+fn prepare_for_read_child_proof_check() -> (TestChecker, Header, TrieNodesStorageProof, Vec<u8>) {
 	use substrate_test_runtime_client::DefaultTestClientBuilderExt;
 	use substrate_test_runtime_client::TestClientBuilderExt;
 	let child_info = ChildInfo::new_default(b"child1");
@@ -530,7 +530,7 @@ fn prepare_for_read_child_proof_check() -> (TestChecker, Header, StorageProof, V
 	(local_checker, remote_block_header, remote_read_proof, child_value)
 }
 
-fn prepare_for_header_proof_check(insert_cht: bool) -> (TestChecker, Hash, Header, StorageProof) {
+fn prepare_for_header_proof_check(insert_cht: bool) -> (TestChecker, Hash, Header, TrieNodesStorageProof) {
 	// prepare remote client
 	let mut remote_client = substrate_test_runtime_client::new();
 	let mut local_headers_hashes = Vec::new();
@@ -573,7 +573,7 @@ fn header_with_computed_extrinsics_root(extrinsics: Vec<Extrinsic>) -> Header {
 #[test]
 fn storage_read_proof_is_generated_and_checked() {
 	let (local_checker, remote_block_header, remote_read_proof, heap_pages) = prepare_for_read_proof_check();
-	assert_eq!((&local_checker as &dyn FetchChecker<Block, StorageProof>).check_read_proof(&RemoteReadRequest::<Header> {
+	assert_eq!((&local_checker as &dyn FetchChecker<Block, TrieNodesStorageProof>).check_read_proof(&RemoteReadRequest::<Header> {
 		block: remote_block_header.hash(),
 		header: remote_block_header,
 		keys: vec![well_known_keys::HEAP_PAGES.to_vec()],
@@ -590,7 +590,7 @@ fn storage_child_read_proof_is_generated_and_checked() {
 		remote_read_proof,
 		result,
 	) = prepare_for_read_child_proof_check();
-	assert_eq!((&local_checker as &dyn FetchChecker<Block, StorageProof>).check_read_child_proof(
+	assert_eq!((&local_checker as &dyn FetchChecker<Block, TrieNodesStorageProof>).check_read_child_proof(
 		&RemoteReadChildRequest::<Header> {
 			block: remote_block_header.hash(),
 			header: remote_block_header,
@@ -605,7 +605,7 @@ fn storage_child_read_proof_is_generated_and_checked() {
 #[test]
 fn header_proof_is_generated_and_checked() {
 	let (local_checker, local_cht_root, remote_block_header, remote_header_proof) = prepare_for_header_proof_check(true);
-	assert_eq!((&local_checker as &dyn FetchChecker<Block, StorageProof>).check_header_proof(&RemoteHeaderRequest::<Header> {
+	assert_eq!((&local_checker as &dyn FetchChecker<Block, TrieNodesStorageProof>).check_header_proof(&RemoteHeaderRequest::<Header> {
 		cht_root: local_cht_root,
 		block: 1,
 		retry_count: None,
@@ -616,7 +616,7 @@ fn header_proof_is_generated_and_checked() {
 fn check_header_proof_fails_if_cht_root_is_invalid() {
 	let (local_checker, _, mut remote_block_header, remote_header_proof) = prepare_for_header_proof_check(true);
 	remote_block_header.number = 100;
-	assert!((&local_checker as &dyn FetchChecker<Block, StorageProof>).check_header_proof(&RemoteHeaderRequest::<Header> {
+	assert!((&local_checker as &dyn FetchChecker<Block, TrieNodesStorageProof>).check_header_proof(&RemoteHeaderRequest::<Header> {
 		cht_root: Default::default(),
 		block: 1,
 		retry_count: None,
@@ -627,7 +627,7 @@ fn check_header_proof_fails_if_cht_root_is_invalid() {
 fn check_header_proof_fails_if_invalid_header_provided() {
 	let (local_checker, local_cht_root, mut remote_block_header, remote_header_proof) = prepare_for_header_proof_check(true);
 	remote_block_header.number = 100;
-	assert!((&local_checker as &dyn FetchChecker<Block, StorageProof>).check_header_proof(&RemoteHeaderRequest::<Header> {
+	assert!((&local_checker as &dyn FetchChecker<Block, TrieNodesStorageProof>).check_header_proof(&RemoteHeaderRequest::<Header> {
 		cht_root: local_cht_root,
 		block: 1,
 		retry_count: None,
@@ -642,7 +642,7 @@ fn changes_proof_is_generated_and_checked_when_headers_are_not_pruned() {
 		local_executor(),
 		tasks_executor(),
 	);
-	let local_checker = &local_checker as &dyn FetchChecker<Block, StorageProof>;
+	let local_checker = &local_checker as &dyn FetchChecker<Block, TrieNodesStorageProof>;
 	let max = remote_client.chain_info().best_number;
 	let max_hash = remote_client.chain_info().best_hash;
 
@@ -752,7 +752,7 @@ fn check_changes_proof_fails_if_proof_is_wrong() {
 		local_executor(),
 		tasks_executor(),
 	);
-	let local_checker = &local_checker as &dyn FetchChecker<Block, StorageProof>;
+	let local_checker = &local_checker as &dyn FetchChecker<Block, TrieNodesStorageProof>;
 	let max = remote_client.chain_info().best_number;
 	let max_hash = remote_client.chain_info().best_hash;
 
@@ -803,13 +803,13 @@ fn check_changes_proof_fails_if_proof_is_wrong() {
 		max_block: remote_proof.max_block,
 		proof: remote_proof.proof.clone(),
 		roots: vec![(begin - 1, Default::default())].into_iter().collect(),
-		roots_proof: StorageProof::empty(),
+		roots_proof: TrieNodesStorageProof::empty(),
 	}).is_err());
 	assert!(local_checker.check_changes_proof(&request, ChangesProof {
 		max_block: remote_proof.max_block,
 		proof: remote_proof.proof.clone(),
 		roots: vec![(end + 1, Default::default())].into_iter().collect(),
-		roots_proof: StorageProof::empty(),
+		roots_proof: TrieNodesStorageProof::empty(),
 	}).is_err());
 }
 
@@ -852,7 +852,7 @@ fn check_changes_tries_proof_fails_if_proof_is_wrong() {
 		tasks_executor(),
 	);
 	let result = local_checker.check_changes_tries_proof(
-		4, &remote_proof.roots, StorageProof::empty()
+		4, &remote_proof.roots, TrieNodesStorageProof::empty()
 	);
 	assert!(result.is_err());
 }

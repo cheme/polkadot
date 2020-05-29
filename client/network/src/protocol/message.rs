@@ -141,7 +141,7 @@ pub mod generic {
 	use bitflags::bitflags;
 	use codec::{Encode, Decode, Input, Output};
 	use sp_runtime::Justification;
-	use sc_client_api::StorageProof;
+	use sc_client_api::TrieNodesStorageProof;
 	use super::{
 		RemoteReadResponse, Transactions, Direction,
 		RequestId, BlockAttributes, RemoteCallResponse, ConsensusEngineId,
@@ -500,7 +500,7 @@ pub mod generic {
 		/// Header. None if proof generation has failed (e.g. header is unknown).
 		pub header: Option<Header>,
 		/// Header proof.
-		pub proof: StorageProof,
+		pub proof: TrieNodesStorageProof,
 	}
 
 	#[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
@@ -536,7 +536,7 @@ pub mod generic {
 		/// Changes tries roots missing on the requester' node.
 		pub roots: Vec<(N, H)>,
 		/// Missing changes tries roots proof.
-		pub roots_proof: StorageProof,
+		pub roots_proof: TrieNodesStorageProof,
 	}
 
 	#[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]

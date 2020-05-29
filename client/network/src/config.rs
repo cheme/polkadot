@@ -49,7 +49,7 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
-use sp_state_machine::BackendStorageProof as StorageProof;
+use sp_state_machine::StorageProof;
 use zeroize::Zeroize;
 
 /// Network initialization parameters.

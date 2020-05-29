@@ -39,8 +39,8 @@ extern crate self as sp_api;
 #[doc(hidden)]
 #[cfg(feature = "std")]
 pub use sp_state_machine::{
-	OverlayedChanges, StorageProof, ChangesTrieState, InMemoryBackend,
-	backend::{Backend as StateBackend, ProofBackend, ProofBackendStateFor},
+	OverlayedChanges, TrieNodesStorageProof, ChangesTrieState, InMemoryBackend,
+	backend::{Backend as StateBackend, ProofRegBackend, ProofRegStateFor},
 };
 #[doc(hidden)]
 #[cfg(feature = "std")]
@@ -383,7 +383,7 @@ pub trait ApiExt<Block: BlockT>: ApiErrorExt {
 	/// Extract the proof recorder state.
 	///
 	/// This stops the proof recording.
-	fn extract_proof_recorder(&mut self) -> Option<ProofBackendStateFor<Self::StateBackend, HashFor<Block>>>;
+	fn extract_proof_recorder(&mut self) -> Option<ProofRegStateFor<Self::StateBackend, HashFor<Block>>>;
 
 	/// Convert the api object into the storage changes that were done while executing runtime
 	/// api functions.
@@ -445,7 +445,7 @@ pub struct CallApiAtParams<'a, Block: BlockT, C, NC, Backend: StateBackend<HashF
 	/// The context this function is executed in.
 	pub context: ExecutionContext,
 	/// The optional proof recorder for recording storage accesses.
-	pub recorder: Option<ProofBackendStateFor<Backend, HashFor<Block>>>,
+	pub recorder: Option<ProofRegStateFor<Backend, HashFor<Block>>>,
 }
 
 /// Something that can call into the an api at a given block.

@@ -194,8 +194,8 @@ where
 
 		let state = self.backend.state_at(self.block_id)?;
 		let proof = proof_recorder.and_then(|backend| {
-			use backend::{StateBackend, ProofBackend};
-			state.from_proof_backend(backend).map(|backend| backend.extract_proof())
+			use backend::{StateBackend, ProofRegBackend};
+			state.from_reg_state(backend).map(|backend| backend.extract_proof())
 		});
 		let state = self.backend.state_at(self.block_id)?;
 		let changes_trie_state = backend::changes_tries_state_at_block(

@@ -34,7 +34,7 @@ use sp_state_machine::{
 	InMemoryChangesTrieStorage, TrieBackend, read_proof_check, key_changes_proof_check_with_db,
 	read_child_proof_check, CloneableSpawn, backend::ProofCheckBackend,
 };
-pub use sp_state_machine::StorageProof;
+pub use sp_state_machine::TrieNodesStorageProof;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 
 pub use sc_client_api::{
@@ -151,7 +151,7 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>, P> LightDataChecker<E, H, B, S, P
 		&self,
 		cht_size: NumberFor<B>,
 		remote_roots: &BTreeMap<NumberFor<B>, B::Hash>,
-		remote_roots_proof: StorageProof,
+		remote_roots_proof: TrieNodesStorageProof,
 	) -> ClientResult<()>
 		where
 			H: Hasher,
@@ -215,7 +215,7 @@ impl<E, Block, H, S, P> FetchChecker<Block, P::StorageProof> for LightDataChecke
 		&self,
 		request: &RemoteHeaderRequest<Block::Header>,
 		remote_header: Option<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: TrieNodesStorageProof,
 	) -> ClientResult<Block::Header> {
 		let remote_header = remote_header.ok_or_else(||
 			ClientError::from(ClientError::InvalidCHTProof))?;

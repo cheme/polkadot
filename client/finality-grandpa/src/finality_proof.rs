@@ -40,7 +40,7 @@ use log::{trace, warn};
 
 use sp_blockchain::{Backend as BlockchainBackend, Error as ClientError, Result as ClientResult};
 use sc_client_api::{
-	backend::Backend, StorageProof,
+	backend::Backend, TrieNodesStorageProof as StorageProof,
 	light::{FetchChecker, RemoteReadRequest},
 	StorageProvider, ProofProvider,
 };

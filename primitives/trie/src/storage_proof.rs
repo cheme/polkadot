@@ -26,13 +26,12 @@ use hash_db::{Hasher, HashDB};
 /// the keys covered by the proof. Verifying the proof requires constructing the partial trie from
 /// the serialized nodes and performing the key lookups.
 #[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
-pub struct StorageProof {
+pub struct TrieNodesStorageProof {
 	trie_nodes: Vec<Vec<u8>>,
 }
 
 /// Trait for proofs that can be use as a partial backend for verification.
-/// TODO EMCH rename backend got nothing to do with that, pbly state.
-pub trait BackendStorageProof: Codec + sp_std::fmt::Debug + Sized + 'static {
+pub trait StorageProof: Codec + sp_std::fmt::Debug + Sized + 'static {
 	/// Merges multiple storage proofs covering potentially different sets of keys into one proof
 	/// covering all keys. The merged proof output may be smaller than the aggregate size of the input
 	/// proofs due to deduplication of trie nodes.
@@ -48,10 +47,10 @@ pub trait BackendStorageProof: Codec + sp_std::fmt::Debug + Sized + 'static {
 	fn is_empty(&self) -> bool;
 }
 
-impl StorageProof {
+impl TrieNodesStorageProof {
 	/// Constructs a storage proof from a subset of encoded trie nodes in a storage backend.
 	pub fn new(trie_nodes: Vec<Vec<u8>>) -> Self {
-		StorageProof { trie_nodes }
+		TrieNodesStorageProof { trie_nodes }
 	}
 
 	/// Create an iterator over trie nodes constructed from the proof. The nodes are not guaranteed
@@ -66,7 +65,7 @@ impl StorageProof {
 	}
 }
 
-impl BackendStorageProof for StorageProof {
+impl StorageProof for TrieNodesStorageProof {
 	fn merge<I>(proofs: I) -> Self where I: IntoIterator<Item=Self> {
 		let trie_nodes = proofs.into_iter()
 			.flat_map(|proof| proof.iter_nodes())
@@ -78,7 +77,7 @@ impl BackendStorageProof for StorageProof {
 	}
 
 	fn empty() -> Self {
-		StorageProof {
+		TrieNodesStorageProof {
 			trie_nodes: Vec::new(),
 		}
 	}
@@ -95,7 +94,7 @@ pub struct StorageProofNodeIterator {
 }
 
 impl StorageProofNodeIterator {
-	fn new(proof: StorageProof) -> Self {
+	fn new(proof: TrieNodesStorageProof) -> Self {
 		StorageProofNodeIterator {
 			inner: proof.trie_nodes.into_iter(),
 		}
@@ -110,8 +109,8 @@ impl Iterator for StorageProofNodeIterator {
 	}
 }
 
-impl<H: Hasher> From<StorageProof> for crate::MemoryDB<H> {
-	fn from(proof: StorageProof) -> Self {
+impl<H: Hasher> From<TrieNodesStorageProof> for crate::MemoryDB<H> {
+	fn from(proof: TrieNodesStorageProof) -> Self {
 		let mut db = crate::MemoryDB::default();
 		for item in proof.iter_nodes() {
 			db.insert(crate::EMPTY_PREFIX, &item);

@@ -40,10 +40,10 @@ use sp_blockchain;
 use sp_consensus::BlockOrigin;
 use parking_lot::RwLock;
 
-pub use sp_state_machine::backend::{Backend as StateBackend, ProofBackend,
-	ProofBackendStateFor,
+pub use sp_state_machine::backend::{Backend as StateBackend, ProofRegBackend,
+	ProofRegStateFor,
 };
-pub use sp_state_machine::BackendStorageProof;
+pub use sp_state_machine::StorageProof;
 use std::marker::PhantomData;
 
 /// Extracts the state backend type for the given backend.
@@ -55,14 +55,14 @@ pub type TransactionForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::Trans
 /// Extracts the transaction for the given backend.
 pub type TransactionFor<B, Block> = TransactionForSB<StateBackendFor<B, Block>, Block>;
 
-/// Extracts the proof backend for the given state backend.
-pub type ProofBackendForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::ProofBackend;
+/// Extracts the proof registering backend for the given state backend.
+pub type ProofRegForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::ProofRegBackend;
 
-/// Extracts the proof backend for the given backend.
-pub type ProofBackendFor<B, Block> = ProofBackendForSB<StateBackendFor<B, Block>, Block>;
+/// Extracts the proof registering backend for the given backend.
+pub type ProofRegFor<B, Block> = ProofRegForSB<StateBackendFor<B, Block>, Block>;
 
 /// Extracts the proof for the given backend.
-pub type ProofFor<B, Block> = <ProofBackendFor<B, Block> as StateBackend<HashFor<Block>>>::StorageProof;
+pub type ProofFor<B, Block> = <ProofRegFor<B, Block> as StateBackend<HashFor<Block>>>::StorageProof;
 
 /// Import operation summary.
 ///

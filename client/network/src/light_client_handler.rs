@@ -56,13 +56,13 @@ use libp2p::{
 use nohash_hasher::IntMap;
 use prost::Message;
 use sc_client_api::{
-	StorageProof,
+	TrieNodesStorageProof,
 	light::{
 		self, RemoteReadRequest, RemoteBodyRequest, ChangesProof,
 		RemoteCallRequest, RemoteChangesRequest, RemoteHeaderRequest,
 	}
 };
-use sp_state_machine::BackendStorageProof;
+use sp_state_machine::StorageProof;
 use sc_peerset::ReputationChange;
 use sp_core::{
 	storage::{ChildInfo, ChildType,StorageKey, PrefixedStorageKey},
@@ -284,7 +284,7 @@ enum PeerStatus {
 }
 
 /// The light client handler behaviour.
-pub struct LightClientHandler<B: Block, P: BackendStorageProof> {
+pub struct LightClientHandler<B: Block, P: StorageProof> {
 	/// This behaviour's configuration.
 	config: Config,
 	/// Blockchain client.
@@ -308,7 +308,7 @@ pub struct LightClientHandler<B: Block, P: BackendStorageProof> {
 impl<B, P> LightClientHandler<B, P>
 where
 	B: Block,
-	P: BackendStorageProof,
+	P: StorageProof,
 {
 	/// Construct a new light client handler.
 	pub fn new(
@@ -671,7 +671,7 @@ where
 					peer,
 					request.block,
 					error);
-				(Default::default(), StorageProof::empty())
+				(Default::default(), TrieNodesStorageProof::empty())
 			}
 		};
 
@@ -724,7 +724,7 @@ where
 					max_block: Zero::zero(),
 					proof: Vec::new(),
 					roots: BTreeMap::new(),
-					roots_proof: StorageProof::empty(),
+					roots_proof: TrieNodesStorageProof::empty(),
 				}
 			}
 		};
@@ -748,7 +748,7 @@ where
 impl<B, P> NetworkBehaviour for LightClientHandler<B, P>
 where
 	B: Block,
-	P: BackendStorageProof,
+	P: StorageProof,
 {
 	type ProtocolsHandler = OneShotHandler<InboundProtocol, OutboundProtocol, Event<NegotiatedSubstream>>;
 	type OutEvent = Void;
@@ -1325,7 +1325,7 @@ mod tests {
 		swarm::{NetworkBehaviour, NetworkBehaviourAction, PollParameters},
 		yamux
 	};
-	use sc_client_api::{StorageProof, RemoteReadChildRequest, FetchChecker};
+	use sc_client_api::{TrieNodesStorageProof, RemoteReadChildRequest, FetchChecker};
 	use sp_blockchain::{Error as ClientError};
 	use sp_core::storage::ChildInfo;
 	use std::{
@@ -1341,11 +1341,11 @@ mod tests {
 	use void::Void;
 
 	type Block = sp_runtime::generic::Block<Header<u64, BlakeTwo256>, substrate_test_runtime::Extrinsic>;
-	type Handler = LightClientHandler<Block, StorageProof>;
+	type Handler = LightClientHandler<Block, TrieNodesStorageProof>;
 	type Swarm = libp2p::swarm::Swarm<Handler>;
 
 	fn empty_proof() -> Vec<u8> {
-		StorageProof::empty().encode()
+		TrieNodesStorageProof::empty().encode()
 	}
 
 	fn make_swarm(ok: bool, ps: sc_peerset::PeersetHandle, cf: super::Config) -> Swarm {
@@ -1369,12 +1369,12 @@ mod tests {
 		_mark: std::marker::PhantomData<B>
 	}
 
-	impl<B: BlockT, P: BackendStorageProof> light::FetchChecker<B, P> for DummyFetchChecker<B> {
+	impl<B: BlockT, P: StorageProof> light::FetchChecker<B, P> for DummyFetchChecker<B> {
 		fn check_header_proof(
 			&self,
 			_request: &RemoteHeaderRequest<B::Header>,
 			header: Option<B::Header>,
-			_remote_proof: StorageProof,
+			_remote_proof: TrieNodesStorageProof,
 		) -> Result<B::Header, ClientError> {
 			match self.ok {
 				true if header.is_some() => Ok(header.unwrap()),
@@ -1501,7 +1501,7 @@ mod tests {
 		( ok: bool
 		, ps: sc_peerset::PeersetHandle
 		, cf: super::Config
-		) -> LightClientHandler<Block, StorageProof>
+		) -> LightClientHandler<Block, TrieNodesStorageProof>
 	{
 		let client = Arc::new(substrate_test_runtime_client::new());
 		let checker = Arc::new(DummyFetchChecker { ok, _mark: std::marker::PhantomData });
@@ -1512,7 +1512,7 @@ mod tests {
 		ConnectedPoint::Dialer { address: Multiaddr::empty() }
 	}
 
-	fn poll(mut b: &mut LightClientHandler<Block, StorageProof>) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
+	fn poll(mut b: &mut LightClientHandler<Block, TrieNodesStorageProof>) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
 		let mut p = EmptyPollParams(PeerId::random());
 		match future::poll_fn(|cx| Pin::new(&mut b).poll(cx, &mut p)).now_or_never() {
 			Some(a) => Poll::Ready(a),

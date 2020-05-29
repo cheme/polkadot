@@ -32,7 +32,7 @@ use sp_state_machine::{
 	InMemoryBackend, ChangesTrieTransaction,
 	StorageCollection, ChildStorageCollection,
 };
-use sp_state_machine::backend::{Backend as StateBackend, ProofBackendStateFor};
+use sp_state_machine::backend::{Backend as StateBackend, ProofRegStateFor};
 use sp_runtime::{generic::BlockId, Justification, Storage};
 use sp_runtime::traits::{Block as BlockT, NumberFor, Zero, Header, HashFor};
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
@@ -378,7 +378,7 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 	type Error = ClientError;
 	type Transaction = <InMemoryBackend<H> as StateBackend<H>>::Transaction;
 	type StorageProof = <InMemoryBackend<H> as StateBackend<H>>::StorageProof;
-	type ProofBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofBackend;
+	type ProofRegBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofRegBackend;
 	type ProofCheckBackend = <InMemoryBackend<H> as StateBackend<H>>::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> ClientResult<Option<Vec<u8>>> {
@@ -511,9 +511,9 @@ impl<H: Hasher> StateBackend<H> for GenesisOrUnavailableState<H>
 		sp_state_machine::UsageInfo::empty()
 	}
 
-	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend> {
+	fn from_reg_state(self, previous: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend> {
 		match self {
-			GenesisOrUnavailableState::Genesis(state) => state.from_proof_backend(previous),
+			GenesisOrUnavailableState::Genesis(state) => state.from_reg_state(previous),
 			GenesisOrUnavailableState::Unavailable => None,
 		}
 	}

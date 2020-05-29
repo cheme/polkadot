@@ -26,7 +26,7 @@ use crate::{
 };
 
 /// Access the state of the proof backend of a backend.
-pub type ProofBackendStateFor<B, H> = <<B as Backend<H>>::ProofBackend as ProofBackend<H>>::State;
+pub type ProofRegStateFor<B, H> = <<B as Backend<H>>::ProofRegBackend as ProofRegBackend<H>>::State;
 
 /// Transaction containing a set of key values updates.
 pub trait HashDBNodesTransaction<K, V> {
@@ -52,10 +52,10 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	type Transaction: Consolidate + Default + Send;
 
 	/// The actual proof produced.
-	type StorageProof: sp_trie::BackendStorageProof;
+	type StorageProof: sp_trie::StorageProof;
 
 	/// Type of proof backend.
-	type ProofBackend: ProofBackend<H, StorageProof = Self::StorageProof>;
+	type ProofRegBackend: ProofRegBackend<H, StorageProof = Self::StorageProof>;
 
 	/// Type of proof backend.
 	type ProofCheckBackend: ProofCheckBackend<H, StorageProof = Self::StorageProof>;
@@ -187,15 +187,14 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	/// Try convert into a proof backend.
 	/// If one do not want to consume the backend, calling on '&self' is fine
 	/// since '&Backend' implement 'Backend'.
-	fn as_proof_backend(self) -> Option<Self::ProofBackend> {
-		self.from_proof_backend(Default::default())
+	fn as_proof_backend(self) -> Option<Self::ProofRegBackend> {
+		self.from_reg_state(Default::default())
 	}
 
 	/// Try convert into a proof backend.
 	/// We can optionally use a previous proof backend to avoid having to merge
 	/// proof later.
-	/// TODO rename to make it clear it is some proof backend state.
-	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend>;
+	fn from_reg_state(self, previous: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend>;
 
 	/// Calculate the storage root, with given delta over what is already stored
 	/// in the backend, and produce a "transaction" that can be used to commit.
@@ -270,9 +269,8 @@ pub trait InstantiableStateBackend<H>: Backend<H>
 	fn extract_state(self) -> (Self::Storage, H::Out);
 }
 
-/// Backend used to produce proof.
-/// TODO rename ProofRegisterBackend or Proving backend
-pub trait ProofBackend<H>: crate::backend::Backend<H>
+/// Backend used to register a proof record.
+pub trait ProofRegBackend<H>: crate::backend::Backend<H>
 	where
 		H: Hasher,
 		H::Out: Encode,
@@ -282,14 +280,9 @@ pub trait ProofBackend<H>: crate::backend::Backend<H>
 
 	/// Extract proof when run.
 	fn extract_proof(&self) -> Self::StorageProof;
-
-	/// Extract proof when run.
-	/// TODO probably useless (state is sync)
-	fn current_state(self) -> Self::State;
 }
 
 /// Backend used to produce proof.
-/// TODO move trait location
 pub trait ProofCheckBackend<H>: Sized + crate::backend::Backend<H>
 	where
 		H: Hasher,
@@ -312,7 +305,7 @@ impl<'a, T, H> Backend<H> for &'a T
 	type Error = T::Error;
 	type Transaction = T::Transaction;
 	type StorageProof = T::StorageProof;
-	type ProofBackend = T::ProofBackend;
+	type ProofRegBackend = T::ProofRegBackend;
 	type ProofCheckBackend = T::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
@@ -393,7 +386,7 @@ impl<'a, T, H> Backend<H> for &'a T
 		(*self).usage_info()
 	}
 
-	fn from_proof_backend(self, _previous: ProofBackendStateFor<Self, H>) -> Option<Self::ProofBackend> {
+	fn from_reg_state(self, _previous: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend> {
 		// cannot move out of reference, consider cloning or
 		// if needed.
 		None

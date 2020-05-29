@@ -195,7 +195,7 @@ pub struct Peer<D> {
 	block_import: BlockImportAdapter<()>,
 	select_chain: Option<LongestChain<substrate_test_runtime_client::Backend, Block>>,
 	backend: Option<Arc<substrate_test_runtime_client::Backend>>,
-	network: NetworkWorker<Block, <Block as BlockT>::Hash, sp_trie::StorageProof>,
+	network: NetworkWorker<Block, <Block as BlockT>::Hash, sp_trie::TrieNodesStorageProof>,
 	imported_blocks_stream: Pin<Box<dyn Stream<Item = BlockImportNotification<Block>> + Send>>,
 	finality_notification_stream: Pin<Box<dyn Stream<Item = FinalityNotification<Block>> + Send>>,
 }

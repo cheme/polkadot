@@ -352,7 +352,7 @@ fn build_network_future<
 	B: BlockT,
 	C: BlockchainEvents<B>,
 	H: sc_network::ExHashT,
-	P: sp_trie::BackendStorageProof,
+	P: sp_trie::StorageProof,
 > (
 	role: Role,
 	mut network: sc_network::NetworkWorker<B, H, P>,
@@ -646,7 +646,7 @@ impl<B, H, C, Pool, E, P> sc_network::config::TransactionPool<H, B, P> for
 	TransactionPoolAdapter<C, Pool>
 where
 	C: sc_network::config::Client<B, P> + Send + Sync,
-	P: sp_trie::BackendStorageProof,
+	P: sp_trie::StorageProof,
 	Pool: 'static + TransactionPool<Block=B, Hash=H, Error=E>,
 	B: BlockT,
 	H: std::hash::Hash + Eq + sp_runtime::traits::Member + sp_runtime::traits::MaybeSerialize,

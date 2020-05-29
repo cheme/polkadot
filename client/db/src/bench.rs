@@ -26,15 +26,15 @@ use sp_trie::{MemoryDB, prefixed_key};
 use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use sp_runtime::Storage;
-use sp_state_machine::{DBValue, backend::{Backend as StateBackend, ProofBackendStateFor}};
+use sp_state_machine::{DBValue, backend::{Backend as StateBackend, ProofRegStateFor}};
 use kvdb::{KeyValueDB, DBTransaction};
 use crate::storage_cache::{CachingState, SharedCache, new_shared_cache};
 
-type DbState<B> = sp_state_machine::TrieBackend<
+type TrieBackendState<B> = sp_state_machine::TrieBackend<
 	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
 >;
 
-type State<B> = CachingState<DbState<B>, B>;
+type State<B> = CachingState<TrieBackendState<B>, B>;
 
 struct StorageDb<Block: BlockT> {
 	db: Arc<dyn KeyValueDB>,
@@ -102,7 +102,7 @@ impl<B: BlockT> BenchmarkingState<B> {
 		self.db.set(Some(db.clone()));
 		let storage_db = Arc::new(StorageDb::<B> { db, _block: Default::default() });
 		*self.state.borrow_mut() = Some(State::new(
-			DbState::<B>::new(storage_db, self.root.get()),
+			TrieBackendState::<B>::new(storage_db, self.root.get()),
 			self.shared_cache.clone(),
 			None
 		));
@@ -115,11 +115,11 @@ fn state_err() -> String {
 }
 
 impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
-	type Error =  <DbState<B> as StateBackend<HashFor<B>>>::Error;
-	type Transaction = <DbState<B> as StateBackend<HashFor<B>>>::Transaction;
-	type StorageProof = <DbState<B> as StateBackend<HashFor<B>>>::StorageProof;
-	type ProofBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofBackend;
-	type ProofCheckBackend = <DbState<B> as StateBackend<HashFor<B>>>::ProofCheckBackend;
+	type Error =  <TrieBackendState<B> as StateBackend<HashFor<B>>>::Error;
+	type Transaction = <TrieBackendState<B> as StateBackend<HashFor<B>>>::Transaction;
+	type StorageProof = <TrieBackendState<B> as StateBackend<HashFor<B>>>::StorageProof;
+	type ProofRegBackend = <TrieBackendState<B> as StateBackend<HashFor<B>>>::ProofRegBackend;
+	type ProofCheckBackend = <TrieBackendState<B> as StateBackend<HashFor<B>>>::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.state.borrow().as_ref().ok_or_else(state_err)?.storage(key)
@@ -280,8 +280,8 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 		self.state.borrow().as_ref().map_or(sp_state_machine::UsageInfo::empty(), |s| s.usage_info())
 	}
 
-	fn from_proof_backend(self, previous: ProofBackendStateFor<Self, HashFor<B>>) -> Option<Self::ProofBackend> {
-		self.state.borrow_mut().take().and_then(|s| s.from_proof_backend(previous))
+	fn from_reg_state(self, previous: ProofRegStateFor<Self, HashFor<B>>) -> Option<Self::ProofRegBackend> {
+		self.state.borrow_mut().take().and_then(|s| s.from_reg_state(previous))
 	}
 }
 

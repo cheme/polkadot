@@ -57,7 +57,7 @@ use sp_blockchain::{
 	well_known_cache_keys::Id as CacheKeyId,
 	HeaderMetadata, CachedHeaderMetadata,
 };
-use sp_trie::{StorageProof, BackendStorageProof};
+use sp_trie::{TrieNodesStorageProof, StorageProof};
 use sp_api::{
 	CallApiAt, ConstructRuntimeApi, Core as CoreApi, ApiExt, ApiRef, ProvideRuntimeApi,
 	CallApiAtParams,
@@ -366,7 +366,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		&self,
 		id: &BlockId<Block>,
 		cht_size: NumberFor<Block>,
-	) -> sp_blockchain::Result<(Block::Header, StorageProof)> {
+	) -> sp_blockchain::Result<(Block::Header, TrieNodesStorageProof)> {
 		let proof_error = || sp_blockchain::Error::Backend(format!("Failed to generate header proof for {:?}", id));
 		let header = self.backend.blockchain().expect_header(*id)?;
 		let block_num = *header.number();
@@ -514,7 +514,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		&self,
 		cht_size: NumberFor<Block>,
 		blocks: I
-	) -> sp_blockchain::Result<StorageProof> {
+	) -> sp_blockchain::Result<TrieNodesStorageProof> {
 		// most probably we have touched several changes tries that are parts of the single CHT
 		// => GroupBy changes tries by CHT number and then gather proof for the whole group at once
 		let mut proofs = Vec::new();
@@ -525,7 +525,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			Ok(())
 		}, ())?;
 
-		Ok(StorageProof::merge(proofs))
+		Ok(TrieNodesStorageProof::merge(proofs))
 	}
 
 	/// Generates CHT-based proof for roots of changes tries at given blocks (that are part of single CHT).
@@ -534,7 +534,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		cht_size: NumberFor<Block>,
 		cht_num: NumberFor<Block>,
 		blocks: Vec<NumberFor<Block>>
-	) -> sp_blockchain::Result<StorageProof> {
+	) -> sp_blockchain::Result<TrieNodesStorageProof> {
 		let cht_start = cht::start_number(cht_size, cht_num);
 		let mut current_num = cht_start;
 		let cht_range = ::std::iter::from_fn(|| {
@@ -1228,7 +1228,7 @@ impl<B, E, Block, RA> ProofProvider<Block, ProofFor<B, Block>> for Client<B, E, 
 		})
 	}
 
-	fn header_proof(&self, id: &BlockId<Block>) -> sp_blockchain::Result<(Block::Header, StorageProof)> {
+	fn header_proof(&self, id: &BlockId<Block>) -> sp_blockchain::Result<(Block::Header, TrieNodesStorageProof)> {
 		self.header_proof_with_cht_size(id, cht::size())
 	}
 

@@ -23,9 +23,9 @@ use futures::{channel::oneshot, prelude::*};
 use parking_lot::Mutex;
 use sc_client_api::{
 	FetchChecker, Fetcher, RemoteBodyRequest, RemoteCallRequest, RemoteChangesRequest,
-	RemoteHeaderRequest, RemoteReadChildRequest, RemoteReadRequest, StorageProof, ChangesProof,
+	RemoteHeaderRequest, RemoteReadChildRequest, RemoteReadRequest, TrieNodesStorageProof, ChangesProof,
 };
-use sp_state_machine::BackendStorageProof;
+use sp_state_machine::StorageProof;
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
 use sp_blockchain::Error as ClientError;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT, NumberFor};
@@ -36,7 +36,7 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, task::Context, task::Poll};
 ///
 /// This implementation stores all the requests in a queue. The network, in parallel, is then
 /// responsible for pulling elements out of that queue and fulfilling them.
-pub struct OnDemand<B: BlockT, P: BackendStorageProof> {
+pub struct OnDemand<B: BlockT, P: StorageProof> {
 	/// Objects that checks whether what has been retrieved is correct.
 	checker: Arc<dyn FetchChecker<B, P>>,
 
@@ -58,12 +58,12 @@ pub struct OnDemand<B: BlockT, P: BackendStorageProof> {
 #[derive(Default, Clone)]
 pub struct AlwaysBadChecker;
 
-impl<Block: BlockT, Proof: BackendStorageProof> FetchChecker<Block, Proof> for AlwaysBadChecker {
+impl<Block: BlockT, Proof: StorageProof> FetchChecker<Block, Proof> for AlwaysBadChecker {
 	fn check_header_proof(
 		&self,
 		_request: &RemoteHeaderRequest<Block::Header>,
 		_remote_header: Option<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: TrieNodesStorageProof,
 	) -> Result<Block::Header, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -109,7 +109,7 @@ impl<Block: BlockT, Proof: BackendStorageProof> FetchChecker<Block, Proof> for A
 	}
 }
 
-impl<B: BlockT, P: BackendStorageProof> OnDemand<B, P>
+impl<B: BlockT, P: StorageProof> OnDemand<B, P>
 where
 	B::Header: HeaderT,
 {
@@ -148,7 +148,7 @@ impl<B, P> Fetcher<B> for OnDemand<B, P>
 where
 	B: BlockT,
 	B::Header: HeaderT,
-	P: BackendStorageProof,
+	P: StorageProof,
 {
 	type RemoteHeaderResult = RemoteResponse<B::Header>;
 	type RemoteReadResult = RemoteResponse<HashMap<Vec<u8>, Option<Vec<u8>>>>;

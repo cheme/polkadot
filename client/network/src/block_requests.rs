@@ -30,7 +30,7 @@ use crate::{
 	protocol::{message::{self, BlockAttributes}},
 	schema,
 };
-use sp_state_machine::BackendStorageProof as StorageProof;
+use sp_state_machine::StorageProof;
 use futures::{future::BoxFuture, prelude::*, stream::FuturesUnordered};
 use futures_timer::Delay;
 use libp2p::{
