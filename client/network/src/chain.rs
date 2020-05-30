@@ -15,12 +15,13 @@
 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 //! Blockchain access trait
 
 use sp_blockchain::{Error, HeaderBackend, HeaderMetadata};
 use sc_client_api::{BlockBackend, ProofProvider};
 use sp_runtime::traits::{Block as BlockT, BlockIdTo};
-use sp_state_machine::StorageProof;
+use sc_client_api::StorageProof;
 
 /// Local client abstraction for the network.
 pub trait Client<Block: BlockT, Proof: StorageProof>: HeaderBackend<Block> + ProofProvider<Block, Proof> + BlockIdTo<Block, Error = Error>

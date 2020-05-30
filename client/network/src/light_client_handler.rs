@@ -62,7 +62,7 @@ use sc_client_api::{
 		RemoteCallRequest, RemoteChangesRequest, RemoteHeaderRequest,
 	}
 };
-use sp_state_machine::StorageProof;
+use sc_client_api::StorageProof;
 use sc_peerset::ReputationChange;
 use sp_core::{
 	storage::{ChildInfo, ChildType,StorageKey, PrefixedStorageKey},

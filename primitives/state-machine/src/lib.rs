@@ -42,11 +42,13 @@ mod proving_backend;
 mod trie_backend;
 mod trie_backend_essence;
 mod stats;
+mod read_only;
 
 pub use sp_trie::{trie_types::{Layout, TrieDBMut}, TrieNodesStorageProof, TrieMut,
 	DBValue, MemoryDB, StorageProof};
 pub use testing::TestExternalities;
 pub use basic::BasicExternalities;
+pub use read_only::{ReadOnlyExternalities, InspectState};
 pub use ext::Ext;
 pub use changes_trie::{
 	AnchorBlockId as ChangesTrieAnchorBlockId,

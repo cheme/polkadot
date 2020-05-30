@@ -30,7 +30,7 @@ use log::debug;
 use sp_consensus::{BlockOrigin, import_queue::{IncomingBlock, Origin}};
 use sp_runtime::{traits::{Block as BlockT, NumberFor}, ConsensusEngineId, Justification};
 use std::{borrow::Cow, collections::VecDeque, iter, task::{Context, Poll}, time::Duration};
-use sp_state_machine::StorageProof;
+use sc_client_api::StorageProof;
 
 /// General behaviour of the network. Combines all protocols together.
 #[derive(NetworkBehaviour)]

@@ -15,6 +15,7 @@
 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 //! Substrate Client
 
 use sc_client_api::backend::ProofFor;
@@ -57,7 +58,6 @@ use sp_blockchain::{
 	well_known_cache_keys::Id as CacheKeyId,
 	HeaderMetadata, CachedHeaderMetadata,
 };
-use sp_trie::{TrieNodesStorageProof, StorageProof};
 use sp_api::{
 	CallApiAt, ConstructRuntimeApi, Core as CoreApi, ApiExt, ApiRef, ProvideRuntimeApi,
 	CallApiAtParams,
@@ -78,7 +78,7 @@ use sc_client_api::{
 	execution_extensions::ExecutionExtensions,
 	notifications::{StorageNotifications, StorageEventStream},
 	KeyIterator, CallExecutor, ExecutorProvider, ProofProvider,
-	cht, UsageProvider
+	cht, UsageProvider, TrieNodesStorageProof, StorageProof,
 };
 use sp_utils::mpsc::tracing_unbounded;
 use sp_blockchain::Error;

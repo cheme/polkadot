@@ -15,6 +15,7 @@
 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use crate::{
 	ExHashT,
 	chain::{Client, FinalityProofProvider},
@@ -39,7 +40,7 @@ use sp_consensus::{
 	block_validation::BlockAnnounceValidator,
 	import_queue::{BlockImportResult, BlockImportError, IncomingBlock, Origin}
 };
-use sp_state_machine::StorageProof;
+use sc_client_api::StorageProof;
 use codec::{Decode, Encode};
 use sp_runtime::{generic::BlockId, ConsensusEngineId, Justification};
 use sp_runtime::traits::{

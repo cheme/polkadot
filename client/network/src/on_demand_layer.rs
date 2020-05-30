@@ -15,6 +15,7 @@
 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 //! On-demand requests service.
 
 use crate::light_client_handler;
@@ -25,7 +26,7 @@ use sc_client_api::{
 	FetchChecker, Fetcher, RemoteBodyRequest, RemoteCallRequest, RemoteChangesRequest,
 	RemoteHeaderRequest, RemoteReadChildRequest, RemoteReadRequest, TrieNodesStorageProof, ChangesProof,
 };
-use sp_state_machine::StorageProof;
+use sc_client_api::StorageProof;
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
 use sp_blockchain::Error as ClientError;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT, NumberFor};

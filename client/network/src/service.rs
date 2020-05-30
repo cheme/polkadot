@@ -15,6 +15,7 @@
 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 //! Main entry point of the sc-network crate.
 //!
 //! There are two main structs in this module: [`NetworkWorker`] and [`NetworkService`].
@@ -72,7 +73,7 @@ use std::{
 	},
 	task::Poll,
 };
-use sp_state_machine::StorageProof;
+use sc_client_api::StorageProof;
 
 mod out_events;
 #[cfg(test)]
@@ -559,13 +560,17 @@ impl<B: BlockT + 'static, H: ExHashT> NetworkService<B, H> {
 
 	/// Registers a new notifications protocol.
 	///
-	/// After that, you can call `write_notifications`.
+	/// After a protocol has been registered, you can call `write_notifications`.
+	///
+	/// **Important**: This method is a work-around, and you are instead strongly encouraged to
+	/// pass the protocol in the `NetworkConfiguration::notifications_protocols` list instead.
+	/// If you have no other choice but to use this method, you are very strongly encouraged to
+	/// call it very early on. Any connection open will retain the protocols that were registered
+	/// then, and not any new one.
 	///
 	/// Please call `event_stream` before registering a protocol, otherwise you may miss events
 	/// about the protocol that you have registered.
-	///
-	/// You are very strongly encouraged to call this method very early on. Any connection open
-	/// will retain the protocols that were registered then, and not any new one.
+	// TODO: remove this method after https://github.com/paritytech/substrate/issues/4587
 	pub fn register_notifications_protocol(
 		&self,
 		engine_id: ConsensusEngineId,
@@ -1209,7 +1214,7 @@ impl<B: BlockT + 'static, H: ExHashT, P: StorageProof> Future for NetworkWorker<
 					}
 				},
 				Poll::Ready(SwarmEvent::ExpiredListenAddr(addr)) => {
-					trace!(target: "sub-libp2p", "Libp2p => ExpiredListenAddr({})", addr);
+					info!(target: "sub-libp2p", "📪 No longer listening on {}", addr);
 					if let Some(metrics) = this.metrics.as_ref() {
 						metrics.listeners_local_addresses.dec();
 					}
@@ -1277,9 +1282,22 @@ impl<B: BlockT + 'static, H: ExHashT, P: StorageProof> Future for NetworkWorker<
 					trace!(target: "sub-libp2p", "Libp2p => UnknownPeerUnreachableAddr({}): {}",
 						address, error),
 				Poll::Ready(SwarmEvent::ListenerClosed { reason, addresses }) => {
-					warn!(target: "sub-libp2p", "Libp2p => ListenerClosed: {:?}", reason);
 					if let Some(metrics) = this.metrics.as_ref() {
 						metrics.listeners_local_addresses.sub(addresses.len() as u64);
+					}
+					let addrs = addresses.into_iter().map(|a| a.to_string())
+						.collect::<Vec<_>>().join(", ");
+					match reason {
+						Ok(()) => error!(
+							target: "sub-libp2p",
+							"📪 Libp2p listener ({}) closed gracefully",
+							addrs
+						),
+						Err(e) => error!(
+							target: "sub-libp2p",
+							"📪 Libp2p listener ({}) closed: {}",
+							addrs, e
+						),
 					}
 				},
 				Poll::Ready(SwarmEvent::ListenerError { error }) => {

@@ -34,7 +34,7 @@ use sp_consensus::{BlockOrigin, BlockStatus,
 	block_validation::{BlockAnnounceValidator, Validation},
 	import_queue::{IncomingBlock, BlockImportResult, BlockImportError}
 };
-use sp_state_machine::StorageProof;
+use sc_client_api::StorageProof;
 use crate::{
 	config::BoxFinalityProofRequestBuilder,
 	protocol::message::{self, generic::FinalityProofRequest, BlockAnnounce, BlockAttributes, BlockRequest, BlockResponse,
