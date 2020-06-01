@@ -42,7 +42,6 @@ pub trait HashDBNodesTransaction<K, V> {
 pub trait Backend<H>: std::fmt::Debug + Sized
 	where
 		H: Hasher,
-		H::Out: Encode,
 {
 	/// An error type when fetching data is not possible.
 	type Error: super::Error;
@@ -63,10 +62,8 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error>;
 
 	/// Get keyed storage value hash or None if there is nothing associated.
-	fn storage_encoded_hash(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.storage(key).map(|v| v
-			.map(|v| H::hash(&v))
-			.map(|h| h.encode()))
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
+		self.storage(key).map(|v| v.map(|v| H::hash(&v)))
 	}
 
 	/// Get keyed child storage or None if there is nothing associated.
@@ -77,19 +74,12 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	) -> Result<Option<StorageValue>, Self::Error>;
 
 	/// Get child keyed storage value hash or None if there is nothing associated.
-	fn child_storage_encoded_hash(
+	fn child_storage_hash(
 		&self,
 		child_info: &ChildInfo,
 		key: &[u8],
-	) -> Result<Option<Vec<u8>>, Self::Error> {
-		match child_info {
-			ChildInfo::ParentKeyId(..) => {
-				// Same hash as top backend
-				self.child_storage(child_info, key).map(|v| v
-					.map(|v| H::hash(&v))
-					.map(|h| h.encode()))
-			}
-		}
+	) -> Result<Option<H::Out>, Self::Error> {
+		self.child_storage(child_info, key).map(|v| v.map(|v| H::hash(&v)))
 	}
 
 	/// true if a key exists in storage.
@@ -154,11 +144,11 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	/// Calculate the child storage root, with given delta over what is already stored in
 	/// the backend, and produce a "transaction" that can be used to commit. The second argument
 	/// is true if child storage root equals default storage root.
-	fn child_storage_encoded_root<'a>(
+	fn child_storage_root<'a>(
 		&self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item=(&'a [u8], Option<&'a [u8]>)>,
-	) -> (Vec<u8>, bool, Self::Transaction) where H::Out: Ord;
+	) -> (H::Out, bool, Self::Transaction) where H::Out: Ord;
 
 	/// Get all key/value pairs into a Vec.
 	fn pairs(&self) -> Vec<(StorageKey, StorageValue)>;
@@ -208,14 +198,14 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 		let mut child_roots: Vec<_> = Default::default();
 		// child first
 		for (child_info, child_delta) in child_deltas {
-			let (encoded_child_root, empty, child_txs) =
-				self.child_storage_encoded_root(&child_info, child_delta);
+			let (child_root, empty, child_txs) =
+				self.child_storage_root(&child_info, child_delta);
 			let prefixed_storage_key = child_info.prefixed_storage_key();
 			txs.consolidate(child_txs);
 			if empty {
 				child_roots.push((prefixed_storage_key.into_inner(), None));
 			} else {
-				child_roots.push((prefixed_storage_key.into_inner(), Some(encoded_child_root)));
+				child_roots.push((prefixed_storage_key.into_inner(), Some(child_root.encode())));
 			}
 		}
 		let (root, parent_txs) = self.storage_root(delta
@@ -256,7 +246,6 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 pub trait InstantiableStateBackend<H>: Backend<H>
 	where
 		H: Hasher,
-		H::Out: Encode,
 {
 	/// Storage to use to instantiate.
 	type Storage;
@@ -272,7 +261,6 @@ pub trait InstantiableStateBackend<H>: Backend<H>
 pub trait ProofRegBackend<H>: crate::backend::Backend<H>
 	where
 		H: Hasher,
-		H::Out: Encode,
 {
 	/// State of a backend.
 	type State: Default + Send + Sync + Clone;
@@ -285,7 +273,6 @@ pub trait ProofRegBackend<H>: crate::backend::Backend<H>
 pub trait ProofCheckBackend<H>: Sized + crate::backend::Backend<H>
 	where
 		H: Hasher,
-		H::Out: Encode,
 {
 	/// Instantiate backend from proof.
 	fn create_proof_check_backend(
@@ -298,7 +285,6 @@ pub trait ProofCheckBackend<H>: Sized + crate::backend::Backend<H>
 impl<'a, T, H> Backend<H> for &'a T
 	where
 		H: Hasher,
-		H::Out: Encode,
 		T: Backend<H>,
 {
 	type Error = T::Error;
@@ -359,12 +345,12 @@ impl<'a, T, H> Backend<H> for &'a T
 		(*self).storage_root(delta)
 	}
 
-	fn child_storage_encoded_root<'b>(
+	fn child_storage_root<'b>(
 		&self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
-	) -> (Vec<u8>, bool, Self::Transaction) where H::Out: Ord {
-		(*self).child_storage_encoded_root(child_info, delta)
+	) -> (H::Out, bool, Self::Transaction) where H::Out: Ord {
+		(*self).child_storage_root(child_info, delta)
 	}
 
 	fn pairs(&self) -> Vec<(StorageKey, StorageValue)> {
@@ -444,11 +430,8 @@ pub struct BackendRuntimeCode<'a, B, H> {
 	_marker: std::marker::PhantomData<H>,
 }
 
-impl<'a, B, H> sp_core::traits::FetchRuntimeCode for BackendRuntimeCode<'a, B, H>
-	where
-		H: Hasher,
-		H::Out: Encode,
-		B: Backend<H>,
+impl<'a, B: Backend<H>, H: Hasher> sp_core::traits::FetchRuntimeCode for
+	BackendRuntimeCode<'a, B, H>
 {
 	fn fetch_runtime_code<'b>(&'b self) -> Option<std::borrow::Cow<'b, [u8]>> {
 		self.backend.storage(well_known_keys::CODE).ok().flatten().map(Into::into)
@@ -466,10 +449,11 @@ impl<'a, B: Backend<H>, H: Hasher> BackendRuntimeCode<'a, B, H> where H::Out: En
 
 	/// Return the [`RuntimeCode`] build from the wrapped `backend`.
 	pub fn runtime_code(&self) -> Result<RuntimeCode, &'static str> {
-		let hash = self.backend.storage_encoded_hash(well_known_keys::CODE)
+		let hash = self.backend.storage_hash(well_known_keys::CODE)
 			.ok()
 			.flatten()
-			.ok_or("`:code` hash not found")?;
+			.ok_or("`:code` hash not found")?
+			.encode();
 		let heap_pages = self.backend.storage(well_known_keys::HEAP_PAGES)
 			.ok()
 			.flatten()

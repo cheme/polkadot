@@ -163,8 +163,8 @@ impl<B, S> StateBackend<HashFor<B>> for RefTrackingState<B, S>
 		self.state().storage(key)
 	}
 
-	fn storage_encoded_hash(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.state().storage_encoded_hash(key)
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<B::Hash>, Self::Error> {
+		self.state().storage_hash(key)
 	}
 
 	fn child_storage(
@@ -231,12 +231,12 @@ impl<B, S> StateBackend<HashFor<B>> for RefTrackingState<B, S>
 		self.state().storage_root(delta)
 	}
 
-	fn child_storage_encoded_root<'a>(
+	fn child_storage_root<'a>(
 		&self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item=(&'a [u8], Option<&'a [u8]>)>,
-	) -> (Vec<u8>, bool, Self::Transaction) where B::Hash: Ord {
-		self.state().child_storage_encoded_root(child_info, delta)
+	) -> (B::Hash, bool, Self::Transaction) where B::Hash: Ord {
+		self.state().child_storage_root(child_info, delta)
 	}
 
 	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {

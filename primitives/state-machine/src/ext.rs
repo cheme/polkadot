@@ -71,7 +71,6 @@ impl<B: error::Error, E: error::Error> error::Error for Error<B, E> {
 pub struct Ext<'a, H, N, B>
 	where
 		H: Hasher,
-		H::Out: Encode,
 		B: 'a + Backend<H>,
 		N: crate::changes_trie::BlockNumber,
 {
@@ -139,7 +138,7 @@ where
 impl<'a, H, N, B> Ext<'a, H, N, B>
 where
 	H: Hasher,
-	H::Out: Ord + Encode + 'static,
+	H::Out: Ord + 'static,
 	B: 'a + Backend<H>,
 	N: crate::changes_trie::BlockNumber,
 {
@@ -188,15 +187,15 @@ where
 		let _guard = sp_panic_handler::AbortGuard::force_abort();
 		let result = self.overlay
 			.storage(key)
-			.map(|x| x.map(|x| H::hash(x).encode()))
-			.unwrap_or_else(|| self.backend.storage_encoded_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL));
+			.map(|x| x.map(|x| H::hash(x)))
+			.unwrap_or_else(|| self.backend.storage_hash(key).expect(EXT_NOT_ALLOWED_TO_FAIL));
 
 		trace!(target: "state", "{:04x}: Hash {}={:?}",
 			self.id,
 			HexDisplay::from(&key),
 			result,
 		);
-		result
+		result.map(|r| r.encode())
 	}
 
 	fn child_storage(
@@ -231,9 +230,9 @@ where
 		let _guard = sp_panic_handler::AbortGuard::force_abort();
 		let result = self.overlay
 			.child_storage(child_info, key)
-			.map(|x| x.map(|x| H::hash(x).encode()))
+			.map(|x| x.map(|x| H::hash(x)))
 			.unwrap_or_else(||
-				self.backend.child_storage_encoded_hash(child_info, key)
+				self.backend.child_storage_hash(child_info, key)
 					.expect(EXT_NOT_ALLOWED_TO_FAIL)
 			);
 
@@ -244,7 +243,7 @@ where
 			result,
 		);
 
-		result
+		result.map(|r| r.encode())
 	}
 
 	fn exists_storage(&self, key: &[u8]) -> bool {
@@ -484,9 +483,10 @@ where
 					let delta = self.overlay.changes(Some(child_info))
 						.map(|(k, v)| (k.as_ref(), v.value().map(AsRef::as_ref)));
 
-					self.backend.child_storage_encoded_root(child_info, delta)
+					self.backend.child_storage_root(child_info, delta)
 				};
 
+				let root = root.encode();
 				// We store update in the overlay in order to be able to use 'self.storage_transaction'
 				// cache. This is brittle as it rely on Ext only querying the trie backend for
 				// storage root.
@@ -618,7 +618,6 @@ impl<'a> StorageAppend<'a> {
 impl<'a, H, B, N> sp_externalities::ExtensionStore for Ext<'a, H, N, B>
 where
 	H: Hasher,
-	H::Out: Encode,
 	B: 'a + Backend<H>,
 	N: crate::changes_trie::BlockNumber,
 {

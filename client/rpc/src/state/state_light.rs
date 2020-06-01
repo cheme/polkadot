@@ -20,7 +20,7 @@ use std::{
 	sync::Arc,
 	collections::{HashSet, HashMap, hash_map::Entry},
 };
-use codec::{Encode, Decode};
+use codec::Decode;
 use futures::{
 	future::{ready, Either},
 	channel::oneshot::{channel, Sender},
@@ -469,7 +469,6 @@ impl<Block, F, Client> StateBackend<Block, Client> for LightState<Block, F, Clie
 impl<Block, F, Client> ChildStateBackend<Block, Client> for LightState<Block, F, Client>
 	where
 		Block: BlockT,
-		Block::Hash: Encode,
 		Client: BlockchainEvents<Block> + HeaderBackend<Block> + Send + Sync + 'static,
 		F: Fetcher<Block> + 'static
 {
@@ -512,15 +511,15 @@ impl<Block, F, Client> ChildStateBackend<Block, Client> for LightState<Block, F,
 		Box::new(child_storage.boxed().compat())
 	}
 
-	fn storage_encoded_hash(
+	fn storage_hash(
 		&self,
 		block: Option<Block::Hash>,
 		storage_key: PrefixedStorageKey,
 		key: StorageKey,
-	) -> FutureResult<Option<Vec<u8>>> {
+	) -> FutureResult<Option<Block::Hash>> {
 		Box::new(ChildStateBackend::storage(self, block, storage_key, key)
 			.and_then(|maybe_storage|
-				result(Ok(maybe_storage.map(|storage| HashFor::<Block>::hash(&storage.0).encode())))
+				result(Ok(maybe_storage.map(|storage| HashFor::<Block>::hash(&storage.0))))
 			)
 		)
 	}

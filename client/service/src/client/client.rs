@@ -1370,9 +1370,7 @@ impl<B, E, Block, RA> StorageProvider<Block, B> for Client<B, E, Block, RA> wher
 		key: &StorageKey,
 	) -> sp_blockchain::Result<Option<Block::Hash>> {
 		Ok(self.state_at(id)?
-			.storage_encoded_hash(&key.0)
-				.map(|enc| enc.and_then(|enc| Decode::decode(&mut enc.as_ref()).ok()))
-				.map_err(|e| sp_blockchain::Error::from_state(Box::new(e)))?
+			.storage_hash(&key.0).map_err(|e| sp_blockchain::Error::from_state(Box::new(e)))?
 		)
 	}
 
@@ -1402,14 +1400,14 @@ impl<B, E, Block, RA> StorageProvider<Block, B> for Client<B, E, Block, RA> wher
 			.map(StorageData))
 	}
 
-	fn child_storage_encoded_hash(
+	fn child_storage_hash(
 		&self,
 		id: &BlockId<Block>,
 		child_info: &ChildInfo,
 		key: &StorageKey
-	) -> sp_blockchain::Result<Option<Vec<u8>>> {
+	) -> sp_blockchain::Result<Option<Block::Hash>> {
 		Ok(self.state_at(id)?
-			.child_storage_encoded_hash(child_info, &key.0)
+			.child_storage_hash(child_info, &key.0)
 			.map_err(|e| sp_blockchain::Error::from_state(Box::new(e)))?
 		)
 	}

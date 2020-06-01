@@ -297,10 +297,10 @@ impl Externalities for BasicExternalities {
 		if let Some(child) = self.inner.children_default.get(child_info.storage_key()) {
 			let delta = child.data.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref())));
 			crate::in_memory_backend::new_in_mem::<Blake2Hasher>()
-				.child_storage_encoded_root(&child.child_info, delta).0
+				.child_storage_root(&child.child_info, delta).0
 		} else {
-			empty_child_trie_root::<Layout<Blake2Hasher>>().encode()
-		}
+			empty_child_trie_root::<Layout<Blake2Hasher>>()
+		}.encode()
 	}
 
 	fn storage_changes_root(&mut self, _parent: &[u8]) -> Result<Option<Vec<u8>>, ()> {

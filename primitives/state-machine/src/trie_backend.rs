@@ -22,7 +22,7 @@ use hash_db::Hasher;
 use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use sp_core::storage::{ChildInfo, ChildType};
-use codec::{Codec, Encode, Decode};
+use codec::{Codec, Decode};
 use crate::{
 	backend::{InstantiableStateBackend, Backend, ProofRegStateFor, ProofCheckBackend},
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
@@ -192,11 +192,11 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		(root, write_overlay)
 	}
 
-	fn child_storage_encoded_root<'a>(
+	fn child_storage_root<'a>(
 		&self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item=(&'a [u8], Option<&'a [u8]>)>,
-	) -> (Vec<u8>, bool, Self::Transaction) where H::Out: Encode {
+	) -> (H::Out, bool, Self::Transaction) where H::Out: Ord {
 		let default_root = match child_info.child_type() {
 			ChildType::ParentKeyId => empty_child_trie_root::<Layout<H>>()
 		};
@@ -231,7 +231,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 		let is_default = root == default_root;
 
-		(root.encode(), is_default, write_overlay)
+		(root, is_default, write_overlay)
 	}
 
 	fn from_reg_state(self, recorder: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend> {

@@ -104,7 +104,6 @@ fn prepare_extrinsics_input<'a, B, H, Number>(
 	where
 		B: Backend<H>,
 		H: Hasher + 'a,
-		H::Out: Encode,
 		Number: BlockNumber,
 {
 	let mut children_result = BTreeMap::new();
@@ -136,7 +135,6 @@ fn prepare_extrinsics_input_inner<'a, B, H, Number>(
 	where
 		B: Backend<H>,
 		H: Hasher,
-		H::Out: Encode,
 		Number: BlockNumber,
 {
 	changes.changes(child_info.as_ref())

@@ -318,12 +318,12 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 		self.0.storage_root(delta)
 	}
 
-	fn child_storage_encoded_root<'b>(
+	fn child_storage_root<'b>(
 		&self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
-	) -> (Vec<u8>, bool, Self::Transaction) where H::Out: Ord {
-		self.0.child_storage_encoded_root(child_info, delta)
+	) -> (H::Out, bool, Self::Transaction) where H::Out: Ord {
+		self.0.child_storage_root(child_info, delta)
 	}
 
 	fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats) { }

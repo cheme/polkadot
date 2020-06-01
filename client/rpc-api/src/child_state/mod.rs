@@ -52,13 +52,13 @@ pub trait ChildStateApi<Hash> {
 	) -> FutureResult<Option<StorageData>>;
 
 	/// Returns the hash of a child storage entry at a block's state.
-	#[rpc(name = "childstate_getStorageEncodedHash")]
-	fn storage_encoded_hash(
+	#[rpc(name = "childstate_getStorageHash")]
+	fn storage_hash(
 		&self,
 		child_storage_key: PrefixedStorageKey,
 		key: StorageKey,
 		hash: Option<Hash>
-	) -> FutureResult<Option<Vec<u8>>>;
+	) -> FutureResult<Option<Hash>>;
 
 	/// Returns the size of a child storage entry at a block's state.
 	#[rpc(name = "childstate_getStorageSize")]

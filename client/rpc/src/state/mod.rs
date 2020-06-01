@@ -362,12 +362,12 @@ pub trait ChildStateBackend<Block: BlockT, Client>: Send + Sync + 'static
 	) -> FutureResult<Option<StorageData>>;
 
 	/// Returns the hash of a child storage entry at a block's state.
-	fn storage_encoded_hash(
+	fn storage_hash(
 		&self,
 		block: Option<Block::Hash>,
 		storage_key: PrefixedStorageKey,
 		key: StorageKey,
-	) -> FutureResult<Option<Vec<u8>>>;
+	) -> FutureResult<Option<Block::Hash>>;
 
 	/// Returns the size of a child storage entry at a block's state.
 	fn storage_size(
@@ -411,13 +411,13 @@ impl<Block, Client> ChildStateApi<Block::Hash> for ChildState<Block, Client>
 		self.backend.storage_keys(block, storage_key, key_prefix)
 	}
 
-	fn storage_encoded_hash(
+	fn storage_hash(
 		&self,
 		storage_key: PrefixedStorageKey,
 		key: StorageKey,
 		block: Option<Block::Hash>
-	) -> FutureResult<Option<Vec<u8>>> {
-		self.backend.storage_encoded_hash(block, storage_key, key)
+	) -> FutureResult<Option<Block::Hash>> {
+		self.backend.storage_hash(block, storage_key, key)
 	}
 
 	fn storage_size(
