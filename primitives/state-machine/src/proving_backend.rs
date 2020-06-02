@@ -258,12 +258,24 @@ impl<S, T> Backend<T::Hash> for ProvingBackend<S, T>
 		self.0.storage(key)
 	}
 
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<TrieHash<T>>, Self::Error> {
+		self.0.storage_hash(key)
+	}
+
 	fn child_storage(
 		&self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.0.child_storage(child_info, key)
+	}
+
+	fn child_storage_hash(
+		&self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> Result<Option<TrieHash<T>>, Self::Error> {
+		self.0.child_storage_hash(child_info, key)
 	}
 
 	fn for_keys_in_child_storage<F: FnMut(&[u8])>(

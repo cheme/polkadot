@@ -95,12 +95,38 @@ impl<S, T> Backend<T::Hash> for TrieBackend<S, T>
 		self.essence.storage(key)
 	}
 
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<TrieHash<T>>, Self::Error> {
+		Ok(if T::HYBRID_HASH {
+			self.storage(key)?.and_then(|v|
+				sp_trie::hybrid_hash_node_adapter::<T::Hash>(&v).ok().flatten()
+			)
+		} else {
+			use hash_db::Hasher;
+			self.storage(key)?.map(|v| T::Hash::hash(&v))
+		})
+	}
+
 	fn child_storage(
 		&self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>, Self::Error> {
 		self.essence.child_storage(child_info, key)
+	}
+
+	fn child_storage_hash(
+		&self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> Result<Option<TrieHash<T>>, Self::Error> {
+		Ok(if T::HYBRID_HASH {
+			self.child_storage(child_info, key)?.and_then(|v|
+				sp_trie::hybrid_hash_node_adapter::<T::Hash>(&v).ok().flatten()
+			)
+		} else {
+			use hash_db::Hasher;
+			self.child_storage(child_info, key)?.map(|v| T::Hash::hash(&v))
+		})
 	}
 
 	fn next_storage_key(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {

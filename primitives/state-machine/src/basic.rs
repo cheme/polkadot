@@ -167,7 +167,13 @@ impl<T> Externalities for BasicExternalitiesWithTrie<T>
 	}
 
 	fn storage_hash(&self, key: &[u8]) -> Option<Vec<u8>> {
-		self.storage(key).map(|v| T::Hash::hash(&v).encode())
+		if T::HYBRID_HASH {
+			self.storage(key).and_then(|v|
+				sp_trie::hybrid_hash_node_adapter::<T::Hash>(&v).ok().flatten().as_ref().map(Encode::encode)
+			)
+		} else {
+			self.storage(key).map(|v| T::Hash::hash(&v).encode())
+		}
 	}
 
 	fn child_storage(
@@ -184,7 +190,13 @@ impl<T> Externalities for BasicExternalitiesWithTrie<T>
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<Vec<u8>> {
-		self.child_storage(child_info, key).map(|v| T::Hash::hash(&v).encode())
+		if T::HYBRID_HASH {
+			self.child_storage(child_info, key).and_then(|v|
+				sp_trie::hybrid_hash_node_adapter::<T::Hash>(&v).ok().flatten().as_ref().map(Encode::encode)
+			)
+		} else {
+			self.child_storage(child_info, key).map(|v| T::Hash::hash(&v).encode())
+		}
 	}
 
 	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {

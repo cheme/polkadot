@@ -63,9 +63,7 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error>;
 
 	/// Get keyed storage value hash or None if there is nothing associated.
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
-		self.storage(key).map(|v| v.map(|v| H::hash(&v)))
-	}
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error>;
 
 	/// Get keyed child storage or None if there is nothing associated.
 	fn child_storage(
@@ -79,9 +77,7 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 		&self,
 		child_info: &ChildInfo,
 		key: &[u8],
-	) -> Result<Option<H::Out>, Self::Error> {
-		self.child_storage(child_info, key).map(|v| v.map(|v| H::hash(&v)))
-	}
+	) -> Result<Option<H::Out>, Self::Error>;
 
 	/// true if a key exists in storage.
 	fn exists_storage(&self, key: &[u8]) -> Result<bool, Self::Error> {
@@ -307,12 +303,24 @@ impl<'a, T, H> Backend<H> for &'a T
 		(*self).storage(key)
 	}
 
+	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
+		(*self).storage_hash(key)
+	}
+
 	fn child_storage(
 		&self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>, Self::Error> {
 		(*self).child_storage(child_info, key)
+	}
+
+	fn child_storage_hash(
+		&self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> Result<Option<H::Out>, Self::Error> {
+		(*self).child_storage_hash(child_info, key)
 	}
 
 	fn for_keys_in_child_storage<F: FnMut(&[u8])>(
