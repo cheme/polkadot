@@ -1102,7 +1102,7 @@ pub fn oom(_: core::alloc::Layout) -> ! {
 /// Type alias for Externalities implementation used in tests.
 #[cfg(feature = "std")]
 pub type TestExternalities = sp_state_machine::TestExternalities<
-	sp_trie::RefHasher<sp_core::Blake2Hasher>,
+	sp_trie::Layout<sp_trie::RefHasher<sp_core::Blake2Hasher>>,
 	u64,
 >;
 

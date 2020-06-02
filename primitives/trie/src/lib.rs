@@ -91,7 +91,7 @@ impl<H: HasherHybrid> TrieConfiguration for Layout<H> {
 /*
 // This code can be uncommented to check if an issue may be related
 // to trie_root call on non sorted value.
-	fn trie_root<I, A, B>(input: I) -> <Self::Hash as Hasher>::Out where
+	fn trie_root<I, A, B>(input: I) -> TrieHash<Self> where
 		I: IntoIterator<Item = (A, B)>,
 		A: AsRef<[u8]> + Ord,
 		B: AsRef<[u8]>,

@@ -155,6 +155,10 @@ fn impl_build_storage(
 				&self,
 				storage: &mut #scrate::sp_runtime::Storage,
 			) -> std::result::Result<(), String> #fn_where_clause {
+				// This use basic externalities but should not use trie
+				// related function, allowing trie related modification
+				// would require using a call back for execute on those
+				// building functions.
 				#scrate::BasicExternalities::execute_with_storage(storage, || {
 					#( #builder_blocks )*
 					Ok(())

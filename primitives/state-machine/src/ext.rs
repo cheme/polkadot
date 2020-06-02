@@ -671,10 +671,11 @@ mod tests {
 			InMemoryStorage as TestChangesTrieStorage,
 		}, InMemoryBackend,
 	};
+	use sp_trie::Layout;
 	use hash_db::Hasher;
 
 	type Blake2Hasher = crate::RefHasher<sp_core::Blake2Hasher>;
-	type TestBackend = InMemoryBackend<Blake2Hasher>;
+	type TestBackend = InMemoryBackend<Layout<Blake2Hasher>>;
 	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend>;
 
 	fn prepare_overlay_with_changes() -> OverlayedChanges {

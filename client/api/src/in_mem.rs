@@ -29,7 +29,7 @@ use sp_runtime::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor, Ha
 use sp_runtime::{Justification, Storage};
 use sp_state_machine::{
 	ChangesTrieTransaction, InMemoryBackend, backend::Backend as StateBackend, StorageCollection,
-	ChildStorageCollection,
+	ChildStorageCollection, Layout,
 };
 use sp_blockchain::{CachedHeaderMetadata, HeaderMetadata};
 
@@ -465,8 +465,8 @@ impl<Block: BlockT> light::Storage<Block> for Blockchain<Block>
 pub struct BlockImportOperation<Block: BlockT> {
 	pending_block: Option<PendingBlock<Block>>,
 	pending_cache: HashMap<CacheKeyId, Vec<u8>>,
-	old_state: InMemoryBackend<HashFor<Block>>,
-	new_state: Option<<InMemoryBackend<HashFor<Block>> as StateBackend<HashFor<Block>>>::Transaction>,
+	old_state: InMemoryBackend<Layout<HashFor<Block>>>,
+	new_state: Option<<InMemoryBackend<Layout<HashFor<Block>>> as StateBackend<HashFor<Block>>>::Transaction>,
 	aux: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 	finalized_blocks: Vec<(BlockId<Block>, Option<Justification>)>,
 	set_head: Option<BlockId<Block>>,
@@ -475,7 +475,7 @@ pub struct BlockImportOperation<Block: BlockT> {
 impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperation<Block> where
 	Block::Hash: Ord,
 {
-	type State = InMemoryBackend<HashFor<Block>>;
+	type State = InMemoryBackend<Layout<HashFor<Block>>>;
 
 	fn state(&self) -> sp_blockchain::Result<Option<&Self::State>> {
 		Ok(Some(&self.old_state))
@@ -502,7 +502,7 @@ impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperatio
 
 	fn update_db_storage(
 		&mut self,
-		update: <InMemoryBackend<HashFor<Block>> as StateBackend<HashFor<Block>>>::Transaction,
+		update: <InMemoryBackend<Layout<HashFor<Block>>> as StateBackend<HashFor<Block>>>::Transaction,
 	) -> sp_blockchain::Result<()> {
 		self.new_state = Some(update);
 		Ok(())
@@ -571,7 +571,7 @@ impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperatio
 /// > **Warning**: Doesn't support all the features necessary for a proper database. Only use this
 /// > struct for testing purposes. Do **NOT** use in production.
 pub struct Backend<Block: BlockT> where Block::Hash: Ord {
-	states: RwLock<HashMap<Block::Hash, InMemoryBackend<HashFor<Block>>>>,
+	states: RwLock<HashMap<Block::Hash, InMemoryBackend<Layout<HashFor<Block>>>>>,
 	blockchain: Blockchain<Block>,
 	import_lock: RwLock<()>,
 }
@@ -606,7 +606,7 @@ impl<Block: BlockT> backend::AuxStore for Backend<Block> where Block::Hash: Ord 
 impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash: Ord {
 	type BlockImportOperation = BlockImportOperation<Block>;
 	type Blockchain = Blockchain<Block>;
-	type State = InMemoryBackend<HashFor<Block>>;
+	type State = InMemoryBackend<Layout<HashFor<Block>>>;
 	type OffchainStorage = OffchainStorage;
 
 	fn begin_operation(&self) -> sp_blockchain::Result<Self::BlockImportOperation> {

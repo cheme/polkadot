@@ -25,6 +25,7 @@ use hash_db::HasherHybrid as Hasher;
 use sp_trie::{
 	MemoryDB, TrieMut,
 	trie_types::TrieDBMut,
+	TrieConfiguration, TrieHash,
 };
 use codec::Codec;
 use sp_core::storage::{ChildInfo, Storage};
@@ -59,9 +60,9 @@ where
 }
 
 /// Create a new empty instance of in-memory backend.
-pub fn new_in_mem<H: Hasher>() -> TrieBackend<MemoryDB<H>, H>
+pub fn new_in_mem<T: TrieConfiguration>() -> TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	TrieHash<T>: Codec + Ord,
 {
 	let db = MemoryDB::default();
 	let mut backend = TrieBackend::new(db, Default::default());
@@ -69,16 +70,17 @@ where
 	backend
 }
 
-impl<H: Hasher> TrieBackend<MemoryDB<H>, H>
+impl<T> TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	T: TrieConfiguration,
+	TrieHash<T>: Codec + Ord,
 {
 	/// Copy the state, with applied updates
 	pub fn update<
-		T: IntoIterator<Item = (Option<ChildInfo>, StorageCollection)>
+		I: IntoIterator<Item = (Option<ChildInfo>, StorageCollection)>
 	>(
 		&self,
-		changes: T,
+		changes: I,
 	) -> Self {
 		let mut clone = self.clone();
 		clone.insert(changes);
@@ -87,10 +89,10 @@ where
 
 	/// Insert values into backend trie.
 	pub fn insert<
-		T: IntoIterator<Item = (Option<ChildInfo>, StorageCollection)>
+		I: IntoIterator<Item = (Option<ChildInfo>, StorageCollection)>
 	>(
 		&mut self,
-		changes: T,
+		changes: I,
 	) {
 		let mut new_child_roots = Vec::new();
 		let mut root_map = None;
@@ -98,7 +100,7 @@ where
 		for (child_info, map) in changes {
 			if let Some(child_info) = child_info.as_ref() {
 				let prefix_storage_key = child_info.prefixed_storage_key();
-				let ch = insert_into_memory_db::<H, _>(root, self.backend_storage_mut(), map.clone().into_iter());
+				let ch = insert_into_memory_db::<T::Hash, _>(root, self.backend_storage_mut(), map.clone().into_iter());
 				new_child_roots.push((prefix_storage_key.into_inner(), Some(ch.as_ref().into())));
 			} else {
 				root_map = Some(map);
@@ -106,12 +108,12 @@ where
 		}
 
 		let root = match root_map {
-			Some(map) => insert_into_memory_db::<H, _>(
+			Some(map) => insert_into_memory_db::<T::Hash, _>(
 				root,
 				self.backend_storage_mut(),
 				map.clone().into_iter().chain(new_child_roots.into_iter()),
 			),
-			None => insert_into_memory_db::<H, _>(
+			None => insert_into_memory_db::<T::Hash, _>(
 				root,
 				self.backend_storage_mut(),
 				new_child_roots.into_iter(),
@@ -121,7 +123,7 @@ where
 	}
 
 	/// Merge trie nodes into this backend.
-	pub fn update_backend(&self, root: H::Out, changes: MemoryDB<H>) -> Self {
+	pub fn update_backend(&self, root: TrieHash<T>, changes: MemoryDB<T::Hash>) -> Self {
 		let mut clone = self.backend_storage().clone();
 		clone.consolidate(changes);
 		Self::new(clone, root)
@@ -133,28 +135,31 @@ where
 	}
 }
 
-impl<H: Hasher> Clone for TrieBackend<MemoryDB<H>, H>
+impl<T> Clone for TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	T: TrieConfiguration,
+	TrieHash<T>: Codec + Ord,
 {
 	fn clone(&self) -> Self {
 		TrieBackend::new(self.backend_storage().clone(), self.root().clone())
 	}
 }
 
-impl<H: Hasher> Default for TrieBackend<MemoryDB<H>, H>
+impl<T> Default for TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	T: TrieConfiguration,
+	TrieHash<T>: Codec + Ord,
 {
 	fn default() -> Self {
 		new_in_mem()
 	}
 }
 
-impl<H: Hasher> From<HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>>
-	for TrieBackend<MemoryDB<H>, H>
+impl<T> From<HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>>
+	for TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	T: TrieConfiguration,
+	TrieHash<T>: Codec + Ord,
 {
 	fn from(inner: HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>) -> Self {
 		let mut backend = new_in_mem();
@@ -163,9 +168,10 @@ where
 	}
 }
 
-impl<H: Hasher> From<Storage> for TrieBackend<MemoryDB<H>, H>
+impl<T> From<Storage> for TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	T: TrieConfiguration,
+	TrieHash<T>: Codec + Ord,
 {
 	fn from(inners: Storage) -> Self {
 		let mut inner: HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>
@@ -175,9 +181,10 @@ where
 	}
 }
 
-impl<H: Hasher> From<BTreeMap<StorageKey, StorageValue>> for TrieBackend<MemoryDB<H>, H>
+impl<T> From<BTreeMap<StorageKey, StorageValue>> for TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	T: TrieConfiguration,
+	TrieHash<T>: Codec + Ord,
 {
 	fn from(inner: BTreeMap<StorageKey, StorageValue>) -> Self {
 		let mut expanded = HashMap::new();
@@ -186,10 +193,11 @@ where
 	}
 }
 
-impl<H: Hasher> From<Vec<(Option<ChildInfo>, StorageCollection)>>
-	for TrieBackend<MemoryDB<H>, H>
+impl<T> From<Vec<(Option<ChildInfo>, StorageCollection)>>
+	for TrieBackend<MemoryDB<T::Hash>, T>
 where
-	H::Out: Codec + Ord,
+	T: TrieConfiguration,
+	TrieHash<T>: Codec + Ord,
 {
 	fn from(
 		inner: Vec<(Option<ChildInfo>, StorageCollection)>,
@@ -211,6 +219,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use sp_trie::Layout;
 	use crate::backend::Backend;
 
 	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
@@ -218,7 +227,7 @@ mod tests {
 	/// Assert in memory backend with only child trie keys works as trie backend.
 	#[test]
 	fn in_memory_with_child_trie_only() {
-		let storage = new_in_mem::<BlakeTwo256>();
+		let storage = new_in_mem::<Layout<BlakeTwo256>>();
 		let child_info = ChildInfo::new_default(b"1");
 		let child_info = &child_info;
 		let storage = storage.update(

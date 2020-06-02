@@ -18,37 +18,37 @@
 //! Trie-based state machine backend.
 
 use log::{warn, debug};
-use hash_db::HasherHybrid as Hasher;
-use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root};
-use sp_trie::trie_types::{TrieDB, TrieError, Layout};
+use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root,
+	TrieConfiguration, TrieHash, TrieDB, TrieError};
 use sp_core::storage::{ChildInfo, ChildType};
 use codec::{Codec, Decode};
 use crate::{
-	backend::{InstantiableStateBackend, Backend, ProofRegStateFor, ProofCheckBackend},
+	backend::{InstantiableStateBackend, Backend, ProofRegStateFor, ProofCheckBackend,
+	GenesisStateBackend},
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 	StorageKey, StorageValue,
 };
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
-pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
-	pub (crate) essence: TrieBackendEssence<S, H>,
+pub struct TrieBackend<S: TrieBackendStorage<T::Hash>, T: TrieConfiguration> {
+	pub (crate) essence: TrieBackendEssence<S, T>,
 }
 
-/// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
-pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
-	pub (crate) essence: TrieBackendEssence<S, H>,
-}
-
-impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where H::Out: Codec {
+impl<S, T> TrieBackend<S, T>
+	where
+		T: TrieConfiguration,
+		S: TrieBackendStorage<T::Hash>,
+		TrieHash<T>: Codec,
+{
 	/// Create new trie-based backend.
-	pub fn new(storage: S, root: H::Out) -> Self {
+	pub fn new(storage: S, root: TrieHash<T>) -> Self {
 		TrieBackend {
 			essence: TrieBackendEssence::new(storage, root),
 		}
 	}
 
 	/// Get backend essence reference.
-	pub fn essence(&self) -> &TrieBackendEssence<S, H> {
+	pub fn essence(&self) -> &TrieBackendEssence<S, T> {
 		&self.essence
 	}
 
@@ -63,7 +63,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where H::Out: Codec 
 	}
 
 	/// Get trie root.
-	pub fn root(&self) -> &H::Out {
+	pub fn root(&self) -> &TrieHash<T> {
 		self.essence.root()
 	}
 
@@ -73,20 +73,23 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where H::Out: Codec 
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> std::fmt::Debug for TrieBackend<S, H> {
+impl<S: TrieBackendStorage<T::Hash>, T: TrieConfiguration> std::fmt::Debug for TrieBackend<S, T> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "TrieBackend")
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
-	H::Out: Ord + Codec,
+impl<S, T> Backend<T::Hash> for TrieBackend<S, T>
+	where
+		T: TrieConfiguration,
+		S: TrieBackendStorage<T::Hash>,
+		TrieHash<T>: Ord + Codec,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
 	type StorageProof = sp_trie::TrieNodesStorageProof;
-	type ProofRegBackend = crate::proving_backend::ProvingBackend<S, H>;
-	type ProofCheckBackend = TrieBackend<crate::MemoryDB<H>, H>;
+	type ProofRegBackend = crate::proving_backend::ProvingBackend<S, T>;
+	type ProofCheckBackend = TrieBackend<crate::MemoryDB<T::Hash>, T>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
 		self.essence.storage(key)
@@ -138,8 +141,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	}
 
 	fn pairs(&self) -> Vec<(StorageKey, StorageValue)> {
-		let collect_all = || -> Result<_, Box<TrieError<H::Out>>> {
-			let trie = TrieDB::<H>::new(self.essence(), self.essence.root())?;
+		let collect_all = || -> Result<_, Box<TrieError<T>>> {
+			let trie = TrieDB::<T>::new(self.essence(), self.essence.root())?;
 			let mut v = Vec::new();
 			for x in trie.iter()? {
 				let (key, value) = x?;
@@ -159,8 +162,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	}
 
 	fn keys(&self, prefix: &[u8]) -> Vec<StorageKey> {
-		let collect_all = || -> Result<_, Box<TrieError<H::Out>>> {
-			let trie = TrieDB::<H>::new(self.essence(), self.essence.root())?;
+		let collect_all = || -> Result<_, Box<TrieError<T>>> {
+			let trie = TrieDB::<T>::new(self.essence(), self.essence.root())?;
 			let mut v = Vec::new();
 			for x in trie.iter()? {
 				let (key, _) = x?;
@@ -178,7 +181,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	fn storage_root<'a>(
 		&self,
 		delta: impl Iterator<Item=(&'a [u8], Option<&'a [u8]>)>,
-	) -> (H::Out, Self::Transaction) where H::Out: Ord {
+	) -> (TrieHash<T>, Self::Transaction) where TrieHash<T>: Ord {
 		let mut write_overlay = S::Overlay::default();
 		let mut root = *self.essence.root();
 
@@ -188,7 +191,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				&mut write_overlay,
 			);
 
-			match delta_trie_root::<Layout<H>, _, _, _, _, _>(&mut eph, root, delta) {
+			match delta_trie_root::<T, _, _, _, _, _>(&mut eph, root, delta) {
 				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
@@ -201,9 +204,9 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		&self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item=(&'a [u8], Option<&'a [u8]>)>,
-	) -> (H::Out, bool, Self::Transaction) where H::Out: Ord {
+	) -> (TrieHash<T>, bool, Self::Transaction) where TrieHash<T>: Ord {
 		let default_root = match child_info.child_type() {
-			ChildType::ParentKeyId => empty_child_trie_root::<Layout<H>>()
+			ChildType::ParentKeyId => empty_child_trie_root::<T>()
 		};
 
 		let mut write_overlay = S::Overlay::default();
@@ -223,7 +226,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				&mut write_overlay,
 			);
 
-			match child_delta_trie_root::<Layout<H>, _, _, _, _, _, _>(
+			match child_delta_trie_root::<T, _, _, _, _, _, _>(
 				child_info.keyspace(),
 				&mut eph,
 				root,
@@ -239,7 +242,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		(root, is_default, write_overlay)
 	}
 
-	fn from_reg_state(self, recorder: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend> {
+	fn from_reg_state(self, recorder: ProofRegStateFor<Self, T::Hash>) -> Option<Self::ProofRegBackend> {
 		let root = self.essence.root().clone();
 		Some(crate::proving_backend::ProvingBackend::from_backend_with_recorder(
 			self.essence.into_storage(),
@@ -259,11 +262,13 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	}
 }
 
-impl<H: Hasher> ProofCheckBackend<H> for TrieBackend<crate::MemoryDB<H>, H> where
-	H::Out: Ord + Codec,
+impl<T> ProofCheckBackend<T::Hash> for TrieBackend<crate::MemoryDB<T::Hash>, T>
+	where
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + Codec,
 {
 	fn create_proof_check_backend(
-		root: H::Out,
+		root: TrieHash<T>,
 		proof: Self::StorageProof,
 	) -> Result<Self, Box<dyn crate::Error>> {
 		use hash_db::HashDB;
@@ -278,20 +283,41 @@ impl<H: Hasher> ProofCheckBackend<H> for TrieBackend<crate::MemoryDB<H>, H> wher
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> InstantiableStateBackend<H> for TrieBackend<S, H>
+impl<S, T> InstantiableStateBackend<T::Hash> for TrieBackend<S, T>
 	where
-		H::Out: Ord + Codec,
+		T: TrieConfiguration,
+		S: TrieBackendStorage<T::Hash>,
+		TrieHash<T>: Ord + Codec,
 {
 	type Storage = S;
 
-	fn new(storage: Self::Storage, state: H::Out) -> Self {
+	fn new(storage: Self::Storage, state: TrieHash<T>) -> Self {
 		TrieBackend::new(storage, state)
 	}
 
-	fn extract_state(self) -> (Self::Storage, H::Out) {
+	fn extract_state(self) -> (Self::Storage, TrieHash<T>) {
 		let root = self.essence().root().clone();
 		let storage = self.into_storage();
 		(storage, root)
+	}
+}
+
+impl<T> GenesisStateBackend<T::Hash> for TrieBackend<crate::MemoryDB<T::Hash>, T>
+	where
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + Codec,
+{
+	fn new(input: sp_core::storage::Storage) -> Self {
+		// this is only called when genesis block is imported => shouldn't be performance bottleneck
+		let mut storage: std::collections::HashMap<Option<ChildInfo>, _> = std::collections::HashMap::new();
+		storage.insert(None, input.top);
+
+		// make sure to persist the child storage
+		for (_child_key, storage_child) in input.children_default.clone() {
+			storage.insert(Some(storage_child.child_info), storage_child.data);
+		}
+
+		Self::from(storage)
 	}
 }
 
@@ -335,7 +361,10 @@ pub mod tests {
 		(mdb, root)
 	}
 
-	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256> {
+	pub(crate) fn test_trie() -> TrieBackend<
+		PrefixedMemoryDB<BlakeTwo256>,
+		sp_trie::Layout<BlakeTwo256>,
+	> {
 		let (mdb, root) = test_db();
 		TrieBackend::new(mdb, root)
 	}
@@ -366,7 +395,7 @@ pub mod tests {
 
 	#[test]
 	fn pairs_are_empty_on_empty_storage() {
-		assert!(TrieBackend::<PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256>::new(
+		assert!(TrieBackend::<PrefixedMemoryDB<BlakeTwo256>, sp_trie::Layout<BlakeTwo256>>::new(
 			PrefixedMemoryDB::default(),
 			Default::default(),
 		).pairs().is_empty());

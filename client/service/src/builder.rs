@@ -24,7 +24,7 @@ use crate::metrics::MetricsService;
 use sc_client_api::{
 	self, BlockchainEvents, backend::RemoteBackend, light::RemoteBlockchain, execution_extensions::ExtensionsFactory,
 	ExecutorProvider, CallExecutor, ForkBlocks, BadBlocks, CloneableSpawn, UsageProvider, StateBackend,
-	ProofCheckBackendT, InstantiableStateBackend, HashDBNodesTransaction, DbStorage,
+	ProofCheckBackendT, InstantiableStateBackend, HashDBNodesTransaction, DbStorage, GenesisStateBackend,
 };
 use crate::client::{Client, ClientConfig};
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedSender};
@@ -170,31 +170,31 @@ pub type TFullCallExecutor<TBl, TExecDisp, TSt> = crate::client::LocalCallExecut
 >;
 
 /// Light client type.
-pub type TLightClient<TBl, TRtApi, TExecDisp> = Client<
-	TLightBackend<TBl>,
-	TLightCallExecutor<TBl, TExecDisp>,
+pub type TLightClient<TBl, TRtApi, TExecDisp, TGs> = Client<
+	TLightBackend<TBl, TGs>,
+	TLightCallExecutor<TBl, TExecDisp, TGs>,
 	TBl,
 	TRtApi,
 >;
 
 /// Light client backend type.
-pub type TLightBackend<TBl> = crate::client::light::backend::Backend<
+pub type TLightBackend<TBl, TGs> = crate::client::light::backend::Backend<
 	sc_client_db::light::LightStorage<TBl>,
-	HashFor<TBl>,
+	TGs,
 >;
 
 /// Light call executor type.
-pub type TLightCallExecutor<TBl, TExecDisp> = crate::client::light::call_executor::GenesisCallExecutor<
+pub type TLightCallExecutor<TBl, TExecDisp, TGs> = crate::client::light::call_executor::GenesisCallExecutor<
 	crate::client::light::backend::Backend<
 		sc_client_db::light::LightStorage<TBl>,
-		HashFor<TBl>
+		TGs,
 	>,
 	crate::client::LocalCallExecutor<
 		crate::client::light::backend::Backend<
 			sc_client_db::light::LightStorage<TBl>,
-			HashFor<TBl>
+			TGs,
 		>,
-		NativeExecutor<TExecDisp>
+		NativeExecutor<TExecDisp>,
 	>,
 >;
 
@@ -381,12 +381,18 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	}
 
 	/// Start the service builder with a configuration.
-	pub fn new_light<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static, TProof: ProofCheckBackendT<HashFor<TBl>> + Send + Sync + 'static>(
+	pub fn new_light<
+		TBl: BlockT,
+		TRtApi,
+		TExecDisp: NativeExecutionDispatch + 'static,
+		TProof: ProofCheckBackendT<HashFor<TBl>> + Send + Sync + 'static,
+		TGs: GenesisStateBackend<HashFor<TBl>> + Clone + Send + Sync,
+	>(
 		config: Configuration,
 	) -> Result<ServiceBuilder<
 		TBl,
 		TRtApi,
-		TLightClient<TBl, TRtApi, TExecDisp>,
+		TLightClient<TBl, TRtApi, TExecDisp, TGs>,
 		Arc<OnDemand<TBl, TProof::StorageProof>>,
 		(),
 		(),
@@ -394,7 +400,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 		Arc<dyn FinalityProofProvider<TBl>>,
 		(),
 		(),
-		TLightBackend<TBl>,
+		TLightBackend<TBl, TGs>,
 	>, Error> {
 		let task_manager = {
 			let registry = config.prometheus_config.as_ref().map(|cfg| &cfg.registry);

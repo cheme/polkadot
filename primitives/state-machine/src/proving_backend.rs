@@ -24,9 +24,9 @@ use log::debug;
 use hash_db::{Hasher as HasherT, HasherHybrid as Hasher, Prefix};
 use sp_trie::{
 	MemoryDB, empty_child_trie_root, read_trie_value_with, read_child_trie_value_with,
-	record_all_keys, TrieNodesStorageProof,
+	record_all_keys, TrieNodesStorageProof, TrieConfiguration, TrieHash,
 };
-pub use sp_trie::{Recorder, trie_types::{Layout, TrieError}};
+pub use sp_trie::{Recorder, TrieError, trie_types::{Layout}};
 use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::backend::{Backend, ProofRegStateFor, ProofRegBackend};
@@ -34,16 +34,16 @@ use crate::DBValue;
 use sp_core::storage::ChildInfo;
 
 /// Patricia trie-based backend specialized in get value proofs.
-pub struct ProvingBackendRecorder<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
-	pub(crate) backend: &'a TrieBackendEssence<S, H>,
-	pub(crate) proof_recorder: &'a mut Recorder<H::Out>,
+pub struct ProvingBackendRecorder<'a, S: 'a + TrieBackendStorage<T::Hash>, T: 'a + TrieConfiguration> {
+	pub(crate) backend: &'a TrieBackendEssence<S, T>,
+	pub(crate) proof_recorder: &'a mut Recorder<TrieHash<T>>,
 }
 
-impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
+impl<'a, S, T> ProvingBackendRecorder<'a, S, T>
 	where
-		S: TrieBackendStorage<H>,
-		H: Hasher,
-		H::Out: Codec,
+		S: TrieBackendStorage<T::Hash>,
+		T: TrieConfiguration,
+		TrieHash<T>: Codec,
 {
 	/// Produce proof for a key query.
 	pub fn storage(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
@@ -55,7 +55,7 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_trie_value_with::<Layout<H>, _, Ephemeral<S, H>>(
+		read_trie_value_with::<T, _, Ephemeral<S, T::Hash>>(
 			&eph,
 			self.backend.root(),
 			key,
@@ -72,7 +72,7 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 		let storage_key = child_info.storage_key();
 		let root = self.storage(storage_key)?
 			.and_then(|r| Decode::decode(&mut &r[..]).ok())
-			.unwrap_or(empty_child_trie_root::<Layout<H>>());
+			.unwrap_or(empty_child_trie_root::<T>());
 
 		let mut read_overlay = S::Overlay::default();
 		let eph = Ephemeral::new(
@@ -82,7 +82,7 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_child_trie_value_with::<Layout<H>, _, _>(
+		read_child_trie_value_with::<T, _, _>(
 			child_info.keyspace(),
 			&eph,
 			&root.as_ref(),
@@ -99,9 +99,9 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 			&mut read_overlay,
 		);
 
-		let mut iter = move || -> Result<(), Box<TrieError<H::Out>>> {
+		let mut iter = move || -> Result<(), Box<TrieError<T>>> {
 			let root = self.backend.root();
-			record_all_keys::<Layout<H>, _>(&eph, root, &mut *self.proof_recorder)
+			record_all_keys::<T, _>(&eph, root, &mut *self.proof_recorder)
 		};
 
 		if let Err(e) = iter() {
@@ -137,8 +137,8 @@ fn merge_proof_recorder<H: Hasher>(first: ProofRecorder<H>, second: ProofRecorde
 
 /// Patricia trie-based backend which also tracks all touched storage trie values.
 /// These can be sent to remote node and used as a proof of execution.
-pub struct ProvingBackend<S: TrieBackendStorage<H>, H: Hasher> (
-	pub TrieBackend<ProofRecorderBackend<S, H>, H>,
+pub struct ProvingBackend<S: TrieBackendStorage<T::Hash>, T: TrieConfiguration> (
+	pub TrieBackend<ProofRecorderBackend<S, T::Hash>, T>,
 );
 
 /// Trie backend storage with its proof recorder.
@@ -147,18 +147,21 @@ pub struct ProofRecorderBackend<S: TrieBackendStorage<H>, H: Hasher> {
 	proof_recorder: ProofRecorder<H>,
 }
 
-impl<'a, S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<&'a S, H>
-	where H::Out: Codec
+impl<'a, S, T> ProvingBackend<&'a S, T>
+	where
+		S: TrieBackendStorage<T::Hash>,
+		T: TrieConfiguration,
+		TrieHash<T>: Codec,
 {
 	/// Create new proving backend.
-	pub fn new(backend: &'a TrieBackend<S, H>) -> Self {
+	pub fn new(backend: &'a TrieBackend<S, T>) -> Self {
 		let proof_recorder = Default::default();
 		Self::new_with_recorder(backend, proof_recorder)
 	}
 
 	fn new_with_recorder(
-		backend: &'a TrieBackend<S, H>,
-		proof_recorder: ProofRecorder<H>,
+		backend: &'a TrieBackend<S, T>,
+		proof_recorder: ProofRecorder<T::Hash>,
 	) -> Self {
 		let essence = backend.essence();
 		let root = essence.root().clone();
@@ -170,14 +173,17 @@ impl<'a, S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<&'a S, H>
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<S, H>
-	where H::Out: Codec
+impl<S, T> ProvingBackend<S, T>
+	where
+		S: TrieBackendStorage<T::Hash>,
+		T: TrieConfiguration,
+		TrieHash<T>: Codec,
 {
 	/// Create new proving backend with the given recorder.
 	pub fn from_backend_with_recorder(
 		backend: S,
-		root: H::Out,
-		proof_recorder: ProofRecorder<H>,
+		root: TrieHash<T>,
+		proof_recorder: ProofRecorder<T::Hash>,
 	) -> Self {
 		let recorder = ProofRecorderBackend {
 			backend,
@@ -188,7 +194,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> ProvingBackend<S, H>
 
 	/// Extract current recording state.
 	/// This is sharing a rc over a sync reference.
-	pub fn extract_recorder(&self) -> ProofRecorder<H> {
+	pub fn extract_recorder(&self) -> ProofRecorder<T::Hash> {
 		self.0.backend_storage().proof_recorder.clone()
 	}
 }
@@ -208,21 +214,23 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendStorage<H>
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> std::fmt::Debug
-	for ProvingBackend<S, H>
+impl<S, T> std::fmt::Debug for ProvingBackend<S, T>
+	where
+		S: TrieBackendStorage<T::Hash>,
+		T: TrieConfiguration,
 {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "ProvingBackend")
 	}
 }
 
-impl<S, H> ProofRegBackend<H> for ProvingBackend<S, H>
+impl<S, T> ProofRegBackend<T::Hash> for ProvingBackend<S, T>
 	where
-		S: TrieBackendStorage<H>,
-		H: Hasher,
-		H::Out: Ord + Codec,
+		S: TrieBackendStorage<T::Hash>,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + Codec,
 {
-	type State = ProofRecorder<H>;
+	type State = ProofRecorder<T::Hash>;
 
 	fn extract_proof(&self) -> Self::StorageProof {
 		let trie_nodes = self.0.essence().backend_storage().proof_recorder
@@ -234,17 +242,17 @@ impl<S, H> ProofRegBackend<H> for ProvingBackend<S, H>
 	}
 }
 
-impl<S, H> Backend<H> for ProvingBackend<S, H>
+impl<S, T> Backend<T::Hash> for ProvingBackend<S, T>
 	where
-		S: TrieBackendStorage<H>,
-		H: Hasher,
-		H::Out: Ord + Codec,
+		S: TrieBackendStorage<T::Hash>,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + Codec,
 {
 	type Error = String;
 	type Transaction = S::Overlay;
 	type StorageProof = sp_trie::TrieNodesStorageProof;
 	type ProofRegBackend = Self;
-	type ProofCheckBackend = TrieBackend<MemoryDB<H>, H>;
+	type ProofCheckBackend = TrieBackend<MemoryDB<T::Hash>, T>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.0.storage(key)
@@ -314,7 +322,7 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 	fn storage_root<'b>(
 		&self,
 		delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
-	) -> (H::Out, Self::Transaction) where H::Out: Ord {
+	) -> (TrieHash<T>, Self::Transaction) where TrieHash<T>: Ord {
 		self.0.storage_root(delta)
 	}
 
@@ -322,7 +330,7 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 		&self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
-	) -> (H::Out, bool, Self::Transaction) where H::Out: Ord {
+	) -> (TrieHash<T>, bool, Self::Transaction) where TrieHash<T>: Ord {
 		self.0.child_storage_root(child_info, delta)
 	}
 
@@ -336,13 +344,13 @@ impl<S, H> Backend<H> for ProvingBackend<S, H>
 		Some(self)
 	}
 
-	fn from_reg_state(self, previous_recorder: ProofRegStateFor<Self, H>) -> Option<Self::ProofRegBackend> {
+	fn from_reg_state(self, previous_recorder: ProofRegStateFor<Self, T::Hash>) -> Option<Self::ProofRegBackend> {
 		let root = self.0.essence().root().clone();
 		let storage = self.0.into_storage();
 		let current_recorder = storage.proof_recorder;
 		let backend = storage.backend;
-		merge_proof_recorder::<H>(current_recorder, previous_recorder).map(|merged_recorder|
-			ProvingBackend::<S, H>::from_backend_with_recorder(backend, root, merged_recorder)
+		merge_proof_recorder::<T::Hash>(current_recorder, previous_recorder).map(|merged_recorder|
+			ProvingBackend::<S, T>::from_backend_with_recorder(backend, root, merged_recorder)
 		)
 	}
 }
@@ -353,15 +361,18 @@ mod tests {
 	use crate::trie_backend::tests::test_trie;
 	use super::*;
 	use sp_trie::PrefixedMemoryDB;
-	use sp_trie::StorageProof;
+	use sp_trie::{StorageProof, Layout};
 	use crate::backend::ProofCheckBackend as _;
 
 	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
-	type ProofCheckBackend = crate::trie_backend::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
+	type ProofCheckBackend = crate::trie_backend::TrieBackend<
+		MemoryDB<BlakeTwo256>,
+		Layout<BlakeTwo256>,
+	>;
 
 	fn test_proving<'a>(
-		trie_backend: &'a TrieBackend<PrefixedMemoryDB<BlakeTwo256>,BlakeTwo256>,
-	) -> ProvingBackend<&'a PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256> {
+		trie_backend: &'a TrieBackend<PrefixedMemoryDB<BlakeTwo256>, Layout<BlakeTwo256>>,
+	) -> ProvingBackend<&'a PrefixedMemoryDB<BlakeTwo256>, Layout<BlakeTwo256>> {
 		ProvingBackend::new(trie_backend)
 	}
 
@@ -405,7 +416,7 @@ mod tests {
 	#[test]
 	fn proof_recorded_and_checked() {
 		let contents = (0..64).map(|i| (vec![i], Some(vec![i]))).collect::<Vec<_>>();
-		let in_memory = InMemoryBackend::<BlakeTwo256>::default();
+		let in_memory = InMemoryBackend::<Layout<BlakeTwo256>>::default();
 		let in_memory = in_memory.update(vec![(None, contents)]);
 		let in_memory_root = in_memory.storage_root(::std::iter::empty()).0;
 		(0..64).for_each(|i| assert_eq!(in_memory.storage(&[i]).unwrap().unwrap(), vec![i]));
@@ -438,7 +449,7 @@ mod tests {
 			(Some(child_info_2.clone()),
 				(10..15).map(|i| (vec![i], Some(vec![i]))).collect()),
 		];
-		let in_memory = InMemoryBackend::<BlakeTwo256>::default();
+		let in_memory = InMemoryBackend::<Layout<BlakeTwo256>>::default();
 		let in_memory = in_memory.update(contents);
 		let child_storage_keys = vec![child_info_1.to_owned(), child_info_2.to_owned()];
 		let in_memory_root = in_memory.full_storage_root(

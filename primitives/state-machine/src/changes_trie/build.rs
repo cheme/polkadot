@@ -34,6 +34,7 @@ use crate::{
 	},
 };
 use sp_core::storage::{ChildInfo, PrefixedStorageKey};
+use sp_trie::Layout;
 
 /// Prepare input pairs for building a changes trie of given block.
 ///
@@ -270,7 +271,7 @@ fn prepare_digest_input<'a, H, Number>(
 
 			let mut children_roots = BTreeMap::<PrefixedStorageKey, _>::new();
 			{
-				let trie_storage = TrieBackendEssence::<_, H>::new(
+				let trie_storage = TrieBackendEssence::<_, Layout<H>>::new(
 					crate::changes_trie::TrieBackendStorageAdapter(storage),
 					trie_root,
 				);
@@ -302,7 +303,7 @@ fn prepare_digest_input<'a, H, Number>(
 				};
 
 				let mut map = child_map.entry(child_index).or_default();
-				let trie_storage = TrieBackendEssence::<_, H>::new(
+				let trie_storage = TrieBackendEssence::<_, Layout<H>>::new(
 					crate::changes_trie::TrieBackendStorageAdapter(storage),
 					trie_root,
 				);
@@ -328,6 +329,7 @@ fn prepare_digest_input<'a, H, Number>(
 
 #[cfg(test)]
 mod test {
+	use sp_trie::Layout;
 	use crate::InMemoryBackend;
 	use crate::changes_trie::{RootsStorage, Configuration, storage::InMemoryStorage};
 	use crate::changes_trie::build_cache::{IncompleteCacheAction, IncompleteCachedBuildData};
@@ -336,7 +338,7 @@ mod test {
 	type Blake2Hasher = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	fn prepare_for_build(zero: u64) -> (
-		InMemoryBackend<Blake2Hasher>,
+		InMemoryBackend<Layout<Blake2Hasher>>,
 		InMemoryStorage<Blake2Hasher, u64>,
 		OverlayedChanges,
 		Configuration,

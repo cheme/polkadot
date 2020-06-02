@@ -46,7 +46,7 @@ mod stats;
 mod read_only;
 
 pub use sp_trie::{trie_types::{Layout, TrieDBMut}, TrieNodesStorageProof, TrieMut,
-	DBValue, MemoryDB, StorageProof, RefHasher};
+	DBValue, MemoryDB, StorageProof, RefHasher, TrieLayout, TrieHash};
 pub use testing::TestExternalities;
 pub use basic::BasicExternalities;
 pub use read_only::{ReadOnlyExternalities, InspectState};
@@ -94,7 +94,7 @@ pub type ChangesTrieTransaction<H, N> = (
 );
 
 /// Trie backend with in-memory storage.
-pub type InMemoryBackend<H> = TrieBackend<MemoryDB<H>, H>;
+pub type InMemoryBackend<T> = TrieBackend<MemoryDB<<T as TrieLayout>::Hash>, T>;
 
 /// Strategy for executing a call into the runtime.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -761,9 +761,13 @@ mod tests {
 	use super::ext::Ext;
 	use super::changes_trie::Configuration as ChangesTrieConfig;
 	use sp_core::{map, traits::{Externalities, RuntimeCode}};
+	use sp_trie::Layout;
 
 	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
-	type ProvingBackend = super::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
+	type ProvingBackend = super::TrieBackend<
+		MemoryDB<BlakeTwo256>,
+		Layout<BlakeTwo256>,
+	>;
 
 	#[derive(Clone)]
 	struct DummyCodeExecutor {
@@ -979,7 +983,7 @@ mod tests {
 			b"abc".to_vec() => b"2".to_vec(),
 			b"bbb".to_vec() => b"3".to_vec()
 		];
-		let backend = InMemoryBackend::<BlakeTwo256>::from(initial);
+		let backend = InMemoryBackend::<Layout<BlakeTwo256>>::from(initial);
 
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_storage(b"aba".to_vec(), Some(b"1312".to_vec()));
@@ -1022,7 +1026,7 @@ mod tests {
 	fn set_child_storage_works() {
 		let child_info = ChildInfo::new_default(b"sub1");
 		let child_info = &child_info;
-		let backend = new_in_mem::<BlakeTwo256>();
+		let backend = new_in_mem::<Layout<BlakeTwo256>>();
 		let mut overlay = OverlayedChanges::default();
 		let mut offchain_overlay = OffchainOverlayedChanges::default();
 		let mut cache = StorageTransactionCache::default();
@@ -1068,7 +1072,7 @@ mod tests {
 			b"d4".to_vec(),
 		];
 		let key = b"key".to_vec();
-		let backend = new_in_mem::<BlakeTwo256>();
+		let backend = new_in_mem::<Layout<BlakeTwo256>>();
 		let mut overlay = OverlayedChanges::default();
 		let mut offchain_overlay = OffchainOverlayedChanges::default();
 		let mut cache = StorageTransactionCache::default();
@@ -1132,7 +1136,7 @@ mod tests {
 
 		let key = b"events".to_vec();
 		let mut cache = StorageTransactionCache::default();
-		let backend = new_in_mem::<BlakeTwo256>();
+		let backend = new_in_mem::<Layout<BlakeTwo256>>();
 		let mut offchain_overlay = OffchainOverlayedChanges::default();
 		let mut overlay = OverlayedChanges::default();
 

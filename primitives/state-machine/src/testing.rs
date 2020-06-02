@@ -19,7 +19,7 @@
 
 use std::any::{Any, TypeId};
 use codec::Decode;
-use hash_db::{HasherHybrid as Hasher};
+use sp_trie::{TrieConfiguration, TrieHash};
 use crate::{
 	backend::Backend, OverlayedChanges, StorageTransactionCache, ext::Ext, InMemoryBackend,
 	StorageKey, StorageValue,
@@ -41,27 +41,31 @@ use codec::Encode;
 use sp_externalities::{Extensions, Extension};
 
 /// Simple HashMap-based Externalities impl.
-pub struct TestExternalities<H: Hasher, N: ChangesTrieBlockNumber = u64>
+pub struct TestExternalities<T, N = u64>
 where
-	H::Out: codec::Codec + Ord,
+	N: ChangesTrieBlockNumber,
+	T: TrieConfiguration,
+	TrieHash<T>: codec::Codec + Ord,
 {
 	overlay: OverlayedChanges,
 	offchain_overlay: OffchainOverlayedChanges,
 	storage_transaction_cache: StorageTransactionCache<
-		<InMemoryBackend<H> as Backend<H>>::Transaction, H, N
+		<InMemoryBackend<T> as Backend<T::Hash>>::Transaction, T::Hash, N
 	>,
-	backend: InMemoryBackend<H>,
+	backend: InMemoryBackend<T>,
 	changes_trie_config: Option<ChangesTrieConfiguration>,
-	changes_trie_storage: ChangesTrieInMemoryStorage<H, N>,
+	changes_trie_storage: ChangesTrieInMemoryStorage<T::Hash, N>,
 	extensions: Extensions,
 }
 
-impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
+impl<T, N> TestExternalities<T, N>
 	where
-		H::Out: Ord + 'static + codec::Codec
+		N: ChangesTrieBlockNumber,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + 'static + codec::Codec,
 {
 	/// Get externalities implementation.
-	pub fn ext(&mut self) -> Ext<H, N, InMemoryBackend<H>> {
+	pub fn ext(&mut self) -> Ext<T::Hash, N, InMemoryBackend<T>> {
 		Ext::new(
 			&mut self.overlay,
 			&mut self.offchain_overlay,
@@ -130,12 +134,12 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 	}
 
 	/// Get mutable reference to changes trie storage.
-	pub fn changes_trie_storage(&mut self) -> &mut ChangesTrieInMemoryStorage<H, N> {
+	pub fn changes_trie_storage(&mut self) -> &mut ChangesTrieInMemoryStorage<T::Hash, N> {
 		&mut self.changes_trie_storage
 	}
 
 	/// Return a new backend with all pending value.
-	pub fn commit_all(&self) -> InMemoryBackend<H> {
+	pub fn commit_all(&self) -> InMemoryBackend<T> {
 		let top: Vec<_> = self.overlay.changes(None)
 			.map(|(k, v)| (k.clone(), v.value().cloned()))
 			.collect();
@@ -162,45 +166,55 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 	}
 }
 
-impl<H: Hasher, N: ChangesTrieBlockNumber> std::fmt::Debug for TestExternalities<H, N>
-	where H::Out: Ord + codec::Codec,
+impl<T, N> std::fmt::Debug for TestExternalities<T, N>
+	where
+		N: ChangesTrieBlockNumber,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + codec::Codec,
 {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "overlay: {:?}\nbackend: {:?}", self.overlay, self.backend.pairs())
 	}
 }
 
-impl<H: Hasher, N: ChangesTrieBlockNumber> PartialEq for TestExternalities<H, N>
+impl<T, N> PartialEq for TestExternalities<T, N>
 	where
-		H::Out: Ord + 'static + codec::Codec
+		N: ChangesTrieBlockNumber,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + 'static + codec::Codec
 {
 	/// This doesn't test if they are in the same state, only if they contains the
 	/// same data at this state
-	fn eq(&self, other: &TestExternalities<H, N>) -> bool {
+	fn eq(&self, other: &TestExternalities<T, N>) -> bool {
 		self.commit_all().eq(&other.commit_all())
 	}
 }
 
-impl<H: Hasher, N: ChangesTrieBlockNumber> Default for TestExternalities<H, N>
+impl<T, N> Default for TestExternalities<T, N>
 	where
-		H::Out: Ord + 'static + codec::Codec,
+		N: ChangesTrieBlockNumber,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + 'static + codec::Codec,
 {
 	fn default() -> Self { Self::new(Default::default()) }
 }
 
-impl<H: Hasher, N: ChangesTrieBlockNumber> From<Storage> for TestExternalities<H, N>
+impl<T, N> From<Storage> for TestExternalities<T, N>
 	where
-		H::Out: Ord + 'static + codec::Codec,
+		N: ChangesTrieBlockNumber,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + 'static + codec::Codec,
 {
 	fn from(storage: Storage) -> Self {
 		Self::new(storage)
 	}
 }
 
-impl<H, N> sp_externalities::ExtensionStore for TestExternalities<H, N> where
-	H: Hasher,
-	H::Out: Ord + codec::Codec,
-	N: ChangesTrieBlockNumber,
+impl<T, N> sp_externalities::ExtensionStore for TestExternalities<T, N>
+	where
+		N: ChangesTrieBlockNumber,
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + codec::Codec,
 {
 	fn extension_by_type_id(&mut self, type_id: TypeId) -> Option<&mut dyn Any> {
 		self.extensions.get_mut(type_id)
@@ -226,13 +240,14 @@ impl<H, N> sp_externalities::ExtensionStore for TestExternalities<H, N> where
 mod tests {
 	use super::*;
 	use sp_core::traits::Externalities;
+	use sp_trie::Layout;
 	use hex_literal::hex;
 
 	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	#[test]
 	fn commit_should_work() {
-		let mut ext = TestExternalities::<BlakeTwo256, u64>::default();
+		let mut ext = TestExternalities::<Layout<BlakeTwo256>, u64>::default();
 		let mut ext = ext.ext();
 		ext.set_storage(b"doe".to_vec(), b"reindeer".to_vec());
 		ext.set_storage(b"dog".to_vec(), b"puppy".to_vec());
@@ -243,7 +258,7 @@ mod tests {
 
 	#[test]
 	fn set_and_retrieve_code() {
-		let mut ext = TestExternalities::<BlakeTwo256, u64>::default();
+		let mut ext = TestExternalities::<Layout<BlakeTwo256>, u64>::default();
 		let mut ext = ext.ext();
 
 		let code = vec![1, 2, 3];
@@ -255,6 +270,6 @@ mod tests {
 	#[test]
 	fn check_send() {
 		fn assert_send<T: Send>() {}
-		assert_send::<TestExternalities::<BlakeTwo256, u64>>();
+		assert_send::<TestExternalities::<Layout<BlakeTwo256>, u64>>();
 	}
 }

@@ -46,10 +46,13 @@ use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, BlakeTwo256};
 use sc_service::client::{LocalCallExecutor, ClientConfig};
 
+/// Test client genesis in memory backend.
+pub type InMemoryBackend<H> = sp_state_machine::InMemoryBackend<sp_state_machine::Layout<H>>;
+
 /// Test client light database backend.
 pub type LightBackend<Block> = client::light::backend::Backend<
 	sc_client_db::light::LightStorage<Block>,
-	BlakeTwo256,
+	InMemoryBackend<BlakeTwo256>,
 >;
 
 /// A genesis storage initialization trait.
