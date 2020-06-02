@@ -242,7 +242,7 @@ pub trait Backend<H>: std::fmt::Debug + Sized
 	}
 }
 
-/// Backend that can be instantiated from a few elements.
+/// Backend that can be instantiated from its state.
 pub trait InstantiableStateBackend<H>: Backend<H>
 	where
 		H: Hasher,
@@ -255,6 +255,15 @@ pub trait InstantiableStateBackend<H>: Backend<H>
 
 	/// Extract state out of the backend.
 	fn extract_state(self) -> (Self::Storage, H::Out);
+}
+
+/// Backend that can be instantiated from intital content.
+pub trait GenesisStateBackend<H>: Backend<H>
+	where
+		H: Hasher,
+{
+	/// Instantiation method.
+	fn new(storage: sp_core::storage::Storage) -> Self;
 }
 
 /// Backend used to register a proof record.

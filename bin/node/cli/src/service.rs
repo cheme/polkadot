@@ -322,7 +322,13 @@ pub fn new_light(config: Configuration)
 -> Result<impl AbstractService, ServiceError> {
 	let inherent_data_providers = InherentDataProviders::new();
 
-	let service = ServiceBuilder::new_light::<Block, RuntimeApi, node_executor::Executor, sc_client_api::ProofCheckBackend<Block>>(config)?
+	let service = ServiceBuilder::new_light::<
+		Block,
+		RuntimeApi,
+		node_executor::Executor,
+		sc_client_api::ProofCheckBackend<Block>,
+		sc_client_api::GenesisBackend<Block>,
+	>(config)?
 		.with_select_chain(|_config, backend| {
 			Ok(LongestChain::new(backend.clone()))
 		})?

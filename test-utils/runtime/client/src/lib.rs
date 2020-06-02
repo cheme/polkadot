@@ -86,7 +86,7 @@ pub type LightExecutor = client::light::call_executor::GenesisCallExecutor<
 	client::LocalCallExecutor<
 		client::light::backend::Backend<
 			sc_client_db::light::LightStorage<substrate_test_runtime::Block>,
-			HashFor<substrate_test_runtime::Block>
+			sc_client_api::GenesisBackend<substrate_test_runtime::Block>
 		>,
 		NativeExecutor<LocalExecutor>
 	>

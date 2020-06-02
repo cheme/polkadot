@@ -40,7 +40,7 @@ use sp_api::{InitializeBlock, StorageTransactionCache, OffchainOverlayedChanges}
 use sp_consensus::{BlockOrigin};
 use sc_executor::{NativeExecutor, WasmExecutionMethod, RuntimeVersion, NativeVersion};
 use sp_core::{H256, tasks::executor as tasks_executor, NativeOrEncoded};
-use sc_client_api::{blockchain::Info, backend::NewBlockState, Backend as ClientBackend, ProofProvider, in_mem::{Backend as InMemBackend, Blockchain as InMemoryBlockchain}, AuxStore, Storage, CallExecutor, cht, ExecutionStrategy, BlockImportOperation, RemoteCallRequest, StorageProvider, ChangesProof, RemoteBodyRequest, RemoteReadRequest, RemoteChangesRequest, FetchChecker, RemoteReadChildRequest, RemoteHeaderRequest, ProofRegStateFor};
+use sc_client_api::{blockchain::Info, backend::NewBlockState, Backend as ClientBackend, ProofProvider, in_mem::{Backend as InMemBackend, Blockchain as InMemoryBlockchain}, AuxStore, Storage, CallExecutor, cht, ExecutionStrategy, BlockImportOperation, RemoteCallRequest, StorageProvider, ChangesProof, RemoteBodyRequest, RemoteReadRequest, RemoteChangesRequest, FetchChecker, RemoteReadChildRequest, RemoteHeaderRequest, ProofRegStateFor, GenesisBackend, GenesisBackendHash};
 use sp_externalities::Extensions;
 use sc_block_builder::BlockBuilderProvider;
 use sp_blockchain::{
@@ -265,7 +265,7 @@ fn local_state_is_created_when_genesis_state_is_available() {
 	let def = Default::default();
 	let header0 = substrate_test_runtime_client::runtime::Header::new(0, def, def, def, Default::default());
 
-	let backend: Backend<_, BlakeTwo256> = Backend::new(
+	let backend: Backend<_, GenesisBackendHash<BlakeTwo256>> = Backend::new(
 		Arc::new(DummyBlockchain::new(DummyStorage::new())),
 	);
 	let mut op = backend.begin_operation().unwrap();
@@ -281,7 +281,7 @@ fn local_state_is_created_when_genesis_state_is_available() {
 
 #[test]
 fn unavailable_state_is_created_when_genesis_state_is_unavailable() {
-	let backend: Backend<_, BlakeTwo256> = Backend::new(
+	let backend: Backend<_, GenesisBackendHash<BlakeTwo256>> = Backend::new(
 		Arc::new(DummyBlockchain::new(DummyStorage::new())),
 	);
 
@@ -293,7 +293,7 @@ fn unavailable_state_is_created_when_genesis_state_is_unavailable() {
 
 #[test]
 fn light_aux_store_is_updated_via_non_importing_op() {
-	let backend = Backend::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
+	let backend = Backend::<_, GenesisBackend<Block>>::new(Arc::new(DummyBlockchain::new(DummyStorage::new())));
 	let mut op = ClientBackend::<Block>::begin_operation(&backend).unwrap();
 	BlockImportOperation::<Block>::insert_aux(&mut op, vec![(vec![1], Some(vec![2]))]).unwrap();
 	ClientBackend::<Block>::commit_operation(&backend, op).unwrap();

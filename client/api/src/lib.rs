@@ -39,7 +39,7 @@ pub use proof_provider::*;
 
 pub use sp_state_machine::{TrieNodesStorageProof, ExecutionStrategy, CloneableSpawn};
 pub use sp_state_machine::backend::{ProofCheckBackend as ProofCheckBackendT,
-	ProofRegStateFor, InstantiableStateBackend, HashDBNodesTransaction};
+	ProofRegStateFor, InstantiableStateBackend, HashDBNodesTransaction, GenesisStateBackend};
 pub use sp_runtime::traits::HashFor;
 
 /// DB backend for state supported by client db implementation.
@@ -47,26 +47,35 @@ pub type DbStorage<Block> = DbStorageHash<HashFor<Block>>;
 /// DB backend for state supported by client db implementation.
 pub type DbStorageHash<H> = std::sync::Arc<dyn sp_state_machine::Storage<H>>;
 
-/// Static definition of the proving backend
+/// Trie Layout to use.
+pub type TrieLayout<B> = sp_state_machine::Layout<HashFor<B>>;
+/// Trie Layout to use.
+pub type TrieLayoutHash<H> = sp_state_machine::Layout<H>;
+
+/// Static definition of the proving backend.
 pub type ProvingBackend<Block> = ProvingBackendHash<HashFor<Block>>;
-/// Static definition of the proving backend
-pub type ProvingBackendHash<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, sp_state_machine::Layout<H>>;
+/// Static definition of the proving backend.
+pub type ProvingBackendHash<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, TrieLayoutHash<H>>;
 
 /// Trie backend proof check.
 pub type ProofCheckBackend<Block> = ProofCheckBackendHash<HashFor<Block>>;
 /// Static definition of the verification backend
-pub type ProofCheckBackendHash<H> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<H>, sp_state_machine::Layout<H>>;
+pub type ProofCheckBackendHash<H> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<H>, TrieLayoutHash<H>>;
 
 /// State backend configuration for default `sp_trie` patricia trie.
 pub type TrieStateBackend<Block> = TrieStateBackendHash<HashFor<Block>>;
 /// State backend configuration for default `sp_trie` patricia trie.
-/// TODO EMCH expose layout (& other type alias)
-pub type TrieStateBackendHash<H> = sp_state_machine::TrieBackend<DbStorageHash<H>, sp_state_machine::Layout<H>>;
+pub type TrieStateBackendHash<H> = sp_state_machine::TrieBackend<DbStorageHash<H>, TrieLayoutHash<H>>;
+
+/// Genesis backend proof check.
+pub type GenesisBackend<Block> = GenesisBackendHash<HashFor<Block>>;
+/// Static definition of the genesis backend
+pub type GenesisBackendHash<H> = sp_state_machine::InMemoryBackend<TrieLayoutHash<H>>;
 
 /// Static definition of the state backend to use with tests.
 pub type TrieBackendState<B> = sp_state_machine::TrieBackend<
 	std::sync::Arc<dyn sp_state_machine::Storage<HashFor<B>>>,
-	sp_state_machine::Layout<HashFor<B>>,
+	TrieLayout<B>,
 >;
 
 /// Usage Information Provider interface

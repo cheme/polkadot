@@ -23,7 +23,8 @@ use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_roo
 use sp_core::storage::{ChildInfo, ChildType};
 use codec::{Codec, Decode};
 use crate::{
-	backend::{InstantiableStateBackend, Backend, ProofRegStateFor, ProofCheckBackend},
+	backend::{InstantiableStateBackend, Backend, ProofRegStateFor, ProofCheckBackend,
+	GenesisStateBackend},
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 	StorageKey, StorageValue,
 };
@@ -297,6 +298,25 @@ impl<S, T> InstantiableStateBackend<T::Hash> for TrieBackend<S, T>
 		let root = self.essence().root().clone();
 		let storage = self.into_storage();
 		(storage, root)
+	}
+}
+
+impl<T> GenesisStateBackend<T::Hash> for TrieBackend<crate::MemoryDB<T::Hash>, T>
+	where
+		T: TrieConfiguration,
+		TrieHash<T>: Ord + Codec,
+{
+	fn new(input: sp_core::storage::Storage) -> Self {
+		// this is only called when genesis block is imported => shouldn't be performance bottleneck
+		let mut storage: std::collections::HashMap<Option<ChildInfo>, _> = std::collections::HashMap::new();
+		storage.insert(None, input.top);
+
+		// make sure to persist the child storage
+		for (_child_key, storage_child) in input.children_default.clone() {
+			storage.insert(Some(storage_child.child_info), storage_child.data);
+		}
+
+		Self::from(storage)
 	}
 }
 
