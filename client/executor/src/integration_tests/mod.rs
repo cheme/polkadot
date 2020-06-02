@@ -33,7 +33,7 @@ use sp_runtime::traits::BlakeTwo256;
 
 use crate::WasmExecutionMethod;
 
-pub type TestExternalities = CoreTestExternalities<BlakeTwo256, u64>;
+pub type TestExternalities = CoreTestExternalities<sp_state_machine::Layout<BlakeTwo256>, u64>;
 type HostFunctions = sp_io::SubstrateHostFunctions;
 
 fn call_in_wasm<E: Externalities>(

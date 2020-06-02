@@ -24,7 +24,7 @@ use codec::{Decode, Encode, Codec};
 use hash_db::Hasher;
 use num_traits::Zero;
 use sp_core::storage::PrefixedStorageKey;
-use sp_trie::Recorder;
+use sp_trie::{Recorder, Layout};
 use crate::changes_trie::{AnchorBlockId, ConfigurationRange, RootsStorage, Storage, BlockNumber};
 use crate::changes_trie::input::{DigestIndex, ExtrinsicIndex, DigestIndexValue, ExtrinsicIndexValue};
 use crate::changes_trie::storage::{TrieBackendAdapter, InMemoryStorage};
@@ -325,7 +325,7 @@ impl<'a, H: Hasher, Number: BlockNumber> Iterator for DrilldownIterator<'a, H, N
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.essence.next(|storage, root, key|
-			TrieBackendEssence::<_, H>::new(TrieBackendAdapter::new(storage), root).storage(key))
+			TrieBackendEssence::<_, Layout<H>>::new(TrieBackendAdapter::new(storage), root).storage(key))
 	}
 }
 
@@ -368,7 +368,7 @@ impl<'a, H, Number> Iterator for ProvingDrilldownIterator<'a, H, Number>
 		let proof_recorder = &mut *self.proof_recorder.try_borrow_mut()
 			.expect("only fails when already borrowed; storage() is non-reentrant; qed");
 		self.essence.next(|storage, root, key|
-			ProvingBackendRecorder::<_, H> {
+			ProvingBackendRecorder::<_, Layout<H>> {
 				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
 				proof_recorder,
 			}.storage(key))

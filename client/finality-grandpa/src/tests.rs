@@ -43,7 +43,7 @@ use sp_runtime::traits::{Block as BlockT, Header as HeaderT, HashFor};
 use sp_runtime::generic::{BlockId, DigestItem};
 use sp_core::{H256, crypto::Public};
 use sp_finality_grandpa::{GRANDPA_ENGINE_ID, AuthorityList, EquivocationProof, GrandpaApi, OpaqueKeyOwnershipProof};
-use sp_state_machine::{InMemoryBackend, prove_read, read_proof_check, MemoryDB};
+use sp_state_machine::{InMemoryBackend, prove_read, read_proof_check, MemoryDB, Layout};
 
 use authorities::AuthoritySet;
 use finality_proof::{
@@ -53,7 +53,7 @@ use consensus_changes::ConsensusChanges;
 use sc_block_builder::BlockBuilderProvider;
 use sc_consensus::LongestChain;
 
-type ProvingBackend<H> = sp_state_machine::TrieBackend<MemoryDB<H>, H>;
+type ProvingBackend<H> = sp_state_machine::TrieBackend<MemoryDB<H>, sp_state_machine::Layout<H>>;
 
 type PeerData =
 	Mutex<
@@ -248,7 +248,7 @@ impl AuthoritySetForFinalityProver<Block> for TestApi {
 
 	fn prove_authorities(&self, block: &BlockId<Block>) -> Result<TrieNodesStorageProof> {
 		let authorities = self.authorities(block)?;
-		let backend = <InMemoryBackend<HashFor<Block>>>::from(vec![
+		let backend = <InMemoryBackend<Layout<HashFor<Block>>>>::from(vec![
 			(None, vec![(b"authorities".to_vec(), Some(authorities.encode()))])
 		]);
 		let proof = prove_read(backend, vec![b"authorities"])

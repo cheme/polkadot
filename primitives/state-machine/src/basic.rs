@@ -23,7 +23,7 @@ use std::{
 };
 use crate::{backend::Backend, StorageKey, StorageValue};
 use hash_db::Hasher;
-use sp_trie::{TrieConfiguration, empty_child_trie_root};
+use sp_trie::{TrieConfiguration, empty_child_trie_root, TrieHash};
 use sp_core::{
 	storage::{
 		well_known_keys::is_child_storage_key, Storage,
@@ -90,7 +90,7 @@ impl<T> BasicExternalitiesWithTrie<T> {
 impl<T> BasicExternalitiesWithTrie<T>
 	where
 		T: TrieConfiguration,
-		<T::Hash as Hasher>::Out: Ord + Codec,
+		TrieHash<T>: Ord + Codec,
 {
 	/// Execute the given closure `f` with the externalities set and initialized with `storage`.
 	///
@@ -158,7 +158,7 @@ impl<T> From<BTreeMap<StorageKey, StorageValue>> for BasicExternalitiesWithTrie<
 impl<T> Externalities for BasicExternalitiesWithTrie<T>
 	where
 		T: TrieConfiguration,
-		<T::Hash as Hasher>::Out: Ord + Codec,
+		TrieHash<T>: Ord + Codec,
 {
 	fn set_offchain_storage(&mut self, _key: &[u8], _value: Option<&[u8]>) {}
 
@@ -315,7 +315,7 @@ impl<T> Externalities for BasicExternalitiesWithTrie<T>
 	) -> Vec<u8> {
 		if let Some(child) = self.inner.children_default.get(child_info.storage_key()) {
 			let delta = child.data.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref())));
-			crate::in_memory_backend::new_in_mem::<T::Hash>()
+			crate::in_memory_backend::new_in_mem::<T>()
 				.child_storage_root(&child.child_info, delta).0
 		} else {
 			empty_child_trie_root::<T>()

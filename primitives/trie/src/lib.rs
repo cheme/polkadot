@@ -56,7 +56,7 @@ impl<H: Hasher> TrieLayout for Layout<H> {
 }
 
 impl<H: Hasher> TrieConfiguration for Layout<H> {
-	fn trie_root<I, A, B>(input: I) -> <Self::Hash as Hasher>::Out where
+	fn trie_root<I, A, B>(input: I) -> TrieHash<Self> where
 		I: IntoIterator<Item = (A, B)>,
 		A: AsRef<[u8]> + Ord,
 		B: AsRef<[u8]>,

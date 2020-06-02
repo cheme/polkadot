@@ -782,6 +782,7 @@ mod tests {
 	};
 	use crate::InMemoryBackend;
 	use crate::ext::Ext;
+	use sp_trie::Layout;
 	use super::*;
 
 	fn strip_extrinsic_index(map: &BTreeMap<StorageKey, OverlayedValue>)
@@ -828,7 +829,7 @@ mod tests {
 			(b"dogglesworth".to_vec(), b"catXXX".to_vec()),
 			(b"doug".to_vec(), b"notadog".to_vec()),
 		].into_iter().collect();
-		let backend = InMemoryBackend::<Blake2Hasher>::from(initial);
+		let backend = InMemoryBackend::<Layout<Blake2Hasher>>::from(initial);
 		let mut overlay = OverlayedChanges {
 			committed: vec![
 				(b"dog".to_vec(), Some(b"puppy".to_vec()).into()),

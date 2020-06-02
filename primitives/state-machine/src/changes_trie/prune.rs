@@ -18,7 +18,7 @@
 //! Changes trie pruning-related functions.
 
 use hash_db::Hasher;
-use sp_trie::Recorder;
+use sp_trie::{Recorder, Layout};
 use log::warn;
 use num_traits::One;
 use crate::proving_backend::ProvingBackendRecorder;
@@ -60,7 +60,7 @@ pub fn prune<H: Hasher, Number: BlockNumber, F: FnMut(H::Out)>(
 			},
 		};
 		let children_roots = {
-			let trie_storage = TrieBackendEssence::<_, H>::new(
+			let trie_storage = TrieBackendEssence::<_, Layout<H>>::new(
 				crate::changes_trie::TrieBackendStorageAdapter(storage),
 				root,
 			);
@@ -97,7 +97,7 @@ fn prune_trie<H: Hasher, Number: BlockNumber, F: FnMut(H::Out)>(
 	// (effectively - all changes trie nodes)
 	let mut proof_recorder: Recorder<H::Out> = Default::default();
 	{
-		let mut trie = ProvingBackendRecorder::<_, H> {
+		let mut trie = ProvingBackendRecorder::<_, Layout<H>> {
 			backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
 			proof_recorder: &mut proof_recorder,
 		};

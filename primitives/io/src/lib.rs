@@ -1101,7 +1101,10 @@ pub fn oom(_: core::alloc::Layout) -> ! {
 
 /// Type alias for Externalities implementation used in tests.
 #[cfg(feature = "std")]
-pub type TestExternalities = sp_state_machine::TestExternalities<sp_core::Blake2Hasher, u64>;
+pub type TestExternalities = sp_state_machine::TestExternalities<
+	sp_trie::Layout<sp_core::Blake2Hasher>,
+	u64,
+>;
 
 /// The host functions Substrate provides for the Wasm runtime environment.
 ///

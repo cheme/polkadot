@@ -29,7 +29,7 @@ use sp_core::ChangesTrieConfiguration;
 use sp_core::storage::{well_known_keys, ChildInfo};
 use sp_core::offchain::storage::InMemOffchainStorage;
 use sp_state_machine::{
-	InMemoryBackend, ChangesTrieTransaction,
+	ChangesTrieTransaction,
 	StorageCollection, ChildStorageCollection,
 };
 use sp_state_machine::backend::{Backend as StateBackend, ProofRegStateFor};
@@ -52,6 +52,9 @@ use super::blockchain::Blockchain;
 use hash_db::Hasher;
 
 const IN_MEMORY_EXPECT_PROOF: &str = "InMemory state backend has Void error type and always succeeds; qed";
+
+// TODO EMCH this should be defined from client.
+type InMemoryBackend<H> = sp_state_machine::InMemoryBackend<sp_state_machine::Layout<H>>;
 
 /// Light client backend.
 pub struct Backend<S, H: Hasher> {

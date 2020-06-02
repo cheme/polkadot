@@ -71,7 +71,7 @@ fn implement_common_api_traits(
 		}
 
 		impl #crate_::ApiExt<#block_type> for #self_ty {
-			type StateBackend = #crate_::InMemoryBackend<#crate_::HashFor<#block_type>>;
+			type StateBackend = #crate_::InMemoryBackend<#crate_::Layout<#crate_::HashFor<#block_type>>>;
 
 			fn map_api_result<F: FnOnce(&Self) -> std::result::Result<R, E>, R, E>(
 				&self,

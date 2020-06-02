@@ -23,7 +23,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use hash_db::{Prefix, Hasher};
-use sp_trie::{MemoryDB, prefixed_key};
+use sp_trie::{MemoryDB, prefixed_key, Layout};
 use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use sp_runtime::Storage;
@@ -32,7 +32,8 @@ use kvdb::{KeyValueDB, DBTransaction};
 use crate::storage_cache::{CachingState, SharedCache, new_shared_cache};
 
 type TrieBackendState<B> = sp_state_machine::TrieBackend<
-	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
+	Arc<dyn sp_state_machine::Storage<HashFor<B>>>,
+	Layout<HashFor<B>>,
 >;
 
 type State<B> = CachingState<TrieBackendState<B>, B>;

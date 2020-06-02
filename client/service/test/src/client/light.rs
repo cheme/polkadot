@@ -61,7 +61,10 @@ use sp_state_machine::backend::Backend as _;
 #[cfg(test)]
 use sp_trie::StorageProof;
 
-type ProvingBackend = sp_state_machine::TrieBackend<sp_trie::MemoryDB<BlakeTwo256>, BlakeTwo256>;
+type ProvingBackend = sp_state_machine::TrieBackend<
+	sp_trie::MemoryDB<BlakeTwo256>,
+	sp_state_machine::Layout<BlakeTwo256>,
+>;
 pub type DummyBlockchain = Blockchain<DummyStorage>;
 
 pub struct DummyStorage {

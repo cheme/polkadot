@@ -76,7 +76,7 @@ pub const SPEC_VERSION: u32 = node_runtime::VERSION.spec_version;
 
 pub const TRANSACTION_VERSION: u32 = node_runtime::VERSION.transaction_version;
 
-pub type TestExternalities<H> = CoreTestExternalities<H, u64>;
+pub type TestExternalities<H> = CoreTestExternalities<sp_state_machine::Layout<H>, u64>;
 
 pub fn sign(xt: CheckedExtrinsic) -> UncheckedExtrinsic {
 	node_testing::keyring::sign(xt, SPEC_VERSION, TRANSACTION_VERSION, GENESIS_HASH)

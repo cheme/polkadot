@@ -50,21 +50,23 @@ pub type DbStorageHash<H> = std::sync::Arc<dyn sp_state_machine::Storage<H>>;
 /// Static definition of the proving backend
 pub type ProvingBackend<Block> = ProvingBackendHash<HashFor<Block>>;
 /// Static definition of the proving backend
-pub type ProvingBackendHash<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, H>;
+pub type ProvingBackendHash<H> = sp_state_machine::ProvingBackend<sp_state_machine::MemoryDB<H>, sp_state_machine::Layout<H>>;
 
 /// Trie backend proof check.
 pub type ProofCheckBackend<Block> = ProofCheckBackendHash<HashFor<Block>>;
 /// Static definition of the verification backend
-pub type ProofCheckBackendHash<H> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<H>, H>;
+pub type ProofCheckBackendHash<H> = sp_state_machine::TrieBackend<sp_state_machine::MemoryDB<H>, sp_state_machine::Layout<H>>;
 
 /// State backend configuration for default `sp_trie` patricia trie.
 pub type TrieStateBackend<Block> = TrieStateBackendHash<HashFor<Block>>;
 /// State backend configuration for default `sp_trie` patricia trie.
-pub type TrieStateBackendHash<H> = sp_state_machine::TrieBackend<DbStorageHash<H>, H>;
+/// TODO EMCH expose layout (& other type alias)
+pub type TrieStateBackendHash<H> = sp_state_machine::TrieBackend<DbStorageHash<H>, sp_state_machine::Layout<H>>;
 
 /// Static definition of the state backend to use with tests.
 pub type TrieBackendState<B> = sp_state_machine::TrieBackend<
-	std::sync::Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
+	std::sync::Arc<dyn sp_state_machine::Storage<HashFor<B>>>,
+	sp_state_machine::Layout<HashFor<B>>,
 >;
 
 /// Usage Information Provider interface

@@ -30,7 +30,10 @@ use sc_executor::CallInWasm;
 
 use std::{collections::HashSet, sync::{Arc, Mutex}};
 
-type TestExternalities = sp_state_machine::TestExternalities<sp_runtime::traits::BlakeTwo256, u64>;
+type TestExternalities = sp_state_machine::TestExternalities<
+	sp_state_machine::Layout<sp_runtime::traits::BlakeTwo256>,
+	u64,
+>;
 
 fn call_wasm_method_with_result<HF: HostFunctionsT>(
 	binary: &[u8],

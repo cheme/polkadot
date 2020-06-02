@@ -36,10 +36,10 @@ use sp_state_machine::{
 	TrieNodesStorageProof as StorageProof, InMemoryBackend,
 	prove_read_on_proof_backend, read_proof_check, read_proof_check_on_proving_backend,
 };
-
+use sp_trie::trie_types::Layout;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 
-type ProofCheckBackend<H> = sp_state_machine::TrieBackend<MemoryDB<H>, H>;
+type ProofCheckBackend<H> = sp_state_machine::TrieBackend<MemoryDB<H>, Layout<H>>;
 
 /// The size of each CHT. This value is passed to every CHT-related function from
 /// production code. Other values are passed from tests.
@@ -96,7 +96,7 @@ pub fn compute_root<Header, Hasher, I>(
 		I: IntoIterator<Item=ClientResult<Option<Header::Hash>>>,
 {
 	use sp_trie::TrieConfiguration;
-	Ok(sp_trie::trie_types::Layout::<Hasher>::trie_root(
+	Ok(Layout::<Hasher>::trie_root(
 		build_pairs::<Header, I>(cht_size, cht_num, hashes)?
 	))
 }
@@ -119,7 +119,7 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 		.into_iter()
 		.map(|(k, v)| (k, Some(v)))
 		.collect::<Vec<_>>();
-	let storage = InMemoryBackend::<Hasher>::default().update(vec![(None, transaction)]);
+	let storage = InMemoryBackend::<Layout<Hasher>>::default().update(vec![(None, transaction)]);
 	let proof_backend = storage.as_proof_backend()
 		.expect("InMemoryState::as_proof_backend always returns Some; qed");
 	prove_read_on_proof_backend(
@@ -162,7 +162,7 @@ pub fn check_proof_on_proving_backend<Header, Hasher>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	proving_backend: &TrieBackend<MemoryDB<Hasher>, Hasher>,
+	proving_backend: &TrieBackend<MemoryDB<Hasher>, Layout<Hasher>>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,
@@ -174,7 +174,7 @@ pub fn check_proof_on_proving_backend<Header, Hasher>(
 		local_number,
 		remote_hash,
 		|_, local_cht_key|
-			read_proof_check_on_proving_backend::<TrieBackend<MemoryDB<Hasher>, Hasher>, Hasher>(
+			read_proof_check_on_proving_backend::<TrieBackend<MemoryDB<Hasher>, Layout<Hasher>>, Hasher>(
 				proving_backend,
 				local_cht_key,
 			).map_err(|e| ClientError::from(e)),
