@@ -7688,6 +7688,7 @@ dependencies = [
  "rand 0.7.3",
  "serde",
  "serde_json",
+ "smallvec 1.4.0",
  "sp-application-crypto",
  "sp-arithmetic",
  "sp-core",

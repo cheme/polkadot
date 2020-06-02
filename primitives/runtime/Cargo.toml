@@ -29,6 +29,7 @@ sp-inherents = { version = "2.0.0-rc2", default-features = false, path = "../inh
 parity-util-mem = { version = "0.6.1", default-features = false, features = ["primitive-types"] }
 hash256-std-hasher = { version = "0.15.2", default-features = false }
 ordered-trie = { version = "0.19.2", default-features = false }
+smallvec = "1.4.0"
 
 [dev-dependencies]
 serde_json = "1.0.41"

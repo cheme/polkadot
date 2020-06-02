@@ -386,10 +386,12 @@ impl BinaryHasher for BlakeTwo256 {
 		71, 119, 143, 119, 135, 250, 171, 69, 205, 241, 47, 227, 168];
 	// we use sp_io so this trait will bufferize
 	// to reduce number of sp_io call.
-	type Buffer = Vec<u8>;
+	// We use a small vec of two hash len to avoid
+	// allocation on binary trie.
+	type Buffer = smallvec::SmallVec<[u8; 64]>;
 
 	fn init_buffer() -> Self::Buffer {
-		Vec::with_capacity(32)
+		Default::default()
 	}
 
 	fn reset_buffer(buff: &mut Self::Buffer) {
@@ -485,10 +487,10 @@ impl BinaryHasher for Keccak256 {
 			250, 216, 4, 93, 133, 164, 112];
 	// we use sp_io so this trait will bufferize
 	// to reduce number of sp_io call.
-	type Buffer = Vec<u8>;
+	type Buffer = smallvec::SmallVec<[u8; 64]>;
 
 	fn init_buffer() -> Self::Buffer {
-		Vec::with_capacity(32)
+		Default::default()
 	}
 
 	fn reset_buffer(buff: &mut Self::Buffer) {
