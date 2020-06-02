@@ -314,17 +314,15 @@ pub fn read_trie_value_with<
 
 /// Determine the empty child trie root.
 pub fn empty_child_trie_root<L: TrieConfiguration>(
-) -> TrieHash<L> {
-	let mut result = TrieHash::<L>::default();
-	result.as_mut().copy_from_slice(<L::Hash as BinaryHasher>::NULL_HASH);
-	result
+) -> <L::Hash as Hasher>::Out {
+	L::trie_root::<_, Vec<u8>, Vec<u8>>(core::iter::empty())
 }
 
 /// Determine a child trie root given its ordered contents, closed form. H is the default hasher,
 /// but a generic implementation may ignore this type parameter and use other hashers.
 pub fn child_trie_root<L: TrieConfiguration, I, A, B>(
 	input: I,
-) -> TrieHash<L>
+) -> <L::Hash as Hasher>::Out
 	where
 		I: IntoIterator<Item = (A, B)>,
 		A: AsRef<[u8]> + Ord,
@@ -340,7 +338,7 @@ pub fn child_delta_trie_root<L: TrieConfiguration, I, A, B, DB, RD, V>(
 	db: &mut DB,
 	root_data: RD,
 	delta: I,
-) -> Result<TrieHash<L>, Box<TrieError<L>>>
+) -> Result<<L::Hash as Hasher>::Out, Box<TrieError<L>>>
 	where
 		I: IntoIterator<Item = (A, B)>,
 		A: Borrow<[u8]>,
