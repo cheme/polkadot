@@ -22,7 +22,7 @@ use std::{
 	marker::PhantomData,
 };
 use crate::{Backend, StorageKey, StorageValue};
-use hash_db::Hasher;
+use hash_db::{HasherHybrid as Hasher, Hasher as _};
 use sp_core::{
 	storage::ChildInfo,
 	traits::Externalities, Blake2Hasher,

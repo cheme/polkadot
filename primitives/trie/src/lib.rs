@@ -22,7 +22,6 @@ mod error;
 mod node_header;
 mod node_codec;
 mod storage_proof;
-mod trie_stream;
 
 use sp_std::{boxed::Box, marker::PhantomData, vec::Vec, borrow::Borrow};
 use hash_db::{Hasher, Prefix};
@@ -30,14 +29,13 @@ use trie_db::proof::{generate_proof, verify_proof};
 pub use trie_db::proof::VerifyError;
 /// Our `NodeCodec`-specific error.
 pub use error::Error;
-/// The Substrate format implementation of `TrieStream`.
-pub use trie_stream::TrieStream;
 /// The Substrate format implementation of `NodeCodec`.
 pub use node_codec::NodeCodec;
 pub use storage_proof::{TrieNodesStorageProof, StorageProof};
 /// Various re-exports from the `trie-db` crate.
 pub use trie_db::{
 	Trie, TrieMut, DBValue, Recorder, CError, Query, TrieLayout, TrieConfiguration, nibble_ops, TrieDBIterator,
+	BinaryHasher, HashDBHybrid, HasherHybrid, HashDBHybridDyn,
 };
 /// Various re-exports from the `memory-db` crate.
 pub use memory_db::KeyFunction;
@@ -45,23 +43,70 @@ pub use memory_db::prefixed_key;
 /// Various re-exports from the `hash-db` crate.
 pub use hash_db::{HashDB as HashDBT, EMPTY_PREFIX};
 
+/// Using the same binary hasher for both layer of hybrid trie.
+pub type RefHasher<H> = ordered_trie::OrderedTrieHasher<H, H>;
+
 #[derive(Default)]
 /// substrate trie layout
 pub struct Layout<H>(sp_std::marker::PhantomData<H>);
 
-impl<H: Hasher> TrieLayout for Layout<H> {
+impl<H: HasherHybrid> TrieLayout for Layout<H> {
 	const USE_EXTENSION: bool = false;
+	const HYBRID_HASH: bool = false;
 	type Hash = H;
 	type Codec = NodeCodec<Self::Hash>;
 }
 
-impl<H: Hasher> TrieConfiguration for Layout<H> {
+#[derive(Default)]
+/// substrate trie layout
+pub struct LayoutHybrid<H>(sp_std::marker::PhantomData<H>);
+
+impl<H: HasherHybrid> TrieLayout for LayoutHybrid<H> {
+	const USE_EXTENSION: bool = false;
+	const HYBRID_HASH: bool = true;
+	type Hash = H;
+	type Codec = NodeCodec<Self::Hash>;
+}
+
+impl<H: HasherHybrid> TrieConfiguration for Layout<H> {
+	fn encode_index(input: u32) -> Vec<u8> {
+		codec::Encode::encode(&codec::Compact(input))
+	}
+
+	// Because encode index does not produce ordered index, we need to
+	// sort explicitely here.
+	// Something like libp2p varint would be way better for encode_index.
+	fn ordered_trie_root<I, A>(input: I) -> <Self::Hash as Hasher>::Out
+	where
+		I: IntoIterator<Item = A>,
+		A: AsRef<[u8]>,
+	{
+		let sorted = data_sorted_unique(input
+			.into_iter()
+			.enumerate()
+			.map(|(i, v)| (Self::encode_index(i as u32), v))
+		);
+		Self::trie_root(sorted)
+	}
+/*
+// This code can be uncommented to check if an issue may be related
+// to trie_root call on non sorted value.
 	fn trie_root<I, A, B>(input: I) -> <Self::Hash as Hasher>::Out where
 		I: IntoIterator<Item = (A, B)>,
 		A: AsRef<[u8]> + Ord,
 		B: AsRef<[u8]>,
 	{
-		trie_root::trie_root_no_extension::<H, TrieStream, _, _, _>(input)
+		use trie_db::{TrieRoot, TrieRootHybrid, trie_visit};
+		let input = data_sorted_unique(input);
+		if Self::HYBRID_HASH {
+			let mut cb = TrieRootHybrid::<Self::Hash, _>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		} else {
+			let mut cb = TrieRoot::<Self::Hash, _>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		}
 	}
 
 	fn trie_root_unhashed<I, A, B>(input: I) -> Vec<u8> where
@@ -69,12 +114,58 @@ impl<H: Hasher> TrieConfiguration for Layout<H> {
 		A: AsRef<[u8]> + Ord,
 		B: AsRef<[u8]>,
 	{
-		trie_root::unhashed_trie_no_extension::<H, TrieStream, _, _, _>(input)
+		use trie_db::{TrieRootUnhashedHybrid, TrieRootUnhashed, trie_visit};
+		let input = data_sorted_unique(input);
+		if Self::HYBRID_HASH {
+			let mut cb = TrieRootUnhashedHybrid::<Self::Hash>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		} else {
+			let mut cb = TrieRootUnhashed::<Self::Hash>::default();
+			trie_visit::<Self, _, _, _, _>(input.into_iter(), &mut cb);
+			cb.root.unwrap_or(Default::default())
+		}
 	}
+*/
+}
 
+impl<H: HasherHybrid> TrieConfiguration for LayoutHybrid<H> {
 	fn encode_index(input: u32) -> Vec<u8> {
 		codec::Encode::encode(&codec::Compact(input))
 	}
+
+	// Because encode index does not produce ordered index, we need to
+	// sort explicitely here.
+	// Something like libp2p varint would be way better for encode_index.
+	fn ordered_trie_root<I, A>(input: I) -> <Self::Hash as Hasher>::Out
+	where
+		I: IntoIterator<Item = A>,
+		A: AsRef<[u8]>,
+	{
+		let sorted = data_sorted_unique(input
+			.into_iter()
+			.enumerate()
+			.map(|(i, v)| (Self::encode_index(i as u32), v))
+		);
+		Self::trie_root(sorted)
+	}
+}
+
+/// Utility function, this may be to cumbersome to use
+/// at a case by case basic and directly plugged into
+/// `TrieConfiguration` `trie_root`, and `trie_root_unhashed`
+/// implementations.
+pub fn data_sorted_unique<I, A: Ord, B>(input: I) -> impl Iterator<Item = (A, B)>
+	where
+		I: IntoIterator<Item = (A, B)>,
+{
+	// TODO Vec sort_unstable_by may be faster (and typing the function with Vec input
+	// and vec output too plus having it in TrieConfiguration.
+	let mut m = sp_std::collections::btree_map::BTreeMap::new();
+	for (k,v) in input {
+		let _ = m.insert(k,v); // latest value for uniqueness
+	}
+	m.into_iter()
 }
 
 /// TrieDB error over `TrieConfiguration` trait.
@@ -104,9 +195,21 @@ pub type Lookup<'a, L, Q> = trie_db::Lookup<'a, L, Q>;
 /// Hash type for a trie layout.
 pub type TrieHash<L> = <<L as TrieLayout>::Hash as Hasher>::Out;
 
+
+/// Typed version of hybrid_hash_node_adapter.
+pub fn hybrid_hash_node_adapter<H: HasherHybrid>(
+	encoded_node: &[u8]
+) -> sp_std::result::Result<Option<H::Out>, ()> {
+	trie_db::hybrid_hash_node_adapter::<
+		NodeCodec<H>,
+		H,
+	> (encoded_node)
+}
+
 /// This module is for non generic definition of trie type.
 /// Only the `Hasher` trait is generic in this case.
 pub mod trie_types {
+	/// We use the same hashing for complex trie.
 	pub type Layout<H> = super::Layout<H>;
 	/// Persistent trie database read-access interface for the a given hasher.
 	pub type TrieDB<'a, H> = super::TrieDB<'a, Layout<H>>;
@@ -169,7 +272,8 @@ pub fn delta_trie_root<L: TrieConfiguration, I, A, B, DB, V>(
 	A: Borrow<[u8]>,
 	B: Borrow<Option<V>>,
 	V: Borrow<[u8]>,
-	DB: hash_db::HashDB<L::Hash, trie_db::DBValue>,
+	DB: hash_db::HashDB<L::Hash, trie_db::DBValue>
+		+ HashDBHybrid<L::Hash, trie_db::DBValue>,
 {
 	{
 		let mut trie = TrieDBMut::<L>::from_existing(&mut *db, &mut root)?;
@@ -242,6 +346,7 @@ pub fn child_delta_trie_root<L: TrieConfiguration, I, A, B, DB, RD, V>(
 		V: Borrow<[u8]>,
 		RD: AsRef<[u8]>,
 		DB: hash_db::HashDB<L::Hash, trie_db::DBValue>
+			+ HashDBHybrid<L::Hash, trie_db::DBValue>
 {
 	let mut root = TrieHash::<L>::default();
 	// root is fetched from DB, not writable by runtime, so it's always valid.
@@ -432,6 +537,73 @@ impl<'a, DB, H, T> hash_db::HashDB<H, T> for KeySpacedDBMut<'a, DB, H> where
 	}
 }
 
+impl<'a, DB, H, T> HashDBHybrid<H, T> for KeySpacedDBMut<'a, DB, H> where
+	DB: HashDBHybrid<H, T>,
+	H: HasherHybrid,
+	T: Default + PartialEq<T> + for<'b> From<&'b [u8]> + Clone + Send + Sync,
+{
+	fn insert_hybrid(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		callback: fn(&[u8]) -> sp_std::result::Result<Option<H::Out>, ()>,
+	) -> bool {
+		let derived_prefix = keyspace_as_prefix_alloc(self.1, prefix);
+		self.0.insert_hybrid(
+			(&derived_prefix.0, derived_prefix.1),
+			value,
+			callback,
+		)
+	}
+
+	fn insert_branch_hybrid<
+		I: Iterator<Item = Option<H::Out>>,
+	>(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		no_child_value: &[u8],
+		nb_children: usize,
+		children: I,
+		buffer: &mut <H::InnerHasher as BinaryHasher>::Buffer,
+	) -> H::Out {
+		let derived_prefix = keyspace_as_prefix_alloc(self.1, prefix);
+		self.0.insert_branch_hybrid(
+			(&derived_prefix.0, derived_prefix.1),
+			value,
+			no_child_value,
+			nb_children,
+			children,
+			buffer,
+		)
+	}
+
+	fn insert_branch_hybrid_proof<
+		I: Iterator<Item = Option<H::Out>>,
+		I2: Iterator<Item = H::Out>,
+	>(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		no_child_value: &[u8],
+		nb_children: usize,
+		children: I,
+		additional_hashes: I2,
+		buffer: &mut <H::InnerHasher as BinaryHasher>::Buffer,
+	) -> Option<H::Out> {
+		let derived_prefix = keyspace_as_prefix_alloc(self.1, prefix);
+		self.0.insert_branch_hybrid_proof(
+			(&derived_prefix.0, derived_prefix.1),
+			value,
+			no_child_value,
+			nb_children,
+			children,
+			additional_hashes,
+			buffer,
+		)
+	}
+}
+
 impl<'a, DB, H, T> hash_db::AsHashDB<H, T> for KeySpacedDBMut<'a, DB, H> where
 	DB: hash_db::HashDB<H, T>,
 	H: Hasher,
@@ -458,12 +630,12 @@ mod tests {
 	use super::*;
 	use codec::{Encode, Compact};
 	use sp_core::Blake2Hasher;
-	use hash_db::{HashDB, Hasher};
+	use hash_db::Hasher;
 	use trie_db::{DBValue, TrieMut, Trie, NodeCodec as NodeCodecT};
 	use trie_standardmap::{Alphabet, ValueMode, StandardMap};
 	use hex_literal::hex;
 
-	type Layout = super::Layout<Blake2Hasher>;
+	type Layout = super::Layout<super::RefHasher<Blake2Hasher>>;
 
 	fn hashed_null_node<T: TrieConfiguration>() -> TrieHash<T> {
 		<T::Codec as NodeCodecT>::hashed_null_node()
@@ -617,7 +789,7 @@ mod tests {
 	}
 
 	fn populate_trie<'db, T: TrieConfiguration>(
-		db: &'db mut dyn HashDB<T::Hash, DBValue>,
+		db: &'db mut dyn HashDBHybridDyn<T::Hash, DBValue>,
 		root: &'db mut TrieHash<T>,
 		v: &[(Vec<u8>, Vec<u8>)]
 	) -> TrieDBMut<'db, T> {
@@ -655,6 +827,11 @@ mod tests {
 				count: 100,
 			}.make_with(seed.as_fixed_bytes_mut());
 
+			// TODO EMCH this asumption in substrate code base
+			// may require that TrieConfiguration trie_root function
+			// directly implement the sort (I would rather audit
+			// trie_root call at this point)
+			let x: Vec<_> = data_sorted_unique(x.into_iter()).collect();
 			let real = Layout::trie_root(x.clone());
 			let mut memdb = MemoryDB::default();
 			let mut root = Default::default();
@@ -714,7 +891,7 @@ mod tests {
 
 	#[test]
 	fn codec_trie_two_tuples_disjoint_keys() {
-		let input = vec![(&[0x48, 0x19], &[0xfe]), (&[0x13, 0x14], &[0xff])];
+		let input = vec![(&[0x13, 0x14], &[0xff]), (&[0x48, 0x19], &[0xfe])];
 		let trie = Layout::trie_root_unhashed::<_, _, _>(input);
 		println!("trie: {:#x?}", trie);
 		let mut ex = Vec::<u8>::new();

@@ -17,7 +17,7 @@
 
 //! Changes trie pruning-related functions.
 
-use hash_db::Hasher;
+use hash_db::{HasherHybrid as Hasher, Hasher as HasherT};
 use sp_trie::Recorder;
 use log::warn;
 use num_traits::One;
@@ -69,7 +69,7 @@ pub fn prune<H: Hasher, Number: BlockNumber, F: FnMut(H::Out)>(
 			trie_storage.for_key_values_with_prefix(&child_prefix, |key, value| {
 				if let Ok(InputKey::ChildIndex::<Number>(_trie_key)) = Decode::decode(&mut &key[..]) {
 					if let Ok(value) = <Vec<u8>>::decode(&mut &value[..]) {
-						let mut trie_root = <H as Hasher>::Out::default();
+						let mut trie_root = <H as HasherT>::Out::default();
 						trie_root.as_mut().copy_from_slice(&value[..]);
 						children_roots.push(trie_root);
 					}
@@ -119,8 +119,9 @@ mod tests {
 	use crate::backend::insert_into_memory_db;
 	use crate::changes_trie::storage::InMemoryStorage;
 	use codec::Encode;
-	use sp_runtime::traits::BlakeTwo256;
 	use super::*;
+
+	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	fn prune_by_collect(
 		storage: &dyn Storage<BlakeTwo256, u64>,

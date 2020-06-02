@@ -457,6 +457,7 @@ static BENCHMARK_ADD_ONE: sp_runtime_interface::wasm::ExchangeableFunction<fn(u6
 	sp_runtime_interface::wasm::ExchangeableFunction::new(benchmark_add_one);
 
 fn code_using_trie() -> u64 {
+	type BlakeTwo256 = sp_trie::RefHasher<sp_runtime::traits::BlakeTwo256>;
 	let pairs = [
 		(b"0103000000000000000464".to_vec(), b"0400000000".to_vec()),
 		(b"0103000000000000000469".to_vec(), b"0401000000".to_vec()),

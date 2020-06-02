@@ -23,7 +23,7 @@ use crate::{
 	changes_trie::State as ChangesTrieState,
 };
 
-use hash_db::Hasher;
+use hash_db::{HasherHybrid as Hasher};
 use sp_core::{
 	offchain::storage::OffchainOverlayedChanges,
 	storage::{well_known_keys::is_child_storage_key, ChildInfo},
@@ -657,7 +657,6 @@ mod tests {
 	use codec::Encode;
 	use sp_core::{
 		H256,
-		Blake2Hasher,
 		map,
 		offchain,
 		storage::{
@@ -672,7 +671,9 @@ mod tests {
 			InMemoryStorage as TestChangesTrieStorage,
 		}, InMemoryBackend,
 	};
+	use hash_db::Hasher;
 
+	type Blake2Hasher = crate::RefHasher<sp_core::Blake2Hasher>;
 	type TestBackend = InMemoryBackend<Blake2Hasher>;
 	type TestExt<'a> = Ext<'a, Blake2Hasher, u64, TestBackend>;
 

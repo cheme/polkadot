@@ -22,7 +22,7 @@ use std::{
 };
 use crate::{backend::Backend, StorageKey, StorageValue};
 use hash_db::Hasher;
-use sp_trie::{TrieConfiguration, empty_child_trie_root};
+use sp_trie::{TrieConfiguration, empty_child_trie_root, RefHasher};
 use sp_trie::trie_types::Layout;
 use sp_core::{
 	storage::{
@@ -277,7 +277,7 @@ impl Externalities for BasicExternalities {
 		// Single child trie implementation currently allows using the same child
 		// empty root for all child trie. Using null storage key until multiple
 		// type of child trie support.
-		let empty_hash = empty_child_trie_root::<Layout<Blake2Hasher>>();
+		let empty_hash = empty_child_trie_root::<Layout<RefHasher<Blake2Hasher>>>(); // TODO EMCH this should use generic param
 		for (prefixed_storage_key, child_info) in prefixed_keys {
 			let child_root = self.child_storage_root(&child_info);
 			if &empty_hash[..] == &child_root[..] {
@@ -287,7 +287,7 @@ impl Externalities for BasicExternalities {
 			}
 		}
 
-		Layout::<Blake2Hasher>::trie_root(self.inner.top.clone()).as_ref().into()
+		Layout::<RefHasher<Blake2Hasher>>::trie_root(self.inner.top.clone()).as_ref().into()
 	}
 
 	fn child_storage_root(
@@ -296,10 +296,10 @@ impl Externalities for BasicExternalities {
 	) -> Vec<u8> {
 		if let Some(child) = self.inner.children_default.get(child_info.storage_key()) {
 			let delta = child.data.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref())));
-			crate::in_memory_backend::new_in_mem::<Blake2Hasher>()
+			crate::in_memory_backend::new_in_mem::<RefHasher<Blake2Hasher>>()
 				.child_storage_root(&child.child_info, delta).0
 		} else {
-			empty_child_trie_root::<Layout<Blake2Hasher>>()
+			empty_child_trie_root::<Layout<RefHasher<Blake2Hasher>>>()
 		}.encode()
 	}
 

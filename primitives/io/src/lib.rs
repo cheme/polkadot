@@ -49,7 +49,7 @@ use sp_core::{
 };
 
 #[cfg(feature = "std")]
-use sp_trie::{TrieConfiguration, trie_types::Layout};
+use sp_trie::{TrieConfiguration, trie_types::Layout, RefHasher};
 
 use sp_runtime_interface::{runtime_interface, Pointer};
 
@@ -293,22 +293,22 @@ pub trait DefaultChildStorage {
 pub trait Trie {
 	/// A trie root formed from the iterated items.
 	fn blake2_256_root(input: Vec<(Vec<u8>, Vec<u8>)>) -> H256 {
-		Layout::<sp_core::Blake2Hasher>::trie_root(input)
+		Layout::<RefHasher<sp_core::Blake2Hasher>>::trie_root(input)
 	}
 
 	/// A trie root formed from the enumerated items.
 	fn blake2_256_ordered_root(input: Vec<Vec<u8>>) -> H256 {
-		Layout::<sp_core::Blake2Hasher>::ordered_trie_root(input)
+		Layout::<RefHasher<sp_core::Blake2Hasher>>::ordered_trie_root(input)
 	}
 
 	/// A trie root formed from the iterated items.
 	fn keccak_256_root(input: Vec<(Vec<u8>, Vec<u8>)>) -> H256 {
-		Layout::<sp_core::KeccakHasher>::trie_root(input)
+		Layout::<RefHasher<sp_core::KeccakHasher>>::trie_root(input)
 	}
 
 	/// A trie root formed from the enumerated items.
 	fn keccak_256_ordered_root(input: Vec<Vec<u8>>) -> H256 {
-		Layout::<sp_core::KeccakHasher>::ordered_trie_root(input)
+		Layout::<RefHasher<sp_core::KeccakHasher>>::ordered_trie_root(input)
 	}
 }
 
@@ -1101,7 +1101,10 @@ pub fn oom(_: core::alloc::Layout) -> ! {
 
 /// Type alias for Externalities implementation used in tests.
 #[cfg(feature = "std")]
-pub type TestExternalities = sp_state_machine::TestExternalities<sp_core::Blake2Hasher, u64>;
+pub type TestExternalities = sp_state_machine::TestExternalities<
+	sp_trie::RefHasher<sp_core::Blake2Hasher>,
+	u64,
+>;
 
 /// The host functions Substrate provides for the Wasm runtime environment.
 ///

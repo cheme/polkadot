@@ -21,7 +21,7 @@ use crate::{
 	trie_backend::TrieBackend,
 };
 use std::{collections::{BTreeMap, HashMap}};
-use hash_db::Hasher;
+use hash_db::HasherHybrid as Hasher;
 use sp_trie::{
 	MemoryDB, TrieMut,
 	trie_types::TrieDBMut,
@@ -211,8 +211,9 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use sp_runtime::traits::BlakeTwo256;
 	use crate::backend::Backend;
+
+	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	/// Assert in memory backend with only child trie keys works as trie backend.
 	#[test]

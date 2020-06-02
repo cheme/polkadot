@@ -21,7 +21,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use codec::{Decode, Encode, Codec};
-use hash_db::Hasher;
+use hash_db::{HasherHybrid as Hasher};
 use num_traits::Zero;
 use sp_core::storage::PrefixedStorageKey;
 use sp_trie::Recorder;
@@ -381,8 +381,9 @@ mod tests {
 	use crate::changes_trie::Configuration;
 	use crate::changes_trie::input::InputPair;
 	use crate::changes_trie::storage::InMemoryStorage;
-	use sp_runtime::traits::BlakeTwo256;
 	use super::*;
+
+	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	fn child_key() -> PrefixedStorageKey {
 		let child_info = sp_core::storage::ChildInfo::new_default(&b"1"[..]);

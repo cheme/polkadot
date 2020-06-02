@@ -21,7 +21,8 @@
 
 use std::{fmt, result, collections::HashMap, panic::UnwindSafe};
 use log::{warn, trace};
-use hash_db::Hasher;
+use hash_db::{Hasher as HasherT};
+use hash_db::{HasherHybrid as Hasher};
 use codec::{Decode, Encode, Codec};
 use sp_core::{
 	offchain::storage::OffchainOverlayedChanges,
@@ -45,7 +46,7 @@ mod stats;
 mod read_only;
 
 pub use sp_trie::{trie_types::{Layout, TrieDBMut}, TrieNodesStorageProof, TrieMut,
-	DBValue, MemoryDB, StorageProof};
+	DBValue, MemoryDB, StorageProof, RefHasher};
 pub use testing::TestExternalities;
 pub use basic::BasicExternalities;
 pub use read_only::{ReadOnlyExternalities, InspectState};
@@ -89,7 +90,7 @@ pub type DefaultHandler<R, E> = fn(CallResult<R, E>, CallResult<R, E>) -> CallRe
 /// Type of changes trie transaction.
 pub type ChangesTrieTransaction<H, N> = (
 	MemoryDB<H>,
-	ChangesTrieCacheAction<<H as Hasher>::Out, N>,
+	ChangesTrieCacheAction<<H as HasherT>::Out, N>,
 );
 
 /// Trie backend with in-memory storage.
@@ -760,8 +761,8 @@ mod tests {
 	use super::ext::Ext;
 	use super::changes_trie::Configuration as ChangesTrieConfig;
 	use sp_core::{map, traits::{Externalities, RuntimeCode}};
-	use sp_runtime::traits::BlakeTwo256;
 
+	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 	type ProvingBackend = super::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
 
 	#[derive(Clone)]

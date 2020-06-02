@@ -18,7 +18,7 @@
 //! Trie-based state machine backend.
 
 use log::{warn, debug};
-use hash_db::Hasher;
+use hash_db::HasherHybrid as Hasher;
 use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use sp_core::storage::{ChildInfo, ChildType};
@@ -28,6 +28,11 @@ use crate::{
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 	StorageKey, StorageValue,
 };
+
+/// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
+pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
+	pub (crate) essence: TrieBackendEssence<S, H>,
+}
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
@@ -262,7 +267,8 @@ impl<H: Hasher> ProofCheckBackend<H> for TrieBackend<crate::MemoryDB<H>, H> wher
 		proof: Self::StorageProof,
 	) -> Result<Self, Box<dyn crate::Error>> {
 		use hash_db::HashDB;
-		let db = proof.into_memory_db();
+		// TODO EMCH here you need specific for hybrid backend
+		let db = proof.into_memory_db_non_hybrid();
 
 		if db.contains(&root, hash_db::EMPTY_PREFIX) {
 			Ok(TrieBackend::new(db, root))
@@ -295,8 +301,9 @@ pub mod tests {
 	use sp_core::H256;
 	use codec::Encode;
 	use sp_trie::{TrieMut, PrefixedMemoryDB, trie_types::TrieDBMut, KeySpacedDBMut};
-	use sp_runtime::traits::BlakeTwo256;
 	use super::*;
+
+	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	const CHILD_KEY_1: &[u8] = b"sub1";
 

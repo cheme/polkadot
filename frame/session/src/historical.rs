@@ -36,6 +36,7 @@ use frame_support::{Parameter, print};
 use sp_trie::{MemoryDB, Trie, TrieMut, Recorder, EMPTY_PREFIX};
 use sp_trie::trie_types::{TrieDBMut, TrieDB};
 use super::{SessionIndex, Module as SessionModule};
+use sp_trie::RefHasher;
 
 /// Trait necessary for the historical module.
 pub trait Trait: super::Trait {
@@ -156,7 +157,7 @@ pub type IdentificationTuple<T> = (<T as crate::Trait>::ValidatorId, <T as Trait
 
 /// a trie instance for checking and generating proofs.
 pub struct ProvingTrie<T: Trait> {
-	db: MemoryDB<T::Hashing>,
+	db: MemoryDB<RefHasher<T::Hashing>>,
 	root: T::Hash,
 }
 

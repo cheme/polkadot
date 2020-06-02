@@ -31,7 +31,7 @@ use codec::{Decode, Encode};
 use sp_core::storage::{well_known_keys::EXTRINSIC_INDEX, ChildInfo, ChildType};
 use sp_core::offchain::storage::OffchainOverlayedChanges;
 
-use hash_db::Hasher;
+use hash_db::{HasherHybrid as Hasher};
 
 /// Storage key.
 pub type StorageKey = Vec<u8>;
@@ -778,11 +778,13 @@ impl From<Option<StorageValue>> for OverlayedValue {
 mod tests {
 	use hex_literal::hex;
 	use sp_core::{
-		Blake2Hasher, traits::Externalities, storage::well_known_keys::EXTRINSIC_INDEX,
+		traits::Externalities, storage::well_known_keys::EXTRINSIC_INDEX,
 	};
 	use crate::InMemoryBackend;
 	use crate::ext::Ext;
 	use super::*;
+
+	type Blake2Hasher = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	fn strip_extrinsic_index(map: &BTreeMap<StorageKey, OverlayedValue>)
 		-> BTreeMap<StorageKey, OverlayedValue>

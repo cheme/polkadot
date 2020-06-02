@@ -21,7 +21,7 @@ use std::{sync::Arc, collections::{HashMap, hash_map::Entry}};
 use parking_lot::RwLock;
 use codec::{Decode, Codec};
 use log::debug;
-use hash_db::{Hasher, Prefix};
+use hash_db::{Hasher as HasherT, HasherHybrid as Hasher, Prefix};
 use sp_trie::{
 	MemoryDB, empty_child_trie_root, read_trie_value_with, read_child_trie_value_with,
 	record_all_keys, TrieNodesStorageProof,
@@ -112,7 +112,7 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 /// Global proof recorder, act as a layer over a hash db for recording queried
 /// data.
-pub type ProofRecorder<H> = Arc<RwLock<HashMap<<H as Hasher>::Out, Option<DBValue>>>>;
+pub type ProofRecorder<H> = Arc<RwLock<HashMap<<H as HasherT>::Out, Option<DBValue>>>>;
 
 /// Try merging two proof recorder, fails when both recorder records different entries.
 fn merge_proof_recorder<H: Hasher>(first: ProofRecorder<H>, second: ProofRecorder<H>) -> Option<ProofRecorder<H>> {
@@ -353,10 +353,10 @@ mod tests {
 	use crate::trie_backend::tests::test_trie;
 	use super::*;
 	use sp_trie::PrefixedMemoryDB;
-	use sp_runtime::traits::BlakeTwo256;
 	use sp_trie::StorageProof;
 	use crate::backend::ProofCheckBackend as _;
 
+	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 	type ProofCheckBackend = crate::trie_backend::TrieBackend<MemoryDB<BlakeTwo256>, BlakeTwo256>;
 
 	fn test_proving<'a>(

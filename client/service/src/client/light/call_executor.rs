@@ -33,7 +33,7 @@ use sp_state_machine::{
 	ExecutionManager, CloneableSpawn,
 };
 use sp_state_machine::backend::{Backend as StateBackend, ProofRegStateFor};
-use hash_db::Hasher;
+use hash_db::{HasherHybrid as Hasher};
 use sp_trie::StorageProof;
 
 use sp_api::{InitializeBlock, StorageTransactionCache};

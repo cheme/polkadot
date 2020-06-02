@@ -15,8 +15,9 @@
 // along with Parity.  If not, see <http://www.gnu.org/licenses/>.
 
 use sp_std::vec::Vec;
-use codec::{Codec, Encode, Decode};
-use hash_db::{Hasher, HashDB};
+use codec::{Codec,Encode, Decode};
+use hash_db::{HashDB, HasherHybrid, EMPTY_PREFIX};
+use trie_db::HashDBHybrid;
 
 /// A proof that some set of key-value pairs are included in the storage trie. The proof contains
 /// the storage values so that the partial storage backend can be reconstructed by a verifier that
@@ -60,8 +61,23 @@ impl TrieNodesStorageProof {
 	}
 
 	/// Creates a `MemoryDB` from `Self`.
-	pub fn into_memory_db<H: Hasher>(self) -> crate::MemoryDB<H> {
+	pub fn into_memory_db_non_hybrid<H: HasherHybrid>(self) -> crate::MemoryDB<H> {
 		self.into()
+	}
+
+	/// Creates a `MemoryDB` from `Self`.
+	pub fn into_memory_db_hybrid<H: HasherHybrid>(self) -> Option<crate::MemoryDB<H>> {
+		let mut db = crate::MemoryDB::default();
+		for value in self.trie_nodes {
+			if !db.insert_hybrid(
+				EMPTY_PREFIX,
+				&value[..],
+				crate::hybrid_hash_node_adapter::<H>,
+			) {
+				return None;
+			}
+		}
+		Some(db)
 	}
 }
 
@@ -109,7 +125,8 @@ impl Iterator for StorageProofNodeIterator {
 	}
 }
 
-impl<H: Hasher> From<TrieNodesStorageProof> for crate::MemoryDB<H> {
+// TODO EMCH here that works only for non hybrid proof : use explicit function instead
+impl<H: HasherHybrid> From<TrieNodesStorageProof> for crate::MemoryDB<H> {
 	fn from(proof: TrieNodesStorageProof) -> Self {
 		let mut db = crate::MemoryDB::default();
 		for item in proof.iter_nodes() {

@@ -19,7 +19,7 @@
 
 use std::any::{Any, TypeId};
 use codec::Decode;
-use hash_db::Hasher;
+use hash_db::{HasherHybrid as Hasher};
 use crate::{
 	backend::Backend, OverlayedChanges, StorageTransactionCache, ext::Ext, InMemoryBackend,
 	StorageKey, StorageValue,
@@ -226,8 +226,9 @@ impl<H, N> sp_externalities::ExtensionStore for TestExternalities<H, N> where
 mod tests {
 	use super::*;
 	use sp_core::traits::Externalities;
-	use sp_runtime::traits::BlakeTwo256;
 	use hex_literal::hex;
+
+	type BlakeTwo256 = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	#[test]
 	fn commit_should_work() {

@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use codec::{Decode, Encode};
-use hash_db::Hasher;
+use hash_db::{Hasher as HasherT, HasherHybrid as Hasher};
 use num_traits::One;
 use crate::{
 	StorageKey,
@@ -278,7 +278,7 @@ fn prepare_digest_input<'a, H, Number>(
 				trie_storage.for_key_values_with_prefix(&child_prefix, |key, value|
 					if let Ok(InputKey::ChildIndex::<Number>(trie_key)) = Decode::decode(&mut &key[..]) {
 						if let Ok(value) = <Vec<u8>>::decode(&mut &value[..]) {
-							let mut trie_root = <H as Hasher>::Out::default();
+							let mut trie_root = <H as HasherT>::Out::default();
 							trie_root.as_mut().copy_from_slice(&value[..]);
 							children_roots.insert(trie_key.storage_key, trie_root);
 						}
@@ -328,11 +328,12 @@ fn prepare_digest_input<'a, H, Number>(
 
 #[cfg(test)]
 mod test {
-	use sp_core::Blake2Hasher;
 	use crate::InMemoryBackend;
 	use crate::changes_trie::{RootsStorage, Configuration, storage::InMemoryStorage};
 	use crate::changes_trie::build_cache::{IncompleteCacheAction, IncompleteCachedBuildData};
 	use super::*;
+
+	type Blake2Hasher = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	fn prepare_for_build(zero: u64) -> (
 		InMemoryBackend<Blake2Hasher>,

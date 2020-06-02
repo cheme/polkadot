@@ -18,14 +18,13 @@
 //! Changes trie storage utilities.
 
 use std::collections::{BTreeMap, HashSet, HashMap};
-use hash_db::{Hasher, Prefix, EMPTY_PREFIX};
+use hash_db::{HasherHybrid as Hasher, Prefix};
 use sp_core::storage::PrefixedStorageKey;
-use sp_trie::DBValue;
+use sp_trie::{DBValue, TrieNodesStorageProof};
 use sp_trie::MemoryDB;
 use parking_lot::RwLock;
 use crate::{
-	StorageKey,
-	trie_backend_essence::TrieBackendStorage,
+	StorageKey,	trie_backend_essence::TrieBackendStorage,
 	changes_trie::{BuildCache, RootsStorage, Storage, AnchorBlockId, BlockNumber},
 };
 
@@ -70,12 +69,9 @@ impl<H: Hasher, Number: BlockNumber> InMemoryStorage<H, Number> {
 
 	/// Creates storage with given proof.
 	pub fn with_proof(proof: Vec<Vec<u8>>) -> Self {
-		use hash_db::HashDB;
 
- 		let mut proof_db = MemoryDB::<H>::default();
-		for item in proof {
-			proof_db.insert(EMPTY_PREFIX, &item);
-		}
+ 		let proof_db = TrieNodesStorageProof::new(proof)
+			.into_memory_db_non_hybrid();
 		Self::with_db(proof_db)
 	}
 

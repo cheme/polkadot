@@ -21,7 +21,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 use log::{debug, warn};
-use hash_db::{self, Hasher, Prefix};
+use hash_db::{self, BinaryHasher, HasherHybrid as Hasher, Prefix};
 use sp_trie::{Trie, MemoryDB, PrefixedMemoryDB, DBValue,
 	empty_child_trie_root, read_trie_value, read_child_trie_value,
 	for_keys_in_child_trie, KeySpacedDB, TrieDBIterator};
@@ -320,6 +320,71 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDB<H, DBValue>
 	}
 }
 
+impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> trie_db::HashDBHybrid<H, DBValue>
+	for Ephemeral<'a, S, H>
+{
+	fn insert_hybrid(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		callback: fn(&[u8]) -> std::result::Result<Option<H::Out>, ()>,
+	) -> bool {
+		trie_db::HashDBHybrid::insert_hybrid(
+			self.overlay,
+			prefix,
+			value,
+			callback,
+		)
+	}
+
+	fn insert_branch_hybrid<
+		I: Iterator<Item = Option<H::Out>>,
+	>(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		no_child_value: &[u8],
+		nb_children: usize,
+		children: I,
+		buffer: &mut <H::InnerHasher as BinaryHasher>::Buffer,
+	) -> H::Out {
+		trie_db::HashDBHybrid::insert_branch_hybrid(
+			self.overlay,
+			prefix,
+			value,
+			no_child_value,
+			nb_children,
+			children,
+			buffer,
+		)
+	}
+
+	fn insert_branch_hybrid_proof<
+		I: Iterator<Item = Option<H::Out>>,
+		I2: Iterator<Item = H::Out>,
+	>(
+		&mut self,
+		prefix: Prefix,
+		value: &[u8],
+		no_child_value: &[u8],
+		nb_children: usize,
+		children: I,
+		additional_hashes: I2,
+		buffer: &mut <H::InnerHasher as BinaryHasher>::Buffer,
+	) -> Option<H::Out> {
+		trie_db::HashDBHybrid::insert_branch_hybrid_proof(
+			self.overlay,
+			prefix,
+			value,
+			no_child_value,
+			nb_children,
+			children,
+			additional_hashes,
+			buffer,
+		)
+	}
+}
+
 impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDBRef<H, DBValue>
 	for Ephemeral<'a, S, H>
 {
@@ -335,7 +400,8 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDBRef<H, DBValue
 /// Key-value pairs storage that is used by trie backend essence.
 pub trait TrieBackendStorage<H: Hasher>: Send + Sync {
 	/// Type of in-memory overlay.
-	type Overlay: hash_db::HashDB<H, DBValue> + Default + Consolidate;
+	type Overlay: hash_db::HashDB<H, DBValue> + Default + Consolidate
+		+ trie_db::HashDBHybrid<H, DBValue>;
 	/// Get the value stored at key.
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String>;
 }
@@ -463,9 +529,10 @@ impl<S: TrieBackendStorage<H>, H: Hasher> hash_db::HashDBRef<H, DBValue>
 
 #[cfg(test)]
 mod test {
-	use sp_core::{Blake2Hasher, H256};
+	use sp_core::H256;
 	use sp_trie::{TrieMut, PrefixedMemoryDB, trie_types::TrieDBMut, KeySpacedDBMut};
 	use super::*;
+	type Blake2Hasher = crate::RefHasher<sp_core::Blake2Hasher>;
 
 	#[test]
 	fn next_storage_key_and_next_child_storage_key_work() {

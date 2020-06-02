@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
-use hash_db::{HashDB, Hasher, EMPTY_PREFIX};
+use hash_db::{HashDB, HasherHybrid as Hasher, EMPTY_PREFIX};
 use codec::{Decode, Encode};
 use sp_core::{convert_hash, traits::CodeExecutor};
 use sp_core::storage::{ChildInfo, ChildType};
@@ -159,7 +159,7 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>, P> LightDataChecker<E, H, B, S, P
 			H::Out: Ord + codec::Codec,
 	{
 		// all the checks are sharing the same storage
-		let storage = remote_roots_proof.into_memory_db();
+		let storage = remote_roots_proof.into_memory_db_non_hybrid();
 
 		// remote_roots.keys() are sorted => we can use this to group changes tries roots
 		// that are belongs to the same CHT

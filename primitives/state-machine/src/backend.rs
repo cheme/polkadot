@@ -17,7 +17,7 @@
 
 //! State machine backends. These manage the code and storage of contracts.
 
-use hash_db::Hasher;
+use hash_db::HasherHybrid as Hasher;
 use codec::{Decode, Encode};
 use sp_core::{traits::RuntimeCode, storage::{ChildInfo, well_known_keys}};
 use crate::{
@@ -39,6 +39,7 @@ pub trait HashDBNodesTransaction<K, V> {
 /// to it.
 ///
 /// The clone operation (if implemented) should be cheap.
+/// TODO EMCH backend sohould be other H::Out only
 pub trait Backend<H>: std::fmt::Debug + Sized
 	where
 		H: Hasher,
@@ -410,7 +411,7 @@ pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut sp_trie::MemoryDB<H>, input:
 {
 	use sp_trie::{TrieMut, trie_types::TrieDBMut};
 
-	let mut root = <H as Hasher>::Out::default();
+	let mut root = <H as hash_db::Hasher>::Out::default();
 	{
 		let mut trie = TrieDBMut::<H>::new(mdb, &mut root);
 		for (key, value) in input {
