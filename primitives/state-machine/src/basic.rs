@@ -18,34 +18,40 @@
 //! Basic implementation for Externalities.
 
 use std::{
-	collections::BTreeMap, any::{TypeId, Any}, iter::FromIterator, ops::Bound
+	collections::BTreeMap, any::{TypeId, Any}, iter::FromIterator, ops::Bound,
+	marker::PhantomData,
 };
 use crate::{backend::Backend, StorageKey, StorageValue};
 use hash_db::Hasher;
 use sp_trie::{TrieConfiguration, empty_child_trie_root};
-use sp_trie::trie_types::Layout;
 use sp_core::{
 	storage::{
 		well_known_keys::is_child_storage_key, Storage,
 		ChildInfo, StorageChild,
 	},
-	traits::Externalities, Blake2Hasher,
+	traits::Externalities,
 };
 use log::warn;
-use codec::Encode;
+use codec::{Codec, Encode};
 use sp_externalities::Extensions;
 
 /// Simple Map-based Externalities impl.
+pub type BasicExternalities = BasicExternalitiesWithTrie<
+	sp_trie::trie_types::Layout<sp_core::Blake2Hasher>
+>;
+
+/// Simple Map-based Externalities impl.
 #[derive(Debug)]
-pub struct BasicExternalities {
+pub struct BasicExternalitiesWithTrie<T> {
 	inner: Storage,
 	extensions: Extensions,
+	_ph: PhantomData<T>,
 }
 
-impl BasicExternalities {
-	/// Create a new instance of `BasicExternalities`
+impl<T> BasicExternalitiesWithTrie<T> {
+	/// Create a new instance of `BasicExternalitiesWithTrie`
 	pub fn new(inner: Storage) -> Self {
-		BasicExternalities { inner, extensions: Default::default() }
+		BasicExternalitiesWithTrie {inner, extensions: Default::default(), _ph: PhantomData }
 	}
 
 	/// New basic externalities with empty storage.
@@ -61,6 +67,7 @@ impl BasicExternalities {
 		Self {
 			inner: Storage::default(),
 			extensions,
+			_ph: PhantomData,
 		}
 	}
 
@@ -74,6 +81,17 @@ impl BasicExternalities {
 		self.inner
 	}
 
+	/// List of active extensions.
+	pub fn extensions(&mut self) -> &mut Extensions {
+		&mut self.extensions
+	}
+}
+
+impl<T> BasicExternalitiesWithTrie<T>
+	where
+		T: TrieConfiguration,
+		<T::Hash as Hasher>::Out: Ord + Codec,
+{
 	/// Execute the given closure `f` with the externalities set and initialized with `storage`.
 	///
 	/// Returns the result of the closure and updates `storage` with all changes.
@@ -87,6 +105,7 @@ impl BasicExternalities {
 				children_default: std::mem::take(&mut storage.children_default),
 			},
 			extensions: Default::default(),
+			_ph: PhantomData,
 		};
 
 		let r = ext.execute_with(f);
@@ -102,21 +121,16 @@ impl BasicExternalities {
 	pub fn execute_with<R>(&mut self, f: impl FnOnce() -> R) -> R {
 		sp_externalities::set_and_run_with_externalities(self, f)
 	}
-
-	/// List of active extensions.
-	pub fn extensions(&mut self) -> &mut Extensions {
-		&mut self.extensions
-	}
 }
 
-impl PartialEq for BasicExternalities {
-	fn eq(&self, other: &BasicExternalities) -> bool {
+impl<T> PartialEq for BasicExternalitiesWithTrie<T> {
+	fn eq(&self, other: &BasicExternalitiesWithTrie<T>) -> bool {
 		self.inner.top.eq(&other.inner.top)
 			&& self.inner.children_default.eq(&other.inner.children_default)
 	}
 }
 
-impl FromIterator<(StorageKey, StorageValue)> for BasicExternalities {
+impl<T> FromIterator<(StorageKey, StorageValue)> for BasicExternalitiesWithTrie<T> {
 	fn from_iter<I: IntoIterator<Item=(StorageKey, StorageValue)>>(iter: I) -> Self {
 		let mut t = Self::default();
 		t.inner.top.extend(iter);
@@ -124,23 +138,28 @@ impl FromIterator<(StorageKey, StorageValue)> for BasicExternalities {
 	}
 }
 
-impl Default for BasicExternalities {
+impl<T> Default for BasicExternalitiesWithTrie<T> {
 	fn default() -> Self { Self::new(Default::default()) }
 }
 
-impl From<BTreeMap<StorageKey, StorageValue>> for BasicExternalities {
+impl<T> From<BTreeMap<StorageKey, StorageValue>> for BasicExternalitiesWithTrie<T> {
 	fn from(hashmap: BTreeMap<StorageKey, StorageValue>) -> Self {
-		BasicExternalities {
+		BasicExternalitiesWithTrie {
 			inner: Storage {
 				top: hashmap,
 				children_default: Default::default(),
 			},
 			extensions: Default::default(),
+			_ph: PhantomData,
 		}
 	}
 }
 
-impl Externalities for BasicExternalities {
+impl<T> Externalities for BasicExternalitiesWithTrie<T>
+	where
+		T: TrieConfiguration,
+		<T::Hash as Hasher>::Out: Ord + Codec,
+{
 	fn set_offchain_storage(&mut self, _key: &[u8], _value: Option<&[u8]>) {}
 
 	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
@@ -148,7 +167,7 @@ impl Externalities for BasicExternalities {
 	}
 
 	fn storage_hash(&self, key: &[u8]) -> Option<Vec<u8>> {
-		self.storage(key).map(|v| Blake2Hasher::hash(&v).encode())
+		self.storage(key).map(|v| T::Hash::hash(&v).encode())
 	}
 
 	fn child_storage(
@@ -165,7 +184,7 @@ impl Externalities for BasicExternalities {
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<Vec<u8>> {
-		self.child_storage(child_info, key).map(|v| Blake2Hasher::hash(&v).encode())
+		self.child_storage(child_info, key).map(|v| T::Hash::hash(&v).encode())
 	}
 
 	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
@@ -277,17 +296,17 @@ impl Externalities for BasicExternalities {
 		// Single child trie implementation currently allows using the same child
 		// empty root for all child trie. Using null storage key until multiple
 		// type of child trie support.
-		let empty_hash = empty_child_trie_root::<Layout<Blake2Hasher>>();
+		let empty_hash = empty_child_trie_root::<T>();
 		for (prefixed_storage_key, child_info) in prefixed_keys {
 			let child_root = self.child_storage_root(&child_info);
-			if &empty_hash[..] == &child_root[..] {
+			if empty_hash.as_ref() == &child_root[..] {
 				top.remove(prefixed_storage_key.as_slice());
 			} else {
 				top.insert(prefixed_storage_key.into_inner(), child_root);
 			}
 		}
 
-		Layout::<Blake2Hasher>::trie_root(self.inner.top.clone()).as_ref().into()
+		T::trie_root(self.inner.top.clone()).as_ref().into()
 	}
 
 	fn child_storage_root(
@@ -296,10 +315,10 @@ impl Externalities for BasicExternalities {
 	) -> Vec<u8> {
 		if let Some(child) = self.inner.children_default.get(child_info.storage_key()) {
 			let delta = child.data.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref())));
-			crate::in_memory_backend::new_in_mem::<Blake2Hasher>()
+			crate::in_memory_backend::new_in_mem::<T::Hash>()
 				.child_storage_root(&child.child_info, delta).0
 		} else {
-			empty_child_trie_root::<Layout<Blake2Hasher>>()
+			empty_child_trie_root::<T>()
 		}.encode()
 	}
 
@@ -312,7 +331,7 @@ impl Externalities for BasicExternalities {
 	fn commit(&mut self) {}
 }
 
-impl sp_externalities::ExtensionStore for BasicExternalities {
+impl<T> sp_externalities::ExtensionStore for BasicExternalitiesWithTrie<T> {
 	fn extension_by_type_id(&mut self, type_id: TypeId) -> Option<&mut dyn Any> {
 		self.extensions.get_mut(type_id)
 	}
