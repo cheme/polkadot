@@ -574,6 +574,14 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		Ok(value)
 	}
 
+	fn child_storage_hash(
+		&self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> Result<Option<B::Hash>, Self::Error> {
+		self.state.child_storage_hash(child_info, key)
+	}
+
 	fn exists_storage(&self, key: &[u8]) -> Result<bool, Self::Error> {
 		Ok(self.storage(key)?.is_some())
 	}
@@ -756,6 +764,14 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Syncin
 		key: &[u8],
 	) -> Result<Option<Vec<u8>>, Self::Error> {
 		self.caching_state().child_storage(child_info, key)
+	}
+
+	fn child_storage_hash(
+		&self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> Result<Option<B::Hash>, Self::Error> {
+		self.caching_state().child_storage_hash(child_info, key)
 	}
 
 	fn exists_storage(&self, key: &[u8]) -> Result<bool, Self::Error> {

@@ -139,6 +139,14 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 		self.state.borrow().as_ref().ok_or_else(state_err)?.child_storage(child_info, key)
 	}
 
+	fn child_storage_hash(
+		&self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> Result<Option<B::Hash>, Self::Error> {
+		self.state.borrow().as_ref().ok_or_else(state_err)?.child_storage_hash(child_info, key)
+	}
+
 	fn exists_storage(&self, key: &[u8]) -> Result<bool, Self::Error> {
 		self.state.borrow().as_ref().ok_or_else(state_err)?.exists_storage(key)
 	}

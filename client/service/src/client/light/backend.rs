@@ -393,6 +393,14 @@ impl<H: Hasher, GS> StateBackend<H> for GenesisOrUnavailableState<GS>
 		}
 	}
 
+	fn storage_hash(&self, key: &[u8]) -> ClientResult<Option<H::Out>> {
+		match *self {
+			GenesisOrUnavailableState::Genesis(ref state) =>
+				Ok(state.storage_hash(key).expect(IN_MEMORY_EXPECT_PROOF)),
+			GenesisOrUnavailableState::Unavailable => Err(ClientError::NotAvailableOnLightClient),
+		}
+	}
+
 	fn child_storage(
 		&self,
 		child_info: &ChildInfo,
@@ -401,6 +409,18 @@ impl<H: Hasher, GS> StateBackend<H> for GenesisOrUnavailableState<GS>
 		match *self {
 			GenesisOrUnavailableState::Genesis(ref state) =>
 				Ok(state.child_storage(child_info, key).expect(IN_MEMORY_EXPECT_PROOF)),
+			GenesisOrUnavailableState::Unavailable => Err(ClientError::NotAvailableOnLightClient),
+		}
+	}
+
+	fn child_storage_hash(
+		&self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> ClientResult<Option<H::Out>> {
+		match *self {
+			GenesisOrUnavailableState::Genesis(ref state) =>
+				Ok(state.child_storage_hash(child_info, key).expect(IN_MEMORY_EXPECT_PROOF)),
 			GenesisOrUnavailableState::Unavailable => Err(ClientError::NotAvailableOnLightClient),
 		}
 	}
