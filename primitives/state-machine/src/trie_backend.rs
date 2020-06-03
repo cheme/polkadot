@@ -298,8 +298,15 @@ impl<T> ProofCheckBackend<T::Hash> for TrieBackend<crate::MemoryDB<T::Hash>, T>
 		proof: Self::StorageProof,
 	) -> Result<Self, Box<dyn crate::Error>> {
 		use hash_db::HashDB;
-		// TODO EMCH here you need specific for hybrid backend
-		let db = proof.into_memory_db_non_hybrid();
+		let db = if T::HYBRID_HASH {
+			if let Some(db) = proof.into_memory_db_hybrid() {
+				db
+			} else {
+				return Err(Box::new(crate::ExecutionError::InvalidProof));
+			}
+		} else {
+			proof.into_memory_db_non_hybrid()
+		};
 
 		if db.contains(&root, hash_db::EMPTY_PREFIX) {
 			Ok(TrieBackend::new(db, root))

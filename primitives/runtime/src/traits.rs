@@ -330,7 +330,6 @@ impl<T:
 // traits must be fulfilled by all type parameters.
 pub trait Hash: 'static + MaybeSerializeDeserialize + Debug + Clone + Eq + PartialEq
 	+ HasherHybrid<Out = <Self as Hash>::Output>
-	+ Hasher<Out = <Self as Hash>::Output>
 {
 	/// The hash type produced.
 	type Output: Member + MaybeSerializeDeserialize + Debug + sp_std::hash::Hash
