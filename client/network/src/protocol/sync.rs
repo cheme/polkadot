@@ -190,8 +190,8 @@ pub struct ChainSync<B: BlockT, P: StorageProof> {
 	block_announce_validator: Box<dyn BlockAnnounceValidator<B> + Send>,
 	/// Maximum number of peers to ask the same blocks in parallel.
 	max_parallel_downloads: u32,
-	/// Total number of processed blocks (imported or failed).
-	processed_blocks: usize,
+	/// Total number of downloaded blocks.
+	downloaded_blocks: usize,
 }
 
 /// All the data we have about a Peer that we are trying to sync with
@@ -376,7 +376,7 @@ impl<B: BlockT, P: StorageProof> ChainSync<B, P> {
 			pending_requests: Default::default(),
 			block_announce_validator,
 			max_parallel_downloads,
-			processed_blocks: 0,
+			downloaded_blocks: 0,
 		}
 	}
 
@@ -416,9 +416,9 @@ impl<B: BlockT, P: StorageProof> ChainSync<B, P> {
 		self.fork_targets.len()
 	}
 
-	/// Number of processed blocks.
-	pub fn num_processed_blocks(&self) -> usize {
-		self.processed_blocks
+	/// Number of downloaded blocks.
+	pub fn num_downloaded_blocks(&self) -> usize {
+		self.downloaded_blocks
 	}
 
 	/// Handle a new connected peer.
@@ -720,6 +720,7 @@ impl<B: BlockT, P: StorageProof> ChainSync<B, P> {
 		request: Option<BlockRequest<B>>,
 		response: BlockResponse<B>
 	) -> Result<OnBlockData<B>, BadPeer> {
+		self.downloaded_blocks += response.blocks.len();
 		let mut new_blocks: Vec<IncomingBlock<B>> =
 			if let Some(peer) = self.peers.get_mut(who) {
 				let mut blocks = response.blocks;
@@ -1005,8 +1006,6 @@ impl<B: BlockT, P: StorageProof> ChainSync<B, P> {
 		for (_, hash) in &results {
 			self.queue_blocks.remove(&hash);
 		}
-		self.processed_blocks += results.len();
-
 		for (result, hash) in results {
 			if has_error {
 				continue;
@@ -1275,7 +1274,6 @@ impl<B: BlockT, P: StorageProof> ChainSync<B, P> {
 
 	/// Restart the sync process.
 	fn restart<'a>(&'a mut self) -> impl Iterator<Item = Result<(PeerId, BlockRequest<B>), BadPeer>> + 'a {
-		self.processed_blocks = 0;
 		self.blocks.clear();
 		let info = self.client.info();
 		self.best_queued_hash = info.best_hash;
