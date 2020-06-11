@@ -50,7 +50,7 @@ use sc_service::client::{LocalCallExecutor, ClientConfig};
 pub type InMemoryBackend<H> = sp_state_machine::InMemoryBackend<sp_state_machine::Layout<H>>;
 
 /// Test client light database backend.
-pub type LightBackend<Block> = client::light::backend::Backend<
+pub type LightBackend<Block> = sc_light::Backend<
 	sc_client_db::light::LightStorage<Block>,
 	InMemoryBackend<BlakeTwo256>,
 >;
