@@ -185,7 +185,7 @@ fn record_proof_works() {
 	builder.push(transaction.clone()).unwrap();
 	let (block, _, proof) = builder.build().expect("Bake block").into_inner();
 
-	let backend = create_proof_check_backend::<HashFor<Block>, sp_state_machine::SimpleProof>(
+	let backend = create_proof_check_backend::<HashFor<Block>, sp_state_machine::SimpleProof<HashFor<Block>>>(
 		storage_root,
 		proof.expect("Proof was generated"),
 	).expect("Creates proof backend.");

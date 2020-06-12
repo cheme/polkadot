@@ -34,7 +34,7 @@ use sp_core::{
 };
 use sp_version::RuntimeVersion;
 use sp_runtime::{
-	generic::BlockId, traits::{Block as BlockT, NumberFor, SaturatedConversion, CheckedSub},
+	generic::BlockId, traits::{Block as BlockT, NumberFor, SaturatedConversion, CheckedSub, HashFor},
 };
 use sp_api::{Metadata, ProvideRuntimeApi, CallApiAt};
 
@@ -218,7 +218,7 @@ impl<BE, Block: BlockT, Client> FullState<BE, Block, Client>
 impl<BE, Block, Client> StateBackend<Block, Client> for FullState<BE, Block, Client> where
 	Block: BlockT + 'static,
 	BE: Backend<Block> + 'static,
-	Client: ExecutorProvider<Block> + StorageProvider<Block, BE> + ProofProvider<Block, SimpleProof> + HeaderBackend<Block>
+	Client: ExecutorProvider<Block> + StorageProvider<Block, BE> + ProofProvider<Block, SimpleProof<HashFor<Block>>> + HeaderBackend<Block>
 		+ HeaderMetadata<Block, Error = sp_blockchain::Error> + BlockchainEvents<Block>
 		+ CallApiAt<Block, Error = sp_blockchain::Error> + ProvideRuntimeApi<Block>
 		+ Send + Sync + 'static,
@@ -364,6 +364,10 @@ impl<BE, Block, Client> StateBackend<Block, Client> for FullState<BE, Block, Cli
 							&mut keys.iter().map(|key| key.0.as_ref()),
 						)
 						// A new version of this rpc could return a proof with skiped hashes.
+						.map(|proof| {
+							let proof: SimpleProof<HashFor<Block>> = proof.into();
+							proof
+						})
 						.map(|proof| proof.into_nodes().into_iter().map(|node| node.into()).collect())
 						.map(|proof| ReadProof { at: block, proof })
 				})

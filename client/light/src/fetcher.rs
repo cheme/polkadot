@@ -107,7 +107,7 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 		// => check that this proof is correct before proceeding with changes proof
 		let remote_max_block = remote_proof.max_block;
 		let remote_roots = remote_proof.roots;
-		let remote_roots_proof = remote_proof.roots_proof;
+		let remote_roots_proof = StorageProof::<H>::decode(&mut &remote_proof.encoded_roots_proof[..]).unwrap();
 		let remote_proof = remote_proof.proof;
 		if !remote_roots.is_empty() {
 			self.check_changes_tries_proof(
@@ -152,7 +152,7 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 		&self,
 		cht_size: NumberFor<B>,
 		remote_roots: &BTreeMap<NumberFor<B>, B::Hash>,
-		remote_roots_proof: StorageProof,
+		remote_roots_proof: StorageProof<H>,
 	) -> ClientResult<()>
 		where
 			H: Hasher,
@@ -204,7 +204,7 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 	}
 }
 
-impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H, Block, S>
+impl<E, Block, H, S> FetchChecker<Block, StorageProof<H>> for LightDataChecker<E, H, Block, S>
 	where
 		Block: BlockT,
 		E: CodeExecutor + Clone + 'static,
@@ -216,7 +216,7 @@ impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H
 		&self,
 		request: &RemoteHeaderRequest<Block::Header>,
 		remote_header: Option<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: StorageProof<H>,
 	) -> ClientResult<Block::Header> {
 		let remote_header = remote_header.ok_or_else(||
 			ClientError::from(ClientError::InvalidCHTProof))?;
@@ -232,7 +232,7 @@ impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H
 	fn check_read_proof(
 		&self,
 		request: &RemoteReadRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: StorageProof<H>,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
 		read_proof_check::<InMemoryBackend<H>, H, _>(
 			convert_hash(request.header.state_root()),
@@ -244,7 +244,7 @@ impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H
 	fn check_read_child_proof(
 		&self,
 		request: &RemoteReadChildRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: StorageProof<H>,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
 		let child_info = match ChildType::from_prefixed_key(&request.storage_key) {
 			Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
@@ -261,7 +261,7 @@ impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H
 	fn check_execution_proof(
 		&self,
 		request: &RemoteCallRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: StorageProof<H>,
 	) -> ClientResult<Vec<u8>> {
 		check_execution_proof::<_, _, H>(
 			&self.executor,

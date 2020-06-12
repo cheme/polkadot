@@ -240,7 +240,7 @@ mod tests {
 
 		let proof = block.proof.expect("Proof is build on request");
 
-		let backend = sp_state_machine::create_proof_check_backend::<Blake2Hasher, SimpleProof>(
+		let backend = sp_state_machine::create_proof_check_backend::<Blake2Hasher, SimpleProof<Blake2Hasher>>(
 			block.storage_changes.transaction_storage_root,
 			proof,
 		).unwrap();

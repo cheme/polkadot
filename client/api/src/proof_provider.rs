@@ -55,7 +55,7 @@ pub trait ProofProvider<Block: BlockT, Proof: BackendProof<HashFor<Block>>> {
 	) -> sp_blockchain::Result<(Vec<u8>, Proof::ProofRaw)>;
 
 	/// Reads given header and generates CHT-based header proof.
-	fn header_proof(&self, id: &BlockId<Block>) -> sp_blockchain::Result<(Block::Header, SimpleProof)>;
+	fn header_proof(&self, id: &BlockId<Block>) -> sp_blockchain::Result<(Block::Header, SimpleProof<HashFor<Block>>)>;
 
 	/// Get proof for computation of (block, extrinsic) pairs where key has been changed at given blocks range.
 	/// `min` is the hash of the first block, which changes trie root is known to the requester - when we're using

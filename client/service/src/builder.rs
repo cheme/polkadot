@@ -952,7 +952,7 @@ ServiceBuilder<
 	TExPool: MaintainedTransactionPool<Block=TBl, Hash = <TBl as BlockT>::Hash> + MallocSizeOfWasm + 'static,
 	TRpc: sc_rpc::RpcExtension<sc_rpc::Metadata>,
 	// This constraint should be lifted when client get generic over StateBackend and Proof
-	TBackend::State: StateBackend<HashFor<TBl>, StorageProof = SimpleProof>,
+	TBackend::State: StateBackend<HashFor<TBl>, StorageProof = SimpleProof<HashFor<TBl>>>,
 {
 
 	/// Set an ExecutionExtensionsFactory
@@ -1474,7 +1474,7 @@ ServiceBuilder<
 		'static,
 	TRpc: sc_rpc::RpcExtension<sc_rpc::Metadata>,
 	// This constraint should be lifted when client get generic over StateBackend and Proof
-	TBackend::State: StateBackend<HashFor<TBl>, StorageProof = SimpleProof>,
+	TBackend::State: StateBackend<HashFor<TBl>, StorageProof = SimpleProof<HashFor<TBl>>>,
 {
 
 	/// Builds the full service.

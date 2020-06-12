@@ -37,6 +37,28 @@ pub type ProofCompacted = Vec<Vec<u8>>;
 #[derive(Encode, Decode)]
 pub struct Flat<T>(Vec<ProofCompacted>, PhantomData<T>);
 
+impl<T> Flat<T> {
+	/// Access to inner proof node,
+	/// mainly needed for part of the
+	/// code that is not generic or test.
+	pub fn into_nodes(mut self) -> ProofNodes {
+		// TODO remove only work for top trie only
+		// Just for testing on this dirty branch
+		if let Some(top) = self.0.pop() {
+			top
+		} else {
+			Default::default()
+		}
+	}
+	/// Instantiate from inner proof node,
+	/// mainly needed for part of the
+	/// code that is not generic or test.
+	pub fn from_nodes(nodes: ProofNodes) -> Self {
+		Flat(vec![nodes], PhantomData)
+	}
+}
+
+
 impl<T> PartialEq<Flat<T>> for Flat<T> {
 	fn eq(&self, other: &Flat<T>) -> bool {
 		self.0.eq(&other.0)

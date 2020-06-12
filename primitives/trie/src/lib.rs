@@ -39,7 +39,7 @@ pub use storage_proof::{Common as ProofCommon, ChildrenProofMap, simple::ProofNo
 	query_plan::KnownQueryPlanAndValues as QueryPlanProof, Verifiable as VerifiableProof,
 	Input as ProofInput, InputKind as ProofInputKind, RecordMapTrieNodes, Recordable as RecordableProof, FullBackendProof,
 	BackendProof, Mergeable as MergeableProof, RecordBackend, multiple::FlatDefault as ProofFlatDefault,
-	multiple::StorageProofKind, multiple::MultipleStorageProof as TrieNodesStorageProof, simple::Flat as SimpleProof};
+	multiple::StorageProofKind, multiple::MultipleStorageProof as TrieNodesStorageProof, compact::Flat as SimpleProof};
 /// Various re-exports from the `trie-db` crate.
 pub use trie_db::{
 	Trie, TrieMut, DBValue, Recorder, CError, Query, TrieLayout, TrieConfiguration,

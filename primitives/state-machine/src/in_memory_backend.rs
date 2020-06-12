@@ -59,11 +59,11 @@ where
 }
 
 /// Create a new empty instance of in-memory backend.
-pub fn new_in_mem<H: Hasher>() -> TrieBackend<MemoryDB<H>, H, sp_trie::SimpleProof>
+pub fn new_in_mem<H: Hasher>() -> TrieBackend<MemoryDB<H>, H, crate::SimpleProof<H>>
 where
 	H::Out: Codec + Ord,
 {
-	new_in_mem_proof::<H, sp_trie::SimpleProof>()
+	new_in_mem_proof::<H, crate::SimpleProof<H>>()
 }
 
 /// Create a new empty instance of in-memory backend, specifying proof type.

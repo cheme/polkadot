@@ -44,10 +44,13 @@ mod trie_backend_essence;
 mod stats;
 mod read_only;
 
+/// Fix trie layout for proof.
+pub type SimpleProof<H> = sp_trie::SimpleProof<Layout<H>>;
+
 pub use sp_trie::{trie_types::{Layout, TrieDBMut}, TrieMut, DBValue, MemoryDB,
 	TrieNodesStorageProof, ProofCommon,  StorageProofKind, ChildrenProofMap,
 	ProofInput, ProofInputKind, ProofNodes, RecordableProof,
-	SimpleProof, CompactProof, BackendProof, MergeableProof};
+	CompactProof, BackendProof, MergeableProof};
 pub use testing::TestExternalities;
 pub use basic::BasicExternalities;
 pub use read_only::{ReadOnlyExternalities, InspectState};
@@ -94,7 +97,7 @@ pub type ChangesTrieTransaction<H, N> = (
 );
 
 /// Trie backend with in-memory storage.
-pub type InMemoryBackend<H> = TrieBackend<MemoryDB<H>, H, SimpleProof>;
+pub type InMemoryBackend<H> = TrieBackend<MemoryDB<H>, H, SimpleProof<H>>;
 
 /// Trie backend with in-memory storage and choice of proof.
 pub type InMemoryProofCheckBackend<H, P> = TrieBackend<MemoryDB<H>, H, P>;
@@ -832,8 +835,9 @@ mod tests {
 	use super::changes_trie::Configuration as ChangesTrieConfig;
 	use sp_core::{map, traits::{Externalities, RuntimeCode}};
 	use sp_runtime::traits::BlakeTwo256;
-	use sp_trie::{Layout, SimpleProof, SimpleFullProof, BackendProof, FullBackendProof};
+	use sp_trie::{Layout, SimpleFullProof, BackendProof, FullBackendProof};
 
+	type SimpleProof = sp_trie::SimpleProof<Layout<BlakeTwo256>>;
 	type CompactProof = sp_trie::CompactProof<Layout<BlakeTwo256>>;
 	type CompactFullProof = sp_trie::CompactFullProof<Layout<BlakeTwo256>>;
 	type QueryPlanProof = sp_trie::QueryPlanProof<Layout<BlakeTwo256>>;

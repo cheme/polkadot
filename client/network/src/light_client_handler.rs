@@ -71,7 +71,7 @@ use sp_core::{
 use smallvec::SmallVec;
 use sp_blockchain::{Error as ClientError};
 use sp_runtime::{
-	traits::{Block, Header, NumberFor, Zero},
+	traits::{Block, Header, NumberFor, Zero, HashFor},
 	generic::BlockId,
 };
 use std::{
@@ -290,7 +290,7 @@ pub struct LightClientHandler<B: Block> {
 	/// Blockchain client.
 	chain: Arc<dyn Client<B>>,
 	/// Verifies that received responses are correct.
-	checker: Arc<dyn light::FetchChecker<B, StorageProof>>,
+	checker: Arc<dyn light::FetchChecker<B, StorageProof<HashFor<B>>>>,
 	/// Peer information (addresses, their best block, etc.)
 	peers: HashMap<PeerId, PeerInfo<B>>,
 	/// Futures sending back response to remote clients.
@@ -313,7 +313,7 @@ where
 	pub fn new(
 		cfg: Config,
 		chain: Arc<dyn Client<B>>,
-		checker: Arc<dyn light::FetchChecker<B, StorageProof>>,
+		checker: Arc<dyn light::FetchChecker<B, StorageProof<HashFor<B>>>>,
 		peerset: sc_peerset::PeersetHandle,
 	) -> Self {
 		LightClientHandler {
@@ -468,7 +468,6 @@ where
 			Some(Response::RemoteChangesResponse(response)) =>
 				if let Request::Changes { request, .. } = request {
 					let max_block = Decode::decode(&mut response.max.as_ref())?;
-					let roots_proof = Decode::decode(&mut response.roots_proof.as_ref())?;
 					let roots = {
 						let mut r = BTreeMap::new();
 						for pair in response.roots {
@@ -482,7 +481,7 @@ where
 						max_block,
 						proof: response.proof,
 						roots,
-						roots_proof,
+						encoded_roots_proof: response.roots_proof,
 					})?;
 					Ok(Reply::VecNumberU32(reply))
 				} else {
@@ -559,7 +558,7 @@ where
 					request.block,
 					e,
 				);
-				StorageProof::empty()
+				ProofCommon::empty()
 			}
 		};
 
@@ -600,7 +599,7 @@ where
 					fmt_keys(request.keys.first(), request.keys.last()),
 					request.block,
 					error);
-				StorageProof::empty()
+				ProofCommon::empty()
 			}
 		};
 
@@ -649,7 +648,7 @@ where
 					fmt_keys(request.keys.first(), request.keys.last()),
 					request.block,
 					error);
-				StorageProof::empty()
+				ProofCommon::empty()
 			}
 		};
 
@@ -730,7 +729,7 @@ where
 					max_block: Zero::zero(),
 					proof: Vec::new(),
 					roots: BTreeMap::new(),
-					roots_proof: StorageProof::empty(),
+					encoded_roots_proof: StorageProof::<HashFor<B>>::empty().encode(),
 				}
 			}
 		};
@@ -742,7 +741,7 @@ where
 				roots: proof.roots.into_iter()
 					.map(|(k, v)| schema::v1::light::Pair { fst: k.encode(), snd: v.encode() })
 					.collect(),
-				roots_proof: proof.roots_proof.encode(),
+				roots_proof: proof.encoded_roots_proof,
 			};
 			schema::v1::light::response::Response::RemoteChangesResponse(r)
 		};
@@ -1350,7 +1349,7 @@ mod tests {
 	type Swarm = libp2p::swarm::Swarm<Handler>;
 
 	fn empty_proof() -> Vec<u8> {
-		StorageProof::empty().encode()
+		StorageProof::<BlakeTwo256>::empty().encode()
 	}
 
 	fn make_swarm(ok: bool, ps: sc_peerset::PeersetHandle, cf: super::Config) -> Swarm {
@@ -1374,12 +1373,12 @@ mod tests {
 		_mark: std::marker::PhantomData<B>
 	}
 
-	impl<B: BlockT> light::FetchChecker<B, StorageProof> for DummyFetchChecker<B> {
+	impl<B: BlockT> light::FetchChecker<B, StorageProof<HashFor<B>>> for DummyFetchChecker<B> {
 		fn check_header_proof(
 			&self,
 			_request: &RemoteHeaderRequest<B::Header>,
 			header: Option<B::Header>,
-			_remote_proof: StorageProof,
+			_remote_proof: StorageProof<HashFor<B>>,
 		) -> Result<B::Header, ClientError> {
 			match self.ok {
 				true if header.is_some() => Ok(header.unwrap()),
@@ -1390,7 +1389,7 @@ mod tests {
 		fn check_read_proof(
 			&self,
 			request: &RemoteReadRequest<B::Header>,
-			_: StorageProof,
+			_: StorageProof<HashFor<B>>,
 		) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 			match self.ok {
 				true => Ok(request.keys
@@ -1406,7 +1405,7 @@ mod tests {
 		fn check_read_child_proof(
 			&self,
 			request: &RemoteReadChildRequest<B::Header>,
-			_: StorageProof,
+			_: StorageProof<HashFor<B>>,
 		) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 			match self.ok {
 				true => Ok(request.keys
@@ -1422,7 +1421,7 @@ mod tests {
 		fn check_execution_proof(
 			&self,
 			_: &RemoteCallRequest<B::Header>,
-			_: StorageProof,
+			_: StorageProof<HashFor<B>>,
 		) -> Result<Vec<u8>, ClientError> {
 			match self.ok {
 				true => Ok(vec![42]),

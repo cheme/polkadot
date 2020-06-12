@@ -38,7 +38,7 @@ use sp_state_machine::{
 };
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 
-type ProofCheckBackend<H> = sp_state_machine::InMemoryProofCheckBackend<H, SimpleProof>;
+type ProofCheckBackend<H> = sp_state_machine::InMemoryProofCheckBackend<H, SimpleProof<H>>;
 
 /// The size of each CHT. This value is passed to every CHT-related function from
 /// production code. Other values are passed from tests.
@@ -106,7 +106,7 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 	cht_num: Header::Number,
 	blocks: BlocksI,
 	hashes: HashesI
-) -> ClientResult<StorageProof>
+) -> ClientResult<StorageProof<Hasher>>
 	where
 		Header: HeaderT,
 		Hasher: hash_db::Hasher,
@@ -124,7 +124,7 @@ pub fn build_proof<Header, Hasher, BlocksI, HashesI>(
 	prove_read_on_proof_backend(
 		&proof_backend,
 		blocks.into_iter().map(|number| encode_cht_key(number)),
-	).map_err(ClientError::Execution)
+	).map_err(ClientError::Execution).map(Into::into)
 }
 
 /// Check CHT-based header proof.
@@ -132,7 +132,7 @@ pub fn check_proof<Header, Hasher>(
 	local_root: Header::Hash,
 	local_number: Header::Number,
 	remote_hash: Header::Hash,
-	remote_proof: StorageProof,
+	remote_proof: StorageProof<Hasher>,
 ) -> ClientResult<()>
 	where
 		Header: HeaderT,

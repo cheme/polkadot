@@ -43,7 +43,7 @@ use sp_consensus::{
 use codec::{Decode, Encode};
 use sp_runtime::{generic::BlockId, ConsensusEngineId, Justification};
 use sp_runtime::traits::{
-	Block as BlockT, Header as HeaderT, NumberFor, One, Zero, CheckedSub
+	Block as BlockT, Header as HeaderT, NumberFor, One, Zero, CheckedSub, HashFor,
 };
 use sp_arithmetic::traits::SaturatedConversion;
 use message::{BlockAnnounce, Message};
@@ -56,7 +56,7 @@ use std::sync::Arc;
 use std::fmt::Write;
 use std::{cmp, io, num::NonZeroUsize, pin::Pin, task::Poll, time};
 use log::{log, Level, trace, debug, warn, error};
-use sc_client_api::{ChangesProof, ProofCommon};
+use sc_client_api::{ChangesProof, ProofCommon, SimpleProof};
 use util::LruHashSet;
 use wasm_timer::Instant;
 
@@ -1458,12 +1458,12 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 			request.method,
 			request.block
 		);
-		let proof = match self.context_data.chain.execution_proof(
+		let proof: SimpleProof<HashFor<B>> = match self.context_data.chain.execution_proof(
 			&BlockId::Hash(request.block),
 			&request.method,
 			&request.data,
 		) {
-			Ok((_, proof)) => proof,
+			Ok((_, proof)) => proof.into(),
 			Err(error) => {
 				trace!(target: "sync", "Remote call request {} from {} ({} at {}) failed with: {}",
 					request.id,
@@ -1606,11 +1606,11 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 
 		trace!(target: "sync", "Remote read request {} from {} ({} at {})",
 			request.id, who, keys_str(), request.block);
-		let proof = match self.context_data.chain.read_proof(
+		let proof: SimpleProof<HashFor<B>> = match self.context_data.chain.read_proof(
 			&BlockId::Hash(request.block),
 			&mut request.keys.iter().map(AsRef::as_ref)
 		) {
-			Ok(proof) => proof,
+			Ok(proof) => proof.into(),
 			Err(error) => {
 				trace!(target: "sync", "Remote read request {} from {} ({} at {}) failed with: {}",
 					request.id,
@@ -1660,12 +1660,12 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 			Some((ChildType::ParentKeyId, storage_key)) => Ok(ChildInfo::new_default(storage_key)),
 			None => Err("Invalid child storage key".into()),
 		};
-		let proof = match child_info.and_then(|child_info| self.context_data.chain.read_child_proof(
+		let proof: SimpleProof<HashFor<B>> = match child_info.and_then(|child_info| self.context_data.chain.read_child_proof(
 			&BlockId::Hash(request.block),
 			&child_info,
 			&mut request.keys.iter().map(AsRef::as_ref),
 		)) {
-			Ok(proof) => proof,
+			Ok(proof) => proof.into(),
 			Err(error) => {
 				trace!(target: "sync", "Remote read child request {} from {} ({} {} at {}) failed with: {}",
 					request.id,
@@ -1764,7 +1764,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 					max_block: Zero::zero(),
 					proof: vec![],
 					roots: BTreeMap::new(),
-					roots_proof: ProofCommon::empty(),
+					encoded_roots_proof: SimpleProof::<HashFor<B>>::empty().encode(),
 				}
 			}
 		};
@@ -1776,7 +1776,7 @@ impl<B: BlockT, H: ExHashT> Protocol<B, H> {
 				max: proof.max_block,
 				proof: proof.proof,
 				roots: proof.roots.into_iter().collect(),
-				roots_proof: proof.roots_proof.into_nodes(),
+				roots_proof: SimpleProof::<HashFor<B>>::decode(&mut &proof.encoded_roots_proof[..]).unwrap().into_nodes(),
 			}),
 		);
 	}

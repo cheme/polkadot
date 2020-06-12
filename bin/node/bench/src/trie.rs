@@ -182,7 +182,7 @@ impl core::Benchmark for TrieReadBenchmark {
 		let storage: Arc<dyn sp_state_machine::Storage<sp_core::Blake2Hasher>> =
 			Arc::new(Storage(db.open(self.database_type)));
 
-		let trie_backend = sp_state_machine::TrieBackend::<_, _, SimpleProof>::new(
+		let trie_backend = sp_state_machine::TrieBackend::<_, _, SimpleProof<sp_core::Blake2Hasher>>::new(
 			storage,
 			self.root,
 		);

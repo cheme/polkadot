@@ -441,9 +441,10 @@ mod tests {
 	use super::*;
 	use crate::proving_backend::create_proof_check_backend;
 	use sp_trie::PrefixedMemoryDB;
-	use sp_trie::{SimpleProof, ProofCommon};
+	use sp_trie:: ProofCommon;
 	use sp_runtime::traits::BlakeTwo256;
 
+	type SimpleProof = crate::SimpleProof<BlakeTwo256>;
 	type CompactProof = sp_trie::CompactProof<Layout<BlakeTwo256>>;
 
 	fn test_proving<P: sp_trie::BackendProof<BlakeTwo256>>(

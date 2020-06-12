@@ -32,7 +32,7 @@ use sc_rpc_api::state::ReadProof;
 use sc_client_api::light::{RemoteBlockchain, Fetcher};
 use sp_core::{Bytes, storage::{StorageKey, PrefixedStorageKey, StorageData, StorageChangeSet}};
 use sp_version::RuntimeVersion;
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::traits::{Block as BlockT, HashFor};
 
 use sp_api::{Metadata, ProvideRuntimeApi, CallApiAt};
 
@@ -175,7 +175,7 @@ pub fn new_full<BE, Block: BlockT, Client>(
 	where
 		Block: BlockT + 'static,
 		BE: Backend<Block> + 'static,
-		Client: ExecutorProvider<Block> + StorageProvider<Block, BE> + ProofProvider<Block, SimpleProof> + HeaderBackend<Block>
+		Client: ExecutorProvider<Block> + StorageProvider<Block, BE> + ProofProvider<Block, SimpleProof<HashFor<Block>>> + HeaderBackend<Block>
 			+ HeaderMetadata<Block, Error = sp_blockchain::Error> + BlockchainEvents<Block>
 			+ CallApiAt<Block, Error = sp_blockchain::Error>
 			+ ProvideRuntimeApi<Block> + Send + Sync + 'static,

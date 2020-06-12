@@ -28,6 +28,7 @@ use sp_runtime::{
 };
 use sp_core::{ChangesTrieConfigurationRange, storage::PrefixedStorageKey};
 use sp_state_machine::SimpleProof;
+use sp_runtime::traits::HashFor;
 use sp_blockchain::{
 	HeaderMetadata, well_known_cache_keys, HeaderBackend, Cache as BlockchainCache,
 	Error as ClientError, Result as ClientResult,
@@ -124,7 +125,7 @@ pub struct ChangesProof<Header: HeaderT> {
 	pub roots: BTreeMap<Header::Number, Header::Hash>,
 	/// The proofs for all changes tries roots that have been touched AND are
 	/// missing from the requester' node. It is a map of CHT number => proof.
-	pub roots_proof: SimpleProof,
+	pub encoded_roots_proof: Vec<u8>,
 }
 
 /// Remote block body request
@@ -196,7 +197,7 @@ pub trait FetchChecker<Block: BlockT, P>: Send + Sync {
 		&self,
 		request: &RemoteHeaderRequest<Block::Header>,
 		header: Option<Block::Header>,
-		remote_proof: SimpleProof,
+		remote_proof: P,
 	) -> ClientResult<Block::Header>;
 	/// Check remote storage read proof.
 	fn check_read_proof(

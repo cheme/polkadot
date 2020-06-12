@@ -370,10 +370,11 @@ pub mod tests {
 	use std::{collections::HashSet, iter};
 	use sp_core::H256;
 	use codec::Encode;
-	use sp_trie::{TrieMut, PrefixedMemoryDB, trie_types::TrieDBMut, KeySpacedDBMut, SimpleProof};
+	use sp_trie::{TrieMut, PrefixedMemoryDB, trie_types::TrieDBMut, KeySpacedDBMut};
 	use sp_runtime::traits::BlakeTwo256;
 	use super::*;
 
+	type SimpleProof = sp_trie::SimpleProof<sp_trie::Layout<BlakeTwo256>>;
 	const CHILD_KEY_1: &[u8] = b"sub1";
 
 	fn test_db() -> (PrefixedMemoryDB<BlakeTwo256>, H256) {

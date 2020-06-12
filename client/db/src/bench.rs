@@ -33,7 +33,7 @@ use kvdb::{KeyValueDB, DBTransaction};
 use crate::storage_cache::{CachingState, SharedCache, new_shared_cache};
 
 type DbState<B> = sp_state_machine::TrieBackend<
-	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>, SimpleProof,
+	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>, SimpleProof<HashFor<B>>,
 >;
 
 type State<B> = CachingState<DbState<B>, B>;

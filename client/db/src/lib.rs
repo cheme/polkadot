@@ -101,7 +101,7 @@ const DEFAULT_CHILD_RATIO: (usize, usize) = (1, 10);
 
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
 pub type DbState<B> = sp_state_machine::TrieBackend<
-	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>, SimpleProof,
+	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>, SimpleProof<HashFor<B>>,
 >;
 
 const DB_HASH_LEN: usize = 32;

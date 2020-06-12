@@ -226,7 +226,7 @@ pub fn check_execution_proof<Header, E, H>(
 	executor: &E,
 	spawn_handle: Box<dyn CloneableSpawn>,
 	request: &RemoteCallRequest<Header>,
-	remote_proof: StorageProof,
+	remote_proof: StorageProof<H>,
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,

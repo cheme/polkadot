@@ -45,7 +45,7 @@ use sc_client_api::{blockchain::Info, backend::NewBlockState, Backend as ClientB
 	AuxStore, Storage, CallExecutor, cht, ExecutionStrategy, BlockImportOperation,
 	RemoteCallRequest, StorageProvider, ChangesProof, RemoteBodyRequest, RemoteReadRequest,
 	RemoteChangesRequest, FetchChecker, RemoteReadChildRequest, RemoteHeaderRequest,
-	SimpleProof as StorageProof, ProofCommon};
+	SimpleProof, ProofCommon};
 use sp_externalities::Extensions;
 use sc_block_builder::BlockBuilderProvider;
 use sp_blockchain::{
@@ -65,6 +65,7 @@ use sp_core::{blake2_256, ChangesTrieConfiguration};
 use sp_core::storage::{well_known_keys, StorageKey, ChildInfo};
 use sp_state_machine::backend::{ProofRawFor, Backend as _};
 
+type StorageProof = SimpleProof<BlakeTwo256>;
 type InMemoryProofCheckBackend = sp_state_machine::InMemoryProofCheckBackend<BlakeTwo256, StorageProof>;
 
 pub type DummyBlockchain = Blockchain<DummyStorage>;

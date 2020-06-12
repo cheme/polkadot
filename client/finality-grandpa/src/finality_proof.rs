@@ -41,7 +41,7 @@ use log::{trace, warn};
 
 use sp_blockchain::{Backend as BlockchainBackend, Error as ClientError, Result as ClientResult};
 use sc_client_api::{
-	backend::Backend, SimpleProof as StorageProof,
+	backend::Backend, SimpleProof as StorageProof, ProofCommon,
 	light::{FetchChecker, RemoteReadRequest},
 	StorageProvider, ProofProvider,
 };
@@ -49,7 +49,7 @@ use parity_scale_codec::{Encode, Decode};
 use finality_grandpa::BlockNumberOps;
 use sp_runtime::{
 	Justification, generic::BlockId,
-	traits::{NumberFor, Block as BlockT, Header as HeaderT, One},
+	traits::{NumberFor, Block as BlockT, Header as HeaderT, One, HashFor},
 };
 use sp_core::storage::StorageKey;
 use sc_telemetry::{telemetry, CONSENSUS_INFO};
@@ -66,11 +66,11 @@ pub trait AuthoritySetForFinalityProver<Block: BlockT>: Send + Sync {
 	/// Read GRANDPA_AUTHORITIES_KEY from storage at given block.
 	fn authorities(&self, block: &BlockId<Block>) -> ClientResult<AuthorityList>;
 	/// Prove storage read of GRANDPA_AUTHORITIES_KEY at given block.
-	fn prove_authorities(&self, block: &BlockId<Block>) -> ClientResult<StorageProof>;
+	fn prove_authorities(&self, block: &BlockId<Block>) -> ClientResult<StorageProof<HashFor<Block>>>;
 }
 
 /// Trait that combines `StorageProvider` and `ProofProvider`
-pub trait StorageAndProofProvider<Block, BE>: StorageProvider<Block, BE> + ProofProvider<Block, StorageProof> + Send + Sync
+pub trait StorageAndProofProvider<Block, BE>: StorageProvider<Block, BE> + ProofProvider<Block, StorageProof<HashFor<Block>>> + Send + Sync
 	where
 		Block: BlockT,
 		BE: Backend<Block> + Send + Sync,
@@ -81,7 +81,7 @@ impl<Block, BE, P> StorageAndProofProvider<Block, BE> for P
 	where
 		Block: BlockT,
 		BE: Backend<Block> + Send + Sync,
-		P: StorageProvider<Block, BE> + ProofProvider<Block, StorageProof> + Send + Sync,
+		P: StorageProvider<Block, BE> + ProofProvider<Block, StorageProof<HashFor<Block>>> + Send + Sync,
 {}
 
 /// Implementation of AuthoritySetForFinalityProver.
@@ -97,8 +97,8 @@ impl<BE, Block: BlockT> AuthoritySetForFinalityProver<Block> for Arc<dyn Storage
 			.ok_or(ClientError::InvalidAuthoritiesSet)
 	}
 
-	fn prove_authorities(&self, block: &BlockId<Block>) -> ClientResult<StorageProof> {
-		self.read_proof(block, &mut std::iter::once(GRANDPA_AUTHORITIES_KEY))
+	fn prove_authorities(&self, block: &BlockId<Block>) -> ClientResult<StorageProof<HashFor<Block>>> {
+		self.read_proof(block, &mut std::iter::once(GRANDPA_AUTHORITIES_KEY)).map(Into::into)
 	}
 }
 
@@ -109,17 +109,17 @@ pub trait AuthoritySetForFinalityChecker<Block: BlockT>: Send + Sync {
 		&self,
 		hash: Block::Hash,
 		header: Block::Header,
-		proof: StorageProof,
+		proof: StorageProof<HashFor<Block>>,
 	) -> ClientResult<AuthorityList>;
 }
 
 /// FetchChecker-based implementation of AuthoritySetForFinalityChecker.
-impl<Block: BlockT> AuthoritySetForFinalityChecker<Block> for Arc<dyn FetchChecker<Block, StorageProof>> {
+impl<Block: BlockT> AuthoritySetForFinalityChecker<Block> for Arc<dyn FetchChecker<Block, StorageProof<HashFor<Block>>>> {
 	fn check_authorities_proof(
 		&self,
 		hash: Block::Hash,
 		header: Block::Header,
-		proof: StorageProof,
+		proof: StorageProof<HashFor<Block>>,
 	) -> ClientResult<AuthorityList> {
 		let storage_key = GRANDPA_AUTHORITIES_KEY.to_vec();
 		let request = RemoteReadRequest {
@@ -229,7 +229,7 @@ pub(crate) struct FinalityProofFragment<Header: HeaderT> {
 	/// The set of headers in the range (U; F] that we believe are unknown to the caller. Ordered.
 	pub unknown_headers: Vec<Header>,
 	/// Optional proof of execution of GRANDPA::authorities() at the `block`.
-	pub authorities_proof: Option<StorageProof>,
+	pub authorities_proof: Option<Vec<u8>>, // TODO we break code here
 }
 
 /// Proof of finality is the ordered set of finality fragments, where:
@@ -345,7 +345,7 @@ pub(crate) fn prove_finality<Block: BlockT, B: BlockchainBackend<Block>, J>(
 				block: current,
 				justification,
 				unknown_headers: ::std::mem::take(&mut unknown_headers),
-				authorities_proof: new_authorities_proof,
+				authorities_proof: None, // TODO we break things here , using compact proof here would need some type change.
 			};
 
 			// append justification to finality proof if required
@@ -512,7 +512,7 @@ fn check_finality_proof_fragment<Block: BlockT, B, J>(
 		current_authorities = authorities_provider.check_authorities_proof(
 			proof_fragment.block,
 			header,
-			new_authorities_proof,
+			ProofCommon::empty(), // TODO we break things here , using compact proof here would need some type change.
 		)?;
 
 		current_set_id += 1;
@@ -593,13 +593,13 @@ pub(crate) mod tests {
 	impl<GetAuthorities, ProveAuthorities> AuthoritySetForFinalityProver<Block> for (GetAuthorities, ProveAuthorities)
 		where
 			GetAuthorities: Send + Sync + Fn(BlockId<Block>) -> ClientResult<AuthorityList>,
-			ProveAuthorities: Send + Sync + Fn(BlockId<Block>) -> ClientResult<StorageProof>,
+			ProveAuthorities: Send + Sync + Fn(BlockId<Block>) -> ClientResult<StorageProof<HashFor<Block>>>,
 	{
 		fn authorities(&self, block: &BlockId<Block>) -> ClientResult<AuthorityList> {
 			self.0(*block)
 		}
 
-		fn prove_authorities(&self, block: &BlockId<Block>) -> ClientResult<StorageProof> {
+		fn prove_authorities(&self, block: &BlockId<Block>) -> ClientResult<StorageProof<HashFor<Block>>> {
 			self.1(*block)
 		}
 	}
@@ -608,13 +608,13 @@ pub(crate) mod tests {
 
 	impl<Closure> AuthoritySetForFinalityChecker<Block> for ClosureAuthoritySetForFinalityChecker<Closure>
 		where
-			Closure: Send + Sync + Fn(H256, Header, StorageProof) -> ClientResult<AuthorityList>,
+			Closure: Send + Sync + Fn(H256, Header, StorageProof<HashFor<Block>>) -> ClientResult<AuthorityList>,
 	{
 		fn check_authorities_proof(
 			&self,
 			hash: H256,
 			header: Header,
-			proof: StorageProof,
+			proof: StorageProof<HashFor<Block>>,
 		) -> ClientResult<AuthorityList> {
 			self.0(hash, header, proof)
 		}
