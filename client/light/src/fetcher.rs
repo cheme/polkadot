@@ -33,9 +33,9 @@ use sp_runtime::traits::{
 use sp_state_machine::{
 	ChangesTrieRootsStorage, ChangesTrieAnchorBlockId, ChangesTrieConfigurationRange,
 	InMemoryChangesTrieStorage, TrieBackend, read_proof_check, key_changes_proof_check_with_db,
-	read_child_proof_check, CloneableSpawn, BackendProof, InMemoryBackend,
+	read_child_proof_check, CloneableSpawn, BackendProof, backend::ProofCheckBackend,
 };
-pub use sp_state_machine::{SimpleProof as StorageProof, ProofCommon};
+pub use sp_state_machine::{SimpleProof, ProofCommon};
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
 
 pub use sc_client_api::{
@@ -50,14 +50,14 @@ use crate::blockchain::Blockchain;
 use crate::call_executor::check_execution_proof;
 
 /// Remote data checker.
-pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>> {
+pub struct LightDataChecker<E, H, B: BlockT, S: BlockchainStorage<B>, P> {
 	blockchain: Arc<Blockchain<S>>,
 	executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
-	_hasher: PhantomData<(B, H)>,
+	_hasher: PhantomData<(B, H, P)>,
 }
 
-impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
+impl<E, H, B: BlockT, S: BlockchainStorage<B>, P> LightDataChecker<E, H, B, S, P> {
 	/// Create new light data checker.
 	pub fn new(blockchain: Arc<Blockchain<S>>, executor: E, spawn_handle: Box<dyn CloneableSpawn>) -> Self {
 		Self {
@@ -152,7 +152,7 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 		&self,
 		cht_size: NumberFor<B>,
 		remote_roots: &BTreeMap<NumberFor<B>, B::Hash>,
-		remote_roots_proof: StorageProof,
+		remote_roots_proof: SimpleProof,
 	) -> ClientResult<()>
 		where
 			H: Hasher,
@@ -204,19 +204,20 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 	}
 }
 
-impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H, Block, S>
+impl<E, Block, H, S, P> FetchChecker<Block, P::StorageProof> for LightDataChecker<E, H, Block, S, P>
 	where
 		Block: BlockT,
 		E: CodeExecutor + Clone + 'static,
 		H: Hasher,
 		H::Out: Ord + codec::Codec + 'static,
 		S: BlockchainStorage<Block>,
+		P: ProofCheckBackend<H> + Send + Sync,
 {
 	fn check_header_proof(
 		&self,
 		request: &RemoteHeaderRequest<Block::Header>,
 		remote_header: Option<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: SimpleProof,
 	) -> ClientResult<Block::Header> {
 		let remote_header = remote_header.ok_or_else(||
 			ClientError::from(ClientError::InvalidCHTProof))?;
@@ -232,9 +233,9 @@ impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H
 	fn check_read_proof(
 		&self,
 		request: &RemoteReadRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P::StorageProof,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
-		read_proof_check::<InMemoryBackend<H>, H, _>(
+		read_proof_check::<P, H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			request.keys.iter(),
@@ -244,13 +245,13 @@ impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H
 	fn check_read_child_proof(
 		&self,
 		request: &RemoteReadChildRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P::StorageProof,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
 		let child_info = match ChildType::from_prefixed_key(&request.storage_key) {
 			Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
 			None => return Err("Invalid child type".into()),
 		};
-		read_child_proof_check::<InMemoryBackend<H>, H, _>(
+		read_child_proof_check::<P, H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			&child_info,
@@ -261,9 +262,9 @@ impl<E, Block, H, S> FetchChecker<Block, StorageProof> for LightDataChecker<E, H
 	fn check_execution_proof(
 		&self,
 		request: &RemoteCallRequest<Block::Header>,
-		remote_proof: StorageProof,
+		remote_proof: P::StorageProof,
 	) -> ClientResult<Vec<u8>> {
-		check_execution_proof::<_, _, H>(
+		check_execution_proof::<P, _, _, H>(
 			&self.executor,
 			self.spawn_handle.clone(),
 			request,

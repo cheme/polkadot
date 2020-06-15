@@ -37,7 +37,32 @@ pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
 
-pub use sp_state_machine::{ProofCommon, SimpleProof, ExecutionStrategy, CloneableSpawn, ProofNodes};
+pub use sp_state_machine::{ProofCommon, SimpleProof, ExecutionStrategy, CloneableSpawn, ProofNodes, BackendProof};
+pub use sp_state_machine::backend::{ProofCheckBackend as ProofCheckBackendT,
+	InstantiableStateBackend, HashDBNodesTransaction, GenesisStateBackend};
+pub use sp_runtime::traits::HashFor;
+
+/// DB backend for state supported by client db implementation.
+pub type DbStorage<Block> = DbStorageHash<sp_runtime::traits::HashFor<Block>>;
+/// DB backend for state supported by client db implementation.
+pub type DbStorageHash<H> = std::sync::Arc<dyn sp_state_machine::Storage<H>>;
+
+/// State backend configuration for default `sp_trie` patricia trie.
+pub type TrieStateBackend<Block, P> = TrieStateBackendHash<HashFor<Block>, P>;
+/// State backend configuration for default `sp_trie` patricia trie.
+pub type TrieStateBackendHash<H, P> = sp_state_machine::TrieBackend<DbStorageHash<H>, H, P>;
+
+/// Genesis backend proof check.
+pub type GenesisBackend<Block> = GenesisBackendHash<HashFor<Block>>;
+/// Static definition of the genesis backend TODO EMCH rename to Light backend + GS -> LS
+pub type GenesisBackendHash<H> = sp_state_machine::InMemoryBackend<H>;
+
+/// Static definition of the state backend to use with tests.
+pub type TrieBackendState<B, P> = sp_state_machine::TrieBackend<
+	std::sync::Arc<dyn sp_state_machine::Storage<HashFor<B>>>,
+	HashFor<B>,
+	P,
+>;
 
 /// Usage Information Provider interface
 ///

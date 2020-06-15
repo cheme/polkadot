@@ -56,7 +56,7 @@ use sc_network::{NetworkService, NetworkStatus, network_state::NetworkState, Pee
 use log::{log, warn, debug, error, Level};
 use codec::{Encode, Decode};
 use sp_runtime::generic::BlockId;
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::traits::{Block as BlockT, HashFor};
 use parity_util_mem::MallocSizeOf;
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver,  TracingUnboundedSender};
 
@@ -88,7 +88,7 @@ use task_manager::TaskManager;
 use sp_blockchain::{HeaderBackend, HeaderMetadata};
 use sp_api::{ApiExt, ConstructRuntimeApi, ApiErrorExt};
 use sc_client_api::{
-	Backend as BackendT, BlockchainEvents, CallExecutor, UsageProvider,
+	Backend as BackendT, BlockchainEvents, CallExecutor, UsageProvider, BackendProof as StorageProof,
 };
 use sp_block_builder::BlockBuilder;
 
@@ -362,10 +362,11 @@ impl<TBl, TCl, TSc, TNetStatus, TNet, TTxPool, TOc> Spawn for
 fn build_network_future<
 	B: BlockT,
 	C: BlockchainEvents<B>,
-	H: sc_network::ExHashT
+	H: sc_network::ExHashT,
+	P: StorageProof<HashFor<B>>,
 > (
 	role: Role,
-	mut network: sc_network::NetworkWorker<B, H>,
+	mut network: sc_network::NetworkWorker<B, H, P>,
 	client: Arc<C>,
 	status_sinks: Arc<Mutex<status_sinks::StatusSinks<(NetworkStatus<B>, NetworkState)>>>,
 	mut rpc_rx: TracingUnboundedReceiver<sc_rpc::system::Request<B>>,
@@ -633,10 +634,11 @@ where
 		.collect()
 }
 
-impl<B, H, C, Pool, E> sc_network::config::TransactionPool<H, B> for
+impl<B, H, C, Pool, E, P> sc_network::config::TransactionPool<H, B, P> for
 	TransactionPoolAdapter<C, Pool>
 where
-	C: sc_network::config::Client<B> + Send + Sync,
+	C: sc_network::config::Client<B, P> + Send + Sync,
+	P: StorageProof<HashFor<B>>,
 	Pool: 'static + TransactionPool<Block=B, Hash=H, Error=E>,
 	B: BlockT,
 	H: std::hash::Hash + Eq + sp_runtime::traits::Member + sp_runtime::traits::MaybeSerialize,

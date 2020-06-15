@@ -28,5 +28,5 @@ pub struct ReadProof<Hash> {
 	/// Block hash used to generate the proof
 	pub at: Hash,
 	/// A proof used to prove that storage entries are included in the storage trie
-	pub proof: Vec<Bytes>,
+	pub encoded_proof: Bytes, // TODO EMCH this means + 1 in rpc version (change of type)
 }

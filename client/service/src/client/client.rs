@@ -45,7 +45,7 @@ use sp_runtime::{
 use sp_state_machine::{
 	DBValue, backend::Backend as StateBackend, ChangesTrieAnchorBlockId,
 	prove_read, prove_child_read, ChangesTrieRootsStorage, ChangesTrieStorage,
-	ChangesTrieConfigurationRange, key_changes, key_changes_proof, SimpleProof as StorageProof,
+	ChangesTrieConfigurationRange, key_changes, key_changes_proof, SimpleProof,
 	MergeableProof,
 };
 use sc_executor::RuntimeVersion;
@@ -80,7 +80,7 @@ use sc_client_api::{
 	execution_extensions::ExecutionExtensions,
 	notifications::{StorageNotifications, StorageEventStream},
 	KeyIterator, CallExecutor, ExecutorProvider, ProofProvider,
-	cht, UsageProvider
+	cht, UsageProvider,
 };
 use sp_utils::mpsc::{TracingUnboundedSender, tracing_unbounded};
 use sp_blockchain::Error;
@@ -366,7 +366,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		&self,
 		id: &BlockId<Block>,
 		cht_size: NumberFor<Block>,
-	) -> sp_blockchain::Result<(Block::Header, StorageProof)> {
+	) -> sp_blockchain::Result<(Block::Header, SimpleProof)> {
 		let proof_error = || sp_blockchain::Error::Backend(format!("Failed to generate header proof for {:?}", id));
 		let header = self.backend.blockchain().expect_header(*id)?;
 		let block_num = *header.number();
@@ -514,7 +514,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		&self,
 		cht_size: NumberFor<Block>,
 		blocks: I
-	) -> sp_blockchain::Result<StorageProof> {
+	) -> sp_blockchain::Result<SimpleProof> {
 		// most probably we have touched several changes tries that are parts of the single CHT
 		// => GroupBy changes tries by CHT number and then gather proof for the whole group at once
 		let mut proofs = Vec::new();
@@ -525,7 +525,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 			Ok(())
 		}, ())?;
 
-		Ok(StorageProof::merge(proofs).into())
+		Ok(SimpleProof::merge(proofs).into())
 	}
 
 	/// Generates CHT-based proof for roots of changes tries at given blocks (that are part of single CHT).
@@ -534,7 +534,7 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		cht_size: NumberFor<Block>,
 		cht_num: NumberFor<Block>,
 		blocks: Vec<NumberFor<Block>>
-	) -> sp_blockchain::Result<StorageProof> {
+	) -> sp_blockchain::Result<SimpleProof> {
 		let cht_start = cht::start_number(cht_size, cht_num);
 		let mut current_num = cht_start;
 		let cht_range = ::std::iter::from_fn(|| {
@@ -1232,7 +1232,7 @@ impl<B, E, Block, RA> ProofProvider<Block, ProofFor<B, Block>> for Client<B, E, 
 		})
 	}
 
-	fn header_proof(&self, id: &BlockId<Block>) -> sp_blockchain::Result<(Block::Header, StorageProof)> {
+	fn header_proof(&self, id: &BlockId<Block>) -> sp_blockchain::Result<(Block::Header, SimpleProof)> {
 		self.header_proof_with_cht_size(id, cht::size())
 	}
 

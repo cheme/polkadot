@@ -39,7 +39,7 @@ use libp2p::wasm_ext;
 use libp2p::{multiaddr, Multiaddr, PeerId};
 use prometheus_endpoint::Registry;
 use sp_consensus::{block_validation::BlockAnnounceValidator, import_queue::ImportQueue};
-use sp_runtime::{traits::Block as BlockT, ConsensusEngineId};
+use sp_runtime::{traits::{Block as BlockT, HashFor}, ConsensusEngineId};
 use std::{borrow::Cow, convert::TryFrom, future::Future, pin::Pin, str::FromStr};
 use std::{
 	collections::HashMap,
@@ -50,10 +50,11 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
+use sc_client_api::BackendProof as StorageProof;
 use zeroize::Zeroize;
 
 /// Network initialization parameters.
-pub struct Params<B: BlockT, H: ExHashT> {
+pub struct Params<B: BlockT, H: ExHashT, P: StorageProof<HashFor<B>>> {
 	/// Assigned role for our node (full, light, ...).
 	pub role: Role,
 
@@ -65,7 +66,7 @@ pub struct Params<B: BlockT, H: ExHashT> {
 	pub network_config: NetworkConfiguration,
 
 	/// Client that contains the blockchain.
-	pub chain: Arc<dyn Client<B>>,
+	pub chain: Arc<dyn Client<B, P>>,
 
 	/// Finality proof provider.
 	///
@@ -81,13 +82,13 @@ pub struct Params<B: BlockT, H: ExHashT> {
 	/// The `OnDemand` object acts as a "receiver" for block data requests from the client.
 	/// If `Some`, the network worker will process these requests and answer them.
 	/// Normally used only for light clients.
-	pub on_demand: Option<Arc<OnDemand<B>>>,
+	pub on_demand: Option<Arc<OnDemand<B, P>>>,
 
 	/// Pool of transactions.
 	///
 	/// The network worker will fetch transactions from this object in order to propagate them on
 	/// the network.
-	pub transaction_pool: Arc<dyn TransactionPool<H, B>>,
+	pub transaction_pool: Arc<dyn TransactionPool<H, B, P>>,
 
 	/// Name of the protocol to use on the wire. Should be different for each chain.
 	pub protocol_id: ProtocolId,
@@ -186,7 +187,7 @@ pub enum TransactionImport {
 pub type TransactionImportFuture = Pin<Box<dyn Future<Output=TransactionImport> + Send>>;
 
 /// Transaction pool interface
-pub trait TransactionPool<H: ExHashT, B: BlockT>: Send + Sync {
+pub trait TransactionPool<H: ExHashT, B: BlockT, P: StorageProof<HashFor<B>>>: Send + Sync {
 	/// Get transactions from the pool that are ready to be propagated.
 	fn transactions(&self) -> Vec<(H, B::Extrinsic)>;
 	/// Get hash of transaction.
@@ -212,7 +213,12 @@ pub trait TransactionPool<H: ExHashT, B: BlockT>: Send + Sync {
 /// Useful for testing purposes.
 pub struct EmptyTransactionPool;
 
-impl<H: ExHashT + Default, B: BlockT> TransactionPool<H, B> for EmptyTransactionPool {
+impl<H, B, P> TransactionPool<H, B, P> for EmptyTransactionPool
+	where
+		H: ExHashT + Default,
+		B: BlockT,
+		P: StorageProof<HashFor<B>>,
+{
 	fn transactions(&self) -> Vec<(H, B::Extrinsic)> {
 		Vec::new()
 	}

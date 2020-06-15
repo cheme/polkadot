@@ -26,7 +26,8 @@ use crate::{
 use sc_client_api::{
 	self, BlockchainEvents, light::RemoteBlockchain, execution_extensions::ExtensionsFactory,
 	ExecutorProvider, CallExecutor, ForkBlocks, BadBlocks, CloneableSpawn, UsageProvider,
-	backend::RemoteBackend, SimpleProof, StateBackend,
+	backend::RemoteBackend, StateBackend, InstantiableStateBackend,
+	DbStorage, HashDBNodesTransaction, ProofCheckBackendT, GenesisStateBackend,
 };
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedSender};
 use sc_chain_spec::get_extension;
@@ -155,73 +156,77 @@ impl<R> From<R> for NoopRpcExtensionBuilder<R> where
 
 
 /// Full client type.
-pub type TFullClient<TBl, TRtApi, TExecDisp> = Client<
-	TFullBackend<TBl>,
-	TFullCallExecutor<TBl, TExecDisp>,
+pub type TFullClient<TBl, TRtApi, TExecDisp, TSt> = Client<
+	TFullBackend<TBl, TSt>,
+	TFullCallExecutor<TBl, TExecDisp, TSt>,
 	TBl,
 	TRtApi,
 >;
 
 /// Full client backend type.
-pub type TFullBackend<TBl> = sc_client_db::Backend<TBl>;
+pub type TFullBackend<TBl, TSt> = sc_client_db::Backend<TBl, TSt>;
 
 /// Full client call executor type.
-pub type TFullCallExecutor<TBl, TExecDisp> = crate::client::LocalCallExecutor<
-	sc_client_db::Backend<TBl>,
+pub type TFullCallExecutor<TBl, TExecDisp, TSt> = crate::client::LocalCallExecutor<
+	sc_client_db::Backend<TBl, TSt>,
 	NativeExecutor<TExecDisp>,
 >;
 
 /// Light client type.
-pub type TLightClient<TBl, TRtApi, TExecDisp> = Client<
-	TLightBackend<TBl>,
-	TLightCallExecutor<TBl, TExecDisp>,
+pub type TLightClient<TBl, TRtApi, TExecDisp, TGs> = Client<
+	TLightBackend<TBl, TGs>,
+	TLightCallExecutor<TBl, TExecDisp, TGs>,
 	TBl,
 	TRtApi,
 >;
 
 /// Light client backend type.
-pub type TLightBackend<TBl> = sc_light::Backend<
+pub type TLightBackend<TBl, TGs> = sc_light::Backend<
 	sc_client_db::light::LightStorage<TBl>,
-	HashFor<TBl>,
+	TGs,
 >;
 
 /// Light call executor type.
-pub type TLightCallExecutor<TBl, TExecDisp> = sc_light::GenesisCallExecutor<
+pub type TLightCallExecutor<TBl, TExecDisp, TGs> = sc_light::GenesisCallExecutor<
 	sc_light::Backend<
 		sc_client_db::light::LightStorage<TBl>,
-		HashFor<TBl>
+		TGs,
 	>,
 	crate::client::LocalCallExecutor<
 		sc_light::Backend<
 			sc_client_db::light::LightStorage<TBl>,
-			HashFor<TBl>
+			TGs,
 		>,
-		NativeExecutor<TExecDisp>
+		NativeExecutor<TExecDisp>,
 	>,
 >;
 
-type TFullParts<TBl, TRtApi, TExecDisp> = (
-	TFullClient<TBl, TRtApi, TExecDisp>,
-	Arc<TFullBackend<TBl>>,
+type TFullParts<TBl, TRtApi, TExecDisp, TSt> = (
+	TFullClient<TBl, TRtApi, TExecDisp, TSt>,
+	Arc<TFullBackend<TBl, TSt>>,
 	Arc<RwLock<sc_keystore::Store>>,
 	TaskManager,
 );
 
 /// Creates a new full client for the given config.
-pub fn new_full_client<TBl, TRtApi, TExecDisp>(
+pub fn new_full_client<TBl, TRtApi, TExecDisp, TSt>(
 	config: &Configuration,
-) -> Result<TFullClient<TBl, TRtApi, TExecDisp>, Error> where
+) -> Result<TFullClient<TBl, TRtApi, TExecDisp, TSt>, Error> where
 	TBl: BlockT,
 	TExecDisp: NativeExecutionDispatch + 'static,
+	TSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
+	TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 {
 	new_full_parts(config).map(|parts| parts.0)
 }
 
-fn new_full_parts<TBl, TRtApi, TExecDisp>(
+fn new_full_parts<TBl, TRtApi, TExecDisp, TSt>(
 	config: &Configuration,
-) -> Result<TFullParts<TBl, TRtApi, TExecDisp>,	Error> where
+) -> Result<TFullParts<TBl, TRtApi, TExecDisp, TSt>,	Error> where
 	TBl: BlockT,
 	TExecDisp: NativeExecutionDispatch + 'static,
+	TSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
+	TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 {
 	let keystore = match &config.keystore {
 		KeystoreConfig::Path { path, password } => Keystore::open(
@@ -286,7 +291,7 @@ fn new_full_parts<TBl, TRtApi, TExecDisp>(
 
 
 /// Create an instance of db-backed client.
-pub fn new_client<E, Block, RA>(
+pub fn new_client<E, Block, RA, TSt>(
 	settings: DatabaseSettings,
 	executor: E,
 	genesis_storage: &dyn BuildStorage,
@@ -298,22 +303,24 @@ pub fn new_client<E, Block, RA>(
 	config: ClientConfig,
 ) -> Result<(
 	crate::client::Client<
-		Backend<Block>,
-		crate::client::LocalCallExecutor<Backend<Block>, E>,
+		Backend<Block, TSt>,
+		crate::client::LocalCallExecutor<Backend<Block, TSt>, E>,
 		Block,
 		RA,
 	>,
-	Arc<Backend<Block>>,
+	Arc<Backend<Block, TSt>>,
 ),
 	sp_blockchain::Error,
 >
 	where
 		Block: BlockT,
 		E: CodeExecutor + RuntimeInfo,
+		TSt: InstantiableStateBackend<HashFor<Block>, Storage = DbStorage<Block>> + Send,
+		TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 {
 	const CANONICALIZATION_DELAY: u64 = 4096;
 
-	let backend = Arc::new(Backend::new(settings, CANONICALIZATION_DELAY)?);
+	let backend = Arc::new(Backend::<_, TSt>::new(settings, CANONICALIZATION_DELAY)?);
 	let executor = crate::client::LocalCallExecutor::new(backend.clone(), executor, spawn_handle, config.clone());
 	Ok((
 		crate::client::Client::new(
@@ -332,21 +339,27 @@ pub fn new_client<E, Block, RA>(
 
 impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	/// Start the service builder with a configuration.
-	pub fn new_full<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static>(
+	pub fn new_full<TBl, TRtApi, TExecDisp, TSt>(
 		config: Configuration,
 	) -> Result<ServiceBuilder<
 		TBl,
 		TRtApi,
-		TFullClient<TBl, TRtApi, TExecDisp>,
-		Arc<OnDemand<TBl>>,
+		TFullClient<TBl, TRtApi, TExecDisp, TSt>,
+		Arc<OnDemand<TBl, TSt::StorageProof>>,
 		(),
 		(),
 		BoxFinalityProofRequestBuilder<TBl>,
 		Arc<dyn FinalityProofProvider<TBl>>,
 		(),
 		(),
-		TFullBackend<TBl>,
-	>, Error> {
+		TFullBackend<TBl, TSt>,
+	>, Error> 
+		where
+			TBl: BlockT,
+			TExecDisp: NativeExecutionDispatch + 'static,
+			TSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
+			TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
+	{
 		let (client, backend, keystore, task_manager) = new_full_parts(&config)?;
 
 		let client = Arc::new(client);
@@ -372,20 +385,26 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	}
 
 	/// Start the service builder with a configuration.
-	pub fn new_light<TBl: BlockT, TRtApi, TExecDisp: NativeExecutionDispatch + 'static>(
+	pub fn new_light<
+		TBl: BlockT,
+		TRtApi,
+		TExecDisp: NativeExecutionDispatch + 'static,
+		TProof: ProofCheckBackendT<HashFor<TBl>> + Send + Sync + 'static,
+		TGs: GenesisStateBackend<HashFor<TBl>> + Clone + Send + Sync,
+	>(
 		config: Configuration,
 	) -> Result<ServiceBuilder<
 		TBl,
 		TRtApi,
-		TLightClient<TBl, TRtApi, TExecDisp>,
-		Arc<OnDemand<TBl>>,
+		TLightClient<TBl, TRtApi, TExecDisp, TGs>,
+		Arc<OnDemand<TBl, TProof::StorageProof>>,
 		(),
 		(),
 		BoxFinalityProofRequestBuilder<TBl>,
 		Arc<dyn FinalityProofProvider<TBl>>,
 		(),
 		(),
-		TLightBackend<TBl>,
+		TLightBackend<TBl, TGs>,
 	>, Error> {
 		let task_manager = {
 			let registry = config.prometheus_config.as_ref().map(|cfg| &cfg.registry);
@@ -418,7 +437,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 		};
 		let light_blockchain = sc_light::new_light_blockchain(db_storage);
 		let fetch_checker = Arc::new(
-			sc_light::new_fetch_checker::<_, TBl, _>(
+			sc_light::new_fetch_checker::<_, TBl, _, TProof>(
 				light_blockchain.clone(),
 				executor.clone(),
 				Box::new(task_manager.spawn_handle()),
@@ -926,7 +945,7 @@ ServiceBuilder<
 	TBl,
 	TRtApi,
 	Client<TBackend, TExec, TBl, TRtApi>,
-	Arc<OnDemand<TBl>>,
+	Arc<OnDemand<TBl, <TBackend::State as StateBackend<HashFor<TBl>>>::StorageProof>>,
 	TSc,
 	TImpQu,
 	BoxFinalityProofRequestBuilder<TBl>,
@@ -951,8 +970,6 @@ ServiceBuilder<
 	TImpQu: 'static + ImportQueue<TBl>,
 	TExPool: MaintainedTransactionPool<Block=TBl, Hash = <TBl as BlockT>::Hash> + MallocSizeOfWasm + 'static,
 	TRpc: sc_rpc::RpcExtension<sc_rpc::Metadata>,
-	// This constraint should be lifted when client get generic over StateBackend and Proof
-	TBackend::State: StateBackend<HashFor<TBl>, StorageProof = SimpleProof>,
 {
 
 	/// Set an ExecutionExtensionsFactory
@@ -975,7 +992,6 @@ ServiceBuilder<
 		>,
 	>, Error>
 		where TExec: CallExecutor<TBl, Backend = TBackend>,
-			TExec: CallExecutor<TBl, Backend = TBackend>,
 	{
 		let ServiceBuilder {
 			marker: _,
@@ -1445,7 +1461,7 @@ ServiceBuilder<
 	TBl,
 	TRtApi,
 	Client<TBackend, TExec, TBl, TRtApi>,
-	Arc<OnDemand<TBl>>,
+	Arc<OnDemand<TBl, <TBackend::State as StateBackend<HashFor<TBl>>>::StorageProof>>,
 	TSc,
 	TImpQu,
 	BoxFinalityProofRequestBuilder<TBl>,
@@ -1473,8 +1489,6 @@ ServiceBuilder<
 		MallocSizeOfWasm +
 		'static,
 	TRpc: sc_rpc::RpcExtension<sc_rpc::Metadata>,
-	// This constraint should be lifted when client get generic over StateBackend and Proof
-	TBackend::State: StateBackend<HashFor<TBl>, StorageProof = SimpleProof>,
 {
 
 	/// Builds the full service.

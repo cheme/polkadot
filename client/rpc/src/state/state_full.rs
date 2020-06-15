@@ -25,7 +25,7 @@ use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId, manager::SubscriptionMan
 use rpc::{Result as RpcResult, futures::{stream, Future, Sink, Stream, future::result}};
 
 use sc_rpc_api::state::ReadProof;
-use sc_client_api::backend::Backend;
+use sc_client_api::backend::{Backend, ProofFor, ProofRawClientFor};
 use sp_blockchain::{Result as ClientResult, Error as ClientError, HeaderMetadata, CachedHeaderMetadata, HeaderBackend};
 use sc_client_api::BlockchainEvents;
 use sp_core::{
@@ -37,8 +37,9 @@ use sp_runtime::{
 	generic::BlockId, traits::{Block as BlockT, NumberFor, SaturatedConversion, CheckedSub},
 };
 use sp_api::{Metadata, ProvideRuntimeApi, CallApiAt};
+use codec::Encode;
 
-use super::{StateBackend, ChildStateBackend, error::{FutureResult, Error, Result}, client_err, SimpleProof};
+use super::{StateBackend, ChildStateBackend, error::{FutureResult, Error, Result}, client_err};
 use std::marker::PhantomData;
 use sc_client_api::{CallExecutor, StorageProvider, ExecutorProvider, ProofProvider};
 
@@ -218,7 +219,8 @@ impl<BE, Block: BlockT, Client> FullState<BE, Block, Client>
 impl<BE, Block, Client> StateBackend<Block, Client> for FullState<BE, Block, Client> where
 	Block: BlockT + 'static,
 	BE: Backend<Block> + 'static,
-	Client: ExecutorProvider<Block> + StorageProvider<Block, BE> + ProofProvider<Block, SimpleProof> + HeaderBackend<Block>
+	Client: ExecutorProvider<Block> + StorageProvider<Block, BE>
+		+ ProofProvider<Block, ProofFor<BE, Block>> + HeaderBackend<Block>
 		+ HeaderMetadata<Block, Error = sp_blockchain::Error> + BlockchainEvents<Block>
 		+ CallApiAt<Block, Error = sp_blockchain::Error> + ProvideRuntimeApi<Block>
 		+ Send + Sync + 'static,
@@ -363,9 +365,8 @@ impl<BE, Block, Client> StateBackend<Block, Client> for FullState<BE, Block, Cli
 							&BlockId::Hash(block),
 							&mut keys.iter().map(|key| key.0.as_ref()),
 						)
-						// A new version of this rpc could return a proof with skiped hashes.
-						.map(|proof| proof.into_nodes().into_iter().map(|node| node.into()).collect())
-						.map(|proof| ReadProof { at: block, proof })
+						.map(|proof| <ProofRawClientFor<BE, Block>>::into(proof))
+						.map(|proof| ReadProof { at: block, encoded_proof: proof.encode().into() })
 				})
 				.map_err(client_err),
 		))

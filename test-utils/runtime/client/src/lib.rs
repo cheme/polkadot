@@ -63,7 +63,10 @@ sc_executor::native_executor_instance! {
 }
 
 /// Test client database backend.
-pub type Backend = substrate_test_client::Backend<substrate_test_runtime::Block>;
+pub type Backend = substrate_test_client::Backend<
+	substrate_test_runtime::Block,
+	substrate_test_client::TrieBackendState<substrate_test_runtime::Block, substrate_test_client::SimpleProof>, // TODO EMCH generic test? 
+>;
 
 /// Test client executor.
 pub type Executor = client::LocalCallExecutor<
@@ -80,7 +83,7 @@ pub type LightExecutor = sc_light::GenesisCallExecutor<
 	client::LocalCallExecutor<
 		sc_light::Backend<
 			sc_client_db::light::LightStorage<substrate_test_runtime::Block>,
-			HashFor<substrate_test_runtime::Block>
+			sc_client_api::GenesisBackend<substrate_test_runtime::Block>
 		>,
 		NativeExecutor<LocalExecutor>
 	>

@@ -56,7 +56,8 @@ use libp2p::{
 use nohash_hasher::IntMap;
 use prost::Message;
 use sc_client_api::{
-	SimpleProof as StorageProof,
+	BackendProof as StorageProof,
+	SimpleProof,
 	ProofCommon,
 	light::{
 		self, RemoteReadRequest, RemoteBodyRequest, ChangesProof,
@@ -71,7 +72,7 @@ use sp_core::{
 use smallvec::SmallVec;
 use sp_blockchain::{Error as ClientError};
 use sp_runtime::{
-	traits::{Block, Header, NumberFor, Zero},
+	traits::{Block, Header, NumberFor, Zero, HashFor},
 	generic::BlockId,
 };
 use std::{
@@ -284,13 +285,13 @@ enum PeerStatus {
 }
 
 /// The light client handler behaviour.
-pub struct LightClientHandler<B: Block> {
+pub struct LightClientHandler<B: Block, P: StorageProof<HashFor<B>>> {
 	/// This behaviour's configuration.
 	config: Config,
 	/// Blockchain client.
-	chain: Arc<dyn Client<B>>,
+	chain: Arc<dyn Client<B, P>>,
 	/// Verifies that received responses are correct.
-	checker: Arc<dyn light::FetchChecker<B, StorageProof>>,
+	checker: Arc<dyn light::FetchChecker<B, P>>,
 	/// Peer information (addresses, their best block, etc.)
 	peers: HashMap<PeerId, PeerInfo<B>>,
 	/// Futures sending back response to remote clients.
@@ -305,15 +306,16 @@ pub struct LightClientHandler<B: Block> {
 	peerset: sc_peerset::PeersetHandle,
 }
 
-impl<B> LightClientHandler<B>
+impl<B, P> LightClientHandler<B, P>
 where
 	B: Block,
+	P: StorageProof<HashFor<B>>,
 {
 	/// Construct a new light client handler.
 	pub fn new(
 		cfg: Config,
-		chain: Arc<dyn Client<B>>,
-		checker: Arc<dyn light::FetchChecker<B, StorageProof>>,
+		chain: Arc<dyn Client<B, P>>,
+		checker: Arc<dyn light::FetchChecker<B, P>>,
 		peerset: sc_peerset::PeersetHandle,
 	) -> Self {
 		LightClientHandler {
@@ -546,12 +548,12 @@ where
 
 		let block = Decode::decode(&mut request.block.as_ref())?;
 
-		let proof = match self.chain.execution_proof(
+		let proof: P = match self.chain.execution_proof(
 			&BlockId::Hash(block),
 			&request.method,
 			&request.data,
 		) {
-			Ok((_, proof)) => proof,
+			Ok((_, proof)) => proof.into(),
 			Err(e) => {
 				log::trace!("remote call request from {} ({} at {:?}) failed with: {}",
 					peer,
@@ -559,7 +561,7 @@ where
 					request.block,
 					e,
 				);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 
@@ -589,18 +591,18 @@ where
 
 		let block = Decode::decode(&mut request.block.as_ref())?;
 
-		let proof = match self.chain.read_proof(
+		let proof: P = match self.chain.read_proof(
 			&BlockId::Hash(block),
 			&mut request.keys.iter().map(AsRef::as_ref),
 		) {
-			Ok(proof) => proof,
+			Ok(proof) => proof.into(),
 			Err(error) => {
 				log::trace!("remote read request from {} ({} at {:?}) failed with: {}",
 					peer,
 					fmt_keys(request.keys.first(), request.keys.last()),
 					request.block,
 					error);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 
@@ -636,12 +638,12 @@ where
 			Some((ChildType::ParentKeyId, storage_key)) => Ok(ChildInfo::new_default(storage_key)),
 			None => Err("Invalid child storage key".into()),
 		};
-		let proof = match child_info.and_then(|child_info| self.chain.read_child_proof(
+		let proof: P = match child_info.and_then(|child_info| self.chain.read_child_proof(
 			&BlockId::Hash(block),
 			&child_info,
 			&mut request.keys.iter().map(AsRef::as_ref)
 		)) {
-			Ok(proof) => proof,
+			Ok(proof) => proof.into(),
 			Err(error) => {
 				log::trace!("remote read child request from {} ({} {} at {:?}) failed with: {}",
 					peer,
@@ -649,7 +651,7 @@ where
 					fmt_keys(request.keys.first(), request.keys.last()),
 					request.block,
 					error);
-				StorageProof::empty()
+				P::empty()
 			}
 		};
 
@@ -677,7 +679,7 @@ where
 					peer,
 					request.block,
 					error);
-				(Default::default(), StorageProof::empty())
+				(Default::default(), SimpleProof::empty())
 			}
 		};
 
@@ -730,7 +732,7 @@ where
 					max_block: Zero::zero(),
 					proof: Vec::new(),
 					roots: BTreeMap::new(),
-					roots_proof: StorageProof::empty(),
+					roots_proof: SimpleProof::empty(),
 				}
 			}
 		};
@@ -751,9 +753,10 @@ where
 	}
 }
 
-impl<B> NetworkBehaviour for LightClientHandler<B>
+impl<B, P> NetworkBehaviour for LightClientHandler<B, P>
 where
-	B: Block
+	B: Block,
+	P: StorageProof<HashFor<B>> + 'static,
 {
 	type ProtocolsHandler = OneShotHandler<InboundProtocol, OutboundProtocol, Event<NegotiatedSubstream>>;
 	type OutEvent = Void;
@@ -1331,7 +1334,7 @@ mod tests {
 		yamux
 	};
 	use sc_client_api::{ProofCommon, RemoteReadChildRequest, FetchChecker,
-		SimpleProof as StorageProof};
+		SimpleProof, BackendProof as StorageProof}; // TODO EMCH param tests over BackendProof
 	use sp_blockchain::{Error as ClientError};
 	use sp_core::storage::ChildInfo;
 	use std::{
@@ -1347,11 +1350,11 @@ mod tests {
 	use void::Void;
 
 	type Block = sp_runtime::generic::Block<Header<u64, BlakeTwo256>, substrate_test_runtime::Extrinsic>;
-	type Handler = LightClientHandler<Block>;
+	type Handler = LightClientHandler<Block, SimpleProof>;
 	type Swarm = libp2p::swarm::Swarm<Handler>;
 
 	fn empty_proof() -> Vec<u8> {
-		StorageProof::empty().encode()
+		SimpleProof::empty().encode()
 	}
 
 	fn make_swarm(ok: bool, ps: sc_peerset::PeersetHandle, cf: super::Config) -> Swarm {
@@ -1375,12 +1378,12 @@ mod tests {
 		_mark: std::marker::PhantomData<B>
 	}
 
-	impl<B: BlockT> light::FetchChecker<B, StorageProof> for DummyFetchChecker<B> {
+	impl<B: BlockT, P: StorageProof> light::FetchChecker<B, P> for DummyFetchChecker<B> {
 		fn check_header_proof(
 			&self,
 			_request: &RemoteHeaderRequest<B::Header>,
 			header: Option<B::Header>,
-			_remote_proof: StorageProof,
+			_remote_proof: SimpleProof,
 		) -> Result<B::Header, ClientError> {
 			match self.ok {
 				true if header.is_some() => Ok(header.unwrap()),
@@ -1391,7 +1394,7 @@ mod tests {
 		fn check_read_proof(
 			&self,
 			request: &RemoteReadRequest<B::Header>,
-			_: StorageProof,
+			_: P,
 		) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 			match self.ok {
 				true => Ok(request.keys
@@ -1407,7 +1410,7 @@ mod tests {
 		fn check_read_child_proof(
 			&self,
 			request: &RemoteReadChildRequest<B::Header>,
-			_: StorageProof,
+			_: P,
 		) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 			match self.ok {
 				true => Ok(request.keys
@@ -1423,7 +1426,7 @@ mod tests {
 		fn check_execution_proof(
 			&self,
 			_: &RemoteCallRequest<B::Header>,
-			_: StorageProof,
+			_: P,
 		) -> Result<Vec<u8>, ClientError> {
 			match self.ok {
 				true => Ok(vec![42]),
@@ -1507,7 +1510,7 @@ mod tests {
 		( ok: bool
 		, ps: sc_peerset::PeersetHandle
 		, cf: super::Config
-		) -> LightClientHandler<Block>
+		) -> LightClientHandler<Block, SimpleProof>
 	{
 		let client = Arc::new(substrate_test_runtime_client::new());
 		let checker = Arc::new(DummyFetchChecker { ok, _mark: std::marker::PhantomData });
@@ -1518,7 +1521,9 @@ mod tests {
 		ConnectedPoint::Dialer { address: Multiaddr::empty() }
 	}
 
-	fn poll(mut b: &mut LightClientHandler<Block>) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
+	fn poll(
+		mut b: &mut LightClientHandler<Block, SimpleProof>,
+	) -> Poll<NetworkBehaviourAction<OutboundProtocol, Void>> {
 		let mut p = EmptyPollParams(PeerId::random());
 		match future::poll_fn(|cx| Pin::new(&mut b).poll(cx, &mut p)).now_or_never() {
 			Some(a) => Poll::Ready(a),

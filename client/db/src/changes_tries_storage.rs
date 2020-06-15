@@ -527,14 +527,16 @@ mod tests {
 	use sc_client_api::backend::{
 		Backend as ClientBackend, NewBlockState, BlockImportOperation, PrunableStateChangesTrieStorage,
 	};
+	use sc_client_api::{TrieStateBackend, SimpleProof};
 	use sp_blockchain::HeaderBackend as BlockchainHeaderBackend;
 	use sp_core::H256;
 	use sp_runtime::testing::{Digest, Header};
 	use sp_runtime::traits::{Hash, BlakeTwo256};
 	use sp_state_machine::{ChangesTrieRootsStorage, ChangesTrieStorage};
-	use crate::Backend;
 	use crate::tests::{Block, insert_header, prepare_changes};
 	use super::*;
+
+	type Backend<Block> = crate::Backend<Block, TrieStateBackend<Block, SimpleProof>>;
 
 	fn changes(number: u64) -> Option<Vec<(Vec<u8>, Vec<u8>)>> {
 		Some(vec![(number.to_le_bytes().to_vec(), number.to_le_bytes().to_vec())])

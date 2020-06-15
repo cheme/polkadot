@@ -41,11 +41,16 @@ use sp_consensus::BlockOrigin;
 use parking_lot::RwLock;
 
 pub use sp_state_machine::backend::Backend as StateBackend;
-pub use sp_state_machine::backend::ProofRawFor;
+pub use sp_state_machine::backend::{RecordBackendFor, ProofRawFor};
 use std::marker::PhantomData;
 
 /// Extracts the state backend type for the given backend.
 pub type StateBackendFor<B, Block> = <B as Backend<Block>>::State;
+
+/// Extracts the proof raw for the given backend.
+pub type ProofRawClientFor<B, Block> = <
+	ProofFor<B, Block> as sp_state_machine::BackendProof<HashFor<Block>>
+>::ProofRaw;
 
 /// Extracts the proof for the given backend.
 pub type ProofFor<B, Block> = <

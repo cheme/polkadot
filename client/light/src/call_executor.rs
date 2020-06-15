@@ -30,11 +30,11 @@ use sp_runtime::{
 use sp_externalities::Extensions;
 use sp_state_machine::{
 	self, OverlayedChanges, ExecutionStrategy, execution_proof_check_on_proof_backend,
-	ExecutionManager, CloneableSpawn, InMemoryBackend,
+	ExecutionManager, CloneableSpawn,
 };
 use sp_state_machine::backend::{Backend as StateBackend, ProofRawFor};
 use hash_db::Hasher;
-use sp_state_machine::{SimpleProof as StorageProof, MergeableProof};
+use sp_state_machine::MergeableProof;
 
 use sp_api::{ProofRecorder, InitializeBlock, StorageTransactionCache};
 
@@ -222,20 +222,20 @@ pub fn prove_execution<Block, S, E>(
 ///
 /// Method is executed using passed header as environment' current block.
 /// Proof should include both environment preparation proof and method execution proof.
-pub fn check_execution_proof<Header, E, H>(
+pub fn check_execution_proof<P, Header, E, H>(
 	executor: &E,
 	spawn_handle: Box<dyn CloneableSpawn>,
 	request: &RemoteCallRequest<Header>,
-	remote_proof: StorageProof,
+	remote_proof: P::StorageProof,
 ) -> ClientResult<Vec<u8>>
 	where
+		P: sp_state_machine::backend::ProofCheckBackend<H>,
 		Header: HeaderT,
 		E: CodeExecutor + Clone + 'static,
 		H: Hasher,
 		H::Out: Ord + codec::Codec + 'static,
 {
-
-	check_execution_proof_with_make_header::<InMemoryBackend<H>, Header, E, H, _>(
+	check_execution_proof_with_make_header::<P, Header, E, H, _>(
 		executor,
 		spawn_handle,
 		request,

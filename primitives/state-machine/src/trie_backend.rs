@@ -26,7 +26,8 @@ use crate::backend::RecordBackendFor;
 use sp_core::storage::{ChildInfo, ChildInfoProof, ChildType};
 use codec::{Codec, Decode, Encode};
 use crate::{
-	StorageKey, StorageValue, Backend, backend::ProofCheckBackend,
+	StorageKey, StorageValue, Backend,
+	backend::{ProofCheckBackend, InstantiableStateBackend, GenesisStateBackend},
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 };
 use parking_lot::RwLock;
@@ -350,8 +351,29 @@ impl<H: Hasher, P> ProofCheckBackend<H> for crate::InMemoryProofCheckBackend<H, 
 	}
 }
 
-impl<H: Hasher, P> ProofCheckBackend<H> for crate::InMemoryFullProofCheckBackend<H, P>
+impl<S, H, P> InstantiableStateBackend<H> for TrieBackend<S, H, P>
 	where
+		H: Hasher,
+		S: TrieBackendStorage<H>,
+		H::Out: Ord + Codec,
+		P: BackendProof<H>,
+{
+	type Storage = S;
+
+	fn new(storage: Self::Storage, state: H::Out) -> Self {
+		TrieBackend::new(storage, state)
+	}
+
+	fn extract_state(self) -> (Self::Storage, H::Out) {
+		let root = self.essence().root().clone();
+		let storage = self.into_storage();
+		(storage, root)
+	}
+}
+
+impl<H, P> ProofCheckBackend<H> for crate::InMemoryFullProofCheckBackend<H, P>
+	where
+		H: Hasher,
 		H::Out: Ord + Codec,
 		P: FullBackendProof<H>,
 {
@@ -364,7 +386,27 @@ impl<H: Hasher, P> ProofCheckBackend<H> for crate::InMemoryFullProofCheckBackend
 		Ok(TrieBackend::new(mem_db, root))
 	}
 }
-	
+
+impl<H, P> GenesisStateBackend<H> for crate::InMemoryProofCheckBackend<H, P>
+	where
+		H: Hasher,
+		H::Out: Ord + Codec,
+		P: BackendProof<H>,
+{
+	fn new(input: sp_core::storage::Storage) -> Self {
+		// this is only called when genesis block is imported => shouldn't be performance bottleneck
+		let mut storage: std::collections::HashMap<Option<ChildInfo>, _> = std::collections::HashMap::new();
+		storage.insert(None, input.top);
+
+		// make sure to persist the child storage
+		for (_child_key, storage_child) in input.children_default.clone() {
+			storage.insert(Some(storage_child.child_info), storage_child.data);
+		}
+
+		Self::from(storage)
+	}
+}
+
 #[cfg(test)]
 pub mod tests {
 	use std::{collections::HashSet, iter};

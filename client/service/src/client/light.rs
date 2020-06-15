@@ -25,6 +25,7 @@ use sp_core::traits::CodeExecutor;
 use sp_runtime::BuildStorage;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use sp_blockchain::Result as ClientResult;
+use sp_state_machine::backend::GenesisStateBackend;
 use prometheus_endpoint::Registry;
 
 use super::call_executor::LocalCallExecutor;
@@ -36,18 +37,18 @@ use sc_light::{Backend, GenesisCallExecutor};
 
 
 /// Create an instance of light client.
-pub fn new_light<B, S, RA, E>(
-	backend: Arc<Backend<S, HashFor<B>>>,
+pub fn new_light<B, S, RA, E, GS>(
+	backend: Arc<Backend<S, GS>>,
 	genesis_storage: &dyn BuildStorage,
 	code_executor: E,
 	spawn_handle: Box<dyn CloneableSpawn>,
 	prometheus_registry: Option<Registry>,
 ) -> ClientResult<
 		Client<
-			Backend<S, HashFor<B>>,
+			Backend<S, GS>,
 			GenesisCallExecutor<
-				Backend<S, HashFor<B>>,
-				LocalCallExecutor<Backend<S, HashFor<B>>, E>
+				Backend<S, GS>,
+				LocalCallExecutor<Backend<S, GS>, E>
 			>,
 			B,
 			RA
@@ -57,6 +58,7 @@ pub fn new_light<B, S, RA, E>(
 		B: BlockT,
 		S: BlockchainStorage<B> + 'static,
 		E: CodeExecutor + RuntimeInfo + Clone + 'static,
+		GS: GenesisStateBackend<HashFor<B>> + Clone + Send + Sync,
 {
 	let local_executor = LocalCallExecutor::new(
 		backend.clone(),

@@ -23,7 +23,7 @@ pub mod client_ext;
 
 pub use sc_client_api::{
 	execution_extensions::{ExecutionStrategies, ExecutionExtensions},
-	ForkBlocks, BadBlocks, CloneableSpawn,
+	ForkBlocks, BadBlocks, CloneableSpawn, TrieBackendState, SimpleProof, // TODO EMCH mack this generic over proof
 };
 pub use sc_client_db::{Backend, self};
 pub use sp_consensus;
@@ -45,10 +45,14 @@ use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, BlakeTwo256};
 use sc_service::client::{LocalCallExecutor, ClientConfig};
 
+/// Test client genesis in memory backend.
+/// TODO EMCH this incloud a simple proof ref
+pub type InMemoryBackend<H> = sp_state_machine::InMemoryBackend<H>;
+
 /// Test client light database backend.
 pub type LightBackend<Block> = sc_light::Backend<
 	sc_client_db::light::LightStorage<Block>,
-	BlakeTwo256,
+	InMemoryBackend<BlakeTwo256>,
 >;
 
 /// A genesis storage initialization trait.
@@ -78,13 +82,13 @@ pub struct TestClientBuilder<Block: BlockT, Executor, Backend, G: GenesisInit> {
 }
 
 impl<Block: BlockT, Executor, G: GenesisInit> Default
-	for TestClientBuilder<Block, Executor, Backend<Block>, G> {
+	for TestClientBuilder<Block, Executor, Backend<Block, TrieBackendState<Block, SimpleProof>>, G> {
 	fn default() -> Self {
 		Self::with_default_backend()
 	}
 }
 
-impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block>, G> {
+impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block, TrieBackendState<Block, SimpleProof>>, G> {
 	/// Create new `TestClientBuilder` with default backend.
 	pub fn with_default_backend() -> Self {
 		let backend = Arc::new(Backend::new_test(std::u32::MAX, std::u64::MAX));

@@ -24,12 +24,12 @@ use futures::{channel::oneshot, prelude::*};
 use parking_lot::Mutex;
 use sc_client_api::{
 	FetchChecker, Fetcher, RemoteBodyRequest, RemoteCallRequest, RemoteChangesRequest,
-	RemoteHeaderRequest, RemoteReadChildRequest, RemoteReadRequest, SimpleProof as StorageProof,
-	ChangesProof,
+	RemoteHeaderRequest, RemoteReadChildRequest, RemoteReadRequest, SimpleProof,
+	ChangesProof, BackendProof as StorageProof,
 };
 use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
 use sp_blockchain::Error as ClientError;
-use sp_runtime::traits::{Block as BlockT, Header as HeaderT, NumberFor};
+use sp_runtime::traits::{Block as BlockT, Header as HeaderT, NumberFor, HashFor};
 use std::{collections::HashMap, pin::Pin, sync::Arc, task::Context, task::Poll};
 
 /// Implements the `Fetcher` trait of the client. Makes it possible for the light client to perform
@@ -37,9 +37,9 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, task::Context, task::Poll};
 ///
 /// This implementation stores all the requests in a queue. The network, in parallel, is then
 /// responsible for pulling elements out of that queue and fulfilling them.
-pub struct OnDemand<B: BlockT> {
+pub struct OnDemand<B: BlockT, P: StorageProof<HashFor<B>>> {
 	/// Objects that checks whether what has been retrieved is correct.
-	checker: Arc<dyn FetchChecker<B, StorageProof>>,
+	checker: Arc<dyn FetchChecker<B, P>>,
 
 	/// Queue of requests. Set to `Some` at initialization, then extracted by the network.
 	///
@@ -59,12 +59,16 @@ pub struct OnDemand<B: BlockT> {
 #[derive(Default, Clone)]
 pub struct AlwaysBadChecker;
 
-impl<Block: BlockT> FetchChecker<Block, StorageProof> for AlwaysBadChecker {
+impl<Block, Proof> FetchChecker<Block, Proof> for AlwaysBadChecker
+	where
+		Block: BlockT,
+		Proof: StorageProof<HashFor<Block>>,
+{
 	fn check_header_proof(
 		&self,
 		_request: &RemoteHeaderRequest<Block::Header>,
 		_remote_header: Option<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: SimpleProof,
 	) -> Result<Block::Header, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -72,7 +76,7 @@ impl<Block: BlockT> FetchChecker<Block, StorageProof> for AlwaysBadChecker {
 	fn check_read_proof(
 		&self,
 		_request: &RemoteReadRequest<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: Proof,
 	) -> Result<HashMap<Vec<u8>,Option<Vec<u8>>>, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -80,7 +84,7 @@ impl<Block: BlockT> FetchChecker<Block, StorageProof> for AlwaysBadChecker {
 	fn check_read_child_proof(
 		&self,
 		_request: &RemoteReadChildRequest<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: Proof,
 	) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -88,7 +92,7 @@ impl<Block: BlockT> FetchChecker<Block, StorageProof> for AlwaysBadChecker {
 	fn check_execution_proof(
 		&self,
 		_request: &RemoteCallRequest<Block::Header>,
-		_remote_proof: StorageProof,
+		_remote_proof: Proof,
 	) -> Result<Vec<u8>, ClientError> {
 		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
@@ -110,12 +114,14 @@ impl<Block: BlockT> FetchChecker<Block, StorageProof> for AlwaysBadChecker {
 	}
 }
 
-impl<B: BlockT> OnDemand<B>
+impl<B, P> OnDemand<B, P>
 where
+	B: BlockT,
 	B::Header: HeaderT,
+	P: StorageProof<HashFor<B>>,
 {
 	/// Creates new on-demand service.
-	pub fn new(checker: Arc<dyn FetchChecker<B, StorageProof>>) -> Self {
+	pub fn new(checker: Arc<dyn FetchChecker<B, P>>) -> Self {
 		let (requests_send, requests_queue) = tracing_unbounded("mpsc_ondemand");
 		let requests_queue = Mutex::new(Some(requests_queue));
 
@@ -127,7 +133,7 @@ where
 	}
 
 	/// Get checker reference.
-	pub fn checker(&self) -> &Arc<dyn FetchChecker<B, StorageProof>> {
+	pub fn checker(&self) -> &Arc<dyn FetchChecker<B, P>> {
 		&self.checker
 	}
 
@@ -145,10 +151,11 @@ where
 	}
 }
 
-impl<B> Fetcher<B> for OnDemand<B>
+impl<B, P> Fetcher<B> for OnDemand<B, P>
 where
 	B: BlockT,
 	B::Header: HeaderT,
+	P: StorageProof<HashFor<B>>,
 {
 	type RemoteHeaderResult = RemoteResponse<B::Header>;
 	type RemoteReadResult = RemoteResponse<HashMap<Vec<u8>, Option<Vec<u8>>>>;

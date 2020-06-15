@@ -23,10 +23,10 @@ use sp_runtime::{
 };
 use crate::{SimpleProof, ChangesProof};
 use sp_storage::{ChildInfo, StorageKey, PrefixedStorageKey};
-use sp_trie::BackendProof;
+use sp_trie::BackendProof as StorageProof;
 
 /// Interface for providing block proving utilities.
-pub trait ProofProvider<Block: BlockT, Proof: BackendProof<HashFor<Block>>> {
+pub trait ProofProvider<Block: BlockT, Proof: StorageProof<HashFor<Block>>> {
 	/// Reads storage value at a given block + key, returning read proof.
 	fn read_proof(
 		&self,

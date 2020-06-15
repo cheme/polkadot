@@ -29,19 +29,16 @@ pub use self::generic::{
 	FromBlock, RemoteReadChildRequest, Roles,
 };
 
-/// Forme storage proof type, to be replace by
-/// `use sc_client_api::StorageProof`;
-type StorageProof = Vec<Vec<u8>>;
-
 /// A unique ID of a request.
 pub type RequestId = u64;
 
 /// Type alias for using the message type using block type parameters.
-pub type Message<B> = generic::Message<
+pub type Message<B, P> = generic::Message<
 	<B as BlockT>::Header,
 	<B as BlockT>::Hash,
 	<<B as BlockT>::Header as HeaderT>::Number,
 	<B as BlockT>::Extrinsic,
+	P,
 >;
 
 /// Type alias for using the status type using block type parameters.
@@ -124,20 +121,20 @@ pub enum BlockState {
 
 /// Remote call response.
 #[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
-pub struct RemoteCallResponse {
+pub struct RemoteCallResponse<Proof> {
 	/// Id of a request this response was made for.
 	pub id: RequestId,
 	/// Execution proof.
-	pub proof: StorageProof,
+	pub proof: Proof,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
 /// Remote read response.
-pub struct RemoteReadResponse {
+pub struct RemoteReadResponse<Proof> {
 	/// Id of a request this response was made for.
 	pub id: RequestId,
 	/// Read proof.
-	pub proof: StorageProof,
+	pub proof: Proof,
 }
 
 /// Generic types.
@@ -145,10 +142,11 @@ pub mod generic {
 	use bitflags::bitflags;
 	use codec::{Encode, Decode, Input, Output};
 	use sp_runtime::Justification;
+	use sc_client_api::SimpleProof;
 	use super::{
 		RemoteReadResponse, Transactions, Direction,
 		RequestId, BlockAttributes, RemoteCallResponse, ConsensusEngineId,
-		BlockState, StorageProof,
+		BlockState,
 	};
 
 	bitflags! {
@@ -244,7 +242,7 @@ pub mod generic {
 
 	/// A network message.
 	#[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
-	pub enum Message<Header, Hash, Number, Extrinsic> {
+	pub enum Message<Header, Hash, Number, Extrinsic, Proof> {
 		/// Status packet.
 		Status(Status<Hash, Number>),
 		/// Block request.
@@ -260,11 +258,11 @@ pub mod generic {
 		/// Remote method call request.
 		RemoteCallRequest(RemoteCallRequest<Hash>),
 		/// Remote method call response.
-		RemoteCallResponse(RemoteCallResponse),
+		RemoteCallResponse(RemoteCallResponse<Proof>),
 		/// Remote storage read request.
 		RemoteReadRequest(RemoteReadRequest<Hash>),
 		/// Remote storage read response.
-		RemoteReadResponse(RemoteReadResponse),
+		RemoteReadResponse(RemoteReadResponse<Proof>),
 		/// Remote header request.
 		RemoteHeaderRequest(RemoteHeaderRequest<Number>),
 		/// Remote header response.
@@ -283,7 +281,7 @@ pub mod generic {
 		ConsensusBatch(Vec<ConsensusMessage>),
 	}
 
-	impl<Header, Hash, Number, Extrinsic> Message<Header, Hash, Number, Extrinsic> {
+	impl<Header, Hash, Number, Extrinsic, Proof> Message<Header, Hash, Number, Extrinsic, Proof> {
 		/// Message id useful for logging.
 		pub fn id(&self) -> &'static str {
 			match self {
@@ -503,7 +501,7 @@ pub mod generic {
 		/// Header. None if proof generation has failed (e.g. header is unknown).
 		pub header: Option<Header>,
 		/// Header proof.
-		pub proof: StorageProof,
+		pub proof: SimpleProof,
 	}
 
 	#[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
@@ -539,7 +537,7 @@ pub mod generic {
 		/// Changes tries roots missing on the requester' node.
 		pub roots: Vec<(N, H)>,
 		/// Missing changes tries roots proof.
-		pub roots_proof: StorageProof,
+		pub roots_proof: SimpleProof,
 	}
 
 	#[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
