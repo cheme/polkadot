@@ -18,7 +18,7 @@
 
 use parity_scale_codec::{Encode, Decode, Joiner};
 use sc_executor::native_executor_instance;
-use sp_state_machine::{StateMachine, OverlayedChanges, ExecutionStrategy, InMemoryBackend};
+use sp_state_machine::{StateMachine, OverlayedChanges, ExecutionStrategy};
 use substrate_test_runtime_client::{
 	prelude::*,
 	runtime::{
@@ -57,6 +57,7 @@ mod light;
 mod db;
 
 type TrieStateBackend = sc_client_api::TrieStateBackend<Block, SimpleProof>;
+type InMemoryBackend = sp_state_machine::InMemoryBackend<BlakeTwo256, sc_client_api::SimpleProof>;
 
 native_executor_instance!(
 	Executor,
@@ -144,7 +145,7 @@ pub fn prepare_client_with_key_changes() -> (
 }
 
 fn construct_block(
-	backend: &InMemoryBackend<BlakeTwo256, SimpleProof>,
+	backend: &InMemoryBackend,
 	number: BlockNumber,
 	parent_hash: Hash,
 	state_root: Hash,
@@ -219,7 +220,7 @@ fn construct_block(
 	(vec![].and(&Block { header, extrinsics: transactions }), hash)
 }
 
-fn block1(genesis_hash: Hash, backend: &InMemoryBackend<BlakeTwo256, SimpleProof>) -> (Vec<u8>, Hash) {
+fn block1(genesis_hash: Hash, backend: &InMemoryBackend) -> (Vec<u8>, Hash) {
 	construct_block(
 		backend,
 		1,

@@ -29,8 +29,7 @@ use sp_core::ChangesTrieConfiguration;
 use sp_core::storage::{well_known_keys, ChildInfo};
 use sp_core::offchain::storage::InMemOffchainStorage;
 use sp_state_machine::{
-	ChangesTrieTransaction,
-	StorageCollection, ChildStorageCollection,
+	StorageCollection, ChildStorageCollection, ChangesTrieTransaction,
 };
 use sp_state_machine::backend::{Backend as StateBackend, RecordBackendFor,
 	GenesisStateBackend};

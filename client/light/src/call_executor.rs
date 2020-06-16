@@ -117,7 +117,9 @@ impl<Block, B, Local> CallExecutor<Block> for
 		initialize_block: InitializeBlock<'a, Block>,
 		_manager: ExecutionManager<EM>,
 		native_call: Option<NC>,
-		_recorder: Option<&RefCell<ProofRecorder<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, Block>>>,
+		_recorder: Option<&RefCell<
+			ProofRecorder<<Self::Backend as sc_client_api::backend::Backend<Block>>::State, Block>
+		>>,
 		extensions: Option<Extensions>,
 	) -> ClientResult<NativeOrEncoded<R>> where ExecutionManager<EM>: Clone {
 		// there's no actual way/need to specify native/wasm execution strategy on light node
