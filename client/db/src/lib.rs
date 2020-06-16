@@ -790,7 +790,7 @@ impl<T: Clone> FrozenForDuration<T> {
 ///
 /// Disk backend keeps data in a key-value store. In archive mode, trie nodes are kept from all blocks.
 /// Otherwise, trie nodes are kept only from some recent blocks.
-pub struct Backend<Block: BlockT, State> {
+pub struct Backend<Block: BlockT, State, FState> {
 	storage: Arc<StorageDb<Block>>,
 	offchain_storage: offchain::LocalStorage,
 	changes_tries_storage: DbChangesTrieStorage<Block>,
@@ -801,14 +801,16 @@ pub struct Backend<Block: BlockT, State> {
 	is_archive: bool,
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
 	state_usage: Arc<StateUsageStats>,
-	_ph: PhantomData<fn () -> State>,
+	_ph: PhantomData<fn () -> (State, FState)>,
 }
 
-impl<Block, State> Backend<Block, State>
+impl<Block, State, FState> Backend<Block, State, FState>
 	where
 		Block: BlockT,
 		State: InstantiableStateBackend<HashFor<Block>>,
 		State::Transaction: HashDBNodesTransaction<Vec<u8>, DBValue>,
+		FState: InstantiableStateBackend<HashFor<Block>>,
+		FState::Transaction: HashDBNodesTransaction<Vec<u8>, DBValue>,
 {
 	/// Create a new instance of database backend.
 	///
@@ -1352,7 +1354,7 @@ fn apply_state_commit(transaction: &mut Transaction<DbHash>, commit: sc_state_db
 	}
 }
 
-impl<Block, State> sc_client_api::backend::AuxStore for Backend<Block, State> where Block: BlockT {
+impl<Block, State, FState> sc_client_api::backend::AuxStore for Backend<Block, State, FState> where Block: BlockT {
 	fn insert_aux<
 		'a,
 		'b: 'a,
@@ -1376,16 +1378,18 @@ impl<Block, State> sc_client_api::backend::AuxStore for Backend<Block, State> wh
 	}
 }
 
-impl<Block, State> sc_client_api::backend::Backend<Block> for Backend<Block, State>
+impl<Block, State, FState> sc_client_api::backend::Backend<Block> for Backend<Block, State, FState>
 	where
 		Block: BlockT,
 		State: InstantiableStateBackend<HashFor<Block>, Storage = DbStorage<Block>> + Send,
 		State::Transaction: HashDBNodesTransaction<Vec<u8>, DBValue>,
+		FState: InstantiableStateBackend<HashFor<Block>, Storage = DbStorage<Block>> + Send,
+		FState::Transaction: HashDBNodesTransaction<Vec<u8>, DBValue>,
 {
-
 	type BlockImportOperation = BlockImportOperation<Block, State>;
 	type Blockchain = BlockchainDb<Block>;
 	type State = SyncingCachingState<RefTrackingState<Block, State>, Block>;
+	type FState = FState;
 	type OffchainStorage = offchain::LocalStorage;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
@@ -1658,6 +1662,53 @@ impl<Block, State> sc_client_api::backend::Backend<Block> for Backend<Block, Sta
 		}
 	}
 
+	fn finality_state_at(&self, block: BlockId<Block>) -> ClientResult<Self::FState> {
+		use sc_client_api::blockchain::HeaderBackend as BcHeaderBackend;
+
+		// special case for genesis initialization
+		match block {
+			BlockId::Hash(h) if h == Default::default() => {
+				let genesis_storage = DbGenesisStorage::<Block>::new();
+				let root = genesis_storage.0.clone();
+				let db_state = FState::new(Arc::new(genesis_storage), root);
+				return Ok(db_state);
+			},
+			_ => {}
+		}
+
+		let hash = match block {
+			BlockId::Hash(h) => h,
+			BlockId::Number(n) => self.blockchain.hash(n)?.ok_or_else(||
+				sp_blockchain::Error::UnknownBlock(format!("Unknown block number {}", n))
+			)?,
+		};
+
+		match self.blockchain.header_metadata(hash) {
+			Ok(ref hdr) => {
+				if !self.have_state_at(&hash, hdr.number) {
+					return Err(
+						sp_blockchain::Error::UnknownBlock(
+							format!("State already discarded for {:?}", block)
+						)
+					)
+				}
+				if let Ok(()) = self.storage.state_db.pin(&hash) {
+					let root = hdr.state_root;
+					let db_state = FState::new(self.storage.clone(), root);
+					Ok(db_state)
+				} else {
+					Err(
+						sp_blockchain::Error::UnknownBlock(
+							format!("State already discarded for {:?}", block)
+						)
+					)
+				}
+			},
+			Err(e) => Err(e),
+		}
+	}
+
+
 	fn have_state_at(&self, hash: &Block::Hash, number: NumberFor<Block>) -> bool {
 		if self.is_archive {
 			match self.blockchain.header_metadata(hash.clone()) {
@@ -1680,11 +1731,13 @@ impl<Block, State> sc_client_api::backend::Backend<Block> for Backend<Block, Sta
 	}
 }
 
-impl<Block, State> sc_client_api::backend::LocalBackend<Block> for Backend<Block, State>
+impl<Block, State, FState> sc_client_api::backend::LocalBackend<Block> for Backend<Block, State, FState>
 	where
 		Block: BlockT,
 		State: InstantiableStateBackend<HashFor<Block>, Storage = DbStorage<Block>> + Send,
 		State::Transaction: HashDBNodesTransaction<Vec<u8>, DBValue>,
+		FState: InstantiableStateBackend<HashFor<Block>, Storage = DbStorage<Block>> + Send,
+		FState::Transaction: HashDBNodesTransaction<Vec<u8>, DBValue>,
 { }
 
 #[cfg(test)]
@@ -1704,6 +1757,17 @@ pub(crate) mod tests {
 	pub(crate) type Block = RawBlock<ExtrinsicWrapper<u64>>;
 
 	type TrieStateBackend<Block> = sc_client_api::TrieStateBackend<Block, sc_client_api::SimpleProof>;
+	type Backend = super::Backend<
+		Block,
+		TrieStateBackend<Block>,
+		TrieStateBackend<Block>,
+	>;
+	type RuntimeBBackend = super::Backend<
+		substrate_test_runtime_client::runtime::Block,
+		TrieStateBackend<Block>,
+		TrieStateBackend<Block>,
+	>;
+
 
 	pub fn prepare_changes(changes: Vec<(Vec<u8>, Vec<u8>)>) -> (H256, MemoryDB<BlakeTwo256>) {
 		let mut changes_root = H256::default();
@@ -1722,7 +1786,7 @@ pub(crate) mod tests {
 	}
 
 	pub fn insert_header(
-		backend: &Backend<Block, TrieStateBackend<Block>>,
+		backend: &Backend,
 		number: u64,
 		parent_hash: H256,
 		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
@@ -1763,7 +1827,7 @@ pub(crate) mod tests {
 	#[test]
 	fn block_hash_inserted_correctly() {
 		let backing = {
-			let db = Backend::<Block, TrieStateBackend<Block>>::new_test(1, 0);
+			let db = Backend::new_test(1, 0);
 			for i in 0..10 {
 				assert!(db.blockchain().hash(i).unwrap().is_none());
 
@@ -1802,7 +1866,7 @@ pub(crate) mod tests {
 			db.storage.db.clone()
 		};
 
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new(DatabaseSettings {
+		let backend = Backend::new(DatabaseSettings {
 			state_cache_size: 16777216,
 			state_cache_child_ratio: Some((50, 100)),
 			pruning: PruningMode::keep_blocks(1),
@@ -1816,7 +1880,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn set_state_data() {
-		let db = Backend::<Block, TrieStateBackend<Block>>::new_test(2, 0);
+		let db = Backend::new_test(2, 0);
 		let hash = {
 			let mut op = db.begin_operation().unwrap();
 			db.begin_state_operation(&mut op, BlockId::Hash(Default::default())).unwrap();
@@ -1906,7 +1970,7 @@ pub(crate) mod tests {
 	fn delete_only_when_negative_rc() {
 		let _ = ::env_logger::try_init();
 		let key;
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1, 0);
+		let backend = Backend::new_test(1, 0);
 
 		let hash = {
 			let mut op = backend.begin_operation().unwrap();
@@ -2062,7 +2126,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn tree_route_works() {
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1000, 100);
+		let backend = Backend::new_test(1000, 100);
 		let blockchain = backend.blockchain();
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
@@ -2110,7 +2174,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn tree_route_child() {
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1000, 100);
+		let backend = Backend::new_test(1000, 100);
 		let blockchain = backend.blockchain();
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
@@ -2127,7 +2191,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn lowest_common_ancestor_works() {
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(1000, 100);
+		let backend = Backend::new_test(1000, 100);
 		let blockchain = backend.blockchain();
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
@@ -2192,7 +2256,7 @@ pub(crate) mod tests {
 		// triggering the issue being eviction of a previously fetched record
 		// from the cache, therefore this test is dependent on the LRU cache
 		// size for header metadata, which is currently set to 5000 elements.
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(10000, 10000);
+		let backend = Backend::new_test(10000, 10000);
 		let blockchain = backend.blockchain();
 
 		let genesis = insert_header(&backend, 0, Default::default(), None, Default::default());
@@ -2219,28 +2283,25 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_leaves_with_complex_block_tree() {
-		use substrate_test_runtime_client::runtime::Block;
-		let backend: Arc<Backend<Block, TrieStateBackend<Block>>> = Arc::new(Backend::new_test(20, 20));
+		let backend: Arc<RuntimeBBackend> = Arc::new(RuntimeBBackend::new_test(20, 20));
 		substrate_test_runtime_client::trait_tests::test_leaves_for_backend(backend);
 	}
 
 	#[test]
 	fn test_children_with_complex_block_tree() {
-		use substrate_test_runtime_client::runtime::Block;
-		let backend: Arc<Backend<Block, TrieStateBackend<Block>>> = Arc::new(Backend::new_test(20, 20));
+		let backend: Arc<RuntimeBBackend> = Arc::new(RuntimeBBackend::new_test(20, 20));
 		substrate_test_runtime_client::trait_tests::test_children_for_backend(backend);
 	}
 
 	#[test]
 	fn test_blockchain_query_by_number_gets_canonical() {
-		use substrate_test_runtime_client::runtime::Block;
-		let backend: Arc<Backend<Block, TrieStateBackend<Block>>> = Arc::new(Backend::new_test(20, 20));
+		let backend: Arc<RuntimeBBackend> = Arc::new(RuntimeBBackend::new_test(20, 20));
 		substrate_test_runtime_client::trait_tests::test_blockchain_query_by_number_gets_canonical(backend);
 	}
 
 	#[test]
 	fn test_leaves_pruned_on_finality() {
-		let backend: Backend<Block, TrieStateBackend<Block>> = Backend::new_test(10, 10);
+		let backend: Backend = Backend::new_test(10, 10);
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
 		let block1_a = insert_header(&backend, 1, block0, None, Default::default());
@@ -2264,8 +2325,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_aux() {
-		use substrate_test_runtime_client::runtime::Block;
-		let backend: Backend<Block, TrieStateBackend<Block>> = Backend::new_test(0, 0);
+		let backend: RuntimeBBackend = RuntimeBBackend::new_test(0, 0);
 		assert!(backend.get_aux(b"test").unwrap().is_none());
 		backend.insert_aux(&[(&b"test"[..], &b"hello"[..])], &[]).unwrap();
 		assert_eq!(b"hello", &backend.get_aux(b"test").unwrap().unwrap()[..]);
@@ -2277,7 +2337,7 @@ pub(crate) mod tests {
 	fn test_finalize_block_with_justification() {
 		use sc_client_api::blockchain::{Backend as BlockChainBackend};
 
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(10, 10);
+		let backend = Backend::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let _ = insert_header(&backend, 1, block0, None, Default::default());
@@ -2293,7 +2353,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_finalize_multiple_blocks_in_single_op() {
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(10, 10);
+		let backend = Backend::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let block1 = insert_header(&backend, 1, block0, None, Default::default());
@@ -2318,7 +2378,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_finalize_non_sequential() {
-		let backend = Backend::<Block, TrieStateBackend<Block>>::new_test(10, 10);
+		let backend = Backend::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let block1 = insert_header(&backend, 1, block0, None, Default::default());

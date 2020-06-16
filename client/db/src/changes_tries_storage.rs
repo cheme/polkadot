@@ -536,7 +536,11 @@ mod tests {
 	use crate::tests::{Block, insert_header, prepare_changes};
 	use super::*;
 
-	type Backend<Block> = crate::Backend<Block, TrieStateBackend<Block, SimpleProof>>;
+	type Backend<Block> = crate::Backend<
+		Block,
+		TrieStateBackend<Block, SimpleProof>,
+		TrieStateBackend<Block, SimpleProof>,
+	>;
 
 	fn changes(number: u64) -> Option<Vec<(Vec<u8>, Vec<u8>)>> {
 		Some(vec![(number.to_le_bytes().to_vec(), number.to_le_bytes().to_vec())])

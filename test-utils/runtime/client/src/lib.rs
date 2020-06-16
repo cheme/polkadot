@@ -66,6 +66,7 @@ sc_executor::native_executor_instance! {
 pub type Backend = substrate_test_client::Backend<
 	substrate_test_runtime::Block,
 	substrate_test_client::TrieBackendState<substrate_test_runtime::Block, substrate_test_client::SimpleProof>, // TODO EMCH generic test? 
+	substrate_test_client::TrieBackendState<substrate_test_runtime::Block, substrate_test_client::SimpleProof>,
 >;
 
 /// Test client executor.
@@ -244,6 +245,8 @@ impl<B> TestClientBuilderExt<B> for TestClientBuilder<
 	B: sc_client_api::backend::Backend<substrate_test_runtime::Block> + 'static,
 	// Rust bug: https://github.com/rust-lang/rust/issues/24159
 	<B as sc_client_api::backend::Backend<substrate_test_runtime::Block>>::State:
+		sp_api::StateBackend<HashFor<substrate_test_runtime::Block>>,
+	<B as sc_client_api::backend::Backend<substrate_test_runtime::Block>>::FState:
 		sp_api::StateBackend<HashFor<substrate_test_runtime::Block>>,
 {
 	fn genesis_init_mut(&mut self) -> &mut GenesisParameters {

@@ -45,6 +45,7 @@ use wasm_timer::Instant;
 use std::task::{Poll, Context};
 use parking_lot::Mutex;
 
+pub use client::FinalityProofClient;
 use client::Client;
 use futures::{
 	Future, FutureExt, Stream, StreamExt,

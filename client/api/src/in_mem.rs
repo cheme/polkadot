@@ -618,6 +618,7 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 	type BlockImportOperation = BlockImportOperation<Block>;
 	type Blockchain = Blockchain<Block>;
 	type State = InMemoryBackend<HashFor<Block>>;
+	type FState = InMemoryBackend<HashFor<Block>>;
 	type OffchainStorage = OffchainStorage;
 
 	fn begin_operation(&self) -> sp_blockchain::Result<Self::BlockImportOperation> {
@@ -712,6 +713,10 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 			Some(state) => Ok(state),
 			None => Err(sp_blockchain::Error::UnknownBlock(format!("{}", block))),
 		}
+	}
+
+	fn finality_state_at(&self, block: BlockId<Block>) -> sp_blockchain::Result<Self::FState> {
+		self.state_at(block)
 	}
 
 	fn revert(

@@ -21,8 +21,12 @@ use node_executor::Executor;
 use node_runtime::{Block, RuntimeApi};
 use sc_cli::{Result, SubstrateCli};
 
+type CompactProof = sc_client_api::CompactProof<sc_client_api::Layout<sc_client_api::HashFor<Block>>>;
 /// State backend type
-pub type State = sc_client_api::TrieStateBackend<Block, sc_client_api::SimpleProof>;
+pub type State = sc_client_api::TrieStateBackend<Block, CompactProof>;
+
+/// State backend type for finality proof.
+pub type FState = sc_client_api::TrieStateBackend<Block, sc_client_api::SimpleProof>;
 
 impl SubstrateCli for Cli {
 	fn impl_name() -> &'static str {
@@ -82,7 +86,7 @@ pub fn run() -> Result<()> {
 		Some(Subcommand::Inspect(cmd)) => {
 			let runner = cli.create_runner(cmd)?;
 
-			runner.sync_run(|config| cmd.run::<Block, RuntimeApi, Executor, State>(config))
+			runner.sync_run(|config| cmd.run::<Block, RuntimeApi, Executor, State, FState>(config))
 		}
 		Some(Subcommand::Benchmark(cmd)) => {
 			if cfg!(feature = "runtime-benchmarks") {

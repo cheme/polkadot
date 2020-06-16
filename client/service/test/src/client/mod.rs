@@ -1274,7 +1274,7 @@ fn doesnt_import_blocks_that_revert_finality() {
 
 	// we need to run with archive pruning to avoid pruning non-canonical
 	// states
-	let backend = Arc::new(Backend::<_, TrieStateBackend>::new(
+	let backend = Arc::new(Backend::<_, TrieStateBackend, TrieStateBackend>::new(
 		DatabaseSettings {
 			state_cache_size: 1 << 20,
 			state_cache_child_ratio: None,
@@ -1475,7 +1475,7 @@ fn returns_status_for_pruned_blocks() {
 
 	// set to prune after 1 block
 	// states
-	let backend = Arc::new(Backend::<_, TrieStateBackend>::new(
+	let backend = Arc::new(Backend::<_, TrieStateBackend, TrieStateBackend>::new(
 		DatabaseSettings {
 			state_cache_size: 1 << 20,
 			state_cache_child_ratio: None,

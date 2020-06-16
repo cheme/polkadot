@@ -156,19 +156,19 @@ impl<R> From<R> for NoopRpcExtensionBuilder<R> where
 
 
 /// Full client type.
-pub type TFullClient<TBl, TRtApi, TExecDisp, TSt> = Client<
-	TFullBackend<TBl, TSt>,
-	TFullCallExecutor<TBl, TExecDisp, TSt>,
+pub type TFullClient<TBl, TRtApi, TExecDisp, TSt, TFSt> = Client<
+	TFullBackend<TBl, TSt, TFSt>,
+	TFullCallExecutor<TBl, TExecDisp, TSt, TFSt>,
 	TBl,
 	TRtApi,
 >;
 
 /// Full client backend type.
-pub type TFullBackend<TBl, TSt> = sc_client_db::Backend<TBl, TSt>;
+pub type TFullBackend<TBl, TSt, TFSt> = sc_client_db::Backend<TBl, TSt, TFSt>;
 
 /// Full client call executor type.
-pub type TFullCallExecutor<TBl, TExecDisp, TSt> = crate::client::LocalCallExecutor<
-	sc_client_db::Backend<TBl, TSt>,
+pub type TFullCallExecutor<TBl, TExecDisp, TSt, TFSt> = crate::client::LocalCallExecutor<
+	sc_client_db::Backend<TBl, TSt, TFSt>,
 	NativeExecutor<TExecDisp>,
 >;
 
@@ -201,32 +201,36 @@ pub type TLightCallExecutor<TBl, TExecDisp, TGs> = sc_light::GenesisCallExecutor
 	>,
 >;
 
-type TFullParts<TBl, TRtApi, TExecDisp, TSt> = (
-	TFullClient<TBl, TRtApi, TExecDisp, TSt>,
-	Arc<TFullBackend<TBl, TSt>>,
+type TFullParts<TBl, TRtApi, TExecDisp, TSt, TFSt> = (
+	TFullClient<TBl, TRtApi, TExecDisp, TSt, TFSt>,
+	Arc<TFullBackend<TBl, TSt, TFSt>>,
 	Arc<RwLock<sc_keystore::Store>>,
 	TaskManager,
 );
 
 /// Creates a new full client for the given config.
-pub fn new_full_client<TBl, TRtApi, TExecDisp, TSt>(
+pub fn new_full_client<TBl, TRtApi, TExecDisp, TSt, TFSt>(
 	config: &Configuration,
-) -> Result<TFullClient<TBl, TRtApi, TExecDisp, TSt>, Error> where
+) -> Result<TFullClient<TBl, TRtApi, TExecDisp, TSt, TFSt>, Error> where
 	TBl: BlockT,
 	TExecDisp: NativeExecutionDispatch + 'static,
 	TSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
 	TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
+	TFSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
+	TFSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 {
 	new_full_parts(config).map(|parts| parts.0)
 }
 
-fn new_full_parts<TBl, TRtApi, TExecDisp, TSt>(
+fn new_full_parts<TBl, TRtApi, TExecDisp, TSt, TFSt>(
 	config: &Configuration,
-) -> Result<TFullParts<TBl, TRtApi, TExecDisp, TSt>,	Error> where
+) -> Result<TFullParts<TBl, TRtApi, TExecDisp, TSt, TFSt>,	Error> where
 	TBl: BlockT,
 	TExecDisp: NativeExecutionDispatch + 'static,
 	TSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
 	TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
+	TFSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
+	TFSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 {
 	let keystore = match &config.keystore {
 		KeystoreConfig::Path { path, password } => Keystore::open(
@@ -291,7 +295,7 @@ fn new_full_parts<TBl, TRtApi, TExecDisp, TSt>(
 
 
 /// Create an instance of db-backed client.
-pub fn new_client<E, Block, RA, TSt>(
+pub fn new_client<E, Block, RA, TSt, TFSt>(
 	settings: DatabaseSettings,
 	executor: E,
 	genesis_storage: &dyn BuildStorage,
@@ -303,12 +307,12 @@ pub fn new_client<E, Block, RA, TSt>(
 	config: ClientConfig,
 ) -> Result<(
 	crate::client::Client<
-		Backend<Block, TSt>,
-		crate::client::LocalCallExecutor<Backend<Block, TSt>, E>,
+		Backend<Block, TSt, TFSt>,
+		crate::client::LocalCallExecutor<Backend<Block, TSt, TFSt>, E>,
 		Block,
 		RA,
 	>,
-	Arc<Backend<Block, TSt>>,
+	Arc<Backend<Block, TSt, TFSt>>,
 ),
 	sp_blockchain::Error,
 >
@@ -317,10 +321,12 @@ pub fn new_client<E, Block, RA, TSt>(
 		E: CodeExecutor + RuntimeInfo,
 		TSt: InstantiableStateBackend<HashFor<Block>, Storage = DbStorage<Block>> + Send,
 		TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
+		TFSt: InstantiableStateBackend<HashFor<Block>, Storage = DbStorage<Block>> + Send,
+		TFSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 {
 	const CANONICALIZATION_DELAY: u64 = 4096;
 
-	let backend = Arc::new(Backend::<_, TSt>::new(settings, CANONICALIZATION_DELAY)?);
+	let backend = Arc::new(Backend::<_, TSt, TFSt>::new(settings, CANONICALIZATION_DELAY)?);
 	let executor = crate::client::LocalCallExecutor::new(backend.clone(), executor, spawn_handle, config.clone());
 	Ok((
 		crate::client::Client::new(
@@ -339,12 +345,12 @@ pub fn new_client<E, Block, RA, TSt>(
 
 impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 	/// Start the service builder with a configuration.
-	pub fn new_full<TBl, TRtApi, TExecDisp, TSt>(
+	pub fn new_full<TBl, TRtApi, TExecDisp, TSt, TFSt>(
 		config: Configuration,
 	) -> Result<ServiceBuilder<
 		TBl,
 		TRtApi,
-		TFullClient<TBl, TRtApi, TExecDisp, TSt>,
+		TFullClient<TBl, TRtApi, TExecDisp, TSt, TFSt>,
 		Arc<OnDemand<TBl, TSt::StorageProof>>,
 		(),
 		(),
@@ -352,13 +358,15 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 		Arc<dyn FinalityProofProvider<TBl>>,
 		(),
 		(),
-		TFullBackend<TBl, TSt>,
+		TFullBackend<TBl, TSt, TFSt>,
 	>, Error> 
 		where
 			TBl: BlockT,
 			TExecDisp: NativeExecutionDispatch + 'static,
 			TSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
 			TSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
+			TFSt: InstantiableStateBackend<HashFor<TBl>, Storage = DbStorage<TBl>> + Send,
+			TFSt::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 	{
 		let (client, backend, keystore, task_manager) = new_full_parts(&config)?;
 

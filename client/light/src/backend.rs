@@ -124,6 +124,7 @@ impl<S, Block, GS> ClientBackend<Block> for Backend<S, GS>
 	type BlockImportOperation = ImportOperation<Block, S, GS>;
 	type Blockchain = Blockchain<S>;
 	type State = GenesisOrUnavailableState<GS>;
+	type FState = GenesisOrUnavailableState<GS>;
 	type OffchainStorage = InMemOffchainStorage;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
@@ -227,6 +228,10 @@ impl<S, Block, GS> ClientBackend<Block> for Backend<S, GS>
 		// else return unavailable state. We do not return error here, because error
 		// would mean that we do not know this state at all. But we know that it exists
 		Ok(GenesisOrUnavailableState::Unavailable)
+	}
+
+	fn finality_state_at(&self, block: BlockId<Block>) -> ClientResult<Self::State> {
+		self.state_at(block)
 	}
 
 	fn revert(

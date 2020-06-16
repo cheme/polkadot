@@ -81,13 +81,21 @@ pub struct TestClientBuilder<Block: BlockT, Executor, Backend, G: GenesisInit> {
 }
 
 impl<Block: BlockT, Executor, G: GenesisInit> Default
-	for TestClientBuilder<Block, Executor, Backend<Block, TrieBackendState<Block, SimpleProof>>, G> {
+	for TestClientBuilder<Block, Executor, Backend<
+		Block,
+		TrieBackendState<Block, SimpleProof>,
+		TrieBackendState<Block, SimpleProof>,
+	>, G> {
 	fn default() -> Self {
 		Self::with_default_backend()
 	}
 }
 
-impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block, TrieBackendState<Block, SimpleProof>>, G> {
+impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<
+	Block,
+	TrieBackendState<Block, SimpleProof>,
+	TrieBackendState<Block, SimpleProof>,
+>, G> {
 	/// Create new `TestClientBuilder` with default backend.
 	pub fn with_default_backend() -> Self {
 		let backend = Arc::new(Backend::new_test(std::u32::MAX, std::u64::MAX));

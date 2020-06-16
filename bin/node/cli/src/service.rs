@@ -46,10 +46,12 @@ macro_rules! new_full_start {
 		let mut rpc_setup = None;
 		let inherent_data_providers = sp_inherents::InherentDataProviders::new();
 
+		type CompactProof = sc_client_api::CompactProof<sc_client_api::Layout<sc_client_api::HashFor<node_primitives::Block>>>;
 		let builder = sc_service::ServiceBuilder::new_full::<
 			node_primitives::Block,
 			node_runtime::RuntimeApi,
 			node_executor::Executor,
+			sc_client_api::TrieStateBackend<node_primitives::Block, CompactProof>,
 			sc_client_api::TrieStateBackend<node_primitives::Block, sc_client_api::SimpleProof>,
 		>($config)?
 			.with_select_chain(|_config, backend| {
@@ -179,7 +181,7 @@ macro_rules! new_full {
 		let service = builder
 			.with_finality_proof_provider(|client, backend| {
 				// GenesisAuthoritySetProvider is implemented for StorageAndProofProvider
-				let provider = client as Arc<dyn grandpa::StorageAndProofProvider<_, _>>;
+				let provider = Arc::new(sc_service::FinalityProofClient(client)) as Arc<dyn grandpa::StorageAndProofProvider<_, _>>;
 				Ok(Arc::new(grandpa::FinalityProofProvider::new(backend, provider)) as _)
 			})?
 			.build_full()?;

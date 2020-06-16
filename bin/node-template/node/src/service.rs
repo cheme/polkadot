@@ -40,6 +40,10 @@ macro_rules! new_full_start {
 				node_template_runtime::opaque::Block,
 				sc_client_api::SimpleProof,
 			>,
+			sc_client_api::TrieStateBackend<
+				node_template_runtime::opaque::Block,
+				sc_client_api::SimpleProof,
+			>,
 		>($config)?
 			.with_select_chain(|_config, backend| {
 				Ok(sc_consensus::LongestChain::new(backend.clone()))

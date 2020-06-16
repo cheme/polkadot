@@ -52,6 +52,8 @@ impl<'a, A, B> BlockBuilderExt for sc_block_builder::BlockBuilder<'a, substrate_
 	// Rust bug: https://github.com/rust-lang/rust/issues/24159
 	backend::StateBackendFor<B, substrate_test_runtime::Block>:
 		sp_api::StateBackend<HashFor<substrate_test_runtime::Block>>,
+	backend::FStateBackendFor<B, substrate_test_runtime::Block>:
+		sp_api::StateBackend<HashFor<substrate_test_runtime::Block>>,
 {
 	fn push_transfer(&mut self, transfer: substrate_test_runtime::Transfer) -> Result<(), sp_blockchain::Error> {
 		self.push(transfer.into_signed_tx())

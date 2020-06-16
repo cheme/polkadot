@@ -30,6 +30,7 @@ pub type Executor = sc_executor::NativeExecutor<node_executor::Executor>;
 pub type Backend = sc_client_db::Backend<
 	node_primitives::Block,
 	sc_client_api::TrieStateBackend<node_primitives::Block, sc_client_api::SimpleProof>,
+	sc_client_api::TrieStateBackend<node_primitives::Block, sc_client_api::SimpleProof>,
 >;
 
 /// Test client type.

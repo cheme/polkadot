@@ -28,7 +28,7 @@ use sc_client_api::{InstantiableStateBackend, HashDBNodesTransaction, HashFor, D
 
 impl InspectCmd {
 	/// Run the inspect command, passing the inspector.
-	pub fn run<B, RA, EX, ST>(&self, config: Configuration) -> Result<()>
+	pub fn run<B, RA, EX, ST, FST>(&self, config: Configuration) -> Result<()>
 	where
 		B: Block,
 		B::Hash: FromStr,
@@ -36,8 +36,10 @@ impl InspectCmd {
 		EX: NativeExecutionDispatch + 'static,
 		ST: InstantiableStateBackend<HashFor<B>, Storage = DbStorage<B>> + Send + 'static,
 		ST::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
+		FST: InstantiableStateBackend<HashFor<B>, Storage = DbStorage<B>> + Send + 'static,
+		FST::Transaction: HashDBNodesTransaction<Vec<u8>, Vec<u8>>,
 	{
-		let client = new_full_client::<B, RA, EX, ST>(&config)?;
+		let client = new_full_client::<B, RA, EX, ST, FST>(&config)?;
 		let inspect = Inspector::<B>::new(client);
 
 		match &self.command {

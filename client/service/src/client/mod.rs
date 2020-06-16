@@ -52,7 +52,7 @@ mod block_rules;
 
 pub use self::{
 	call_executor::LocalCallExecutor,
-	client::{Client, ClientConfig},
+	client::{Client, ClientConfig, FinalityProofClient},
 };
 
 #[cfg(feature="test-helpers")]

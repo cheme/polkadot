@@ -47,6 +47,9 @@ use std::marker::PhantomData;
 /// Extracts the state backend type for the given backend.
 pub type StateBackendFor<B, Block> = <B as Backend<Block>>::State;
 
+/// Extracts the finality state backend type for the given backend.
+pub type FStateBackendFor<B, Block> = <B as Backend<Block>>::FState;
+
 /// Extracts the proof raw for the given backend.
 pub type ProofRawClientFor<B, Block> = <
 	ProofFor<B, Block> as sp_state_machine::BackendProof<HashFor<Block>>
@@ -57,9 +60,17 @@ pub type ProofFor<B, Block> = <
 	RecProofForB<B, Block> as StateBackend<HashFor<Block>>
 >::StorageProof;
 
+/// Extracts the finality proof for the given backend.
+pub type FProofFor<B, Block> = <
+	FRecProofForB<B, Block> as StateBackend<HashFor<Block>>
+>::StorageProof;
+
+
 type RecProofForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::RecProofBackend;
 
 type RecProofForB<B, Block> = RecProofForSB<StateBackendFor<B, Block>, Block>;
+
+type FRecProofForB<B, Block> = RecProofForSB<FStateBackendFor<B, Block>, Block>;
 
 /// Extracts the transaction for the given state backend.
 pub type TransactionForSB<B, Block> = <B as StateBackend<HashFor<Block>>>::Transaction;
@@ -417,6 +428,8 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	type Blockchain: BlockchainBackend<Block>;
 	/// Associated state backend type.
 	type State: StateBackend<HashFor<Block>> + Send;
+	/// Associated finality proof state backend type.
+	type FState: StateBackend<HashFor<Block>> + Send;
 	/// Offchain workers local storage.
 	type OffchainStorage: OffchainStorage;
 
@@ -463,6 +476,9 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 
 	/// Returns state backend with post-state of given block.
 	fn state_at(&self, block: BlockId<Block>) -> sp_blockchain::Result<Self::State>;
+
+	/// Returns state backend with post-state of given block for finality proof.
+	fn finality_state_at(&self, block: BlockId<Block>) -> sp_blockchain::Result<Self::FState>;
 
 	/// Attempts to revert the chain by `n` blocks. If `revert_finalized` is set
 	/// it will attempt to revert past any finalized block, this is unsafe and

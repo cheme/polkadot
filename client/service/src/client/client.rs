@@ -18,7 +18,7 @@
 
 //! Substrate Client
 
-use sc_client_api::backend::{ProofFor, ProofRawFor};
+use sc_client_api::backend::{ProofFor, ProofRawFor, FProofFor};
 use std::{
 	marker::PhantomData,
 	collections::{HashSet, BTreeMap, HashMap},
@@ -341,6 +341,12 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 	pub fn state_at(&self, block: &BlockId<Block>) -> sp_blockchain::Result<B::State> {
 		self.backend.state_at(*block)
 	}
+
+	/// Get a reference to the state at a given block for finality proof.
+	pub fn finality_state_at(&self, block: &BlockId<Block>) -> sp_blockchain::Result<B::FState> {
+		self.backend.finality_state_at(*block)
+	}
+
 
 	/// Get the code at a given block.
 	pub fn code_at(&self, id: &BlockId<Block>) -> sp_blockchain::Result<Vec<u8>> {
@@ -1177,7 +1183,6 @@ impl<B, E, Block, RA> UsageProvider<Block> for Client<B, E, Block, RA> where
 
 impl<B, E, Block, RA> ProofProvider<Block, ProofFor<B, Block>> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block>,
-//	HashFor<Block>: Ord + Codec,
 	E: CallExecutor<Block>,
 	Block: BlockT,
 {
@@ -1257,6 +1262,147 @@ impl<B, E, Block, RA> ProofProvider<Block, ProofFor<B, Block>> for Client<B, E, 
 	}
 }
 
+/// This struct provides the finality proof implementation for Client.
+pub struct FinalityProofClient<B, E, Block, RA>(pub Arc<Client<B, E, Block, RA>>)
+	where
+		Block: BlockT;
+
+impl<B, E, Block, RA> ProofProvider<Block, FProofFor<B, Block>> for FinalityProofClient<B, E, Block, RA> where
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block>,
+	Block: BlockT,
+{
+	fn read_proof(
+		&self,
+		id: &BlockId<Block>,
+		keys: &mut dyn Iterator<Item=&[u8]>,
+	) -> sp_blockchain::Result<ProofRawFor<B::FState, HashFor<Block>>> {
+		self.0.finality_state_at(id)
+			.and_then(|state| prove_read(state, keys)
+				.map_err(Into::into))
+	}
+
+	fn read_child_proof(
+		&self,
+		_id: &BlockId<Block>,
+		_child_info: &ChildInfo,
+		_keys: &mut dyn Iterator<Item=&[u8]>,
+	) -> sp_blockchain::Result<ProofRawFor<B::FState, HashFor<Block>>> {
+		unimplemented!("Not needed for finality proof")
+	}
+
+	fn execution_proof(
+		&self,
+		_id: &BlockId<Block>,
+		_method: &str,
+		_call_data: &[u8],
+	) -> sp_blockchain::Result<(Vec<u8>, ProofRawFor<B::FState, HashFor<Block>>)> {
+		unimplemented!("Not needed for finality proof")
+	}
+
+	fn header_proof(&self, _id: &BlockId<Block>) -> sp_blockchain::Result<(Block::Header, SimpleProof)> {
+		unimplemented!("Not needed for finality proof")
+	}
+
+	fn key_changes_proof(
+		&self,
+		_first: Block::Hash,
+		_last: Block::Hash,
+		_min: Block::Hash,
+		_max: Block::Hash,
+		_storage_key: Option<&PrefixedStorageKey>,
+		_key: &StorageKey,
+	) -> sp_blockchain::Result<ChangesProof<Block::Header>> {
+		unimplemented!("Not needed for finality proof")
+	}
+}
+
+impl<B, E, Block, RA> StorageProvider<Block, B> for FinalityProofClient<B, E, Block, RA> where
+	B: backend::Backend<Block>,
+	E: CallExecutor<Block>,
+	Block: BlockT,
+{
+	fn storage_keys(&self, id: &BlockId<Block>, key_prefix: &StorageKey) -> sp_blockchain::Result<Vec<StorageKey>> {
+		self.0.storage_keys(id, key_prefix)
+	}
+
+	fn storage_pairs(&self, id: &BlockId<Block>, key_prefix: &StorageKey)
+		-> sp_blockchain::Result<Vec<(StorageKey, StorageData)>>
+	{
+		self.0.storage_pairs(id, key_prefix)
+	}
+
+
+	fn storage_keys_iter<'a>(
+		&self,
+		id: &BlockId<Block>,
+		prefix: Option<&'a StorageKey>,
+		start_key: Option<&StorageKey>
+	) -> sp_blockchain::Result<KeyIterator<'a, B::State, Block>> {
+		self.0.storage_keys_iter(id, prefix, start_key)
+	}
+
+	fn storage(
+		&self,
+		id: &BlockId<Block>,
+		key: &StorageKey,
+	) -> sp_blockchain::Result<Option<StorageData>> {
+		self.0.storage(id, key)
+	}
+
+	fn storage_hash(
+		&self,
+		id: &BlockId<Block>,
+		key: &StorageKey,
+	) -> sp_blockchain::Result<Option<Block::Hash>> {
+		self.0.storage_hash(id, key)
+	}
+
+	fn child_storage_keys(
+		&self,
+		id: &BlockId<Block>,
+		child_info: &ChildInfo,
+		key_prefix: &StorageKey
+	) -> sp_blockchain::Result<Vec<StorageKey>> {
+		self.0.child_storage_keys(id, child_info, key_prefix)
+	}
+
+	fn child_storage(
+		&self,
+		id: &BlockId<Block>,
+		child_info: &ChildInfo,
+		key: &StorageKey
+	) -> sp_blockchain::Result<Option<StorageData>> {
+		self.0.child_storage(id, child_info, key)
+	}
+
+	fn child_storage_hash(
+		&self,
+		id: &BlockId<Block>,
+		child_info: &ChildInfo,
+		key: &StorageKey
+	) -> sp_blockchain::Result<Option<Block::Hash>> {
+		self.0.child_storage_hash(id, child_info, key)
+	}
+
+	fn max_key_changes_range(
+		&self,
+		first: NumberFor<Block>,
+		last: BlockId<Block>,
+	) -> sp_blockchain::Result<Option<(NumberFor<Block>, BlockId<Block>)>> {
+		self.0.max_key_changes_range(first, last)
+	}
+
+	fn key_changes(
+		&self,
+		first: NumberFor<Block>,
+		last: BlockId<Block>,
+		storage_key: Option<&PrefixedStorageKey>,
+		key: &StorageKey
+	) -> sp_blockchain::Result<Vec<(NumberFor<Block>, u32)>> {
+		self.0.key_changes(first, last, storage_key, key)
+	}
+}
 
 impl<B, E, Block, RA> BlockBuilderProvider<B, Block, Self> for Client<B, E, Block, RA>
 	where
