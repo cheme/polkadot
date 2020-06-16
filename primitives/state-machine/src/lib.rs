@@ -94,6 +94,7 @@ pub type ChangesTrieTransaction<H, N> = (
 );
 
 /// Trie backend with in-memory storage.
+/// TODO EMCH param by proof.
 pub type InMemoryBackend<H> = TrieBackend<MemoryDB<H>, H, SimpleProof>;
 
 /// Trie backend with in-memory storage and choice of proof.

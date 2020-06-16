@@ -389,7 +389,7 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 		TBl: BlockT,
 		TRtApi,
 		TExecDisp: NativeExecutionDispatch + 'static,
-		TProof: ProofCheckBackendT<HashFor<TBl>> + Send + Sync + 'static,
+		TProof: ProofCheckBackendT<HashFor<TBl>> + Send + Sync + 'static, // TODO EMCH seems not needed -> TGs::StorageProof instead
 		TGs: GenesisStateBackend<HashFor<TBl>> + Clone + Send + Sync,
 	>(
 		config: Configuration,

@@ -30,6 +30,9 @@ use crate::protocol::message::{generic::BlockResponse, Message};
 use crate::protocol::generic_proto::{GenericProto, GenericProtoOut};
 use sp_test_primitives::Block;
 
+type Proof = sc_client_api::SimpleProof;
+//type Proof = sc_client_api::SimpleProof<sp_runtime::traits::HashFor<Block>>; // TODO EMCH this will probably need to be a type param to test on multiple proof.
+
 /// Builds two nodes that have each other as bootstrap nodes.
 /// This is to be used only for testing, and a panic will happen if something goes wrong.
 fn build_nodes() -> (Swarm<CustomProtoWithAddr>, Swarm<CustomProtoWithAddr>) {
@@ -234,7 +237,7 @@ fn two_nodes_transfer_lots_of_packets() {
 					for n in 0 .. NUM_PACKETS {
 						service1.send_packet(
 							&peer_id,
-							Message::<Block>::BlockResponse(BlockResponse {
+							Message::<Block, Proof>::BlockResponse(BlockResponse {
 								id: n as _,
 								blocks: Vec::new(),
 							}).encode()
@@ -252,8 +255,8 @@ fn two_nodes_transfer_lots_of_packets() {
 			match ready!(service2.poll_next_unpin(cx)) {
 				Some(GenericProtoOut::CustomProtocolOpen { .. }) => {},
 				Some(GenericProtoOut::LegacyMessage { message, .. }) => {
-					match Message::<Block>::decode(&mut &message[..]).unwrap() {
-						Message::<Block>::BlockResponse(BlockResponse { id: _, blocks }) => {
+					match Message::<Block, Proof>::decode(&mut &message[..]).unwrap() {
+						Message::<Block, Proof>::BlockResponse(BlockResponse { id: _, blocks }) => {
 							assert!(blocks.is_empty());
 							packet_counter += 1;
 							if packet_counter == NUM_PACKETS {
@@ -292,7 +295,7 @@ fn basic_two_nodes_requests_in_parallel() {
 				}
 			};
 
-			to_send.push(Message::<Block>::BlockResponse(
+			to_send.push(Message::<Block, Proof>::BlockResponse(
 				BlockResponse { id: req_id, blocks: Vec::new() }
 			));
 		}

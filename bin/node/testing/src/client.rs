@@ -27,7 +27,10 @@ pub use substrate_test_client::*;
 pub type Executor = sc_executor::NativeExecutor<node_executor::Executor>;
 
 /// Default backend type.
-pub type Backend = sc_client_db::Backend<node_primitives::Block>;
+pub type Backend = sc_client_db::Backend<
+	node_primitives::Block,
+	sc_client_api::TrieStateBackend<node_primitives::Block, sc_client_api::SimpleProof>,
+>;
 
 /// Test client type.
 pub type Client = client::Client<
@@ -75,5 +78,3 @@ impl TestClientBuilderExt for substrate_test_client::TestClientBuilder<
 		self.build_with_native_executor(None).0
 	}
 }
-
-

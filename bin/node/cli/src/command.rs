@@ -21,6 +21,9 @@ use node_executor::Executor;
 use node_runtime::{Block, RuntimeApi};
 use sc_cli::{Result, SubstrateCli};
 
+/// State backend type
+pub type State = sc_client_api::TrieStateBackend<Block, sc_client_api::SimpleProof>;
+
 impl SubstrateCli for Cli {
 	fn impl_name() -> &'static str {
 		"Substrate Node"
@@ -79,7 +82,7 @@ pub fn run() -> Result<()> {
 		Some(Subcommand::Inspect(cmd)) => {
 			let runner = cli.create_runner(cmd)?;
 
-			runner.sync_run(|config| cmd.run::<Block, RuntimeApi, Executor>(config))
+			runner.sync_run(|config| cmd.run::<Block, RuntimeApi, Executor, State>(config))
 		}
 		Some(Subcommand::Benchmark(cmd)) => {
 			if cfg!(feature = "runtime-benchmarks") {

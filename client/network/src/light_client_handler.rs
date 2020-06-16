@@ -1378,7 +1378,7 @@ mod tests {
 		_mark: std::marker::PhantomData<B>
 	}
 
-	impl<B: BlockT, P: StorageProof> light::FetchChecker<B, P> for DummyFetchChecker<B> {
+	impl<B: BlockT, P: StorageProof<HashFor<B>>> light::FetchChecker<B, P> for DummyFetchChecker<B> {
 		fn check_header_proof(
 			&self,
 			_request: &RemoteHeaderRequest<B::Header>,

@@ -56,6 +56,8 @@ use hex_literal::hex;
 mod light;
 mod db;
 
+type TrieStateBackend = sc_client_api::TrieStateBackend<Block, sc_client_api::SimpleProof>;
+
 native_executor_instance!(
 	Executor,
 	substrate_test_runtime_client::runtime::api::dispatch,
@@ -1271,7 +1273,7 @@ fn doesnt_import_blocks_that_revert_finality() {
 
 	// we need to run with archive pruning to avoid pruning non-canonical
 	// states
-	let backend = Arc::new(Backend::new(
+	let backend = Arc::new(Backend::<_, TrieStateBackend>::new(
 		DatabaseSettings {
 			state_cache_size: 1 << 20,
 			state_cache_child_ratio: None,
@@ -1472,7 +1474,7 @@ fn returns_status_for_pruned_blocks() {
 
 	// set to prune after 1 block
 	// states
-	let backend = Arc::new(Backend::new(
+	let backend = Arc::new(Backend::<_, TrieStateBackend>::new(
 		DatabaseSettings {
 			state_cache_size: 1 << 20,
 			state_cache_child_ratio: None,
@@ -1801,4 +1803,3 @@ fn cleans_up_closed_notification_sinks_on_block_import() {
 	assert_eq!(client.import_notification_sinks().lock().len(), 0);
 	assert_eq!(client.finality_notification_sinks().lock().len(), 0);
 }
-
