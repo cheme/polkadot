@@ -57,12 +57,12 @@ pub type GenesisBackend<Block> = GenesisBackendHash<HashFor<Block>>;
 /// Static definition of the genesis backend TODO EMCH rename to Light backend + GS -> LS + expose
 /// proof (here we use the simpleproof from state machine, morge generally InMemoryBackend of state
 /// machine need to disapear).
-pub type GenesisBackendHash<H> = sp_state_machine::InMemoryBackend<H>;
+pub type GenesisBackendHash<H> = sp_state_machine::InMemoryBackend<H, SimpleProof>;
 
-/// Trie backend proof check. TODO EMCH rename this it gives the wrong impression that it can prove
+/// Trie backend proof check.
 pub type ProofCheckBackend<Block> = ProofCheckBackendHash<HashFor<Block>>;
 /// Static definition of the verification backend
-pub type ProofCheckBackendHash<H> = sp_state_machine::InMemoryBackend<H>;
+pub type ProofCheckBackendHash<H> = sp_state_machine::InMemoryBackend<H, SimpleProof>;
 
 /// Static definition of the state backend to use with tests.
 pub type TrieBackendState<B, P> = sp_state_machine::TrieBackend<

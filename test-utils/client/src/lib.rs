@@ -23,7 +23,7 @@ pub mod client_ext;
 
 pub use sc_client_api::{
 	execution_extensions::{ExecutionStrategies, ExecutionExtensions},
-	ForkBlocks, BadBlocks, CloneableSpawn, TrieBackendState, SimpleProof, // TODO EMCH mack this generic over proof
+	ForkBlocks, BadBlocks, CloneableSpawn, TrieBackendState, SimpleProof,
 };
 pub use sc_client_db::{Backend, self};
 pub use sp_consensus;
@@ -46,8 +46,7 @@ use sp_runtime::traits::{Block as BlockT, BlakeTwo256};
 use sc_service::client::{LocalCallExecutor, ClientConfig};
 
 /// Test client genesis in memory backend.
-/// TODO EMCH this incloud a simple proof ref
-pub type InMemoryBackend<H> = sp_state_machine::InMemoryBackend<H>;
+pub type InMemoryBackend<H> = sp_state_machine::InMemoryBackend<H, SimpleProof>;
 
 /// Test client light database backend.
 pub type LightBackend<Block> = sc_light::Backend<
