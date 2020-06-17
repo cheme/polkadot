@@ -365,8 +365,8 @@ impl<BE, Block, Client> StateBackend<Block, Client> for FullState<BE, Block, Cli
 							&BlockId::Hash(block),
 							&mut keys.iter().map(|key| key.0.as_ref()),
 						)
-						.map(|proof| <ProofRawClientFor<BE, Block>>::into(proof))
-						.map(|proof| ReadProof { at: block, encoded_proof: proof.encode().into() })
+						.map(|proof: ProofRawClientFor<BE, Block>| proof.into())
+						.map(|proof: ProofFor<BE, Block>| ReadProof { at: block, encoded_proof: proof.encode().into() })
 				})
 				.map_err(client_err),
 		))
