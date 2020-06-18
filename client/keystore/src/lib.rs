@@ -19,7 +19,7 @@
 #![warn(missing_docs)]
 use std::{collections::{HashMap, HashSet}, path::PathBuf, fs::{self, File}, io::{self, Write}, sync::Arc};
 use sp_core::{
-	crypto::{IsWrappedBy, CryptoTypePublicPair, KeyTypeId, Pair as PairT, Protected, Public},
+	crypto::{IsWrappedBy, CryptoTypePublicPair, KeyTypeId, Pair as PairT, ProtectedString, Public},
 	traits::{BareCryptoStore, BareCryptoStoreError as TraitError},
 	Encode,
 };
@@ -93,14 +93,14 @@ pub struct Store {
 	path: Option<PathBuf>,
 	/// Map over `(KeyTypeId, Raw public key)` -> `Key phrase/seed`
 	additional: HashMap<(KeyTypeId, Vec<u8>), String>,
-	password: Option<Protected<String>>,
+	password: Option<ProtectedString>,
 }
 
 impl Store {
 	/// Open the store at the given path.
 	///
 	/// Optionally takes a password that will be used to encrypt/decrypt the keys.
-	pub fn open<T: Into<PathBuf>>(path: T, password: Option<Protected<String>>) -> Result<KeyStorePtr> {
+	pub fn open<T: Into<PathBuf>>(path: T, password: Option<ProtectedString>) -> Result<KeyStorePtr> {
 		let path = path.into();
 		fs::create_dir_all(&path)?;
 
@@ -153,7 +153,7 @@ impl Store {
 	pub fn insert_by_type<Pair: PairT>(&self, key_type: KeyTypeId, suri: &str) -> Result<Pair> {
 		let pair = Pair::from_string(
 			suri,
-			self.password.as_ref().map(|p| &***p)
+			self.password.as_ref().map(|p| &**p)
 		).map_err(|_| Error::InvalidSeed)?;
 		self.insert_unknown(key_type, suri, pair.public().as_slice())
 			.map_err(|_| Error::Unavailable)?;
@@ -171,7 +171,7 @@ impl Store {
 	///
 	/// Places it into the file system store.
 	pub fn generate_by_type<Pair: PairT>(&self, key_type: KeyTypeId) -> Result<Pair> {
-		let (pair, phrase, _) = Pair::generate_with_phrase(self.password.as_ref().map(|p| &***p));
+		let (pair, phrase, _) = Pair::generate_with_phrase(self.password.as_ref().map(|p| &**p));
 		if let Some(path) = self.key_file_path(pair.public().as_slice(), key_type) {
 			let mut file = File::create(path)?;
 			serde_json::to_writer(&file, &phrase)?;
@@ -227,7 +227,7 @@ impl Store {
 		let phrase = self.key_phrase_by_type(public.as_slice(), key_type)?;
 		let pair = Pair::from_string(
 			&phrase,
-			self.password.as_ref().map(|p| &***p),
+			self.password.as_ref().map(|p| &**p),
 		).map_err(|_| Error::InvalidPhrase)?;
 
 		if &pair.public() == public {
@@ -432,7 +432,7 @@ impl BareCryptoStore for Store {
 	}
 
 	fn password(&self) -> Option<&str> {
-		self.password.as_ref().map(|x| x.as_str())
+		self.password.as_ref().map(|x| x.as_ref())
 	}
 
 	fn has_keys(&self, public_keys: &[(Vec<u8>, KeyTypeId)]) -> bool {

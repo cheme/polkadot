@@ -79,46 +79,52 @@ impl<S, T: UncheckedFrom<S>> UncheckedInto<T> for S {
 	}
 }
 
-/// A store for sensitive data.
+/// A store for String sensitive data.
 ///
 /// Calls `Zeroize::zeroize` upon `Drop`.
+#[cfg(feature = "std")]
 #[derive(Clone)]
-pub struct Protected<T: Zeroize>(T);
+pub struct ProtectedString(String);
 
-impl<T: Zeroize> AsRef<T> for Protected<T> {
-	fn as_ref(&self) -> &T {
-		&self.0
-	}
-}
-
-impl<T: Zeroize> sp_std::ops::Deref for Protected<T> {
-	type Target = T;
-
-	fn deref(&self) -> &T {
-		&self.0
+#[cfg(feature = "std")]
+impl AsRef<str> for ProtectedString {
+	fn as_ref(&self) -> &str {
+		self.0.as_ref()
 	}
 }
 
 #[cfg(feature = "std")]
-impl<T: Zeroize> std::fmt::Debug for Protected<T> {
+impl sp_std::ops::Deref for ProtectedString {
+	type Target = str;
+
+	fn deref(&self) -> &str {
+		self.0.as_ref()
+	}
+}
+
+#[cfg(feature = "std")]
+impl std::fmt::Debug for ProtectedString {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(fmt, "<protected>")
 	}
 }
 
-impl<T: Zeroize> From<T> for Protected<T> {
-	fn from(t: T) -> Self {
-		Protected(t)
+#[cfg(feature = "std")]
+impl From<String> for ProtectedString {
+	fn from(t: String) -> Self {
+		ProtectedString(t)
 	}
 }
 
-impl<T: Zeroize> Zeroize for Protected<T> {
+#[cfg(feature = "std")]
+impl Zeroize for ProtectedString {
 	fn zeroize(&mut self) {
 		self.0.zeroize()
 	}
 }
 
-impl<T: Zeroize> Drop for Protected<T> {
+#[cfg(feature = "std")]
+impl Drop for ProtectedString {
 	fn drop(&mut self) {
 		self.zeroize()
 	}
