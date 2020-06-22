@@ -59,16 +59,16 @@ pub struct Public(pub [u8; 32]);
 
 /// A key pair.
 #[cfg(feature = "full_crypto")]
-pub struct Pair(ed25519_dalek::Keypair);
+pub struct Pair(Box<ed25519_dalek::Keypair>);
 
 #[cfg(feature = "full_crypto")]
 impl Clone for Pair {
 	fn clone(&self) -> Self {
-		Pair(ed25519_dalek::Keypair {
+		Pair(Box::new(ed25519_dalek::Keypair {
 			public: self.0.public.clone(),
 			secret: ed25519_dalek::SecretKey::from_bytes(self.0.secret.as_bytes())
 				.expect("key is always the correct size; qed")
-		})
+		}))
 	}
 }
 
@@ -466,7 +466,7 @@ impl TraitPair for Pair {
 		let secret = ed25519_dalek::SecretKey::from_bytes(seed_slice)
 			.map_err(|_| SecretStringError::InvalidSeedLength)?;
 		let public = ed25519_dalek::PublicKey::from(&secret);
-		Ok(Pair(ed25519_dalek::Keypair { secret, public }))
+		Ok(Pair(Box::new(ed25519_dalek::Keypair { secret, public })))
 	}
 
 	/// Derive a child key from a series of given junctions.

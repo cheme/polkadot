@@ -399,7 +399,7 @@ pub enum DeriveError {
 #[derive(Clone)]
 pub struct Pair {
 	public: PublicKey,
-	secret: SecretKey,
+	secret: Box<SecretKey>,
 }
 
 #[cfg(feature = "full_crypto")]
@@ -453,7 +453,7 @@ impl TraitPair for Pair {
 		let secret = SecretKey::parse_slice(seed_slice)
 			.map_err(|_| SecretStringError::InvalidSeedLength)?;
 		let public = PublicKey::from_secret_key(&secret);
-		Ok(Pair{ secret, public })
+		Ok(Pair{ secret: Box::new(secret), public })
 	}
 
 	/// Derive a child key from a series of given junctions.

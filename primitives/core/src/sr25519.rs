@@ -65,16 +65,16 @@ pub struct Public(pub [u8; 32]);
 
 /// An Schnorrkel/Ristretto x25519 ("sr25519") key pair.
 #[cfg(feature = "full_crypto")]
-pub struct Pair(Keypair);
+pub struct Pair(Box<Keypair>);
 
 #[cfg(feature = "full_crypto")]
 impl Clone for Pair {
 	fn clone(&self) -> Self {
-		Pair(schnorrkel::Keypair {
+		Pair(Box::new(schnorrkel::Keypair {
 			public: self.0.public,
 			secret: schnorrkel::SecretKey::from_bytes(&self.0.secret.to_bytes()[..])
 				.expect("key is always the correct size; qed")
-		})
+		}))
 	}
 }
 
@@ -413,28 +413,28 @@ impl From<&Public> for CryptoTypePublicPair {
 #[cfg(feature = "std")]
 impl From<MiniSecretKey> for Pair {
 	fn from(sec: MiniSecretKey) -> Pair {
-		Pair(sec.expand_to_keypair(ExpansionMode::Ed25519))
+		Pair(Box::new(sec.expand_to_keypair(ExpansionMode::Ed25519)))
 	}
 }
 
 #[cfg(feature = "std")]
 impl From<SecretKey> for Pair {
 	fn from(sec: SecretKey) -> Pair {
-		Pair(Keypair::from(sec))
+		Pair(Box::new(Keypair::from(sec)))
 	}
 }
 
 #[cfg(feature = "full_crypto")]
 impl From<schnorrkel::Keypair> for Pair {
 	fn from(p: schnorrkel::Keypair) -> Pair {
-		Pair(p)
+		Pair(Box::new(p))
 	}
 }
 
 #[cfg(feature = "full_crypto")]
 impl From<Pair> for schnorrkel::Keypair {
 	fn from(p: Pair) -> schnorrkel::Keypair {
-		p.0
+		*p.0
 	}
 }
 
@@ -486,18 +486,18 @@ impl TraitPair for Pair {
 	fn from_seed_slice(seed: &[u8]) -> Result<Pair, SecretStringError> {
 		match seed.len() {
 			MINI_SECRET_KEY_LENGTH => {
-				Ok(Pair(
+				Ok(Pair(Box::new(
 					MiniSecretKey::from_bytes(seed)
 						.map_err(|_| SecretStringError::InvalidSeed)?
 						.expand_to_keypair(ExpansionMode::Ed25519)
-				))
+				)))
 			}
 			SECRET_KEY_LENGTH => {
-				Ok(Pair(
+				Ok(Pair(Box::new(
 					SecretKey::from_bytes(seed)
 						.map_err(|_| SecretStringError::InvalidSeed)?
 						.to_keypair()
-				))
+				)))
 			}
 			_ => Err(SecretStringError::InvalidSeedLength)
 		}
@@ -541,7 +541,7 @@ impl TraitPair for Pair {
 				(seed.expand(ExpansionMode::Ed25519), maybe_seed.map(|_| seed))
 			}
 		});
-		Ok((Self(result.into()), seed.map(|s| MiniSecretKey::to_bytes(&s))))
+		Ok((Self(Box::new(result.into())), seed.map(|s| MiniSecretKey::to_bytes(&s))))
 	}
 
 	fn sign(&self, message: &[u8]) -> Signature {
@@ -583,7 +583,7 @@ impl Pair {
 			.expect("32 bytes can always build a key; qed");
 
 		let kp = mini_key.expand_to_keypair(ExpansionMode::Ed25519);
-		(Pair(kp), mini_key.to_bytes())
+		(Pair(Box::new(kp)), mini_key.to_bytes())
 	}
 
 	/// Verify a signature on a message. Returns `true` if the signature is good.
