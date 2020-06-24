@@ -1,28 +1,32 @@
-// Copyright 2019-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Substrate is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
 
-// Substrate is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-
-// You should have received a copy of the GNU General Public License
-// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// 	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #[cfg(feature = "std")]
 use serde::{Serialize, Deserialize};
 
 use sp_std::{ops, fmt, prelude::*, convert::TryInto};
-use codec::{Encode, Decode, CompactAs};
+use codec::{Encode, CompactAs};
 use crate::traits::{
 	SaturatedConversion, UniqueSaturatedInto, Saturating, BaseArithmetic, Bounded, Zero,
 };
 use sp_debug_derive::RuntimeDebug;
+
+/// Get the inner type of a `PerThing`.
+pub type InnerOf<P> = <P as PerThing>::Inner;
 
 /// Something that implements a fixed point ration with an arbitrary granularity `X`, as _parts per
 /// `X`_.
@@ -201,7 +205,7 @@ pub trait PerThing:
 
 /// The rounding method to use.
 ///
-/// `Perthing`s are unsigned so `Up` means towards infinity and `Down` means towards zero.
+/// `PerThing`s are unsigned so `Up` means towards infinity and `Down` means towards zero.
 /// `Nearest` will round an exact half down.
 enum Rounding {
 	Up,
@@ -311,8 +315,7 @@ macro_rules! implement_per_thing {
 		///
 		#[doc = $title]
 		#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-		#[derive(Encode, Decode, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord,
-				 RuntimeDebug, CompactAs)]
+		#[derive(Encode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, RuntimeDebug, CompactAs)]
 		pub struct $name($type);
 
 		impl PerThing for $name {
@@ -382,7 +385,6 @@ macro_rules! implement_per_thing {
 		impl $name {
 			/// From an explicitly defined number of parts per maximum of the type.
 			///
-			/// This can be called at compile time.
 			// needed only for peru16. Since peru16 is the only type in which $max ==
 			// $type::max_value(), rustc is being a smart-a** here by warning that the comparison
 			// is not needed.
@@ -398,9 +400,9 @@ macro_rules! implement_per_thing {
 				Self(([x, 100][(x > 100) as usize] as $upper_type * $max as $upper_type / 100) as $type)
 			}
 
-			/// See [`PerThing::one`].
-			pub fn one() -> Self {
-				<Self as PerThing>::one()
+			/// See [`PerThing::one`]
+			pub const fn one() -> Self {
+				Self::from_parts($max)
 			}
 
 			/// See [`PerThing::is_one`].
@@ -409,8 +411,8 @@ macro_rules! implement_per_thing {
 			}
 
 			/// See [`PerThing::zero`].
-			pub fn zero() -> Self {
-				<Self as PerThing>::zero()
+			pub const fn zero() -> Self {
+				Self::from_parts(0)
 			}
 
 			/// See [`PerThing::is_zero`].
@@ -419,8 +421,8 @@ macro_rules! implement_per_thing {
 			}
 
 			/// See [`PerThing::deconstruct`].
-			pub fn deconstruct(self) -> $type {
-				PerThing::deconstruct(self)
+			pub const fn deconstruct(self) -> $type {
+				self.0
 			}
 
 			/// See [`PerThing::square`].
@@ -534,6 +536,18 @@ macro_rules! implement_per_thing {
 			}
 		}
 
+		impl codec::Decode for $name {
+			fn decode<I: codec::Input>(input: &mut I) -> Result<Self, codec::Error> {
+				let inner = <$type as codec::Decode>::decode(input)?;
+
+				if inner <= <Self as PerThing>::ACCURACY {
+					Ok(Self(inner))
+				} else {
+					Err("Value is greater than allowed maximum!".into())
+				}
+			}
+		}
+
 		impl crate::traits::Bounded for $name {
 			fn min_value() -> Self {
 				<Self as PerThing>::zero()
@@ -551,6 +565,12 @@ macro_rules! implement_per_thing {
 				let p = self.0;
 				let q = rhs.0;
 				Self::from_rational_approximation(p, q)
+			}
+		}
+
+		impl Default for $name {
+			fn default() -> Self {
+				<Self as PerThing>::zero()
 			}
 		}
 
@@ -626,6 +646,21 @@ macro_rules! implement_per_thing {
 						.unwrap();
 					let per_thingy: $name = decoded.into();
 					assert_eq!(per_thingy, $name(n));
+				}
+			}
+
+			#[test]
+			fn fail_on_invalid_encoded_value() {
+				let value = <$upper_type>::from($max) * 2;
+				let casted = value as $type;
+				let encoded = casted.encode();
+
+				// For types where `$max == $type::maximum()` we can not
+				if <$upper_type>::from(casted) == value {
+					assert_eq!(
+						$name::decode(&mut &encoded[..]),
+						Err("Value is greater than allowed maximum!".into()),
+					);
 				}
 			}
 
@@ -1069,7 +1104,7 @@ macro_rules! implement_per_thing {
 						<$type>::max_value(),
 						super::Rounding::Nearest,
 					),
-					(<$type>::max_value() - 1).into(),
+					<$upper_type>::from((<$type>::max_value() - 1)),
 				);
 				// (max % 2) * max / 2 == max / 2
 				assert_eq!(
@@ -1101,6 +1136,18 @@ macro_rules! implement_per_thing {
 					),
 					1,
 				);
+			}
+
+			#[test]
+			#[allow(unused)]
+			fn const_fns_work() {
+				const C1: $name = $name::from_percent(50);
+				const C2: $name = $name::one();
+				const C3: $name = $name::zero();
+				const C4: $name = $name::from_parts(1);
+
+				// deconstruct is also const, hence it can be called in const rhs.
+				const C5: bool = C1.deconstruct() == 0;
 			}
 		}
 	};
