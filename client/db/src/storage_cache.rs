@@ -242,6 +242,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 		enacted: &[B::Hash],
 		retracted: &[B::Hash],
 		commit_hash: Option<&B::Hash>,
+		experimental_query_plan: Option<&ForkPlan<usize, usize>>,
 	) -> Option<(ForkPlan<usize, usize>, Latest<(usize, usize)>)> {
 		trace!("Syncing experimental cache, pivot = {:?}, enacted = {:?}, retracted = {:?}", pivot, enacted, retracted);
 			warn!("Syncing = {:?}", (pivot, enacted, retracted));
@@ -271,7 +272,9 @@ impl<B: BlockT> ExperimentalCache<B> {
 			}
 
 			// empty case or unregistered: TODO need a way to distinguish
-			let result = self.management.latest_state_fork();
+			let result = experimental_query_plan
+				.map(|qp| self.management.ref_state_fork(qp))
+				.unwrap_or_else(|| self.management.latest_state_fork());
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
 			result
 		};
@@ -597,6 +600,7 @@ pub struct CacheChanges<B: BlockT> {
 	/// `None` if cache is disabled
 	pub parent_hash: Option<B::Hash>,
 	pub experimental_query_plan: Option<ForkPlan<usize, usize>>,
+	// TODO rather unused as we update on hresh fork.
 	pub experimental_update: Option<Latest<(usize, usize)>>,
 	/// disable checking experimental cache value
 	pub no_assert: bool,
@@ -651,7 +655,7 @@ impl<B: BlockT> CacheChanges<B> {
 	) {
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
-			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref()) {
+			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.experimental_query_plan.as_ref()) {
 				self.experimental_query_plan = Some(qp);
 				self.experimental_update = Some(eu);
 			}
