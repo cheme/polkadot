@@ -46,7 +46,7 @@ use sc_network::NetworkService;
 use parking_lot::{Mutex, RwLock};
 use sp_runtime::generic::BlockId;
 use sp_runtime::traits::{
-	Block as BlockT, NumberFor, SaturatedConversion, HashFor,
+	Block as BlockT, NumberFor, SaturatedConversion, HashFor, Zero,
 };
 use sp_api::ProvideRuntimeApi;
 use sc_executor::{NativeExecutor, NativeExecutionDispatch, RuntimeInfo};
@@ -102,7 +102,6 @@ pub struct ServiceBuilder<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp,
 	remote_backend: Option<Arc<dyn RemoteBlockchain<TBl>>>,
 	marker: PhantomData<(TBl, TRtApi)>,
 	block_announce_validator_builder: Option<Box<dyn FnOnce(Arc<TCl>) -> Box<dyn BlockAnnounceValidator<TBl> + Send> + Send>>,
-	informant_prefix: String,
 }
 
 /// A utility trait for building an RPC extension given a `DenyUnsafe` instance.
@@ -367,7 +366,6 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 			rpc_extensions_builder: Box::new(|_| ()),
 			remote_backend: None,
 			block_announce_validator_builder: None,
-			informant_prefix: Default::default(),
 			marker: PhantomData,
 		})
 	}
@@ -452,7 +450,6 @@ impl ServiceBuilder<(), (), (), (), (), (), (), (), (), (), ()> {
 			rpc_extensions_builder: Box::new(|_| ()),
 			remote_backend: Some(remote_blockchain),
 			block_announce_validator_builder: None,
-			informant_prefix: Default::default(),
 			marker: PhantomData,
 		})
 	}
@@ -547,7 +544,6 @@ impl<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp, TExPool, TRpc, Backend>
 			rpc_extensions_builder: self.rpc_extensions_builder,
 			remote_backend: self.remote_backend,
 			block_announce_validator_builder: self.block_announce_validator_builder,
-			informant_prefix: self.informant_prefix,
 			marker: self.marker,
 		})
 	}
@@ -593,7 +589,6 @@ impl<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp, TExPool, TRpc, Backend>
 			rpc_extensions_builder: self.rpc_extensions_builder,
 			remote_backend: self.remote_backend,
 			block_announce_validator_builder: self.block_announce_validator_builder,
-			informant_prefix: self.informant_prefix,
 			marker: self.marker,
 		})
 	}
@@ -632,7 +627,6 @@ impl<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp, TExPool, TRpc, Backend>
 			rpc_extensions_builder: self.rpc_extensions_builder,
 			remote_backend: self.remote_backend,
 			block_announce_validator_builder: self.block_announce_validator_builder,
-			informant_prefix: self.informant_prefix,
 			marker: self.marker,
 		})
 	}
@@ -699,7 +693,6 @@ impl<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp, TExPool, TRpc, Backend>
 			rpc_extensions_builder: self.rpc_extensions_builder,
 			remote_backend: self.remote_backend,
 			block_announce_validator_builder: self.block_announce_validator_builder,
-			informant_prefix: self.informant_prefix,
 			marker: self.marker,
 		})
 	}
@@ -756,7 +749,6 @@ impl<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp, TExPool, TRpc, Backend>
 			rpc_extensions_builder: self.rpc_extensions_builder,
 			remote_backend: self.remote_backend,
 			block_announce_validator_builder: self.block_announce_validator_builder,
-			informant_prefix: self.informant_prefix,
 			marker: self.marker,
 		})
 	}
@@ -794,7 +786,6 @@ impl<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp, TExPool, TRpc, Backend>
 			rpc_extensions_builder: Box::new(rpc_extensions_builder),
 			remote_backend: self.remote_backend,
 			block_announce_validator_builder: self.block_announce_validator_builder,
-			informant_prefix: self.informant_prefix,
 			marker: self.marker,
 		})
 	}
@@ -840,41 +831,7 @@ impl<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp, TExPool, TRpc, Backend>
 			rpc_extensions_builder: self.rpc_extensions_builder,
 			remote_backend: self.remote_backend,
 			block_announce_validator_builder: Some(Box::new(block_announce_validator_builder)),
-			informant_prefix: self.informant_prefix,
 			marker: self.marker,
-		})
-	}
-
-	/// Defines the informant's prefix for the logs. An empty string by default.
-	///
-	/// By default substrate will show logs without a prefix. Example:
-	///
-	/// ```text
-	/// 2020-05-28 15:11:06 ✨ Imported #2 (0xc21c…2ca8)
-	/// 2020-05-28 15:11:07 💤 Idle (0 peers), best: #2 (0xc21c…2ca8), finalized #0 (0x7299…e6df), ⬇ 0 ⬆ 0
-	/// ```
-	///
-	/// But you can define a prefix by using this function. Example:
-	///
-	/// ```rust,ignore
-	/// service.with_informant_prefix("[Prefix] ".to_string());
-	/// ```
-	///
-	/// This will output:
-	///
-	/// ```text
-	/// 2020-05-28 15:11:06 ✨ [Prefix] Imported #2 (0xc21c…2ca8)
-	/// 2020-05-28 15:11:07 💤 [Prefix] Idle (0 peers), best: #2 (0xc21c…2ca8), finalized #0 (0x7299…e6df), ⬇ 0 ⬆ 0
-	/// ```
-	pub fn with_informant_prefix(
-		self,
-		informant_prefix: String,
-	) -> Result<ServiceBuilder<TBl, TRtApi, TCl, TFchr, TSc, TImpQu, TFprb, TFpp,
-		TExPool, TRpc, Backend>, Error>
-	where TSc: Clone, TFchr: Clone {
-		Ok(ServiceBuilder {
-			informant_prefix: informant_prefix,
-			..self
 		})
 	}
 }
@@ -992,7 +949,6 @@ ServiceBuilder<
 			rpc_extensions_builder,
 			remote_backend,
 			block_announce_validator_builder,
-			informant_prefix,
 		} = self;
 
 		sp_session::generate_initial_session_keys(
@@ -1069,7 +1025,7 @@ ServiceBuilder<
 
 		spawn_handle.spawn(
 			"on-transaction-imported",
-			extrinsic_notifications(transaction_pool.clone(), network.clone()),
+			transaction_notifications(transaction_pool.clone(), network.clone()),
 		);
 
 		// Prometheus metrics.
@@ -1116,8 +1072,17 @@ ServiceBuilder<
 
 		// Telemetry
 		let telemetry = config.telemetry_endpoints.clone().map(|endpoints| {
+			let genesis_hash = match client.block_hash(Zero::zero()) {
+				Ok(Some(hash)) => hash,
+				_ => Default::default(),
+			};
+
 			let (telemetry, future) = build_telemetry(
-				&mut config, endpoints, telemetry_connection_sinks.clone(), network.clone()
+				&mut config,
+				endpoints,
+				telemetry_connection_sinks.clone(),
+				network.clone(),
+				genesis_hash,
 			);
 
 			spawn_handle.spawn(
@@ -1144,7 +1109,7 @@ ServiceBuilder<
 			client.clone(),
 			network_status_sinks.clone(),
 			transaction_pool.clone(),
-			sc_informant::OutputFormat { enable_color: true, prefix: informant_prefix },
+			config.informant_output_format,
 		));
 
 		Ok(Service {
@@ -1247,7 +1212,7 @@ ServiceBuilder<
 	}
 }
 
-async fn extrinsic_notifications<TBl, TExPool>(
+async fn transaction_notifications<TBl, TExPool>(
 	transaction_pool: Arc<TExPool>,
 	network: Arc<NetworkService<TBl, <TBl as BlockT>::Hash>>
 )
@@ -1255,10 +1220,10 @@ async fn extrinsic_notifications<TBl, TExPool>(
 		TBl: BlockT,
 		TExPool: MaintainedTransactionPool<Block=TBl, Hash = <TBl as BlockT>::Hash>,
 {
-	// extrinsic notifications
+	// transaction notifications
 	transaction_pool.import_notification_stream()
 		.for_each(move |hash| {
-			network.propagate_extrinsic(hash);
+			network.propagate_transaction(hash);
 			let status = transaction_pool.status();
 			telemetry!(SUBSTRATE_INFO; "txpool.import";
 				"ready" => status.ready,
@@ -1316,7 +1281,8 @@ fn build_telemetry<TBl: BlockT>(
 	config: &mut Configuration,
 	endpoints: sc_telemetry::TelemetryEndpoints,
 	telemetry_connection_sinks: Arc<Mutex<Vec<TracingUnboundedSender<()>>>>,
-	network: Arc<NetworkService<TBl, <TBl as BlockT>::Hash>>
+	network: Arc<NetworkService<TBl, <TBl as BlockT>::Hash>>,
+	genesis_hash: <TBl as BlockT>::Hash,
 ) -> (sc_telemetry::Telemetry, Pin<Box<dyn Future<Output = ()> + Send>>) {
 	let is_authority = config.role.is_authority();
 	let network_id = network.local_peer_id().to_base58();
@@ -1342,6 +1308,7 @@ fn build_telemetry<TBl: BlockT>(
 				"version" => version,
 				"config" => "",
 				"chain" => chain_name.clone(),
+				"genesis_hash" => ?genesis_hash,
 				"authority" => is_authority,
 				"startup_time" => startup_time,
 				"network_id" => network_id.clone()
