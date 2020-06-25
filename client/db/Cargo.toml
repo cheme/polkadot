@@ -35,7 +35,7 @@ sp-blockchain = { version = "2.0.0-rc3", path = "../../primitives/blockchain" }
 sp-database = { version = "2.0.0-rc3", path = "../../primitives/database" }
 parity-db = { version = "0.1.2", optional = true }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", version = "0.8.0-rc3", path = "../../utils/prometheus" }
-//historied-db = { path = "/home/emeric/work/ssd/parity-trie/historied-db" }
+#historied-db = { path = "/home/emeric/work/ssd/parity-trie/historied-db" }
 historied-db = { git = "https://github.com/cheme/trie", branch = "historied-db" }
 
 [dev-dependencies]
