@@ -267,7 +267,6 @@ pub trait CliConfiguration: Sized {
 			.unwrap_or(Default::default()))
 	}
 
-
 	/// Get the RPC HTTP address (`None` if disabled).
 	///
 	/// By default this is `None`.
@@ -490,6 +489,7 @@ pub trait CliConfiguration: Sized {
 			base_path: Some(base_path),
 			experimental_cache: self.experimental_cache()?, 
 			informant_output_format: Default::default(),
+		})
 	}
 
 	/// Get the filters for the logging.
