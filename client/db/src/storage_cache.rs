@@ -708,6 +708,7 @@ impl<B: BlockT> CacheChanges<B> {
 		// (contributed to canonical state cache)
 		if let Some(_) = self.parent_hash {
 			let mut local_cache = self.local_cache.write();
+			warn!("isbest: {:?}", is_best);
 			if is_best {
 				let eu = &self.experimental_update;
 				let mut exp_cache = self.experimental_cache.as_mut().map(|c| c.0.write())
