@@ -720,6 +720,11 @@ impl<B: BlockT> CacheChanges<B> {
 					child_changes.iter().map(|v|v.1.len()).sum::<usize>(),
 				);
 				for (k, v) in local_cache.storage.drain() {
+		if k == [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
+
+			warn!("write k = {:?}", v);
+		}
+	
 					// This bring some read query of unchanged values.
 					// The queries will be written at latest block index when
 					// they are not: this caching writes somewhat invalid
@@ -774,8 +779,13 @@ impl<B: BlockT> CacheChanges<B> {
 					child_modifications.insert(k);
 				}
 			);
-			for (k, v) in changes.into_iter() {
 			warn!("isbest2: {:?}", is_best);
+			for (k, v) in changes.into_iter() {
+		if k == [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
+
+			warn!("write k = {:?} ", v);
+		}
+	
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
 		if k == [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
 
