@@ -242,6 +242,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 		enacted: &[B::Hash],
 		retracted: &[B::Hash],
 		commit_hash: Option<&B::Hash>,
+		parent_hash: Option<&B::Hash>, // TODO just for debugging, remove
 		experimental_query_plan: Option<&ForkPlan<usize, usize>>,
 	) -> Option<(ForkPlan<usize, usize>, Latest<(usize, usize)>)> {
 		trace!("Syncing experimental cache, pivot = {:?}, enacted = {:?}, retracted = {:?}", pivot, enacted, retracted);
@@ -288,7 +289,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 		}
 
 		if let Some(h) = commit_hash {
-			warn!("actual append at = {:?} for {:?}", commit_hash, state);
+			warn!("actual append at = {:?} for {:?} parent {:?}", commit_hash, state, parent_hash);
 			// TODO returning both state on this call???
 			Some((
 				self.management.append_external_state(h.clone(), &state)
@@ -655,7 +656,7 @@ impl<B: BlockT> CacheChanges<B> {
 	) {
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
-			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.experimental_query_plan.as_ref()) {
+			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
 				self.experimental_query_plan = Some(qp);
 				self.experimental_update = Some(eu);
 			}
@@ -724,7 +725,7 @@ impl<B: BlockT> CacheChanges<B> {
 					// with right change index, here it is not (never write
 					// this content to a backend).
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
-						//exp_cache.emplace(k.clone(), v.clone(), eu);
+						exp_cache.emplace(k.clone(), v.clone(), eu); // debug here??
 					});
 					cache.lru_storage.add(k, v);
 				}
