@@ -220,7 +220,7 @@ struct LRUMap<K, V, B>(LinkedHashMap<K, V>, usize, usize, PhantomData<B>);
 /// TODO replace second usize index by actual B::blocknumber
 pub struct ExperimentalCache<B: BlockT>{
 	lru_storage: LRUMap<StorageKey, MemoryOnly<usize, usize, Option<StorageValue>>, B>,
-	management: TreeManagement<B::Hash, usize, usize, Option<StorageValue>>,
+	management: TreeManagement<B::Hash, usize, usize, Option<StorageValue>, ()>,
 	/// since retracted branch could potentially be enacted back we do not put it
 	/// in management directly.
 	/// TODO Note that we only need lower branch number block, but will also
