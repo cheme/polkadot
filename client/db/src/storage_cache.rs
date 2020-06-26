@@ -259,6 +259,8 @@ impl<B: BlockT> ExperimentalCache<B> {
 				if self.retracted.remove(h) {
 					continue;
 				}
+				// TODO does not make sense to put back when it was not removed!! -> + probably do not need
+				// pivot either or pivot at right location (aka after ennacted!!)
 				self.management.append_external_state(h.clone(), &state)
 					.expect("correct state resolution");
 				state = self.management.get_db_state_for_fork(h) // TODO bad api probably need to return SE instead of S
@@ -266,6 +268,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 			}
 			state
 		} else {
+				// TODO PANIC?? (should have pivot)
 			for h in enacted {
 				if !self.retracted.remove(h) {
 					got_all_enacted = false;
