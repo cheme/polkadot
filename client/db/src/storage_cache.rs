@@ -758,12 +758,10 @@ impl<B: BlockT> CacheChanges<B> {
 			Some(ref number), Some(ref hash), Some(ref parent))
 				= (commit_number, commit_hash, self.parent_hash)
 		{
-			let mut exp_cache = if is_best {
+			let mut exp_cache = {
 				let eu = &self.experimental_update;
 				self.experimental_cache.as_mut().map(|c| c.0.write())
 					.and_then(|c| eu.as_ref().map(|eu| (c, eu)))
-			} else {
-				None
 			};
 			if cache.modifications.len() == STATE_CACHE_BLOCKS {
 				cache.modifications.pop_back();
