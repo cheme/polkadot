@@ -773,6 +773,7 @@ impl<B: BlockT> CacheChanges<B> {
 				}
 			);
 			for (k, v) in changes.into_iter() {
+			warn!("isbest2: {:?}", is_best);
 				if is_best {
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
 		if k == [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
