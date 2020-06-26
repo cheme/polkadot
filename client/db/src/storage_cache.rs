@@ -728,6 +728,11 @@ impl<B: BlockT> CacheChanges<B> {
 					// with right change index, here it is not (never write
 					// this content to a backend).
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
+
+		if k == [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
+
+			warn!("write k = {:?} at {:?}", v, eu);
+		}
 						exp_cache.emplace(k.clone(), v.clone(), eu); // debug here??
 					});
 					cache.lru_storage.add(k, v);
@@ -769,6 +774,10 @@ impl<B: BlockT> CacheChanges<B> {
 			for (k, v) in changes.into_iter() {
 				if is_best {
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
+		if k == [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
+
+			warn!("write k = {:?} at {:?}", v, eu);
+		}
 						exp_cache.emplace(k.clone(), v.clone(), eu);
 					});
 					cache.lru_hashes.remove(&k);
@@ -943,9 +952,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 				self.usage.tally_key_read(key, entry.as_ref(), true);
 if !self.cache.no_assert {
 	if let Some(exp_v) = exp_v {
-		if key != [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
-			assert_eq!(entry, exp_v, "k: {:?}, {:?}, qp {:?} h {:?}", key, self.state.storage(key), self.cache.experimental_query_plan, self.cache.parent_hash);
-		}
+		assert_eq!(entry, exp_v, "k: {:?}, {:?}, qp {:?} h {:?}", key, self.state.storage(key), self.cache.experimental_query_plan, self.cache.parent_hash);
 	}
 }
 				return Ok(entry)
@@ -955,9 +962,7 @@ if !self.cache.no_assert {
 		let value = self.state.storage(key)?;
 if !self.cache.qc && !self.cache.no_assert {
 	if let Some(exp_v) = exp_v {
-		if key != [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
-			assert_eq!(value, exp_v, "k: {:?}, qb {:?} h {:?}", key, self.cache.experimental_query_plan, self.cache.parent_hash);
-		}
+		assert_eq!(value, exp_v, "k: {:?}, qb {:?} h {:?}", key, self.cache.experimental_query_plan, self.cache.parent_hash);
 	}
 }
 
