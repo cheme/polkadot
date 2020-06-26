@@ -724,7 +724,7 @@ impl<B: BlockT> CacheChanges<B> {
 					// with right change index, here it is not (never write
 					// this content to a backend).
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
-						exp_cache.emplace(k.clone(), v.clone(), eu);
+						//exp_cache.emplace(k.clone(), v.clone(), eu);
 					});
 					cache.lru_storage.add(k, v);
 				}
@@ -765,7 +765,7 @@ impl<B: BlockT> CacheChanges<B> {
 			for (k, v) in changes.into_iter() {
 				if is_best {
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
-//						exp_cache.emplace(k.clone(), v.clone(), eu);
+						exp_cache.emplace(k.clone(), v.clone(), eu);
 					});
 					cache.lru_hashes.remove(&k);
 					cache.lru_storage.add(k.clone(), v);
