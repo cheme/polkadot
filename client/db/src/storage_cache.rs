@@ -709,7 +709,6 @@ impl<B: BlockT> CacheChanges<B> {
 		if let Some(_) = self.parent_hash {
 			let mut local_cache = self.local_cache.write();
 			warn!("isbest: {:?}", is_best);
-			if is_best {
 				let eu = &self.experimental_update;
 				let mut exp_cache = self.experimental_cache.as_mut().map(|c| c.0.write())
 					.and_then(|c| eu.as_ref().map(|eu| (c, eu)));
@@ -736,8 +735,11 @@ impl<B: BlockT> CacheChanges<B> {
 		}
 						exp_cache.emplace(k.clone(), v.clone(), eu); // debug here??
 					});
+			if is_best {
 					cache.lru_storage.add(k, v);
+			}
 				}
+			if is_best {
 				for (k, v) in local_cache.child_storage.drain() {
 					cache.lru_child_storage.add(k, v);
 				}
@@ -774,7 +776,6 @@ impl<B: BlockT> CacheChanges<B> {
 			);
 			for (k, v) in changes.into_iter() {
 			warn!("isbest2: {:?}", is_best);
-				if is_best {
 					exp_cache.as_mut().map(|(exp_cache, eu)| {
 		if k == [28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127, 6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237] {
 
@@ -782,6 +783,8 @@ impl<B: BlockT> CacheChanges<B> {
 		}
 						exp_cache.emplace(k.clone(), v.clone(), eu);
 					});
+
+				if is_best {
 					cache.lru_hashes.remove(&k);
 					cache.lru_storage.add(k.clone(), v);
 				}
