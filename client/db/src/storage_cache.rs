@@ -275,7 +275,10 @@ impl<B: BlockT> ExperimentalCache<B> {
 			// empty case or unregistered: TODO need a way to distinguish
 			let result = experimental_query_plan
 				.map(|qp| self.management.ref_state_fork(qp))
-				.unwrap_or_else(|| self.management.latest_state_fork());
+				.unwrap_or_else(|| {
+					warn!("using latest state fork");
+					self.management.latest_state_fork()
+				});
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
 			result
 		};
