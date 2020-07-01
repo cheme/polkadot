@@ -1025,6 +1025,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11c0346158a19b3627234e15596f5e465c360fcdb97d817bcb255e0510f5a788"
 
 [[package]]
+name = "derivative"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb582b60359da160a9477ee80f15c8d784c477e69c217ef2cdd4169c24ea380f"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.6",
+ "syn 1.0.17",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1942,7 +1953,7 @@ dependencies = [
 [[package]]
 name = "hash-db"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=historied-db#24f03df2f8343287d805fe3342c958bfb1ac66c0"
+source = "git+https://github.com/cheme/trie?branch=historied-db#edbe4c5f2360beaa6c06fa65658a49b833a63de7"
 
 [[package]]
 name = "hash-db"
@@ -2015,8 +2026,9 @@ dependencies = [
 [[package]]
 name = "historied-db"
 version = "0.0.1"
-source = "git+https://github.com/cheme/trie?branch=historied-db#24f03df2f8343287d805fe3342c958bfb1ac66c0"
+source = "git+https://github.com/cheme/trie?branch=historied-db#edbe4c5f2360beaa6c06fa65658a49b833a63de7"
 dependencies = [
+ "derivative",
  "hash-db 0.15.2 (git+https://github.com/cheme/trie?branch=historied-db)",
  "parity-scale-codec",
  "smallvec 1.4.0",

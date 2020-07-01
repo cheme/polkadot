@@ -61,7 +61,7 @@ pub struct Cache<B: BlockT> {
 
 // TODO remove (useless) -> make the ExperimentalCache
 impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for SyncExperimentalCache<B> {
-	type S = ForkPlan<usize, usize>;
+	type S = ForkPlan<u32, u32>;
 
 	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
 		use historied_db::historied::ValueRef;
@@ -74,7 +74,7 @@ impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for SyncExperimenta
 }
 
 impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
-	type S = ForkPlan<usize, usize>;
+	type S = ForkPlan<u32, u32>;
 	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
 		unreachable!("dummy implementation for state db implementation")
 	}
@@ -92,7 +92,7 @@ impl<B: BlockT> InMemoryStateDBRef<StorageKey, Option<StorageValue>> for SyncExp
 }
 */
 impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
-	type SE = Latest<(usize, usize)>;
+	type SE = Latest<(u32, u32)>;
 	// not needed as ExperimentalCache also implement management
 	type GC = ();
 	// not needed as ExperimentalCache also implement management
@@ -114,13 +114,13 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 			}
 			if let Some(size) = additional_size {
 				if self.lru_storage.lru_increase_size(size) {
-					self.gc(&());
+					self.gc(&mut ());
 				}
 			}
 		} else {
 			let history = MemoryOnly::new(value, at);
 			if self.lru_storage.add_no_resize(key, history) {
-				self.gc(&());
+				self.gc(&mut ());
 			}
 		}
 	}
@@ -209,7 +209,7 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 		self.lru_storage.lru_resize();
 	}
 
-	fn migrate(&mut self, _mig: &Self::Migrate) {
+	fn migrate(&mut self, _mig: &mut Self::Migrate) {
 		// nice migration strategy
 		self.clear();
 	}
@@ -219,8 +219,8 @@ struct LRUMap<K, V, B>(LinkedHashMap<K, V>, usize, usize, PhantomData<B>);
 
 /// TODO replace second usize index by actual B::blocknumber
 pub struct ExperimentalCache<B: BlockT>{
-	lru_storage: LRUMap<StorageKey, MemoryOnly<usize, usize, Option<StorageValue>>, B>,
-	management: TreeManagement<B::Hash, usize, usize, Option<StorageValue>, ()>,
+	lru_storage: LRUMap<StorageKey, MemoryOnly<u32, u32, Option<StorageValue>>, B>,
+	management: TreeManagement<B::Hash, u32, u32, Option<StorageValue>, ()>,
 	/// since retracted branch could potentially be enacted back we do not put it
 	/// in management directly.
 	/// TODO Note that we only need lower branch number block, but will also
@@ -243,8 +243,8 @@ impl<B: BlockT> ExperimentalCache<B> {
 		retracted: &[B::Hash],
 		commit_hash: Option<&B::Hash>,
 		parent_hash: Option<&B::Hash>, // TODO just for debugging, remove
-		experimental_query_plan: Option<&ForkPlan<usize, usize>>,
-	) -> Option<(ForkPlan<usize, usize>, Latest<(usize, usize)>)> {
+		experimental_query_plan: Option<&ForkPlan<u32, u32>>,
+	) -> Option<(ForkPlan<u32, u32>, Latest<(u32, u32)>)> {
 		trace!("Syncing experimental cache, pivot = {:?}, enacted = {:?}, retracted = {:?}", pivot, enacted, retracted);
 			warn!("Syncing = {:?}", (pivot, enacted, retracted));
 		for h in retracted {
@@ -342,7 +342,7 @@ impl EstimateSize for Option<Vec<u8>> {
 	}
 }
 
-impl EstimateSize for MemoryOnly<usize, usize, Option<StorageValue>> {
+impl EstimateSize for MemoryOnly<u32, u32, Option<StorageValue>> {
 	fn estimate_size(&self) -> usize {
 		self.temp_size()
 	}
@@ -606,9 +606,9 @@ pub struct CacheChanges<B: BlockT> {
 	/// Hash of the block on top of which this instance was created or
 	/// `None` if cache is disabled
 	pub parent_hash: Option<B::Hash>,
-	pub experimental_query_plan: Option<ForkPlan<usize, usize>>,
+	pub experimental_query_plan: Option<ForkPlan<u32, u32>>,
 	// TODO rather unused as we update on hresh fork.
-	pub experimental_update: Option<Latest<(usize, usize)>>,
+	pub experimental_update: Option<Latest<(u32, u32)>>,
 	/// disable checking experimental cache value
 	pub no_assert: bool,
 	/// avoid doing assert against backend result (no backend in qc test)
@@ -847,13 +847,13 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 	) -> Self {
 		let experimental_query_plan = parent_hash.as_ref().and_then(|ph|
 				experimental_cache.as_ref().and_then(|ec| {
-					let cache = ec.0.read();
+					let mut cache = ec.0.write();
 					cache.management.get_db_state(ph)
 				}));
 		// TODO factor with previous exp, ok for now
 		let experimental_update = parent_hash.as_ref().and_then(|ph|
 				experimental_cache.as_ref().and_then(|ec| {
-					let cache = ec.0.read();
+					let mut cache = ec.0.write();
 					cache.management.get_db_state_mut(ph)
 				}));
 

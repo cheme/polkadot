@@ -346,6 +346,43 @@ pub(crate) mod columns {
 	/// Offchain workers local storage
 	pub const OFFCHAIN: u32 = 9;
 	pub const CACHE: u32 = 10;
+	/// Map 1 tree management for historied db
+	/// TODO dynamic collection in state_meta
+	pub const TreeRefs: u32 = 11;
+	/// Map 2 tree management for historied db
+	/// TODO dynamic collection in state_meta
+	pub const TreeBranchs: u32 = 12;
+}
+
+/// Trait for serializing historied db tree management.
+pub mod historied_tree_bindings {
+	macro_rules! static_instance {
+		($name: ident, $col: expr) => {
+
+		#[derive(Default, Clone)]
+		pub struct $name;
+		impl historied_db::simple_db::SerializeInstance for $name {
+			const STATIC_COL: &'static [u8] = $col;
+		}
+		
+	}}
+	macro_rules! static_instance_variable {
+		($name: ident, $col: expr, $path: expr, $lazy: expr) => {
+			static_instance!($name, $col);
+		impl historied_db::simple_db::SerializeInstanceVariable for $name {
+			const PATH: &'static [u8] = $path;
+			const LAZY: bool = $lazy;
+		}
+	}}
+
+	static_instance!(Mapping, &[11u8, 0, 0, 0]);
+	static_instance!(TreeState, &[12u8, 0, 0, 0]);
+	const CST: &'static[u8] = &[2u8, 0, 0, 0]; // STATE_META collection
+	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
+	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
+	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
+	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
+	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
 }
 
 struct PendingBlock<Block: BlockT> {
