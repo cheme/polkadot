@@ -38,7 +38,7 @@ mod children;
 mod cache;
 mod changes_tries_storage;
 mod storage_cache;
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
+// #[cfg(any(feature = "with-kvdb-rocksdb", test))] // TODO restore when historied db conditional
 mod upgrade;
 mod utils;
 mod stats;
@@ -47,6 +47,7 @@ mod parity_db;
 #[cfg(feature = "with-subdb")]
 mod subdb;
 
+use historied_db::historied::tree_management::{TreeManagement, TreeManagementStorage};
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::io;
@@ -67,7 +68,7 @@ use hash_db::Prefix;
 use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
 use sp_database::Transaction;
 use parking_lot::RwLock;
-use sp_core::ChangesTrieConfiguration;
+use sp_core::{ChangesTrieConfiguration, Hasher};
 use sp_core::offchain::storage::{OffchainOverlayedChange, OffchainOverlayedChanges};
 use sp_core::storage::{well_known_keys, ChildInfo};
 use sp_runtime::{generic::BlockId, Justification, Storage};
@@ -354,6 +355,86 @@ pub(crate) mod columns {
 	pub const TreeBranchs: u32 = 12;
 }
 
+struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
+struct TreeManagementPersistence;
+
+impl TreeManagementStorage for TreeManagementPersistence {
+	type Storage = RocksdbStorage;
+	type Mapping = historied_tree_bindings::Mapping;
+	type TouchedGC = historied_tree_bindings::TouchedGC;
+	type CurrentGC = historied_tree_bindings::CurrentGC;
+	type LastIndex = historied_tree_bindings::LastIndex;
+	type NeutralElt = historied_tree_bindings::NeutralElt;
+	type TreeMeta = historied_tree_bindings::TreeMeta;
+	type TreeState = historied_tree_bindings::TreeState;
+
+	fn init() -> Self::Storage {
+		unimplemented!("unused")
+	}
+}
+impl RocksdbStorage {
+
+	pub fn resolve_collection(c: &'static [u8]) -> Option<u32> {
+		if c.len() != 4 {
+			return None;
+		}
+		let index = Self::resolve_collection_inner(c);
+		if index < crate::utils::NUM_COLUMNS {
+			return Some(index);
+		}
+		None
+	}
+	const fn resolve_collection_inner(c: &'static [u8]) -> u32 {
+		let mut buf = [0u8; 4];
+		buf[0] = c[0];
+		buf[1] = c[1];
+		buf[2] = c[2];
+		buf[3] = c[3];
+		u32::from_le_bytes(buf)
+	}
+}
+
+impl historied_db::simple_db::SerializeDB for RocksdbStorage {
+
+	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
+		Self::resolve_collection(c).map(|c| {
+			let mut tx = self.0.transaction();
+			tx.put(c, k, v);
+			self.0.write(tx)
+				.expect("Unsupported serialize error")
+		});
+	}
+
+	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
+		Self::resolve_collection(c).map(|c| {
+			let mut tx = self.0.transaction();
+			tx.delete(c, k);
+			self.0.write(tx)
+				.expect("Unsupported serialize error")
+		});
+	}
+
+	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
+		Self::resolve_collection(c).and_then(|c| {
+			self.0.get(c, k)
+				.expect("Unsupported readdb error")
+		})
+	}
+
+	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::simple_db::SerializeDBIter<'a> {
+		let iter = Self::resolve_collection(c).map(|c| {
+			self.0.iter(c).map(|(k, v)| (Vec::<u8>::from(k), Vec::<u8>::from(v)))
+		}).into_iter().flat_map(|i| i);
+
+		Box::new(iter)
+	}
+
+	fn contains_collection(collection: &'static [u8]) -> bool {
+		Self::resolve_collection(collection).is_some()
+	}
+}
+
+//pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
 /// Trait for serializing historied db tree management.
 pub mod historied_tree_bindings {
 	macro_rules! static_instance {
@@ -810,6 +891,9 @@ impl<T: Clone> FrozenForDuration<T> {
 	}
 }
 
+/// Holder for state of historied.
+type HistoriedState = ();
+
 /// Disk backend.
 ///
 /// Disk backend keeps data in a key-value store. In archive mode, trie nodes are kept from all blocks.
@@ -826,6 +910,14 @@ pub struct Backend<Block: BlockT> {
 	is_archive: bool,
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
 	state_usage: Arc<StateUsageStats>,
+	historied_management: Arc<RwLock<TreeManagement<
+		<HashFor<Block> as Hasher>::Out,
+		u32,
+		u32,
+		Vec<u8>,
+		TreeManagementPersistence,
+	>>>,
+	historied_state: Arc<RwLock<HistoriedState>>,
 }
 
 impl<Block: BlockT> Backend<Block> {
@@ -833,8 +925,8 @@ impl<Block: BlockT> Backend<Block> {
 	///
 	/// The pruning window is how old a block must be before the state is pruned.
 	pub fn new(config: DatabaseSettings, canonicalization_delay: u64) -> ClientResult<Self> {
-		let db = crate::utils::open_database::<Block>(&config, DatabaseType::Full)?;
-		Self::from_database(db as Arc<_>, canonicalization_delay, &config)
+		let (db, r) = crate::utils::open_database_and_historied::<Block>(&config, DatabaseType::Full)?;
+		Self::from_database(db as Arc<_>, r, canonicalization_delay, &config)
 	}
 
 	/// Create new memory-backed client backend for tests.
@@ -859,6 +951,7 @@ impl<Block: BlockT> Backend<Block> {
 
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
+		rocks_histo: Arc<kvdb_rocksdb::Database>,
 		canonicalization_delay: u64,
 		config: &DatabaseSettings,
 	) -> ClientResult<Self> {
@@ -900,6 +993,9 @@ impl<Block: BlockT> Backend<Block> {
 			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
 			config.experimental_cache,
 		);
+		let historied_state = ();
+		let historied_persistence = RocksdbStorage(rocks_histo);
+		let historied_management = TreeManagement::from_ser(historied_persistence);
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
@@ -912,6 +1008,8 @@ impl<Block: BlockT> Backend<Block> {
 			is_archive: is_archive_pruning,
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
 			state_usage: Arc::new(StateUsageStats::new()),
+			historied_management: Arc::new(RwLock::new(historied_management)),
+			historied_state: Arc::new(RwLock::new(historied_state)),
 		})
 	}
 

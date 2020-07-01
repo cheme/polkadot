@@ -1953,7 +1953,7 @@ dependencies = [
 [[package]]
 name = "hash-db"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=historied-db#edbe4c5f2360beaa6c06fa65658a49b833a63de7"
+source = "git+https://github.com/cheme/trie?branch=historied-db#930825e2b6796e133812c3f2ec777a38e24b51c4"
 
 [[package]]
 name = "hash-db"
@@ -2026,7 +2026,7 @@ dependencies = [
 [[package]]
 name = "historied-db"
 version = "0.0.1"
-source = "git+https://github.com/cheme/trie?branch=historied-db#edbe4c5f2360beaa6c06fa65658a49b833a63de7"
+source = "git+https://github.com/cheme/trie?branch=historied-db#930825e2b6796e133812c3f2ec777a38e24b51c4"
 dependencies = [
  "derivative",
  "hash-db 0.15.2 (git+https://github.com/cheme/trie?branch=historied-db)",
@@ -7578,6 +7578,7 @@ name = "sp-database"
 version = "2.0.0-rc3"
 dependencies = [
  "kvdb",
+ "parity-util-mem",
  "parking_lot 0.10.2",
 ]
 
