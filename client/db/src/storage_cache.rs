@@ -257,9 +257,9 @@ impl<B: BlockT> ExperimentalCache<B> {
 			pivot
 		};
 		// TODO EMCH make it debug assert + it break tests -> TODO ignore pivot uses debug parent_hash
-/*		assert!(if parent_hash.is_some() && pivot.is_some() {
+		assert!(if parent_hash.is_some() && pivot.is_some() {
 			parent_hash == pivot
-		} else { true });*/
+		} else { true });
 
 		let state = if let Some(state) = pivot.and_then(|pivot| self.management.get_db_state_for_fork(pivot)) {
 			for h in enacted {
@@ -302,7 +302,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 		if let Some(h) = commit_hash {
 			warn!("actual append at = {:?} for {:?} parent {:?}", commit_hash, state, parent_hash);
 			// TODO EMCH make it debug assert + it breaks test so make it a conditional
-//			assert!(self.management.get_db_state_for_fork(h).is_none());
+			assert!(self.management.get_db_state_for_fork(h).is_none());
 			// TODO returning both state on this call???
 			Some((
 				self.management.append_external_state(h.clone(), &state)
