@@ -22,26 +22,48 @@ use std::path::{Path, PathBuf};
 
 use sp_runtime::traits::Block as BlockT;
 use crate::utils::DatabaseType;
-
 /// Version file name.
 const VERSION_FILE_NAME: &'static str = "db_version";
 
 /// Current db version.
-const CURRENT_VERSION: u32 = 1;
+const CURRENT_VERSION: u32 = 2;
 
 /// Upgrade database to current version.
-pub fn upgrade_db<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
+pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
 	let is_empty = db_path.read_dir().map_or(true, |mut d| d.next().is_none());
 	if !is_empty {
 		let db_version = current_version(db_path)?;
 		match db_version {
 			0 => Err(sp_blockchain::Error::Backend(format!("Unsupported database version: {}", db_version)))?,
-			1 => (),
+			1 => migrate_1_to_2::<Block>(db_path, db_type)?,
+			2 => (),
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
 	}
 
 	update_version(db_path)
+}
+
+/// Migration from version1 to version2:
+/// the number of columns has changed from 11 to 15;
+fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+	// Number of columns in v0.
+	const V1_NUM_COLUMNS: u32 = 11;
+	{
+
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(V1_NUM_COLUMNS);
+		let path = db_path.to_str()
+			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+		let db = kvdb_rocksdb::Database::open(&db_config, &path)
+			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+		db.add_column().map_err(db_err)?;
+		db.add_column().map_err(db_err)?;
+		db.add_column().map_err(db_err)?;
+		db.add_column().map_err(db_err)?;
+		//db.flush().map_err(db_err)?;
+	}
+
+	Ok(())
 }
 
 

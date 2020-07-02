@@ -353,6 +353,8 @@ pub(crate) mod columns {
 	/// Map 2 tree management for historied db
 	/// TODO dynamic collection in state_meta
 	pub const TreeBranchs: u32 = 12;
+	pub const StateValues: u32 = 13;
+	pub const StateIndexes: u32 = 14;
 }
 
 struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
