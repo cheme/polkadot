@@ -256,7 +256,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 		} else {
 			pivot
 		};
-		// TODO make it debug assert + it break tests -> TODO ignore pivot uses debug parent_hash
+		// TODO EMCH make it debug assert + it break tests -> TODO ignore pivot uses debug parent_hash
 		assert!(if parent_hash.is_some() && pivot.is_some() {
 			parent_hash == pivot
 		} else { true });
@@ -268,8 +268,8 @@ impl<B: BlockT> ExperimentalCache<B> {
 				if self.retracted.remove(h) {
 					continue;
 				}
-				// TODO make it debug assert plus it break tests
-				assert!(self.management.get_db_state_for_fork(h).is_none());
+				// TODO EMCH make it debug assert plus it break tests
+				assert!(self.management.get_db_state_for_fork(h).is_some());
 			}
 			state
 		} else {
@@ -301,7 +301,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 
 		if let Some(h) = commit_hash {
 			warn!("actual append at = {:?} for {:?} parent {:?}", commit_hash, state, parent_hash);
-			// TODO make it debug assert + it breaks test
+			// TODO EMCH make it debug assert + it breaks test
 			assert!(self.management.get_db_state_for_fork(h).is_none());
 			// TODO returning both state on this call???
 			Some((
