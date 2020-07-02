@@ -251,20 +251,25 @@ impl<B: BlockT> ExperimentalCache<B> {
 			self.retracted.insert(h.clone());
 		}
 		let mut got_all_enacted = true;
+		let pivot = if enacted.last().is_some() {
+			enacted.last()
+		} else {
+			pivot
+		};
+		// TODO make it debug assert + it break tests -> TODO ignore pivot uses debug parent_hash
+		assert!(if parent_hash.is_some() && pivot.is_some() {
+			parent_hash == pivot
+		} else { true });
 
-		let state = if let Some(mut state) = pivot.and_then(|pivot| self.management.get_db_state_for_fork(pivot)) {
+		let state = if let Some(state) = pivot.and_then(|pivot| self.management.get_db_state_for_fork(pivot)) {
 			for h in enacted {
 				// TODO this should not really occur?? (get state mut on pivot returning
 				warn!("This should not happen = {:?}", (pivot, enacted, retracted));
 				if self.retracted.remove(h) {
 					continue;
 				}
-				// TODO does not make sense to put back when it was not removed!! -> + probably do not need
-				// pivot either or pivot at right location (aka after ennacted!!)
-				self.management.append_external_state(h.clone(), &state)
-					.expect("correct state resolution");
-				state = self.management.get_db_state_for_fork(h) // TODO bad api probably need to return SE instead of S
-					.expect("inserted above");
+				// TODO make it debug assert plus it break tests
+				assert!(self.management.get_db_state_for_fork(h).is_none());
 			}
 			state
 		} else {
@@ -296,6 +301,8 @@ impl<B: BlockT> ExperimentalCache<B> {
 
 		if let Some(h) = commit_hash {
 			warn!("actual append at = {:?} for {:?} parent {:?}", commit_hash, state, parent_hash);
+			// TODO make it debug assert + it breaks test
+			assert!(self.management.get_db_state_for_fork(h).is_none());
 			// TODO returning both state on this call???
 			Some((
 				self.management.append_external_state(h.clone(), &state)
