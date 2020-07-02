@@ -211,7 +211,7 @@ pub fn open_database<Block: BlockT>(
 ) -> sp_blockchain::Result<Arc<dyn Database<DbHash>>> {
 	Ok(open_database_and_historied::<Block>(config, db_type)?.0)
 }
-const DEFAULT_CACHE_SIZE: usize = 100_000; // TODO check it is default value from println 
+const DEFAULT_CACHE_SIZE: usize = 128;
 /// Opens the configured database, and a database for historied state.
 pub fn open_database_and_historied<Block: BlockT>(
 	config: &DatabaseSettings,

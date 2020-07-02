@@ -48,6 +48,14 @@ mod parity_db;
 mod subdb;
 
 use historied_db::historied::tree_management::{TreeManagement, TreeManagementStorage};
+use historied_db::{
+	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
+	ForkableManagement, Latest, UpdateResult,
+	historied::{InMemoryValue, Value},
+	historied::tree::MemoryOnly,
+	historied::tree_management::{Tree, ForkPlan},
+};
+
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::io;
@@ -920,6 +928,7 @@ pub struct Backend<Block: BlockT> {
 		TreeManagementPersistence,
 	>>>,
 	historied_state: Arc<RwLock<HistoriedState>>,
+	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
 }
 
 impl<Block: BlockT> Backend<Block> {
@@ -1012,6 +1021,7 @@ impl<Block: BlockT> Backend<Block> {
 			state_usage: Arc::new(StateUsageStats::new()),
 			historied_management: Arc::new(RwLock::new(historied_management)),
 			historied_state: Arc::new(RwLock::new(historied_state)),
+			historied_next_finalizable: Arc::new(RwLock::new(None)),
 		})
 	}
 
@@ -1483,7 +1493,28 @@ impl<Block: BlockT> Backend<Block> {
 
 		Ok(())
 	}
+
+
+	fn historied_new_finalized(&self, hash: &Block::Hash, number: NumberFor<Block>, force: bool)
+		-> ClientResult<()> {
+		let do_finalize = force && &number > &self.historied_next_finalizable.read().as_ref().unwrap_or(&0.into());
+		if !do_finalize {
+			return Ok(())
+		}
+
+		let switch_index = self.historied_management.write().get_db_state_for_fork(hash);
+		
+		// TODO current canonicalize is broken (uses a path, but remove all that is afterward too), we just need to change composite treshold
+		// and migrate. Or we canonicallize over ptha to hash and only ever migrate less often
+		// (composite index).
+		//self.historied_management.canonicalize(switch_index);
+		// TODO EMCH do migrate data
+		*self.historied_next_finalizable.write() = Some(number + HISTORIED_FINALIZATION_WINDOWS.into());
+		Ok(())
+	}
 }
+
+const HISTORIED_FINALIZATION_WINDOWS: u8 = 101;
 
 fn apply_state_commit(transaction: &mut Transaction<DbHash>, commit: sc_state_db::CommitSet<Vec<u8>>) {
 	for (key, val) in commit.data.inserted.into_iter() {
@@ -1566,9 +1597,51 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	fn commit_operation(&self, operation: Self::BlockImportOperation) -> ClientResult<()> {
 		let usage = operation.old_state.usage_info();
 		self.state_usage.merge_sm(usage);
+		let last_final = operation.finalized_blocks.last().cloned();
+		let hashes = operation.pending_block.as_ref().map(|pending_block| {
+			let hash = pending_block.header.hash();
+			let parent_hash = *pending_block.header.parent_hash();
+			(hash, parent_hash)
+		});
 
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
+				// TODO avoid failure or manage pending on those historied operation
+				// -> could put in try commit (mgmt change are synch at this point).
+				if let Some((hash, parent_hash)) = hashes {
+					if self.historied_next_finalizable.read().is_none() {
+						let parent_block = BlockId::Hash(parent_hash.clone());
+						if let Some(nb) = self.blockchain.block_number_from_id(&parent_block)? {
+							*self.historied_next_finalizable.write() = Some(nb + HISTORIED_FINALIZATION_WINDOWS.into());
+						}
+					}
+					{
+						// lock does notinclude update of value as we do not have concurrent block creation
+						let mut management = self.historied_management.write();
+						if let Some(state) = management.get_db_state_for_fork(&parent_hash) {
+							let query_plan = management.append_external_state(hash.clone(), &state)
+								.expect("correct state resolution");
+							warn!("qp for {:?}, {:?}", hash, query_plan);
+							// TODO EMCH this should be return by append operation!!!
+							let update_plan = management.get_db_state_mut(&hash)
+								.expect("correct state resolution");
+							warn!("up for {:?}, {:?}", hash, update_plan);
+						} else {
+							// TODO EMCH rollback?
+						}
+					}
+					// TODO EMCH iterate collecation and update values at update_plan
+				
+					/* for a in operation.storage_updates {
+					 * } */
+				}
+				if let Some(latest_final) = last_final {
+					let block = latest_final.0;
+					if let (Some(number), Some(hash)) = (self.blockchain.block_number_from_id(&block)?,
+						self.blockchain.block_hash_from_id(&block)?) {
+						self.historied_new_finalized(&hash, number, false)?;
+					}
+				}
 				self.storage.state_db.apply_pending();
 				Ok(())
 			},
@@ -1600,6 +1673,9 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		self.storage.db.commit(transaction);
 		self.blockchain.update_meta(hash, number, is_best, is_finalized);
 		self.changes_tries_storage.post_commit(changes_trie_cache_ops);
+		if let Some(number) = self.blockchain.block_number_from_id(&block)? {
+			self.historied_new_finalized(&hash, number, true)?;
+		}
 		Ok(())
 	}
 

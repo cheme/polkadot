@@ -50,7 +50,6 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 	// Number of columns in v0.
 	const V1_NUM_COLUMNS: u32 = 11;
 	{
-
 		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(V1_NUM_COLUMNS);
 		let path = db_path.to_str()
 			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
@@ -60,7 +59,6 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 		db.add_column().map_err(db_err)?;
 		db.add_column().map_err(db_err)?;
 		db.add_column().map_err(db_err)?;
-		//db.flush().map_err(db_err)?;
 	}
 
 	Ok(())
