@@ -1618,7 +1618,14 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					{
 						// lock does notinclude update of value as we do not have concurrent block creation
 						let mut management = self.historied_management.write();
-						if let Some(state) = management.get_db_state_for_fork(&parent_hash) {
+						if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
+							.unwrap_or_else(|| {
+								// allow this to start from existing state TODO EMCH add a stored boolean to only allow
+								// that once in genesis
+								warn!("state not found for parent hash, THISISABUG, appending to latest");
+								management.latest_state_fork()
+							}))
+						{
 							let query_plan = management.append_external_state(hash.clone(), &state)
 								.expect("correct state resolution");
 							warn!("qp for {:?}, {:?}", hash, query_plan);
