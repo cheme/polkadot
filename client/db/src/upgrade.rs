@@ -197,7 +197,7 @@ impl<Block: BlockT> hash_db::HashDBRef<HashFor<Block>, Vec<u8>> for StorageDb<Bl
 
 	fn get(&self, key: &<HashFor::<Block> as hash_db::Hasher>::Out, prefix: hash_db::Prefix) -> Option<sp_trie::DBValue> {
 		let key = sp_trie::prefixed_key::<HashFor<Block>>(key, prefix);
-		self.0.get(crate::columns::STATE_META, key.as_slice()).expect("bad script")
+		self.0.get(crate::columns::STATE, key.as_slice()).expect("bad script")
 	}
 }
 
