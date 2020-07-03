@@ -52,8 +52,8 @@ use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
 	ForkableManagement, Latest, UpdateResult,
 	historied::{InMemoryValue, Value},
-	historied::tree::MemoryOnly,
-	historied::tree_management::{Tree, ForkPlan},
+	historied::tree::Tree,
+	historied::tree_management::{Tree as TreeMgmt, ForkPlan},
 };
 
 use std::sync::Arc;

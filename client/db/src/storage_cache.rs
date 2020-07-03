@@ -20,8 +20,8 @@ use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
 	ForkableManagement, Latest, UpdateResult,
 	historied::{InMemoryValue, Value},
-	historied::tree::MemoryOnly,
-	historied::tree_management::{Tree, TreeManagement, ForkPlan},
+	historied::tree::Tree,
+	historied::tree_management::{Tree as TreeMgmt, TreeManagement, ForkPlan},
 };
 use std::collections::{VecDeque, HashSet, HashMap, BTreeSet};
 use std::sync::Arc;
@@ -45,6 +45,8 @@ use sc_client_api::ExpCacheConf;
 const STATE_CACHE_BLOCKS: usize = 12;
 
 type ChildStorageKey = (Vec<u8>, Vec<u8>);
+
+type HistoriedLinearBackend = historied_db::historied::linear::MemoryOnly<Option<Vec<u8>>, u32>;
 
 /// Shared canonical state cache.
 pub struct Cache<B: BlockT> {
@@ -118,7 +120,7 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 				}
 			}
 		} else {
-			let history = MemoryOnly::new(value, at);
+			let history = Tree::new(value, at);
 			if self.lru_storage.add_no_resize(key, history) {
 				self.gc(&mut ());
 			}
@@ -219,7 +221,7 @@ struct LRUMap<K, V, B>(LinkedHashMap<K, V>, usize, usize, PhantomData<B>);
 
 /// TODO replace second usize index by actual B::blocknumber
 pub struct ExperimentalCache<B: BlockT>{
-	lru_storage: LRUMap<StorageKey, MemoryOnly<u32, u32, Option<StorageValue>>, B>,
+	lru_storage: LRUMap<StorageKey, Tree<u32, u32, Option<StorageValue>, HistoriedLinearBackend>, B>,
 	management: TreeManagement<B::Hash, u32, u32, Option<StorageValue>, ()>,
 	/// since retracted branch could potentially be enacted back we do not put it
 	/// in management directly.
@@ -349,7 +351,7 @@ impl EstimateSize for Option<Vec<u8>> {
 	}
 }
 
-impl EstimateSize for MemoryOnly<u32, u32, Option<StorageValue>> {
+impl EstimateSize for Tree<u32, u32, Option<StorageValue>, HistoriedLinearBackend> {
 	fn estimate_size(&self) -> usize {
 		self.temp_size()
 	}
