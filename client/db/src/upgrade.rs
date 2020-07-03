@@ -19,6 +19,7 @@
 use std::fs;
 use std::io::{Read, Write, ErrorKind};
 use std::path::{Path, PathBuf};
+use log::warn;
 
 use sp_runtime::traits::Block as BlockT;
 use crate::utils::DatabaseType;
@@ -86,8 +87,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		tx.delete_prefix(13, &[]);
 		tx.delete_prefix(14, &[]);
 
-		db.write(tx).map_err(db_err)?;;
-		log::warn!("END MIGRATE");
+		db.write(tx).map_err(db_err)?;
+		warn!("END MIGRATE");
 
 		Ok(())
 }
@@ -98,11 +99,21 @@ fn current_version(path: &Path) -> sp_blockchain::Result<u32> {
 	let unknown_version_err = || sp_blockchain::Error::Backend("Unknown database version".into());
 
 	match fs::File::open(version_file_path(path)) {
-		Err(ref err) if err.kind() == ErrorKind::NotFound => Ok(0),
-		Err(_) => Err(unknown_version_err()),
+		Err(ref err) if err.kind() == ErrorKind::NotFound => {
+			warn!("version file not found");
+			Ok(0)
+		},
+		Err(e) => {
+			warn!("version file error: {:?}", e);
+			Err(unknown_version_err())
+		},
 		Ok(mut file) => {
 			let mut s = String::new();
-			file.read_to_string(&mut s).map_err(|_| unknown_version_err())?;
+			file.read_to_string(&mut s).map_err(|e| {
+				warn!("version file error: {:?}", e);
+				unknown_version_err()
+			})?;
+			warn!("version db : {:?}", s);
 			u32::from_str_radix(&s, 10).map_err(|_| unknown_version_err())
 		},
 	}
