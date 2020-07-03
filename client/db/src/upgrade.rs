@@ -20,9 +20,13 @@ use std::fs;
 use std::io::{Read, Write, ErrorKind};
 use std::path::{Path, PathBuf};
 use log::warn;
+use std::marker::PhantomData;
 
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::traits::{Block as BlockT, HashFor};
 use crate::utils::DatabaseType;
+use crate::{StateDb, PruningMode, StateMetaDb};
+use std::sync::Arc;
+
 /// Version file name.
 const VERSION_FILE_NAME: &'static str = "db_version";
 
@@ -76,6 +80,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
 
 		log::warn!("START MIGRATE");
+		log::warn!("start clean");
 		let mut tx = db.transaction();
 		tx.delete(2, b"tree_mgmt/touched_gc");
 		tx.delete(2, b"tree_mgmt/current_gc");
@@ -88,11 +93,82 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		tx.delete_prefix(14, &[]);
 
 		db.write(tx).map_err(db_err)?;
+		warn!("end clean");
 		warn!("END MIGRATE");
+
+		let tree_root = match db.get(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK) {
+			Ok(id) => {
+				let id = id.unwrap();
+				warn!("Head is {:?}", id);
+				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
+				hash.as_mut().copy_from_slice(id.as_slice());
+				hash
+			},
+			Err(e) => panic!("no best block is bad sign {:?}", e),
+		};
+
+/*		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+		let db_read = kvdb_rocksdb::Database::open(&db_config, &path)
+			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+
+		let db = sp_database::as_database(db_read);
+
+		let state_db: StateDb<_, _> = StateDb::new(
+			PruningMode::ArchiveAll,
+			true,
+			&StateMetaDb(&*db),
+		).expect("TODO err");
+		let storage_db = crate::StorageDb {
+			db: db.clone(),
+			state_db,
+			prefix_keys: true,
+		};
+	
+		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);
+*/
+		let storage = StorageDb::<Block>(db, PhantomData);
+//		let storage: Arc::<dyn sp_state_machine::Storage<HashFor<Block>>> = Arc::new(storage);
+/*		let mut root = Block::Hash::default();
+		let trie_backend = sp_state_machine::TrieBackend::new(
+			storage,
+			tree_root,
+		);*/
+		let trie = sp_trie::trie_types::TrieDB::new(
+			&storage,
+			&tree_root,
+		).expect("build trie");
+
+		let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
+		while let Some(Ok((k, v))) = iter.next() {
+			warn!("T: {:?}, {:?}", k, v);
+		}
+
 
 		Ok(())
 }
-	
+
+struct StorageDb<Block>(kvdb_rocksdb::Database, PhantomData<Block>);
+
+impl<Block: BlockT> hash_db::HashDBRef<HashFor<Block>, Vec<u8>> for StorageDb<Block> {
+	fn contains(&self, key: &<HashFor::<Block> as hash_db::Hasher>::Out, prefix: hash_db::Prefix) -> bool {
+		self.get(key, prefix).is_some()
+	}
+
+	fn get(&self, key: &<HashFor::<Block> as hash_db::Hasher>::Out, prefix: hash_db::Prefix) -> Option<sp_trie::DBValue> {
+		let key = sp_trie::prefixed_key::<HashFor<Block>>(key, prefix);
+		self.0.get(crate::columns::STATE_META, key.as_slice()).expect("bad script")
+	}
+}
+
+
+impl<Block: BlockT> sp_state_machine::Storage<HashFor<Block>> for StorageDb<Block> {
+	fn get(&self, key: &Block::Hash, prefix: hash_db::Prefix) -> Result<Option<sp_trie::DBValue>, String> {
+		let key = sp_trie::prefixed_key::<HashFor<Block>>(key, prefix);
+		Ok(self.0.get(crate::columns::STATE_META, key.as_slice()).expect("bad script"))
+	}
+}
+
+
 /// Reads current database version from the file at given path.
 /// If the file does not exist returns 0.
 fn current_version(path: &Path) -> sp_blockchain::Result<u32> {
