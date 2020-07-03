@@ -106,7 +106,9 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		warn!("end clean");
 		warn!("END MIGRATE");
 
-		let tree_root = match db.get(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK) {
+		// Can not use crate::meta_keys::BEST_BLOCK on non archive node: using CANNONICAL,
+		// TODO EMCH would need to fetch non_cannonical overlay to complete.
+		let tree_root = match db.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK) {
 			Ok(id) => {
 				let id = id.unwrap();
 				let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
