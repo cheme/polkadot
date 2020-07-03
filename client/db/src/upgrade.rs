@@ -25,6 +25,16 @@ use std::marker::PhantomData;
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use crate::utils::DatabaseType;
 use crate::{StateDb, PruningMode, StateMetaDb};
+use historied_db::historied::tree_management::TreeManagement;
+use historied_db::{
+	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
+	ForkableManagement, Latest, UpdateResult,
+	historied::{InMemoryValue, Value},
+	historied::tree::Tree,
+	historied::tree_management::{Tree as TreeMgmt, ForkPlan},
+};
+use codec::{Decode, Encode};
+
 use std::sync::Arc;
 
 /// Version file name.
@@ -99,10 +109,13 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		let tree_root = match db.get(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK) {
 			Ok(id) => {
 				let id = id.unwrap();
+				let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
+				use sp_runtime::traits::Header;
+				let id = id.unwrap().expect("d").hash();
 				warn!("Head is {:?}", id);
-				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
-				hash.as_mut().copy_from_slice(id.as_slice());
-				hash
+/*				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
+				hash.as_mut().copy_from_slice(id.as_slice());*/
+				id	
 			},
 			Err(e) => panic!("no best block is bad sign {:?}", e),
 		};
@@ -126,7 +139,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	
 		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);
 */
-		let storage = StorageDb::<Block>(db, PhantomData);
+		let db = Arc::new(db);
+		let storage = StorageDb::<Block>(db.clone(), PhantomData);
 //		let storage: Arc::<dyn sp_state_machine::Storage<HashFor<Block>>> = Arc::new(storage);
 /*		let mut root = Block::Hash::default();
 		let trie_backend = sp_state_machine::TrieBackend::new(
@@ -139,15 +153,42 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		).expect("build trie");
 
 		let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
+		let historied_persistence = crate::RocksdbStorage(db.clone());
+		let mut management = TreeManagement::<
+			<HashFor<Block> as hash_db::Hasher>::Out,
+			u32,
+			u32,
+			Vec<u8>,
+			crate::TreeManagementPersistence,
+		>::from_ser(historied_persistence);
+		let state = management.latest_state_fork();
+		management.append_external_state(tree_root.clone(), &state);
+		let state = management.latest_state();
+		let mut tx = db.transaction();
+		let mut count_tx = 0;
 		while let Some(Ok((k, v))) = iter.next() {
-			warn!("T: {:?}, {:?}", k, v);
+			let value = HValue::new(v, &state);
+			let value = value.encode();
+			tx.put(crate::columns::StateValues, k.as_slice(), value.as_slice());
+			count_tx += 1;
+			if count_tx == 1000 {
+				warn!("write a thousand {:?}", k);
+				db.write(tx);
+				tx = db.transaction();
+				count_tx = 0;
+			}
 		}
-
+		db.write(tx);
 
 		Ok(())
 }
 
-struct StorageDb<Block>(kvdb_rocksdb::Database, PhantomData<Block>);
+type HValue<'a> = Tree<u32, u32, Vec<u8>, historied_db::historied::encoded_array::EncodedArray<
+	'a,
+	historied_db::historied::encoded_array::NoVersion,
+>>;
+
+struct StorageDb<Block>(Arc<kvdb_rocksdb::Database>, PhantomData<Block>);
 
 impl<Block: BlockT> hash_db::HashDBRef<HashFor<Block>, Vec<u8>> for StorageDb<Block> {
 	fn contains(&self, key: &<HashFor::<Block> as hash_db::Hasher>::Out, prefix: hash_db::Prefix) -> bool {
