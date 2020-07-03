@@ -37,6 +37,7 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 			0 => Err(sp_blockchain::Error::Backend(format!("Unsupported database version: {}", db_version)))?,
 			1 => migrate_1_to_2::<Block>(db_path, db_type)?,
 			2 => (),
+			42 => delete_historied::<Block>(db_path, db_type)?,
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
 	}
@@ -64,7 +65,33 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 	Ok(())
 }
 
+/// Hacky migrate to trigger action on db.
+/// Here drop historied state content.
+fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+		let path = db_path.to_str()
+			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+		let db = kvdb_rocksdb::Database::open(&db_config, &path)
+			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
 
+		log::warn!("START MIGRATE");
+		let mut tx = db.transaction();
+		tx.delete(2, b"tree_mgmt/touched_gc");
+		tx.delete(2, b"tree_mgmt/current_gc");
+		tx.delete(2, b"tree_mgmt/last_index");
+		tx.delete(2, b"tree_mgmt/neutral_elt");
+		tx.delete(2, b"tree_mgmt/tree_meta");
+		tx.delete_prefix(11, &[]);
+		tx.delete_prefix(12, &[]);
+		tx.delete_prefix(13, &[]);
+		tx.delete_prefix(14, &[]);
+
+		db.write(tx).map_err(db_err)?;;
+		log::warn!("END MIGRATE");
+
+		Ok(())
+}
+	
 /// Reads current database version from the file at given path.
 /// If the file does not exist returns 0.
 fn current_version(path: &Path) -> sp_blockchain::Result<u32> {
