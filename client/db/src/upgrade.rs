@@ -90,10 +90,7 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 
 		let db = sp_database::as_database(db_read);
 
-		let state_db: StateDb<
-			<HashFor<Block> as hash_db::Hasher>::Out,
-			<HashFor<Block> as hash_db::Hasher>::Out,
-		> = StateDb::new(
+		let state_db: StateDb<Block::Hash, Vec<u8>> = StateDb::new(
 			PruningMode::Constrained(sc_state_db::Constraints {
 				max_blocks: None, // may require info in the future, in fact we should fetch it
 				max_mem: None,
