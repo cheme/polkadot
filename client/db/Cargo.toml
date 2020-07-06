@@ -39,6 +39,8 @@ prometheus-endpoint = { package = "substrate-prometheus-endpoint", version = "0.
 historied-db = { git = "https://github.com/cheme/trie", branch = "historied-db" }
 tempfile = "3" # TODO remove when fix custom for tests
 
+trie-db = { version = "0.21.0", default-features = false } # TODO remove, just for testing in upgrade
+
 [dev-dependencies]
 sp-keyring = { version = "2.0.0-rc3", path = "../../primitives/keyring" }
 substrate-test-runtime-client = { version = "2.0.0-rc3", path = "../../test-utils/runtime/client" }

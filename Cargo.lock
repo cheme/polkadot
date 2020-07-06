@@ -6062,6 +6062,7 @@ dependencies = [
  "substrate-prometheus-endpoint",
  "substrate-test-runtime-client",
  "tempfile",
+ "trie-db",
 ]
 
 [[package]]

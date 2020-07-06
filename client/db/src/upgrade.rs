@@ -195,6 +195,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		}
 		println!("iter trie state of {} in : {}", count, now.elapsed().as_millis());
 		let now = Instant::now();
+
 		let state = management.get_db_state(&tree_root).expect("just added");
 		for (k, v) in db.iter(crate::columns::StateValues) {
 			let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
@@ -202,6 +203,20 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 			let v = v.get(&state);
 		}
 		println!("iter kvstate state in : {}", now.elapsed().as_millis());
+		let now = Instant::now();
+
+
+		let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
+		let state = management.get_db_state(&tree_root).expect("just added");
+		let iter_kv = db.iter(crate::columns::StateValues).map(|(k, v)| {
+			let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
+			use historied_db::historied::ValueRef;
+			(k, v.get(&state).expect("d"))
+		});
+
+		trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
+		let hash = root_callback.root;
+		println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
 		Ok(())
 }
 
