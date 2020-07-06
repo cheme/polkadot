@@ -26,7 +26,7 @@ use std::fmt;
 use std::collections::{HashMap, VecDeque, hash_map::Entry};
 use super::{Error, DBValue, ChangeSet, CommitSet, MetaDb, Hash, to_meta_key};
 use codec::{Encode, Decode};
-use log::trace;
+use log::{trace, warn};
 
 const NON_CANONICAL_JOURNAL: &[u8] = b"noncanonical_journal";
 const LAST_CANONICAL: &[u8] = b"last_canonical";
@@ -395,6 +395,7 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 	}
 
 	pub(crate) fn drop_all(&mut self) {
+		warn!("drop all last cano: {:?}", self.last_canonicalized);
 		// only keep last_cannonicalized reference.
 		while let Some(level) = self.levels.pop_front() {
 			for (_i, overlay) in level.into_iter().enumerate() {
@@ -408,6 +409,7 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 				);
 			}
 		}
+		warn!("non cano levels: {:?}", self.levels.len());
 		self.parents.clear();
 		self.pending_canonicalizations.clear();
 		self.pending_insertions.clear();
