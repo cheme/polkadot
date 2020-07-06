@@ -21,6 +21,7 @@ use std::io::{Read, Write, ErrorKind};
 use std::path::{Path, PathBuf};
 use log::warn;
 use std::marker::PhantomData;
+use std::time::{Duration, Instant};
 
 use sp_runtime::traits::{Block as BlockT, HashFor};
 use crate::utils::DatabaseType;
@@ -141,6 +142,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	
 		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);
 */
+		println!("db stats : {:?}", db.get_statistics());
+
 		let db = Arc::new(db);
 		let storage = StorageDb::<Block>(db.clone(), PhantomData);
 //		let storage: Arc::<dyn sp_state_machine::Storage<HashFor<Block>>> = Arc::new(storage);
@@ -168,13 +171,15 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		let state = management.latest_state();
 		let mut tx = db.transaction();
 		let mut count_tx = 0;
+		let mut count = 0;
 		while let Some(Ok((k, v))) = iter.next() {
 			let value = HValue::new(v, &state);
 			let value = value.encode();
 			tx.put(crate::columns::StateValues, k.as_slice(), value.as_slice());
 			count_tx += 1;
 			if count_tx == 1000 {
-				warn!("write a thousand {:?}", k);
+				count += 1;
+				warn!("write a thousand {} {:?}", count, &k[..20]);
 				db.write(tx);
 				tx = db.transaction();
 				count_tx = 0;
@@ -182,6 +187,21 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		}
 		db.write(tx);
 
+		let now = Instant::now();
+		let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
+		let mut count = 0;
+		while let Some(Ok((k, v))) = iter.next() {
+			count += 1;
+		}
+		println!("iter trie state of {} in : {}", count, now.elapsed().as_millis());
+		let now = Instant::now();
+		let state = management.get_db_state(&tree_root).expect("just added");
+		for (k, v) in db.iter(crate::columns::StateValues) {
+			let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
+			use historied_db::historied::ValueRef;
+			let v = v.get(&state);
+		}
+		println!("iter kvstate state in : {}", now.elapsed().as_millis());
 		Ok(())
 }
 
