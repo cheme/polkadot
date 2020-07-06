@@ -40,6 +40,7 @@ historied-db = { git = "https://github.com/cheme/trie", branch = "historied-db" 
 tempfile = "3" # TODO remove when fix custom for tests
 
 trie-db = { version = "0.21.0", default-features = false } # TODO remove, just for testing in upgrade
+rocksdb = { version = "0.14", features = ["snappy"], default-features = false } # TODO remove, just to get collection size
 
 [dev-dependencies]
 sp-keyring = { version = "2.0.0-rc3", path = "../../primitives/keyring" }

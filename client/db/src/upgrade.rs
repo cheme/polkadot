@@ -84,12 +84,28 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 /// Hacky migrate to trigger action on db.
 /// Here drop historied state content.
 fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+
 		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+    {
+			let option = rocksdb::Options::default();
+			 let cfs = rocksdb::DB::list_cf(&option, db_path).unwrap();
+			 let db = rocksdb::DB::open_cf(&option, db_path, cfs.clone()).unwrap();
+			 for cf in cfs {
+
+				 if let Some(col) = db.cf_handle(&cf) {
+					println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.estimate-table-readers-mem"));
+					println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.cur-size-all-mem-tables"));
+				 }
+			 }
+			 
+
+		}
+
 		let path = db_path.to_str()
 			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 		let db = kvdb_rocksdb::Database::open(&db_config, &path)
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
-
+		println!("db stats : {:?}", db.get_statistics());
 		log::warn!("START MIGRATE");
 		log::warn!("start clean");
 		let mut tx = db.transaction();
@@ -142,7 +158,6 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	
 		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);
 */
-		println!("db stats : {:?}", db.get_statistics());
 
 		let db = Arc::new(db);
 		let storage = StorageDb::<Block>(db.clone(), PhantomData);
