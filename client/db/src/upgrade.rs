@@ -81,158 +81,167 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 	Ok(())
 }
 
-/// Hacky migrate to trigger action on db.
-/// Here drop historied state content.
-fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
-
+fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
 		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
-    {
-			let option = rocksdb::Options::default();
-			 let cfs = rocksdb::DB::list_cf(&option, db_path).unwrap();
-			 let db = rocksdb::DB::open_cf(&option, db_path, cfs.clone()).unwrap();
-			 for cf in cfs {
-
-				 if let Some(col) = db.cf_handle(&cf) {
-					println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.estimate-table-readers-mem"));
-					println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.cur-size-all-mem-tables"));
-				 }
-			 }
-			 
-
-		}
-
 		let path = db_path.to_str()
 			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
-		let db = kvdb_rocksdb::Database::open(&db_config, &path)
-			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
-		println!("db stats : {:?}", db.get_statistics());
-		log::warn!("START MIGRATE");
-		log::warn!("start clean");
-		let mut tx = db.transaction();
-		tx.delete(2, b"tree_mgmt/touched_gc");
-		tx.delete(2, b"tree_mgmt/current_gc");
-		tx.delete(2, b"tree_mgmt/last_index");
-		tx.delete(2, b"tree_mgmt/neutral_elt");
-		tx.delete(2, b"tree_mgmt/tree_meta");
-		tx.delete_prefix(11, &[]);
-		tx.delete_prefix(12, &[]);
-		tx.delete_prefix(13, &[]);
-		tx.delete_prefix(14, &[]);
-
-		db.write(tx).map_err(db_err)?;
-		warn!("end clean");
-		warn!("END MIGRATE");
-
-		// Can not use crate::meta_keys::BEST_BLOCK on non archive node: using CANNONICAL,
-		// TODO EMCH would need to fetch non_cannonical overlay to complete.
-		let tree_root = match db.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK) {
-			Ok(id) => {
-				let id = id.unwrap();
-				let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
-				use sp_runtime::traits::Header;
-				let id = id.unwrap().expect("d").state_root().clone();
-				warn!("Head is {:?}", id);
-/*				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
-				hash.as_mut().copy_from_slice(id.as_slice());*/
-				id	
-			},
-			Err(e) => panic!("no best block is bad sign {:?}", e),
-		};
-
-/*		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 		let db_read = kvdb_rocksdb::Database::open(&db_config, &path)
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
 
 		let db = sp_database::as_database(db_read);
 
-		let state_db: StateDb<_, _> = StateDb::new(
-			PruningMode::ArchiveAll,
-			true,
+		let state_db: StateDb<
+			<HashFor<Block> as hash_db::Hasher>::Out,
+			<HashFor<Block> as hash_db::Hasher>::Out,
+		> = StateDb::new(
+			PruningMode::ArchiveCanonical, // using any mode different from ArchiveAll
+			true, // Rc or not does not matter in this case
 			&StateMetaDb(&*db),
 		).expect("TODO err");
-		let storage_db = crate::StorageDb {
+		state_db.clear_non_canonical();
+		Ok(())
+/*		let storage_db = crate::StorageDb {
 			db: db.clone(),
 			state_db,
 			prefix_keys: true,
 		};
 	
-		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);
-*/
+		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);*/
+}
 
-		let db = Arc::new(db);
-		let storage = StorageDb::<Block>(db.clone(), PhantomData);
+/// Hacky migrate to trigger action on db.
+/// Here drop historied state content.
+fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+
+	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+   {
+		let option = rocksdb::Options::default();
+		 let cfs = rocksdb::DB::list_cf(&option, db_path).unwrap();
+		 let db = rocksdb::DB::open_cf(&option, db_path, cfs.clone()).unwrap();
+		 for cf in cfs {
+
+			 if let Some(col) = db.cf_handle(&cf) {
+				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.estimate-table-readers-mem"));
+				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.size-all-mem-tables"));
+				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.cur-size-all-mem-tables"));
+			 }
+		 }
+	}
+
+	delete_non_canonical::<Block>(db_path, db_type)?;
+	let path = db_path.to_str()
+		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+	let db = kvdb_rocksdb::Database::open(&db_config, &path)
+		.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+	println!("db stats : {:?}", db.get_statistics());
+	log::warn!("START MIGRATE");
+	log::warn!("start clean");
+	let mut tx = db.transaction();
+	tx.delete(2, b"tree_mgmt/touched_gc");
+	tx.delete(2, b"tree_mgmt/current_gc");
+	tx.delete(2, b"tree_mgmt/last_index");
+	tx.delete(2, b"tree_mgmt/neutral_elt");
+	tx.delete(2, b"tree_mgmt/tree_meta");
+	tx.delete_prefix(11, &[]);
+	tx.delete_prefix(12, &[]);
+	tx.delete_prefix(13, &[]);
+	tx.delete_prefix(14, &[]);
+
+	db.write(tx).map_err(db_err)?;
+	warn!("end clean");
+	warn!("END MIGRATE");
+
+	// Can not use crate::meta_keys::BEST_BLOCK on non archive node: using CANNONICAL,
+	// TODO EMCH would need to fetch non_cannonical overlay to complete.
+	let tree_root = match db.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK) {
+		Ok(id) => {
+			let id = id.unwrap();
+			let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
+			use sp_runtime::traits::Header;
+			let id = id.unwrap().expect("d").state_root().clone();
+			warn!("Head is {:?}", id);
+	/*				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
+				hash.as_mut().copy_from_slice(id.as_slice());*/
+			id	
+		},
+		Err(e) => panic!("no best block is bad sign {:?}", e),
+	};
+
+
+	let db = Arc::new(db);
+	let storage = StorageDb::<Block>(db.clone(), PhantomData);
 //		let storage: Arc::<dyn sp_state_machine::Storage<HashFor<Block>>> = Arc::new(storage);
 /*		let mut root = Block::Hash::default();
 		let trie_backend = sp_state_machine::TrieBackend::new(
 			storage,
 			tree_root,
 		);*/
-		let trie = sp_trie::trie_types::TrieDB::new(
-			&storage,
-			&tree_root,
-		).expect("build trie");
+	let trie = sp_trie::trie_types::TrieDB::new(
+		&storage,
+		&tree_root,
+	).expect("build trie");
 
-		let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
-		let historied_persistence = crate::RocksdbStorage(db.clone());
-		let mut management = TreeManagement::<
-			<HashFor<Block> as hash_db::Hasher>::Out,
-			u32,
-			u32,
-			Vec<u8>,
-			crate::TreeManagementPersistence,
-		>::from_ser(historied_persistence);
-		let state = management.latest_state_fork();
-		management.append_external_state(tree_root.clone(), &state);
-		let state = management.latest_state();
-		let mut tx = db.transaction();
-		let mut count_tx = 0;
-		let mut count = 0;
-		while let Some(Ok((k, v))) = iter.next() {
-			let value = HValue::new(v, &state);
-			let value = value.encode();
-			tx.put(crate::columns::StateValues, k.as_slice(), value.as_slice());
-			count_tx += 1;
-			if count_tx == 1000 {
-				count += 1;
-				warn!("write a thousand {} {:?}", count, &k[..20]);
-				db.write(tx);
-				tx = db.transaction();
-				count_tx = 0;
-			}
-		}
-		db.write(tx);
-
-		let now = Instant::now();
-		let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
-		let mut count = 0;
-		while let Some(Ok((k, v))) = iter.next() {
+	let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
+	let historied_persistence = crate::RocksdbStorage(db.clone());
+	let mut management = TreeManagement::<
+		<HashFor<Block> as hash_db::Hasher>::Out,
+		u32,
+		u32,
+		Vec<u8>,
+		crate::TreeManagementPersistence,
+	>::from_ser(historied_persistence);
+	let state = management.latest_state_fork();
+	management.append_external_state(tree_root.clone(), &state);
+	let state = management.latest_state();
+	let mut tx = db.transaction();
+	let mut count_tx = 0;
+	let mut count = 0;
+	while let Some(Ok((k, v))) = iter.next() {
+		let value = HValue::new(v, &state);
+		let value = value.encode();
+		tx.put(crate::columns::StateValues, k.as_slice(), value.as_slice());
+		count_tx += 1;
+		if count_tx == 1000 {
 			count += 1;
+			warn!("write a thousand {} {:?}", count, &k[..20]);
+			db.write(tx);
+			tx = db.transaction();
+			count_tx = 0;
 		}
-		println!("iter trie state of {} in : {}", count, now.elapsed().as_millis());
-		let now = Instant::now();
+	}
+	db.write(tx);
 
-		let state = management.get_db_state(&tree_root).expect("just added");
-		for (k, v) in db.iter(crate::columns::StateValues) {
-			let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
-			use historied_db::historied::ValueRef;
-			let v = v.get(&state);
-		}
-		println!("iter kvstate state in : {}", now.elapsed().as_millis());
-		let now = Instant::now();
+	let now = Instant::now();
+	let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
+	let mut count = 0;
+	while let Some(Ok((k, v))) = iter.next() {
+		count += 1;
+	}
+	println!("iter trie state of {} in : {}", count, now.elapsed().as_millis());
+	let now = Instant::now();
+
+	let state = management.get_db_state(&tree_root).expect("just added");
+	for (k, v) in db.iter(crate::columns::StateValues) {
+		let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
+		use historied_db::historied::ValueRef;
+		let v = v.get(&state);
+	}
+	println!("iter kvstate state in : {}", now.elapsed().as_millis());
+	let now = Instant::now();
 
 
-		let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
-		let state = management.get_db_state(&tree_root).expect("just added");
-		let iter_kv = db.iter(crate::columns::StateValues).map(|(k, v)| {
-			let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
-			use historied_db::historied::ValueRef;
-			(k, v.get(&state).expect("d"))
-		});
+	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
+	let state = management.get_db_state(&tree_root).expect("just added");
+	let iter_kv = db.iter(crate::columns::StateValues).map(|(k, v)| {
+		let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
+		use historied_db::historied::ValueRef;
+		(k, v.get(&state).expect("d"))
+	});
 
-		trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
-		let hash = root_callback.root;
-		println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
-		Ok(())
+	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
+	let hash = root_callback.root;
+	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
+	Ok(())
 }
 
 type HValue<'a> = Tree<u32, u32, Vec<u8>, historied_db::historied::encoded_array::EncodedArray<

@@ -394,6 +394,28 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 		}
 	}
 
+	pub(crate) fn drop_all(&mut self) {
+		// only keep last_cannonicalized reference.
+		while let Some(level) = self.levels.pop_front() {
+			for (i, overlay) in level.into_iter().enumerate() {
+				discard_descendants(
+					&mut self.levels.as_mut_slices(),
+					&mut self.values,
+					&mut self.parents,
+					&self.pinned,
+					&mut self.pinned_insertions,
+					&overlay.hash,
+				);
+			}
+		}
+		self.parents.clear();
+		self.pending_canonicalizations.clear();
+		self.pending_insertions.clear();
+		self.values.clear();
+		self.pinned.clear();
+		self.pinned_insertions.clear();
+	}
+
 	/// Get a value from the node overlay. This searches in every existing changeset.
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<DBValue>
 	where

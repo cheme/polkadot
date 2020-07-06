@@ -522,6 +522,17 @@ impl<BlockHash: Hash + MallocSizeOf, Key: Hash + MallocSizeOf> StateDb<BlockHash
 	pub fn memory_info(&self) -> StateDbMemoryInfo {
 		self.db.read().memory_info()
 	}
+
+	/// Remove all non canonical layer infos (journals), and drop related block headers.
+	pub fn clear_non_canonical(&self) {
+		let mut db = self.db.write();
+		match db.mode {
+			PruningMode::ArchiveAll => return (),
+			_ => (),
+		};
+
+		db.non_canonical.drop_all();
+	}
 }
 
 #[cfg(test)]
