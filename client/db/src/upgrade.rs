@@ -30,7 +30,7 @@ use historied_db::historied::tree_management::TreeManagement;
 use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
 	ForkableManagement, Latest, UpdateResult,
-	historied::{InMemoryValue, Value},
+	historied::{InMemoryValue, InMemoryValueSlice, Value},
 	historied::tree::Tree,
 	historied::tree_management::{Tree as TreeMgmt, ForkPlan},
 };
@@ -246,6 +246,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 type HValue<'a> = Tree<u32, u32, Vec<u8>, historied_db::historied::encoded_array::EncodedArray<
 	'a,
+	Vec<u8>,
 	historied_db::historied::encoded_array::NoVersion,
 >>;
 
