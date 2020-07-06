@@ -397,7 +397,7 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 	pub(crate) fn drop_all(&mut self) {
 		// only keep last_cannonicalized reference.
 		while let Some(level) = self.levels.pop_front() {
-			for (i, overlay) in level.into_iter().enumerate() {
+			for (_i, overlay) in level.into_iter().enumerate() {
 				discard_descendants(
 					&mut self.levels.as_mut_slices(),
 					&mut self.values,

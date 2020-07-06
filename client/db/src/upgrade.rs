@@ -94,7 +94,10 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 			<HashFor<Block> as hash_db::Hasher>::Out,
 			<HashFor<Block> as hash_db::Hasher>::Out,
 		> = StateDb::new(
-			PruningMode::ArchiveCanonical, // using any mode different from ArchiveAll
+			PruningMode::Constrained(sc_state_db::Constraints {
+				max_blocks: None, // may require info in the future, in fact we should fetch it
+				max_mem: None,
+			}),
 			true, // Rc or not does not matter in this case
 			&StateMetaDb(&*db),
 		).expect("TODO err");
