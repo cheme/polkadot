@@ -113,7 +113,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 				let id = id.unwrap();
 				let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
 				use sp_runtime::traits::Header;
-				let id = id.unwrap().expect("d").state_root();
+				let id = id.unwrap().expect("d").state_root().clone();
 				warn!("Head is {:?}", id);
 /*				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
 				hash.as_mut().copy_from_slice(id.as_slice());*/
