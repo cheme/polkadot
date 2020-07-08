@@ -24,6 +24,7 @@ use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
 use sp_runtime::traits::{Block as BlockT, HashFor, NumberFor, Header as HeaderT};
+use crate::HValue;
 use crate::utils::DatabaseType;
 use crate::{StateDb, PruningMode, StateMetaDb};
 use historied_db::historied::tree_management::TreeManagement;
@@ -103,9 +104,8 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		let leaves = crate::LeafSet::<Block::Hash, NumberFor<Block>>::read_from_db(&*db, crate::columns::META, crate::meta_keys::LEAF_PREFIX)?;
 		println!("previous leaf set: {:?}", leaves);
 
-		let final_head = db.get(crate::columns::HEADER, meta.finalized_hash.as_ref()).and_then(|b| Block::Header::decode(&mut &b[..]).ok()).expect("s");
 		let mut leaves = crate::LeafSet::<Block::Hash, NumberFor<Block>>::new();
-		leaves.import(meta.finalized_hash, meta.finalized_number, final_head.parent_hash().clone());
+		leaves.import(meta.finalized_hash, meta.finalized_number, Default::default());
 
 		println!("new leaf set: {:?}", leaves);
 		let mut tx = sp_database::Transaction::new();
@@ -269,23 +269,6 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
 	Ok(())
 }
-
-type LinearBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
-	'a,
-	Vec<u8>,
-	historied_db::historied::encoded_array::NoVersion,
->;
-type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
-	'a,
-	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
-	historied_db::historied::encoded_array::NoVersion,
->;
-/*type TreeBackend<'a> = historied_db::historied::linear::MemoryOnly<
-	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
-	u32,
->;*/
-
-type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 struct StorageDb<Block>(Arc<kvdb_rocksdb::Database>, PhantomData<Block>);
 

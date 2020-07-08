@@ -118,11 +118,40 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 
 pub struct HistoriedDB {
 	current_state: historied_db::historied::tree_management::ForkPlan<u32, u32>,
+	db: Arc<kvdb_rocksdb::Database>,
 }
+
+
+type LinearBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
+	'a,
+	Vec<u8>,
+	historied_db::historied::encoded_array::NoVersion,
+>;
+type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
+	'a,
+	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
+	historied_db::historied::encoded_array::NoVersion,
+>;
+/*type TreeBackend<'a> = historied_db::historied::linear::MemoryOnly<
+	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
+	u32,
+>;*/
+
+type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
+
 
 impl KVBackend for HistoriedDB {
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		unimplemented!()
+		if let Some(v) = self.db.get(crate::columns::StateValues, key)
+			.map_err(|e| format!("KVDatabase backend error: {:?}", e))? {
+			let v: HValue = Decode::decode(&mut &v[..])
+				.map_err(|e| format!("KVDatabase decode error: {:?}", e))?;
+			use historied_db::historied::ValueRef;
+			let v = v.get(&self.current_state);
+			Ok(v)
+		} else {
+			Ok(None)
+		}
 	}
 }
 
@@ -942,7 +971,7 @@ pub struct Backend<Block: BlockT> {
 		Vec<u8>,
 		TreeManagementPersistence,
 	>>>,
-	historied_state: Arc<RwLock<HistoriedState>>,
+	historied_state: Arc<kvdb_rocksdb::Database>,
 	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
 }
 
@@ -1019,7 +1048,7 @@ impl<Block: BlockT> Backend<Block> {
 			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
 			config.experimental_cache,
 		);
-		let historied_state = ();
+		let historied_state = rocks_histo.clone();
 		let historied_persistence = RocksdbStorage(rocks_histo);
 		let historied_management = TreeManagement::from_ser(historied_persistence);
 		Ok(Backend {
@@ -1035,7 +1064,7 @@ impl<Block: BlockT> Backend<Block> {
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
 			state_usage: Arc::new(StateUsageStats::new()),
 			historied_management: Arc::new(RwLock::new(historied_management)),
-			historied_state: Arc::new(RwLock::new(historied_state)),
+			historied_state,
 			historied_next_finalizable: Arc::new(RwLock::new(None)),
 		})
 	}
@@ -1845,6 +1874,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						.ok_or("Historied management error")?;
 					HistoriedDB {
 						current_state,
+						db: self.historied_state.clone(),
 					}
 				};
 				let db_state = DbState::<Block>::new(Arc::new(genesis_storage), root, Arc::new(alternative));
@@ -1889,6 +1919,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 							.ok_or_else(|| format!("Historied management missing state for hash {:?}", hash))?;
 						HistoriedDB {
 							current_state,
+							db: self.historied_state.clone(),
 						}
 					};
 
