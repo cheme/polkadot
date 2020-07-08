@@ -116,11 +116,11 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
 >;
 
+/// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
 	current_state: historied_db::historied::tree_management::ForkPlan<u32, u32>,
 	db: Arc<kvdb_rocksdb::Database>,
 }
-
 
 type LinearBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	'a,
@@ -137,6 +137,8 @@ type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	u32,
 >;*/
 
+// Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
+// None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
 type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 
@@ -148,7 +150,13 @@ impl KVBackend for HistoriedDB {
 				.map_err(|e| format!("KVDatabase decode error: {:?}", e))?;
 			use historied_db::historied::ValueRef;
 			let v = v.get(&self.current_state);
-			Ok(v)
+			Ok(v.and_then(|mut v| {
+				match v.pop() {
+					Some(0u8) => None,
+					Some(1u8) => Some(v),
+					None | Some(_) => panic!("inconsistent value"),
+				}
+			}))
 		} else {
 			Ok(None)
 		}
@@ -1648,6 +1656,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			(hash, parent_hash)
 		});
 
+		let historied_update = operation.storage_updates.clone();
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
 				// TODO avoid failure or manage pending on those historied operation
@@ -1659,7 +1668,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 							*self.historied_next_finalizable.write() = Some(nb + HISTORIED_FINALIZATION_WINDOWS.into());
 						}
 					}
-					{
+					let update_plan = {
 						// lock does notinclude update of value as we do not have concurrent block creation
 						let mut management = self.historied_management.write();
 						if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
@@ -1677,14 +1686,55 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 							let update_plan = management.get_db_state_mut(&hash)
 								.expect("correct state resolution");
 							warn!("up for {:?}, {:?}", hash, update_plan);
+							update_plan
 						} else {
-							// TODO EMCH rollback?
+							// TODO EMCH rollback? Not that we could write the change in mgmt first
+							// and includ the later change in rollback 
+							panic!("missing update plan");
 						}
-					}
+					};
 					// TODO EMCH iterate collecation and update values at update_plan
 				
-					/* for a in operation.storage_updates {
-					 * } */
+					let mut tx = self.historied_state.transaction();
+					let mut nb = 0;
+					for (k, change) in historied_update {
+						let histo = if let Ok(Some(histo)) = self.historied_state.get(
+							crate::columns::StateValues,
+							k.as_slice(),
+						) {
+							Some(HValue::decode(&mut &histo[..]).expect("Bad encoded value in db, closing"))
+						} else {
+							if change.is_none() {
+								continue;
+							}
+							None
+						};
+						let mut new_value;
+						match if let Some(mut v) = change {
+							v.push(1);
+							if let Some(histo) = histo {
+								new_value = histo;
+								new_value.set(v, &update_plan)
+							} else {
+								new_value = HValue::new(v, &update_plan);
+								historied_db::UpdateResult::Changed(())
+							}
+						} else {
+							new_value = histo.expect("continue test above");
+							new_value.set(vec![0], &update_plan)
+						} {
+							historied_db::UpdateResult::Changed(()) => {
+								tx.put(crate::columns::StateValues, k.as_slice(), new_value.encode().as_slice());
+							},
+							historied_db::UpdateResult::Cleared(()) => {
+								tx.delete(crate::columns::StateValues, k.as_slice());
+							},
+							historied_db::UpdateResult::Unchanged => (), 
+						}
+						nb += 1;
+					}
+					warn!("committed {:?} change in historied db", nb);
+					self.historied_state.write(tx);
 				}
 				if let Some(latest_final) = last_final {
 					let block = latest_final.0;

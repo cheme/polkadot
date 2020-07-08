@@ -111,6 +111,8 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		let mut tx = sp_database::Transaction::new();
 
 		leaves.prepare_transaction(&mut tx, crate::columns::META, crate::meta_keys::LEAF_PREFIX);
+		// second call on purpose
+		leaves.prepare_transaction(&mut tx, crate::columns::META, crate::meta_keys::LEAF_PREFIX);
 		db.commit(tx);
 
 
@@ -171,23 +173,23 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	tx.delete_prefix(12, &[]);
 	tx.delete_prefix(13, &[]);
 	tx.delete_prefix(14, &[]);
-
+	tx.put(2, b"tree_mgmt/neutral_elt", &[0].encode()); // only for storing Vec<u8>, if changing type, change this.
 	db.write(tx).map_err(db_err)?;
 	warn!("end clean");
 	warn!("END MIGRATE");
 
 	// Can not use crate::meta_keys::BEST_BLOCK on non archive node: using CANNONICAL,
 	// TODO EMCH would need to fetch non_cannonical overlay to complete.
-	let tree_root = match db.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK) {
+	let (tree_root, block_hash) = match db.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK) {
 		Ok(id) => {
 			let id = id.unwrap();
 			let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
 			use sp_runtime::traits::Header;
-			let id = id.unwrap().expect("d").state_root().clone();
+			let id = id.unwrap().expect("d");
 			warn!("Head is {:?}", id);
 	/*				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
 				hash.as_mut().copy_from_slice(id.as_slice());*/
-			id	
+			(id.state_root().clone(), id.hash().clone())
 		},
 		Err(e) => panic!("no best block is bad sign {:?}", e),
 	};
@@ -216,13 +218,14 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		crate::TreeManagementPersistence,
 	>::from_ser(historied_persistence);
 	let state = management.latest_state_fork();
-	management.append_external_state(tree_root.clone(), &state);
+	management.append_external_state(block_hash.clone(), &state);
 	let state = management.latest_state();
 	let mut tx = db.transaction();
 	let mut count_tx = 0;
 	let mut count = 0;
 
-	while let Some(Ok((k, v))) = iter.next() {
+	while let Some(Ok((k, mut v))) = iter.next() {
+		v.push(1);
 		let value = HValue::new(v, &state);
 		let value = value.encode();
 		tx.put(crate::columns::StateValues, k.as_slice(), value.as_slice());
@@ -246,7 +249,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	println!("iter trie state of {} in : {}", count, now.elapsed().as_millis());
 	let now = Instant::now();
 
-	let state = management.get_db_state(&tree_root).expect("just added");
+	let state = management.get_db_state(&block_hash).expect("just added");
 	for (k, v) in db.iter(crate::columns::StateValues) {
 		let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
 		use historied_db::historied::ValueRef;
@@ -257,11 +260,13 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
-	let state = management.get_db_state(&tree_root).expect("just added");
+	let state = management.get_db_state(&block_hash).expect("just added");
 	let iter_kv = db.iter(crate::columns::StateValues).map(|(k, v)| {
 		let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
 		use historied_db::historied::ValueRef;
-		(k, v.get(&state).expect("d"))
+		let mut v = v.get(&state).expect("d");
+		assert!(v.pop() == Some(1u8));
+		(k, v)
 	});
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
