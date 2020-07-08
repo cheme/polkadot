@@ -269,8 +269,6 @@ impl<B: BlockT> ExperimentalCache<B> {
 
 		let state = if let Some(state) = pivot.and_then(|pivot| self.management.get_db_state_for_fork(pivot)) {
 			for h in enacted {
-				// TODO this should not really occur?? (get state mut on pivot returning
-				warn!("This should not happen = {:?}", (pivot, enacted, retracted));
 				if self.retracted.remove(h) {
 					continue;
 				}
@@ -279,8 +277,6 @@ impl<B: BlockT> ExperimentalCache<B> {
 			}
 			state
 		} else {
-			warn!("No pivot for enacted!!!");
-				// TODO PANIC?? (should have pivot)
 			for h in enacted {
 				if !self.retracted.remove(h) {
 					got_all_enacted = false;
@@ -291,7 +287,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 			let result = experimental_query_plan
 				.map(|qp| self.management.ref_state_fork(qp))
 				.unwrap_or_else(|| {
-					warn!("Using latest state fork!!!");
+					warn!("#####Using latest state fork!!!");
 					self.management.latest_state_fork()
 				});
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
@@ -674,6 +670,11 @@ impl<B: BlockT> CacheChanges<B> {
 		commit_number: Option<NumberFor<B>>,
 		is_best: bool,
 	) {
+		// This is also protecting race on experimental cache where
+		// we add a state when a previous state did not commit entirely.
+		let mut shared_cache = self.shared_cache.lock();
+		let cache = &mut *shared_cache;
+
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
 			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
@@ -682,9 +683,6 @@ impl<B: BlockT> CacheChanges<B> {
 			}
 		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
 		
-
-		let mut shared_cache = self.shared_cache.lock();
-		let cache = &mut *shared_cache;
 
 		trace!(
 			"Syncing cache, id = (#{:?}, {:?}), parent={:?}, best={}",
@@ -852,7 +850,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 				}));
 
 		if experimental_query_plan.is_none() {
-			warn!("No query plan for new cache!!!!!");
+			warn!("No query plan for new cache!!!!! {:?}", parent_hash);
 		}
 		experimental_query_plan.as_ref().map(|qp|
 			warn!("Query plan for new cache = {:?}", qp)
@@ -892,6 +890,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 		let mut parent = match *parent_hash {
 			None => {
 				trace!("Cache lookup skipped for {:?}: no parent hash", key.as_ref().map(HexDisplay::from));
+				warn!("Cache lookup skipped for {:?}: no parent hash", key.as_ref().map(HexDisplay::from));
 				return false;
 			}
 			Some(ref parent) => parent,
@@ -911,17 +910,23 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 			if let Some(key) = key {
 				if m.storage.contains(key) {
 					trace!("Cache lookup skipped for {:?}: modified in a later block", HexDisplay::from(&key));
+					warn!("Cache lookup skipped for {:?}: modified in a later block", HexDisplay::from(&key));
 					return false;
 				}
 			}
 			if let Some(child_key) = child_key {
 				if m.child_storage.contains(child_key) {
 					trace!("Cache lookup skipped for {:?}: modified in a later block", child_key);
+					warn!("Cache lookup skipped for {:?}: modified in a later block", child_key);
 					return false;
 				}
 			}
 		}
 		trace!(
+			"Cache lookup skipped for {:?}: parent hash is unknown",
+			key.as_ref().map(HexDisplay::from),
+		);
+		warn!(
 			"Cache lookup skipped for {:?}: parent hash is unknown",
 			key.as_ref().map(HexDisplay::from),
 		);
