@@ -673,6 +673,7 @@ impl<B: BlockT> CacheChanges<B> {
 		commit_number: Option<NumberFor<B>>,
 		is_best: bool,
 	) {
+		let mut cache = self.shared_cache.lock();
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
 			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
@@ -680,7 +681,7 @@ impl<B: BlockT> CacheChanges<B> {
 				self.experimental_update = Some(eu);
 			}
 		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
-			self.sync_cache_default(
+		self.sync_cache_default(
 				enacted,
 				retracted,
 				changes,
@@ -688,7 +689,7 @@ impl<B: BlockT> CacheChanges<B> {
 				commit_hash,
 				commit_number,
 				is_best,
-			)
+		)
 		//}
 	}
 
@@ -703,7 +704,6 @@ impl<B: BlockT> CacheChanges<B> {
 		is_best: bool,
 	) {
 
-		let mut cache = self.shared_cache.lock();
 		trace!(
 			"Syncing cache, id = (#{:?}, {:?}), parent={:?}, best={}",
 			commit_number,
