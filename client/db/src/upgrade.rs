@@ -23,7 +23,7 @@ use log::warn;
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
-use sp_runtime::traits::{Block as BlockT, HashFor};
+use sp_runtime::traits::{Block as BlockT, HashFor, NumberFor, Header as HeaderT};
 use crate::utils::DatabaseType;
 use crate::{StateDb, PruningMode, StateMetaDb};
 use historied_db::historied::tree_management::TreeManagement;
@@ -96,7 +96,23 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		db_read.write(tx).expect("dtdt");
 		println!("replaced best block by finalized block value");
 		
+
 		let db = sp_database::as_database(db_read);
+
+		let meta = crate::read_meta::<Block>(&*db, crate::columns::HEADER)?;
+		let leaves = crate::LeafSet::<Block::Hash, NumberFor<Block>>::read_from_db(&*db, crate::columns::META, crate::meta_keys::LEAF_PREFIX)?;
+		println!("previous leaf set: {:?}", leaves);
+
+		let final_head = db.get(crate::columns::HEADER, meta.finalized_hash.as_ref()).and_then(|b| Block::Header::decode(&mut &b[..]).ok()).expect("s");
+		let mut leaves = crate::LeafSet::<Block::Hash, NumberFor<Block>>::new();
+		leaves.import(meta.finalized_hash, meta.finalized_number, final_head.parent_hash().clone());
+
+		println!("new leaf set: {:?}", leaves);
+		let mut tx = sp_database::Transaction::new();
+
+		leaves.prepare_transaction(&mut tx, crate::columns::META, crate::meta_keys::LEAF_PREFIX);
+		db.commit(tx);
+
 
 		let state_db: StateDb<Block::Hash, Vec<u8>> = StateDb::new(
 			PruningMode::Constrained(sc_state_db::Constraints {
