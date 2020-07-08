@@ -1886,7 +1886,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					let alternative = {
 						let mut management = self.historied_management.write();
 						let current_state = management.get_db_state(&hash)
-							.ok_or("Historied management missing state for hash")?;
+							.ok_or_else(|| format!("Historied management missing state for hash {:?}", hash))?;
 						HistoriedDB {
 							current_state,
 						}

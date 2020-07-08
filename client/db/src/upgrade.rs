@@ -88,6 +88,14 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		let db_read = kvdb_rocksdb::Database::open(&db_config, &path)
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
 
+		let non_canon = db_read.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK).unwrap().unwrap();
+		let latest = db_read.get(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK).unwrap().unwrap();
+		println!("non_can: {:?} latest : {:?}", non_canon, latest);
+		let mut tx = db_read.transaction();
+		tx.put(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK, non_canon.as_slice());
+		db_read.write(tx).expect("dtdt");
+		println!("replaced best block by finalized block value");
+		
 		let db = sp_database::as_database(db_read);
 
 		let state_db: StateDb<Block::Hash, Vec<u8>> = StateDb::new(
@@ -98,6 +106,7 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 			true, // Rc or not does not matter in this case
 			&StateMetaDb(&*db),
 		).expect("TODO err");
+
 		state_db.clear_non_canonical();
 		Ok(())
 /*		let storage_db = crate::StorageDb {
