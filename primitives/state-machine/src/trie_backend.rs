@@ -85,7 +85,18 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	type TrieBackendStorage = S;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
-		self.essence.storage(key)
+		if self.alternative.assert_value() {
+			let reference = self.essence.storage(key);
+			let alter = self.alternative.storage(key);
+			if alter != reference {
+				warn!("Different values in sm");
+			}
+			// TODO put a strong assert here
+			// assert_eq(alter, reference, "mistmatch in stats");
+			reference
+		} else {
+			self.essence.storage(key)
+		}
 	}
 
 	fn child_storage(
