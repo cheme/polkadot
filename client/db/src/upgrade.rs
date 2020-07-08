@@ -255,6 +255,11 @@ type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
 	historied_db::historied::encoded_array::NoVersion,
 >;
+/*type TreeBackend<'a> = historied_db::historied::linear::MemoryOnly<
+	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
+	u32,
+>;*/
+
 type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 struct StorageDb<Block>(Arc<kvdb_rocksdb::Database>, PhantomData<Block>);
