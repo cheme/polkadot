@@ -89,7 +89,9 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 			let reference = self.essence.storage(key);
 			let alter = self.alternative.storage(key);
 			if alter != reference {
-				warn!("Different values in sm");
+				warn!("###Different values in sm");
+			} else {
+				warn!("match...");
 			}
 			// TODO put a strong assert here
 			// assert_eq(alter, reference, "mistmatch in stats");
