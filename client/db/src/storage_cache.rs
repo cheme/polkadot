@@ -670,7 +670,7 @@ impl<B: BlockT> CacheChanges<B> {
 		commit_number: Option<NumberFor<B>>,
 		is_best: bool,
 	) {
-		// This is also protecting race on experimental cache where
+		// This is also protect a race on experimental cache where
 		// we add a state when a previous state did not commit entirely.
 		let mut shared_cache = self.shared_cache.lock();
 		let cache = &mut *shared_cache;

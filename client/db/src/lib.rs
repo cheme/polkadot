@@ -127,15 +127,17 @@ type LinearBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	Vec<u8>,
 	historied_db::historied::encoded_array::NoVersion,
 >;
+/*
 type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	'a,
 	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
 	historied_db::historied::encoded_array::NoVersion,
 >;
-/*type TreeBackend<'a> = historied_db::historied::linear::MemoryOnly<
+*/
+type TreeBackend<'a> = historied_db::historied::linear::MemoryOnly<
 	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
 	u32,
->;*/
+>;
 
 // Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
 // None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
