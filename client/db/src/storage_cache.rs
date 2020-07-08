@@ -673,7 +673,7 @@ impl<B: BlockT> CacheChanges<B> {
 		commit_number: Option<NumberFor<B>>,
 		is_best: bool,
 	) {
-		let mut cache = self.shared_cache.lock();
+		let mut shared_cache = self.shared_cache.lock();
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
 			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
@@ -681,28 +681,8 @@ impl<B: BlockT> CacheChanges<B> {
 				self.experimental_update = Some(eu);
 			}
 		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
-		self.sync_cache_default(
-				enacted,
-				retracted,
-				changes,
-				child_changes,
-				commit_hash,
-				commit_number,
-				is_best,
-		)
-		//}
-	}
-
-	fn sync_cache_default(
-		&mut self,
-		enacted: &[B::Hash],
-		retracted: &[B::Hash],
-		changes: StorageCollection,
-		child_changes: ChildStorageCollection,
-		commit_hash: Option<B::Hash>,
-		commit_number: Option<NumberFor<B>>,
-		is_best: bool,
-	) {
+		
+		let cache = &mut *shared_cache;
 
 		trace!(
 			"Syncing cache, id = (#{:?}, {:?}), parent={:?}, best={}",
@@ -711,7 +691,6 @@ impl<B: BlockT> CacheChanges<B> {
 			self.parent_hash,
 			is_best,
 		);
-		let cache = &mut *cache;
 		// Filter out committing block if any.
 		let enacted: Vec<_> = enacted
 			.iter()
