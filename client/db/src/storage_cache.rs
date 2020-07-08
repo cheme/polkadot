@@ -46,6 +46,10 @@ const STATE_CACHE_BLOCKS: usize = 12;
 
 type ChildStorageKey = (Vec<u8>, Vec<u8>);
 
+type HistoriedTreeBackend = historied_db::historied::linear::MemoryOnly<
+	historied_db::historied::linear::Linear<Option<Vec<u8>>, u32, HistoriedLinearBackend>,
+	u32,
+>;
 type HistoriedLinearBackend = historied_db::historied::linear::MemoryOnly<Option<Vec<u8>>, u32>;
 
 /// Shared canonical state cache.
@@ -221,7 +225,7 @@ struct LRUMap<K, V, B>(LinkedHashMap<K, V>, usize, usize, PhantomData<B>);
 
 /// TODO replace second usize index by actual B::blocknumber
 pub struct ExperimentalCache<B: BlockT>{
-	lru_storage: LRUMap<StorageKey, Tree<u32, u32, Option<StorageValue>, HistoriedLinearBackend>, B>,
+	lru_storage: LRUMap<StorageKey, Tree<u32, u32, Option<StorageValue>, HistoriedTreeBackend, HistoriedLinearBackend>, B>,
 	management: TreeManagement<B::Hash, u32, u32, Option<StorageValue>, ()>,
 	/// since retracted branch could potentially be enacted back we do not put it
 	/// in management directly.
@@ -351,7 +355,7 @@ impl EstimateSize for Option<Vec<u8>> {
 	}
 }
 
-impl EstimateSize for Tree<u32, u32, Option<StorageValue>, HistoriedLinearBackend> {
+impl EstimateSize for Tree<u32, u32, Option<StorageValue>, HistoriedTreeBackend, HistoriedLinearBackend> {
 	fn estimate_size(&self) -> usize {
 		self.temp_size()
 	}

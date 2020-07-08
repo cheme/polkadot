@@ -196,6 +196,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let mut tx = db.transaction();
 	let mut count_tx = 0;
 	let mut count = 0;
+
 	while let Some(Ok((k, v))) = iter.next() {
 		let value = HValue::new(v, &state);
 		let value = value.encode();
@@ -244,11 +245,17 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	Ok(())
 }
 
-type HValue<'a> = Tree<u32, u32, Vec<u8>, historied_db::historied::encoded_array::EncodedArray<
+type LinearBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	'a,
 	Vec<u8>,
 	historied_db::historied::encoded_array::NoVersion,
->>;
+>;
+type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
+	'a,
+	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
+	historied_db::historied::encoded_array::NoVersion,
+>;
+type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 struct StorageDb<Block>(Arc<kvdb_rocksdb::Database>, PhantomData<Block>);
 
