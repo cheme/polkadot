@@ -279,6 +279,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 			}
 			state
 		} else {
+			warn!("No pivot for enacted!!!");
 				// TODO PANIC?? (should have pivot)
 			for h in enacted {
 				if !self.retracted.remove(h) {
@@ -290,7 +291,7 @@ impl<B: BlockT> ExperimentalCache<B> {
 			let result = experimental_query_plan
 				.map(|qp| self.management.ref_state_fork(qp))
 				.unwrap_or_else(|| {
-					warn!("using latest state fork");
+					warn!("Using latest state fork!!!");
 					self.management.latest_state_fork()
 				});
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
@@ -673,7 +674,6 @@ impl<B: BlockT> CacheChanges<B> {
 		commit_number: Option<NumberFor<B>>,
 		is_best: bool,
 	) {
-		let mut shared_cache = self.shared_cache.lock();
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut cache = cache.0.write();
 			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
@@ -682,6 +682,8 @@ impl<B: BlockT> CacheChanges<B> {
 			}
 		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
 		
+
+		let mut shared_cache = self.shared_cache.lock();
 		let cache = &mut *shared_cache;
 
 		trace!(
@@ -849,6 +851,9 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 					cache.management.get_db_state_mut(ph)
 				}));
 
+		if experimental_query_plan.is_none() {
+			warn!("No query plan for new cache!!!!!");
+		}
 		experimental_query_plan.as_ref().map(|qp|
 			warn!("Query plan for new cache = {:?}", qp)
 		);

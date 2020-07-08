@@ -87,6 +87,7 @@ use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
 	StorageCollection, ChildStorageCollection,
 	backend::Backend as StateBackend, StateMachineStats,
+	kv_backend::KVBackend,
 };
 use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
@@ -115,6 +116,16 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
 >;
 
+pub struct HistoriedDB {
+	current_state: historied_db::historied::tree_management::ForkPlan<u32, u32>,
+}
+
+impl KVBackend for HistoriedDB {
+	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+		unimplemented!()
+	}
+}
+
 const DB_HASH_LEN: usize = 32;
 /// Hash type that this backend uses for the database.
 pub type DbHash = [u8; DB_HASH_LEN];
@@ -130,7 +141,11 @@ pub struct RefTrackingState<Block: BlockT> {
 }
 
 impl<B: BlockT> RefTrackingState<B> {
-	fn new(state: DbState<B>, storage: Arc<StorageDb<B>>, parent_hash: Option<B::Hash>) -> Self {
+	fn new(
+		state: DbState<B>,
+		storage: Arc<StorageDb<B>>,
+		parent_hash: Option<B::Hash>,
+	) -> Self {
 		RefTrackingState {
 			state,
 			parent_hash,
@@ -1819,7 +1834,20 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			BlockId::Hash(h) if h == Default::default() => {
 				let genesis_storage = DbGenesisStorage::<Block>::new();
 				let root = genesis_storage.0.clone();
-				let db_state = DbState::<Block>::new(Arc::new(genesis_storage), root);
+				let alternative = {
+					let mut management = self.historied_management.write();
+					let state = management.latest_state_fork();
+					// starting a new state at default hash is not strictly necessary,
+					// but we lack a historied db primitive to get default query state
+					// on (0, 0).
+					let current_state = management.get_db_state(&h)
+						.or_else(|| management.append_external_state(h.clone(), &state))
+						.ok_or("Historied management error")?;
+					HistoriedDB {
+						current_state,
+					}
+				};
+				let db_state = DbState::<Block>::new(Arc::new(genesis_storage), root, Arc::new(alternative));
 				let state = RefTrackingState::new(db_state, self.storage.clone(), None);
 				let caching_state = CachingState::new(
 					state,
@@ -1855,7 +1883,16 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				}
 				if let Ok(()) = self.storage.state_db.pin(&hash) {
 					let root = hdr.state_root;
-					let db_state = DbState::<Block>::new(self.storage.clone(), root);
+					let alternative = {
+						let mut management = self.historied_management.write();
+						let current_state = management.get_db_state(&hash)
+							.ok_or("Historied management missing state for hash")?;
+						HistoriedDB {
+							current_state,
+						}
+					};
+
+					let db_state = DbState::<Block>::new(self.storage.clone(), root, Arc::new(alternative));
 					let state = RefTrackingState::new(
 						db_state,
 						self.storage.clone(),

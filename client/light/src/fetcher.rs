@@ -185,7 +185,8 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 				}
 
 				// check proof for single changes trie root
-				let proving_backend = TrieBackend::new(storage, cht_root);
+				let alternative = sp_state_machine::KVInMem::default();
+				let proving_backend = TrieBackend::new(storage, cht_root, Arc::new(alternative));
 				let remote_changes_trie_root = remote_roots[&block];
 				cht::check_proof_on_proving_backend::<B::Header, H>(
 					local_cht_root,

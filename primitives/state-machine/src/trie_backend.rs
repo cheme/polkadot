@@ -27,17 +27,21 @@ use crate::{
 	StorageKey, StorageValue, Backend,
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 };
+use std::sync::Arc;
+use crate::kv_backend::KVBackend;
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
 	pub (crate) essence: TrieBackendEssence<S, H>,
+	pub alternative: Arc<dyn KVBackend>,
 }
 
 impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where H::Out: Codec {
 	/// Create new trie-based backend.
-	pub fn new(storage: S, root: H::Out) -> Self {
+	pub fn new(storage: S, root: H::Out, alternative: Arc<dyn KVBackend>) -> Self {
 		TrieBackend {
 			essence: TrieBackendEssence::new(storage, root),
+			alternative,
 		}
 	}
 

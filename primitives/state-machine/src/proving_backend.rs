@@ -145,7 +145,7 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 			backend: essence.backend_storage(),
 			proof_recorder,
 		};
-		ProvingBackend(TrieBackend::new(recorder, root))
+		ProvingBackend(TrieBackend::new(recorder, root, backend.alternative.clone()))
 	}
 
 	/// Extracting the gathered unordered proof.
@@ -291,7 +291,8 @@ where
 	let db = proof.into_memory_db();
 
 	if db.contains(&root, EMPTY_PREFIX) {
-		Ok(TrieBackend::new(db, root))
+		let alternative = crate::in_memory_backend::KVInMem::default();
+		Ok(TrieBackend::new(db, root, Arc::new(alternative)))
 	} else {
 		Err(Box::new(ExecutionError::InvalidProof))
 	}

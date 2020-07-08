@@ -75,7 +75,7 @@ pub use proving_backend::{
 pub use trie_backend_essence::{TrieBackendStorage, Storage};
 pub use trie_backend::TrieBackend;
 pub use error::{Error, ExecutionError};
-pub use in_memory_backend::new_in_mem;
+pub use in_memory_backend::{new_in_mem, KVInMem};
 pub use stats::{UsageInfo, UsageUnit, StateMachineStats};
 pub use sp_core::traits::CloneableSpawn;
 
@@ -758,6 +758,16 @@ where
 		.map_err(|e| Box::new(e) as Box<dyn Error>)
 }
 
+/// Simple key value backend support.
+pub mod kv_backend {
+	/// KVBackend trait.
+	pub trait KVBackend: Send + Sync {
+		fn assert_value(&self) -> bool {
+			true
+		}
+		fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String>;
+	}
+}
 #[cfg(test)]
 mod tests {
 	use std::collections::BTreeMap;

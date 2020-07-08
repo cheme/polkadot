@@ -28,6 +28,19 @@ use sp_trie::{
 };
 use codec::Codec;
 use sp_core::storage::{ChildInfo, Storage};
+use std::sync::Arc;
+
+#[derive(Default, Clone, Debug, Eq, PartialEq)]
+pub struct KVInMem(BTreeMap<Vec<u8>, Vec<u8>>);
+
+impl crate::kv_backend::KVBackend for KVInMem {
+	fn assert_value(&self) -> bool {
+		false
+	}
+	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+		Ok(self.0.get(key).cloned())
+	}
+}
 
 /// Insert input pairs into memory db.
 fn insert_into_memory_db<H, I>(mut root: H::Out, mdb: &mut MemoryDB<H>, input: I) -> H::Out
@@ -64,7 +77,8 @@ where
 	H::Out: Codec + Ord,
 {
 	let db = MemoryDB::default();
-	let mut backend = TrieBackend::new(db, Default::default());
+	let kv_db = KVInMem::default();
+	let mut backend = TrieBackend::new(db, Default::default(), Arc::new(kv_db));
 	backend.insert(std::iter::empty());
 	backend
 }
@@ -124,7 +138,7 @@ where
 	pub fn update_backend(&self, root: H::Out, changes: MemoryDB<H>) -> Self {
 		let mut clone = self.backend_storage().clone();
 		clone.consolidate(changes);
-		Self::new(clone, root)
+		Self::new(clone, root, self.alternative.clone())
 	}
 
 	/// Compare with another in-memory backend.
@@ -138,7 +152,7 @@ where
 	H::Out: Codec + Ord,
 {
 	fn clone(&self) -> Self {
-		TrieBackend::new(self.backend_storage().clone(), self.root().clone())
+		TrieBackend::new(self.backend_storage().clone(), self.root().clone(), self.alternative.clone())
 	}
 }
 
