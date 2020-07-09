@@ -136,6 +136,30 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);*/
 }
 
+fn inject_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+		let path = db_path.to_str()
+			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+		let db_read = kvdb_rocksdb::Database::open(&db_config, &path)
+			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+
+		let non_canon = db_read.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK).unwrap().unwrap();
+		let latest = db_read.get(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK).unwrap().unwrap();
+		println!("non_can: {:?} latest : {:?}", non_canon, latest);
+		
+		let db = sp_database::as_database(db_read);
+		let meta = crate::read_meta::<Block>(&*db, crate::columns::HEADER)?;
+		let leaves = crate::LeafSet::<Block::Hash, NumberFor<Block>>::read_from_db(&*db, crate::columns::META, crate::meta_keys::LEAF_PREFIX)?;
+		println!("previous leaf set: {:?}", leaves);
+
+		let db_histo = kvdb_rocksdb::Database::open(&db_config, &path)
+			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+
+
+		Ok(())
+}
+
+
 /// Hacky migrate to trigger action on db.
 /// Here drop historied state content.
 fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
@@ -244,7 +268,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let now = Instant::now();
 	let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
 	let mut count = 0;
-	while let Some(Ok((k, v))) = iter.next() {
+	while let Some(Ok((_k, _v))) = iter.next() {
 		count += 1;
 	}
 	println!("iter trie state of {} in : {}", count, now.elapsed().as_millis());
@@ -256,7 +280,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		db: db.clone(),
 	};
 	let mut count = 0;
-	for (k, v) in historied_db.iter() {
+	for (_k, _v) in historied_db.iter() {
 		count += 1;
 	}
 	println!("iter kvstate {} state in : {}", count, now.elapsed().as_millis());

@@ -234,7 +234,7 @@ impl HistoriedDBMut {
 				historied_db::UpdateResult::Changed(())
 			}
 		} else {
-			new_value = histo.expect("continue test above");
+			new_value = histo.expect("returned above.");
 			new_value.set(vec![0], &self.current_state)
 		} {
 			historied_db::UpdateResult::Changed(()) => {
@@ -248,15 +248,12 @@ impl HistoriedDBMut {
 	}
 	/// write a single value, without checking current state,
 	/// please only use on new empty db.
-	pub fn unchecked_new_single(&mut self, k: &[u8], v: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
-		let value = if let Some(mut v) = v {
-			v.push(1);
-			HValue::new(v, &self.current_state);
-		} else {
-			HValue::new(vec![0], &self.current_state);
-		};
+	pub fn unchecked_new_single(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
+		v.push(1);
+		let value = HValue::new(v, &self.current_state);
 		let value = value.encode();
 		change_set.put(crate::columns::StateValues, k, value.as_slice());
+		// no need for no value set
 	}
 }
 
