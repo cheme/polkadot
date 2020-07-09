@@ -59,6 +59,7 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 				let now = Instant::now();
 				inject_non_canonical::<Block>(db_path, db_type)?;
 				println!("inject non canonnical in {}", now.elapsed().as_millis());
+				compare_latest_roots::<Block>(db_path, db_type)?;
 			},
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
@@ -211,6 +212,58 @@ fn inject_non_canonical<Block: BlockT>(
 
 		Ok(())
 }
+
+fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+	let path = db_path.to_str()
+		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+	let db = kvdb_rocksdb::Database::open(&db_config, &path)
+		.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+
+	let (tree_root, block_hash) = match db.get(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK) {
+		Ok(id) => {
+			let id = id.unwrap();
+			let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
+			use sp_runtime::traits::Header;
+			let id = id.unwrap().expect("d");
+			warn!("Head is {:?}", id);
+	/*				let mut hash = <HashFor::<Block> as hash_db::Hasher>::Out::default();
+				hash.as_mut().copy_from_slice(id.as_slice());*/
+			(id.state_root().clone(), id.hash().clone())
+		},
+		Err(e) => panic!("no best block is bad sign {:?}", e),
+	};
+	println!("hash queryied: {:?}", tree_root);
+	let db = Arc::new(db);
+	let now = Instant::now();
+	let historied_persistence = crate::RocksdbStorage(db.clone());
+	let mut management = TreeManagement::<
+		<HashFor<Block> as hash_db::Hasher>::Out,
+		u32,
+		u32,
+		Vec<u8>,
+		crate::TreeManagementPersistence,
+	>::from_ser(historied_persistence);
+
+	let current_state = management.get_db_state(&block_hash).expect("just added");
+	let historied_db = crate::HistoriedDB {
+		current_state,
+		db: db.clone(),
+		do_assert: false,
+	};
+
+
+	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
+	let _state = management.get_db_state(&block_hash).expect("just added");
+	let iter_kv = historied_db.iter();
+
+	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
+	let hash = root_callback.root;
+	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
+
+	Ok(())
+}
+
 
 
 /// Hacky migrate to trigger action on db.
