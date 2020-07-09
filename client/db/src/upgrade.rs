@@ -206,6 +206,7 @@ fn inject_non_canonical<Block: BlockT>(
 					historied_db.update_single(k.as_slice(), None, &mut tx);
 				}
 				historied_db.write_change_set(tx);
+				break; // TODO for test remove
 			} else {
 				println!("warn ignoring journal: {:?} parent {:?}", journal.hash, journal.parent_hash);
 			}
