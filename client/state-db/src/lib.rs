@@ -195,7 +195,7 @@ fn to_meta_key<S: Codec>(suffix: &[u8], data: &S) -> Vec<u8> {
 
 struct StateDbSync<BlockHash: Hash, Key: Hash> {
 	mode: PruningMode,
-	non_canonical: NonCanonicalOverlay<BlockHash, Key>,
+	pub(crate) non_canonical: NonCanonicalOverlay<BlockHash, Key>,
 	pruning: Option<RefWindow<BlockHash, Key>>,
 	pinned: HashMap<BlockHash, u32>,
 }
@@ -532,6 +532,16 @@ impl<BlockHash: Hash + MallocSizeOf, Key: Hash + MallocSizeOf> StateDb<BlockHash
 		};
 
 		db.non_canonical.drop_all();
+	}
+
+	// TODO can be a true method, but more journaling oriented.
+	pub fn get_non_cannonical_journals<D: MetaDb>(&self, meta: D) -> Result<Vec<crate::noncanonical::JournalRecord<BlockHash, Key>>, Error<D::Error>> {
+		let db = self.db.read();
+		match db.mode {
+			PruningMode::ArchiveAll => return Ok(Vec::new()),
+			_ => (),
+		};
+		db.non_canonical.journals(meta)
 	}
 }
 

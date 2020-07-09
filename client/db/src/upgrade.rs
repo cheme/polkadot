@@ -136,7 +136,17 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);*/
 }
 
-fn inject_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+fn inject_non_canonical<Block: BlockT>(
+	db_path: &Path,
+	db_type: DatabaseType,
+	management: &mut TreeManagement::<
+		<HashFor<Block> as hash_db::Hasher>::Out,
+		u32,
+		u32,
+		Vec<u8>,
+		crate::TreeManagementPersistence,
+	>,
+) -> sp_blockchain::Result<()> {
 		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 		let path = db_path.to_str()
 			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
@@ -152,9 +162,39 @@ fn inject_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		let leaves = crate::LeafSet::<Block::Hash, NumberFor<Block>>::read_from_db(&*db, crate::columns::META, crate::meta_keys::LEAF_PREFIX)?;
 		println!("previous leaf set: {:?}", leaves);
 
-		let db_histo = kvdb_rocksdb::Database::open(&db_config, &path)
-			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+		let meta = StateMetaDb(&*db);
+		let state_db: StateDb<Block::Hash, Vec<u8>> = StateDb::new(
+			PruningMode::Constrained(sc_state_db::Constraints {
+				max_blocks: None, // may require info in the future, in fact we should fetch it
+				max_mem: None,
+			}),
+			true, // Rc or not does not matter in this case
+			&meta,
+		).expect("TODO err");
 
+		let db_histo = Arc::new(kvdb_rocksdb::Database::open(&db_config, &path)
+			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
+		for journal in state_db.get_non_cannonical_journals(meta).expect("aib") {
+
+			if let Some(state) = management.get_db_state_for_fork(&journal.parent_hash) {
+				management.append_external_state(journal.hash, &state);
+				let state = management.latest_state();
+				println!("adding journal: {:?} parent {:?}, at {:?}", journal.hash, journal.parent_hash, state);
+				let mut historied_db = crate::HistoriedDBMut {
+					current_state: state,
+					db: db_histo.clone(),
+				};
+				let mut tx = historied_db.transaction();
+				for (k, v) in journal.inserted {
+					historied_db.update_single(k.as_slice(), Some(v), &mut tx);
+				}
+				for k in journal.deleted {
+					historied_db.update_single(k.as_slice(), None, &mut tx);
+				}
+			} else {
+				println!("warn ignoring journal: {:?} parent {:?}", journal.hash, journal.parent_hash);
+			}
+		}
 
 		Ok(())
 }
@@ -179,7 +219,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		 }
 	}
 
-	delete_non_canonical::<Block>(db_path, db_type)?;
+//	delete_non_canonical::<Block>(db_path, db_type)?;
 	let path = db_path.to_str()
 		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 	let db = kvdb_rocksdb::Database::open(&db_config, &path)
@@ -294,6 +334,10 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 	let hash = root_callback.root;
 	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
+
+	let now = Instant::now();
+	inject_non_canonical::<Block>(db_path, db_type, &mut management)?;
+	println!("inject non canonnical in {}", now.elapsed().as_millis());
 	Ok(())
 }
 
