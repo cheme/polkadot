@@ -55,7 +55,7 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 			1 => migrate_1_to_2::<Block>(db_path, db_type)?,
 			2 => (),
 			42 => {
-				delete_historied::<Block>(db_path, db_type)?,
+				delete_historied::<Block>(db_path, db_type)?;
 				let now = Instant::now();
 				inject_non_canonical::<Block>(db_path, db_type)?;
 				println!("inject non canonnical in {}", now.elapsed().as_millis());
