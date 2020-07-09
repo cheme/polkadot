@@ -120,6 +120,8 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 pub struct HistoriedDB {
 	current_state: historied_db::historied::tree_management::ForkPlan<u32, u32>,
 	db: Arc<kvdb_rocksdb::Database>,
+	// only assert when spawned from cli command (so tests pass)
+	do_assert: bool,
 }
 
 type LinearBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
@@ -145,6 +147,10 @@ type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 
 impl KVBackend for HistoriedDB {
+	fn assert_value(&self) -> bool {
+		self.do_assert
+	}
+
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
 		if let Some(v) = self.db.get(crate::columns::StateValues, key)
 			.map_err(|e| format!("KVDatabase backend error: {:?}", e))? {
@@ -1079,6 +1085,7 @@ pub struct Backend<Block: BlockT> {
 	>>>,
 	historied_state: Arc<kvdb_rocksdb::Database>,
 	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
+	historied_state_do_assert: bool,
 }
 
 impl<Block: BlockT> Backend<Block> {
@@ -1172,7 +1179,13 @@ impl<Block: BlockT> Backend<Block> {
 			historied_management: Arc::new(RwLock::new(historied_management)),
 			historied_state,
 			historied_next_finalizable: Arc::new(RwLock::new(None)),
+			historied_state_do_assert: false,
 		})
+	}
+
+	/// Compare historied state with trie state results.
+	pub fn do_assert_state_machine(&mut self) {
+		self.historied_state_do_assert = true;
 	}
 
 	/// Handle setting head within a transaction. `route_to` should be the last
@@ -1990,6 +2003,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					HistoriedDB {
 						current_state,
 						db: self.historied_state.clone(),
+						do_assert: self.historied_state_do_assert,
 					}
 				};
 				let db_state = DbState::<Block>::new(Arc::new(genesis_storage), root, Arc::new(alternative));
@@ -2039,6 +2053,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						HistoriedDB {
 							current_state,
 							db: self.historied_state.clone(),
+							do_assert: self.historied_state_do_assert,
 						}
 					};
 
