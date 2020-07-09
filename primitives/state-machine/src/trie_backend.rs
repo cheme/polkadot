@@ -91,7 +91,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 			if alter != reference {
 				warn!("###Different values in sm!!!!!!!!!!!!");
 			}
-			//assert_eq!(alter, reference, "mistmatch in sm");
+			//assert!(alter == reference, "mistmatch in sm for key {:?}", key);
 			reference
 		} else {
 			self.essence.storage(key)

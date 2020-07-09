@@ -189,7 +189,6 @@ fn inject_non_canonical<Block: BlockT>(
 	>::from_ser(historied_persistence);
 	
 	for journal in journals {
-
 			if let Some(state) = management.get_db_state_for_fork(&journal.parent_hash) {
 				management.append_external_state(journal.hash, &state);
 				let state = management.latest_state();
@@ -296,6 +295,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		crate::TreeManagementPersistence,
 	>::from_ser(historied_persistence);
 	let state = management.latest_state_fork();
+	let test = management.get_db_state_for_fork(&Default::default());
+	println!("test: {:?}", test);
 	management.append_external_state(block_hash.clone(), &state);
 	let state = management.latest_state();
 	let mut count_tx = 0;
