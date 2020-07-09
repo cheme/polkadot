@@ -139,13 +139,6 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 fn inject_non_canonical<Block: BlockT>(
 	db_path: &Path,
 	db_type: DatabaseType,
-	management: &mut TreeManagement::<
-		<HashFor<Block> as hash_db::Hasher>::Out,
-		u32,
-		u32,
-		Vec<u8>,
-		crate::TreeManagementPersistence,
-	>,
 ) -> sp_blockchain::Result<()> {
 		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 		let path = db_path.to_str()
@@ -177,9 +170,20 @@ fn inject_non_canonical<Block: BlockT>(
 		state_db.get_non_cannonical_journals(meta).expect("aib")
 	};
 
-		let db_histo = Arc::new(kvdb_rocksdb::Database::open(&db_config, &path)
-			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
-		for journal in journals {
+	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+	let db_histo = Arc::new(kvdb_rocksdb::Database::open(&db_config, &path)
+		.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
+
+	let historied_persistence = crate::RocksdbStorage(db_histo.clone());
+	let mut management = TreeManagement::<
+		<HashFor<Block> as hash_db::Hasher>::Out,
+		u32,
+		u32,
+		Vec<u8>,
+		crate::TreeManagementPersistence,
+	>::from_ser(historied_persistence);
+	
+	for journal in journals {
 
 			if let Some(state) = management.get_db_state_for_fork(&journal.parent_hash) {
 				management.append_external_state(journal.hash, &state);
@@ -341,7 +345,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
 
 	let now = Instant::now();
-	inject_non_canonical::<Block>(db_path, db_type, &mut management)?;
+	inject_non_canonical::<Block>(db_path, db_type)?;
 	println!("inject non canonnical in {}", now.elapsed().as_millis());
 	Ok(())
 }
