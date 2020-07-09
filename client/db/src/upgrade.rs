@@ -189,7 +189,7 @@ fn inject_non_canonical<Block: BlockT>(
 		crate::TreeManagementPersistence,
 	>::from_ser(historied_persistence);
 	
-	for journal in journals {
+		for journal in journals {
 			if let Some(state) = management.get_db_state_for_fork(&journal.parent_hash) {
 				management.append_external_state(journal.hash, &state);
 				let state = management.latest_state();
@@ -205,6 +205,7 @@ fn inject_non_canonical<Block: BlockT>(
 				for k in journal.deleted {
 					historied_db.update_single(k.as_slice(), None, &mut tx);
 				}
+				historied_db.write_change_set(tx);
 			} else {
 				println!("warn ignoring journal: {:?} parent {:?}", journal.hash, journal.parent_hash);
 			}
@@ -260,7 +261,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 	let hash = root_callback.root;
-	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
+	println!("hash calculated {:?} : {}", hash, now.elapsed().as_millis());
 
 	Ok(())
 }
