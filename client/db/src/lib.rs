@@ -166,18 +166,18 @@ impl KVBackend for HistoriedDB {
 }
 
 impl HistoriedDB {
-	pub fn iter<'a>(&'a self) -> impl Iterator<Item = (Box<[u8]>, Option<Vec<u8>>)> + 'a {
+	pub fn iter<'a>(&'a self) -> impl Iterator<Item = (Box<[u8]>, Vec<u8>)> + 'a {
 		let current_state = &self.current_state;
 		self.db.iter(crate::columns::StateValues).filter_map(move |(k, v)| {
 			let v: HValue = Decode::decode(&mut &v[..])
 				.expect("Invalid encoded historied value, DB corrupted");
 			use historied_db::historied::ValueRef;
 			if let Some(mut v) = v.get(&current_state) {
-				Some((k, match v.pop() {
+				match v.pop() {
 					Some(0u8) => None,
-					Some(1u8) => Some(v),
+					Some(1u8) => Some((k, v)),
 					None | Some(_) => panic!("inconsistent value, DB corrupted"),
-				}))
+				}
 			} else {
 				None
 			}

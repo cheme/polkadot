@@ -265,9 +265,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
 	let _state = management.get_db_state(&block_hash).expect("just added");
-	let iter_kv = historied_db.iter().filter_map(|(k, v)| {
-		v.map(|v| (k, v))
-	});
+	let iter_kv = historied_db.iter();
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 	let hash = root_callback.root;
