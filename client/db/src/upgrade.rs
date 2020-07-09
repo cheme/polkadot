@@ -267,7 +267,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
-	let _state = management.get_db_state(&block_hash).expect("just added");
+	let _state = management.get_db_state(&hash_for_root).expect("just added");
 	let iter_kv = historied_db.iter();
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
