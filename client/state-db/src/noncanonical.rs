@@ -216,7 +216,7 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 		};
 		if let Some((ref hash, mut block)) = last_canonicalized {
 			for level in self.levels.iter() {
-				for (index, journal) in level.iter().enumerate() {
+				for (index, _journal) in level.iter().enumerate() {
 					let journal_key = to_journal_key(block, index as u64);
 					match db.get_meta(&journal_key).map_err(|e| Error::Db(e))? {
 						Some(record) => {
@@ -225,6 +225,29 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 						},
 						None => (),
 					}
+				}
+				block += 1;
+			}
+			// this could replace the level iter.
+			loop {
+				let mut index = 0;
+				loop {
+					let journal_key = to_journal_key(block, index as u64);
+					match db.get_meta(&journal_key).map_err(|e| Error::Db(e))? {
+						Some(record) => {
+							warn!("out of level found");
+							let record: JournalRecord<BlockHash, Key> = Decode::decode(&mut record.as_slice())?;
+							result.push(record);
+						},
+						None => {
+							if index == 0 {
+								return Ok(result);
+							} else {
+								break;
+							}
+						},
+					}
+					index += 1
 				}
 				block += 1;
 			}
