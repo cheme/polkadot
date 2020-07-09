@@ -246,6 +246,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 	>::from_ser(historied_persistence);
 
 	let current_state = management.get_db_state(&block_hash).expect("just added");
+	println!("current state {:?}", current_state);
 	let historied_db = crate::HistoriedDB {
 		current_state,
 		db: db.clone(),
