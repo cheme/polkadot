@@ -54,7 +54,12 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 			0 => Err(sp_blockchain::Error::Backend(format!("Unsupported database version: {}", db_version)))?,
 			1 => migrate_1_to_2::<Block>(db_path, db_type)?,
 			2 => (),
-			42 => delete_historied::<Block>(db_path, db_type)?,
+			42 => {
+				delete_historied::<Block>(db_path, db_type)?,
+				let now = Instant::now();
+				inject_non_canonical::<Block>(db_path, db_type)?;
+				println!("inject non canonnical in {}", now.elapsed().as_millis());
+			},
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
 	}
@@ -140,11 +145,11 @@ fn inject_non_canonical<Block: BlockT>(
 	db_path: &Path,
 	db_type: DatabaseType,
 ) -> sp_blockchain::Result<()> {
-		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
-		let path = db_path.to_str()
-			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+	let path = db_path.to_str()
+		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 
 	let journals = {
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 		let db_read = kvdb_rocksdb::Database::open(&db_config, &path)
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
 
@@ -344,9 +349,6 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let hash = root_callback.root;
 	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
 
-	let now = Instant::now();
-	inject_non_canonical::<Block>(db_path, db_type)?;
-	println!("inject non canonnical in {}", now.elapsed().as_millis());
 	Ok(())
 }
 
