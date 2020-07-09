@@ -150,6 +150,8 @@ fn inject_non_canonical<Block: BlockT>(
 		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 		let path = db_path.to_str()
 			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+
+	let journals = {
 		let db_read = kvdb_rocksdb::Database::open(&db_config, &path)
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
 
@@ -172,9 +174,12 @@ fn inject_non_canonical<Block: BlockT>(
 			&meta,
 		).expect("TODO err");
 
+		state_db.get_non_cannonical_journals(meta).expect("aib")
+	};
+
 		let db_histo = Arc::new(kvdb_rocksdb::Database::open(&db_config, &path)
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
-		for journal in state_db.get_non_cannonical_journals(meta).expect("aib") {
+		for journal in journals {
 
 			if let Some(state) = management.get_db_state_for_fork(&journal.parent_hash) {
 				management.append_external_state(journal.hash, &state);
