@@ -250,7 +250,21 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	tx.delete_prefix(12, &[]);
 	tx.delete_prefix(13, &[]);
 	tx.delete_prefix(14, &[]);
+	for i in 0u8..255 {
+		tx.delete_prefix(11, &[i]);
+		tx.delete_prefix(12, &[i]);
+		tx.delete_prefix(13, &[i]);
+		tx.delete_prefix(14, &[i]);
+	}
 	tx.put(2, b"tree_mgmt/neutral_elt", &[0].encode()); // only for storing Vec<u8>, if changing type, change this.
+	db.write(tx).map_err(db_err)?;
+	let mut tx = db.transaction();
+	for i in 0u8..255 {
+		tx.delete_prefix(11, &[i]);
+		tx.delete_prefix(12, &[i]);
+		tx.delete_prefix(13, &[i]);
+		tx.delete_prefix(14, &[i]);
+	}
 	db.write(tx).map_err(db_err)?;
 	warn!("end clean");
 	warn!("END MIGRATE");
