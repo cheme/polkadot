@@ -253,7 +253,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	};
 	let mut tx = kv_db.transaction();
 	while let Some(Ok((k, v))) = iter.next() {
-		kv_db.unchecked_new_single(k.as_slice(), Some(v), &mut tx);
+		kv_db.unchecked_new_single(k.as_slice(), v, &mut tx);
 		count_tx += 1;
 		if count_tx == 1000 {
 			count += 1;

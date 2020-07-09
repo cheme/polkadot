@@ -170,6 +170,10 @@ impl HistoriedDB {
 		let current_state = &self.current_state;
 		self.db.iter(crate::columns::StateValues).filter_map(move |(k, v)| {
 			let v: HValue = Decode::decode(&mut &v[..])
+				.map_err(|e| {
+					warn!("k {:?}, v {:?}", k, v);
+					e
+				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			use historied_db::historied::ValueRef;
 			if let Some(mut v) = v.get(&current_state) {
