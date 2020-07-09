@@ -220,25 +220,26 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let state = management.latest_state_fork();
 	management.append_external_state(block_hash.clone(), &state);
 	let state = management.latest_state();
-	let mut tx = db.transaction();
 	let mut count_tx = 0;
 	let mut count = 0;
 
-	while let Some(Ok((k, mut v))) = iter.next() {
-		v.push(1);
-		let value = HValue::new(v, &state);
-		let value = value.encode();
-		tx.put(crate::columns::StateValues, k.as_slice(), value.as_slice());
+	let mut kv_db = crate::HistoriedDBMut {
+		current_state: state,
+		db: db.clone(),
+	};
+	let mut tx = kv_db.transaction();
+	while let Some(Ok((k, v))) = iter.next() {
+		kv_db.unchecked_new_single(k.as_slice(), Some(v), &mut tx);
 		count_tx += 1;
 		if count_tx == 1000 {
 			count += 1;
 			warn!("write a thousand {} {:?}", count, &k[..20]);
-			db.write(tx);
-			tx = db.transaction();
+			kv_db.write_change_set(tx).expect("write_tx");
+			tx = kv_db.transaction();
 			count_tx = 0;
 		}
 	}
-	db.write(tx);
+	kv_db.write_change_set(tx).expect("write_tx last");
 
 	let now = Instant::now();
 	let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
@@ -249,24 +250,23 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	println!("iter trie state of {} in : {}", count, now.elapsed().as_millis());
 	let now = Instant::now();
 
-	let state = management.get_db_state(&block_hash).expect("just added");
-	for (k, v) in db.iter(crate::columns::StateValues) {
-		let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
-		use historied_db::historied::ValueRef;
-		let v = v.get(&state);
+	let current_state = management.get_db_state(&block_hash).expect("just added");
+	let historied_db = crate::HistoriedDB {
+		current_state,
+		db: db.clone(),
+	};
+	let mut count = 0;
+	for (k, v) in historied_db.iter() {
+		count += 1;
 	}
-	println!("iter kvstate state in : {}", now.elapsed().as_millis());
+	println!("iter kvstate {} state in : {}", count, now.elapsed().as_millis());
 	let now = Instant::now();
 
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
-	let state = management.get_db_state(&block_hash).expect("just added");
-	let iter_kv = db.iter(crate::columns::StateValues).map(|(k, v)| {
-		let v: HValue = Decode::decode(&mut &v[..]).expect("just put val");
-		use historied_db::historied::ValueRef;
-		let mut v = v.get(&state).expect("d");
-		assert!(v.pop() == Some(1u8));
-		(k, v)
+	let _state = management.get_db_state(&block_hash).expect("just added");
+	let iter_kv = historied_db.iter().filter_map(|(k, v)| {
+		v.map(|v| (k, v))
 	});
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);

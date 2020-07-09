@@ -156,12 +156,107 @@ impl KVBackend for HistoriedDB {
 				match v.pop() {
 					Some(0u8) => None,
 					Some(1u8) => Some(v),
-					None | Some(_) => panic!("inconsistent value"),
+					None | Some(_) => panic!("inconsistent value, DB corrupted"),
 				}
 			}))
 		} else {
 			Ok(None)
 		}
+	}
+}
+
+impl HistoriedDB {
+	pub fn iter<'a>(&'a self) -> impl Iterator<Item = (Box<[u8]>, Option<Vec<u8>>)> + 'a {
+		let current_state = &self.current_state;
+		self.db.iter(crate::columns::StateValues).filter_map(move |(k, v)| {
+			let v: HValue = Decode::decode(&mut &v[..])
+				.expect("Invalid encoded historied value, DB corrupted");
+			use historied_db::historied::ValueRef;
+			if let Some(mut v) = v.get(&current_state) {
+				Some((k, match v.pop() {
+					Some(0u8) => None,
+					Some(1u8) => Some(v),
+					None | Some(_) => panic!("inconsistent value, DB corrupted"),
+				}))
+			} else {
+				None
+			}
+		})
+	}
+}
+
+/// Key value db change for at a given block of an historied DB.
+pub struct HistoriedDBMut {
+	pub current_state: historied_db::Latest<(u32, u32)>,
+	pub db: Arc<kvdb_rocksdb::Database>,
+}
+
+impl HistoriedDBMut {
+	pub fn transaction(&self) -> kvdb::DBTransaction {
+		self.db.transaction()
+	}
+	pub fn process_change_set(&mut self, change_set: StorageCollection) -> (kvdb::DBTransaction, usize) {
+		let mut tx = self.db.transaction();
+		let mut nb = 0;
+		for (k, change) in change_set {
+			self.update_single(k.as_slice(), change, &mut tx);
+			nb += 1;
+		}
+		(tx, nb)
+	}
+
+	pub fn write_change_set(&mut self, change_set: kvdb::DBTransaction) -> ClientResult<()> {
+		Ok(self.db.write(change_set)
+			.map_err(|e| format!("historied db batch commit failure: {:?}", e))?)
+	}
+
+	/// write a single value in change set.
+	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
+		let histo = if let Ok(Some(histo)) = self.db.get(
+			crate::columns::StateValues,
+			k,
+		) {
+			Some(HValue::decode(&mut &histo[..]).expect("Bad encoded value in db, closing"))
+		} else {
+			if change.is_none() {
+				return;
+			}
+			None
+		};
+		let mut new_value;
+		match if let Some(mut v) = change {
+			v.push(1);
+			if let Some(histo) = histo {
+				new_value = histo;
+				new_value.set(v, &self.current_state)
+			} else {
+				new_value = HValue::new(v, &self.current_state);
+				historied_db::UpdateResult::Changed(())
+			}
+		} else {
+			new_value = histo.expect("continue test above");
+			new_value.set(vec![0], &self.current_state)
+		} {
+			historied_db::UpdateResult::Changed(()) => {
+				change_set.put(crate::columns::StateValues, k, new_value.encode().as_slice());
+			},
+			historied_db::UpdateResult::Cleared(()) => {
+				change_set.delete(crate::columns::StateValues, k);
+			},
+			historied_db::UpdateResult::Unchanged => (), 
+		}
+	}
+	/// write a single value, without checking current state,
+	/// please only use on new empty db.
+	pub fn unchecked_new_single(&mut self, k: &[u8], v: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
+		let value = if let Some(mut v) = v {
+			v.push(1);
+			HValue::new(v, &self.current_state);
+		} else {
+			HValue::new(vec![0], &self.current_state);
+		};
+		let value = value.encode();
+		change_set.put(crate::columns::StateValues, k, value.as_slice());
 	}
 }
 
@@ -1697,46 +1792,13 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					};
 					// TODO EMCH iterate collecation and update values at update_plan
 				
-					let mut tx = self.historied_state.transaction();
-					let mut nb = 0;
-					for (k, change) in historied_update {
-						let histo = if let Ok(Some(histo)) = self.historied_state.get(
-							crate::columns::StateValues,
-							k.as_slice(),
-						) {
-							Some(HValue::decode(&mut &histo[..]).expect("Bad encoded value in db, closing"))
-						} else {
-							if change.is_none() {
-								continue;
-							}
-							None
-						};
-						let mut new_value;
-						match if let Some(mut v) = change {
-							v.push(1);
-							if let Some(histo) = histo {
-								new_value = histo;
-								new_value.set(v, &update_plan)
-							} else {
-								new_value = HValue::new(v, &update_plan);
-								historied_db::UpdateResult::Changed(())
-							}
-						} else {
-							new_value = histo.expect("continue test above");
-							new_value.set(vec![0], &update_plan)
-						} {
-							historied_db::UpdateResult::Changed(()) => {
-								tx.put(crate::columns::StateValues, k.as_slice(), new_value.encode().as_slice());
-							},
-							historied_db::UpdateResult::Cleared(()) => {
-								tx.delete(crate::columns::StateValues, k.as_slice());
-							},
-							historied_db::UpdateResult::Unchanged => (), 
-						}
-						nb += 1;
-					}
+					let mut historied_db = HistoriedDBMut {
+						current_state: update_plan,
+						db: self.historied_state.clone(),
+					};
+					let (tx, nb) = historied_db.process_change_set(historied_update);
 					warn!("committed {:?} change in historied db", nb);
-					self.historied_state.write(tx);
+					historied_db.write_change_set(tx)?;
 				}
 				if let Some(latest_final) = last_final {
 					let block = latest_final.0;

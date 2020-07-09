@@ -890,7 +890,6 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 		let mut parent = match *parent_hash {
 			None => {
 				trace!("Cache lookup skipped for {:?}: no parent hash", key.as_ref().map(HexDisplay::from));
-				warn!("Cache lookup skipped for {:?}: no parent hash", key.as_ref().map(HexDisplay::from));
 				return false;
 			}
 			Some(ref parent) => parent,
@@ -910,23 +909,17 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 			if let Some(key) = key {
 				if m.storage.contains(key) {
 					trace!("Cache lookup skipped for {:?}: modified in a later block", HexDisplay::from(&key));
-					warn!("Cache lookup skipped for {:?}: modified in a later block", HexDisplay::from(&key));
 					return false;
 				}
 			}
 			if let Some(child_key) = child_key {
 				if m.child_storage.contains(child_key) {
 					trace!("Cache lookup skipped for {:?}: modified in a later block", child_key);
-					warn!("Cache lookup skipped for {:?}: modified in a later block", child_key);
 					return false;
 				}
 			}
 		}
 		trace!(
-			"Cache lookup skipped for {:?}: parent hash is unknown",
-			key.as_ref().map(HexDisplay::from),
-		);
-		warn!(
 			"Cache lookup skipped for {:?}: parent hash is unknown",
 			key.as_ref().map(HexDisplay::from),
 		);
