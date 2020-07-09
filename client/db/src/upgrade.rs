@@ -57,9 +57,9 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 			42 => {
 				delete_historied::<Block>(db_path, db_type)?;
 				let now = Instant::now();
-				inject_non_canonical::<Block>(db_path, db_type)?;
+				let hash_for_root = inject_non_canonical::<Block>(db_path, db_type)?;
 				println!("inject non canonnical in {}", now.elapsed().as_millis());
-				compare_latest_roots::<Block>(db_path, db_type)?;
+				compare_latest_roots::<Block>(db_path, db_type, hash_for_root)?;
 			},
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
@@ -145,7 +145,7 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 fn inject_non_canonical<Block: BlockT>(
 	db_path: &Path,
 	db_type: DatabaseType,
-) -> sp_blockchain::Result<()> {
+) -> sp_blockchain::Result<Block::Hash> {
 	let path = db_path.to_str()
 		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 
@@ -189,9 +189,11 @@ fn inject_non_canonical<Block: BlockT>(
 		crate::TreeManagementPersistence,
 	>::from_ser(historied_persistence);
 	
+	let mut last_hash = Default::default();
 		for journal in journals {
 			if let Some(state) = management.get_db_state_for_fork(&journal.parent_hash) {
 				management.append_external_state(journal.hash, &state);
+				last_hash = journal.hash;
 				let state = management.latest_state();
 				println!("adding journal: {:?} parent {:?}, at {:?}", journal.hash, journal.parent_hash, state);
 				let mut historied_db = crate::HistoriedDBMut {
@@ -199,23 +201,28 @@ fn inject_non_canonical<Block: BlockT>(
 					db: db_histo.clone(),
 				};
 				let mut tx = historied_db.transaction();
+				let mut nb_ins = 0;
+				let mut nb_del = 0;
 				for (k, v) in journal.inserted {
+					nb_ins += 1;
 					historied_db.update_single(k.as_slice(), Some(v), &mut tx);
 				}
 				for k in journal.deleted {
+					nb_del += 1;
 					historied_db.update_single(k.as_slice(), None, &mut tx);
 				}
 				historied_db.write_change_set(tx);
+				println!("added, ins: {}, del: {}", nb_ins, nb_del);
 				break; // TODO for test remove
 			} else {
 				println!("warn ignoring journal: {:?} parent {:?}", journal.hash, journal.parent_hash);
 			}
 		}
 
-		Ok(())
+		Ok(last_hash)
 }
 
-fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, hash_for_root: Block::Hash) -> sp_blockchain::Result<()> {
 	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 	let path = db_path.to_str()
 		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
@@ -247,7 +254,10 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		crate::TreeManagementPersistence,
 	>::from_ser(historied_persistence);
 
-	let current_state = management.get_db_state(&block_hash).expect("just added");
+	if hash_for_root != block_hash {
+		println!("querying not best block, but {:?}", hash_for_root);
+	}
+	let current_state = management.get_db_state(&hash_for_root).expect("just added");
 	println!("current state {:?}", current_state);
 	let historied_db = crate::HistoriedDB {
 		current_state,
