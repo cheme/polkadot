@@ -927,6 +927,8 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 	}
 }
 
+static cache_hits_counter: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
 impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for CachingState<S, B> {
 	type Error = S::Error;
 	type Transaction = S::Transaction;
@@ -966,16 +968,18 @@ if !self.cache.no_assert {
 		assert_eq!(entry, exp_v, "k: {:?}, {:?}, qp {:?} h {:?}", key, self.state.storage(key), self.cache.experimental_query_plan, self.cache.parent_hash);
 	}
 } else {
+	let nb = cache_hits_counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 	// TODO add a atomic counter!!
-	warn!("Std cache it when no experimental cache it");
+	warn!("Std cache it when no experimental cache it {}", nb - 1);
 }
 	
 				return Ok(entry)
 			}
 		}
 if exp_v.is_some() {
+	let nb = cache_hits_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 	// TODO add a atomic counter!!
-	warn!("Experimental cache it when no std cache it");
+	warn!("Experimental cache it when no std cache it {}", nb + 1);
 }
 		trace!("Cache miss: {:?}", HexDisplay::from(&key));
 		let value = self.state.storage(key)?;
