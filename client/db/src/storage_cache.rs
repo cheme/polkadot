@@ -988,8 +988,6 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 
 		let exp_v = if let Some(cache) = self.cache.experimental_cache.as_ref() {
 			if self.cache.experimental_query_plan.is_none() {
-				warn!("MISSING EXP CACHE"); // if does not display, then the no query plan
-				// is not an issue.
 				// note that there is no councurency on this it atomic is just use
 				// for inner mutability here (TODO switch to cell??).
 				if self.cache.next_query_plan_retry.load(Ordering::Relaxed) == 0 {
