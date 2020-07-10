@@ -41,6 +41,7 @@ use log::warn;
 use crate::{utils::Meta, stats::StateUsageStats};
 use std::marker::PhantomData;
 use sc_client_api::ExpCacheConf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const STATE_CACHE_BLOCKS: usize = 12;
 
@@ -287,7 +288,10 @@ impl<B: BlockT> ExperimentalCache<B> {
 			let result = experimental_query_plan
 				.map(|qp| self.management.ref_state_fork(qp))
 				.unwrap_or_else(|| {
-					warn!("#####Using latest state fork!!!");
+					// Not found pivot or parent then we start a new branch.
+					warn!("#####Using latest state fork!!!"); 
+	
+					// TODO EMCH when historied db got it replace with first_state_fork !!!!
 					self.management.latest_state_fork()
 				});
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
@@ -623,7 +627,15 @@ pub struct CacheChanges<B: BlockT> {
 	pub no_assert: bool,
 	/// avoid doing assert against backend result (no backend in qc test)
 	pub qc: bool,
+	/// when block processing is concurrent we often have a storage cache
+	/// that is not up to date at start of processing and disable, every
+	/// `RETRY_QUERY_PLAN_DELAY` query we try to get the query plan again.
+	pub next_query_plan_retry: AtomicUsize,
 }
+
+// TODO this is very aggressive value and should be change, good for testing
+// on kusama though.
+const RETRY_QUERY_PLAN_DELAY: usize = 2;
 
 /// State cache abstraction.
 ///
@@ -815,6 +827,31 @@ impl<B: BlockT> CacheChanges<B> {
 			}
 		}
 	}
+
+	fn retry_experimental_init(&self) {
+		let (experimental_query_plan, experimental_update) = if let Some(ph) = self.parent_hash.as_ref() {
+				if let Some(ec) = self.experimental_cache.as_ref() {
+					// Could also use try_write_for
+					if let Some(mut cache) = ec.0.try_write() {
+						(cache.management.get_db_state(ph),
+							cache.management.get_db_state_mut(ph))
+					} else {
+						(None, None)
+					}
+				} else {
+					(None, None)
+				}
+		} else {
+			(None, None)
+		};
+		if experimental_query_plan.is_some() {
+			warn!("~~--- Retry Successful ---~~");
+// TODO need inner mutability			self.experimental_query_plan = experimental_query_plan;
+		}
+		if experimental_update.is_some() {
+// TODO need inner mutability		self.experimental_update = experimental_update;
+		}
+	}
 }
 
 impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
@@ -837,17 +874,17 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 		experimental_cache: Option<SyncExperimentalCache<B>>,
 		parent_hash: Option<B::Hash>,
 	) -> Self {
-		let experimental_query_plan = parent_hash.as_ref().and_then(|ph|
-				experimental_cache.as_ref().and_then(|ec| {
+		let (experimental_query_plan, experimental_update) = if let Some(ph) = parent_hash.as_ref() {
+				if let Some(ec) = experimental_cache.as_ref() {
 					let mut cache = ec.0.write();
-					cache.management.get_db_state(ph)
-				}));
-		// TODO factor with previous exp, ok for now
-		let experimental_update = parent_hash.as_ref().and_then(|ph|
-				experimental_cache.as_ref().and_then(|ec| {
-					let mut cache = ec.0.write();
-					cache.management.get_db_state_mut(ph)
-				}));
+					(cache.management.get_db_state(ph),
+						cache.management.get_db_state_mut(ph))
+				} else {
+					(None, None)
+				}
+		} else {
+			(None, None)
+		};
 
 		if experimental_query_plan.is_none() {
 			warn!("No query plan for new cache!!!!! {:?}", parent_hash);
@@ -875,6 +912,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 				experimental_update,
 				no_assert: false,
 				qc: false,
+				next_query_plan_retry: AtomicUsize::new(RETRY_QUERY_PLAN_DELAY),
 			},
 		}
 	}
@@ -948,6 +986,17 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		}
 
 		let exp_v = if let Some(cache) = self.cache.experimental_cache.as_ref() {
+			if self.cache.experimental_query_plan.is_none() {
+				// note that there is no councurency on this it atomic is just use
+				// for inner mutability here (TODO switch to cell??).
+				if self.cache.next_query_plan_retry.load(Ordering::Relaxed) == 0 {
+					self.cache.retry_experimental_init();
+				} else {
+					// this is totally racy but no concurrency on it 
+					self.cache.next_query_plan_retry.fetch_sub(1, Ordering::Relaxed);
+				}
+			}
+
 			self.cache.experimental_query_plan.as_ref().and_then(|qp| {
 				// TODO change trait to borrow to avoid alloc
 				cache.get(&key.to_vec(), qp)
