@@ -86,7 +86,7 @@ fn build_nodes() -> (Swarm<CustomProtoWithAddr>, Swarm<CustomProtoWithAddr>) {
 		});
 
 		let behaviour = CustomProtoWithAddr {
-			inner: GenericProto::new(local_peer_id, &b"test"[..], &[1], peerset, None),
+			inner: GenericProto::new(local_peer_id, &b"test"[..], &[1], vec![], peerset, None),
 			addrs: addrs
 				.iter()
 				.enumerate()
@@ -244,6 +244,8 @@ fn two_nodes_transfer_lots_of_packets() {
 						);
 					}
 				},
+				// An empty handshake is being sent after opening.
+				Some(GenericProtoOut::LegacyMessage { message, .. }) if message.is_empty() => {},
 				_ => panic!(),
 			}
 		}
@@ -254,6 +256,8 @@ fn two_nodes_transfer_lots_of_packets() {
 		loop {
 			match ready!(service2.poll_next_unpin(cx)) {
 				Some(GenericProtoOut::CustomProtocolOpen { .. }) => {},
+				// An empty handshake is being sent after opening.
+				Some(GenericProtoOut::LegacyMessage { message, .. }) if message.is_empty() => {},
 				Some(GenericProtoOut::LegacyMessage { message, .. }) => {
 					match Message::<Block, Proof>::decode(&mut &message[..]).unwrap() {
 						Message::<Block, Proof>::BlockResponse(BlockResponse { id: _, blocks }) => {
@@ -315,6 +319,8 @@ fn basic_two_nodes_requests_in_parallel() {
 						service1.send_packet(&peer_id, msg.encode());
 					}
 				},
+				// An empty handshake is being sent after opening.
+				Some(GenericProtoOut::LegacyMessage { message, .. }) if message.is_empty() => {},
 				_ => panic!(),
 			}
 		}
@@ -324,6 +330,8 @@ fn basic_two_nodes_requests_in_parallel() {
 		loop {
 			match ready!(service2.poll_next_unpin(cx)) {
 				Some(GenericProtoOut::CustomProtocolOpen { .. }) => {},
+				// An empty handshake is being sent after opening.
+				Some(GenericProtoOut::LegacyMessage { message, .. }) if message.is_empty() => {},
 				Some(GenericProtoOut::LegacyMessage { message, .. }) => {
 					let pos = to_receive.iter().position(|m| m.encode() == message).unwrap();
 					to_receive.remove(pos);
