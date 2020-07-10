@@ -965,10 +965,18 @@ if !self.cache.no_assert {
 	if let Some(exp_v) = exp_v {
 		assert_eq!(entry, exp_v, "k: {:?}, {:?}, qp {:?} h {:?}", key, self.state.storage(key), self.cache.experimental_query_plan, self.cache.parent_hash);
 	}
+} else {
+	// TODO add a atomic counter!!
+	warn!("Std cache it when no experimental cache it");
 }
+	
 				return Ok(entry)
 			}
 		}
+if exp_v.is_some() {
+	// TODO add a atomic counter!!
+	warn!("Experimental cache it when no std cache it");
+}
 		trace!("Cache miss: {:?}", HexDisplay::from(&key));
 		let value = self.state.storage(key)?;
 if !self.cache.qc && !self.cache.no_assert {
