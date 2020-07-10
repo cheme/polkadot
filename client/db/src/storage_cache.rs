@@ -829,11 +829,10 @@ impl<B: BlockT> CacheChanges<B> {
 	}
 
 	fn retry_experimental_init(&self) {
-		warn!("Retry start");
 		let (experimental_query_plan, experimental_update) = if let Some(ph) = self.parent_hash.as_ref() {
 				if let Some(ec) = self.experimental_cache.as_ref() {
 					// Could also use try_write_for
-					if let Some(mut cache) = Some(ec.0.write()) {
+					if let Some(mut cache) = ec.0.try_write() {
 						(cache.management.get_db_state(ph),
 							cache.management.get_db_state_mut(ph))
 					} else {
