@@ -36,6 +36,8 @@ use historied_db::{
 	historied::tree_management::{Tree as TreeMgmt, ForkPlan},
 };
 use codec::{Decode, Encode};
+use kvdb::KeyValueDB;
+use std::io;
 
 use std::sync::Arc;
 
@@ -56,10 +58,10 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 			2 => (),
 			42 => {
 				delete_historied::<Block>(db_path, db_type)?;
-				let now = Instant::now();
+/*				let now = Instant::now();
 				let hash_for_root = inject_non_canonical::<Block>(db_path, db_type)?;
 				println!("inject non canonnical in {}", now.elapsed().as_millis());
-				compare_latest_roots::<Block>(db_path, db_type, hash_for_root)?;
+				compare_latest_roots::<Block>(db_path, db_type, hash_for_root)?;*/
 			},
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
@@ -88,6 +90,8 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 	Ok(())
 }
 
+
+/// This does not seems to work, there is still no reimport of the blocks.
 fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
 		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 		let path = db_path.to_str()
@@ -142,6 +146,8 @@ fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) ->
 		let storage: Arc<crate::StorageDb<Block>> = Arc::new(storage_db);*/
 }
 
+// This would be interesting if it worked, but injecting key hashed encoded node
+// is totally dumb. TODO delete
 fn inject_non_canonical<Block: BlockT>(
 	db_path: &Path,
 	db_type: DatabaseType,
@@ -329,7 +335,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	// Can not use crate::meta_keys::BEST_BLOCK on non archive node: using CANNONICAL,
 	// TODO EMCH would need to fetch non_cannonical overlay to complete.
-	let (tree_root, block_hash) = match db.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK) {
+//	let (tree_root, block_hash) = match db.get(crate::utils::COLUMN_META, crate::meta_keys::FINALIZED_BLOCK) {
+	let (tree_root, block_hash) = match db.get(crate::utils::COLUMN_META, crate::meta_keys::BEST_BLOCK) {
 		Ok(id) => {
 			let id = id.unwrap();
 			let id = db.get(crate::columns::HEADER, &id).expect("s").map(|b| Block::Header::decode(&mut &b[..]).ok());
@@ -343,9 +350,34 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		Err(e) => panic!("no best block is bad sign {:?}", e),
 	};
 
-
+/* Using storage db works only on FINALIZED_BLOCK
 	let db = Arc::new(db);
 	let storage = StorageDb::<Block>(db.clone(), PhantomData);
+*/
+
+	let db = Arc::new(db);
+	let db_read = db.clone();
+	let db = sp_database::as_database(ArcKVDB(db));
+	let meta = crate::read_meta::<Block>(&*db, crate::columns::HEADER)?;
+	let leaves = crate::LeafSet::<Block::Hash, NumberFor<Block>>::read_from_db(&*db, crate::columns::META, crate::meta_keys::LEAF_PREFIX)?;
+	println!("previous leaf set: {:?}", leaves);
+
+	let meta = StateMetaDb(&*db);
+	let state_db: StateDb<Block::Hash, Vec<u8>> = StateDb::new(
+		PruningMode::Constrained(sc_state_db::Constraints {
+			max_blocks: None, // may require info in the future, in fact we should fetch it
+			max_mem: None,
+		}),
+		true, // Rc or not does not matter in this case
+		&meta,
+	).expect("TODO err");
+
+
+	let storage = crate::StorageDb::<Block> {
+		db: db.clone(),
+		state_db,
+		prefix_keys: true, // Rc does not really matter here
+	};
 //		let storage: Arc::<dyn sp_state_machine::Storage<HashFor<Block>>> = Arc::new(storage);
 /*		let mut root = Block::Hash::default();
 		let trie_backend = sp_state_machine::TrieBackend::new(
@@ -358,7 +390,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	).expect("build trie");
 
 	let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
-	let historied_persistence = crate::RocksdbStorage(db.clone());
+	let historied_persistence = crate::RocksdbStorage(db_read.clone());
 	let mut management = TreeManagement::<
 		<HashFor<Block> as hash_db::Hasher>::Out,
 		u32,
@@ -376,7 +408,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	let mut kv_db = crate::HistoriedDBMut {
 		current_state: state,
-		db: db.clone(),
+		db: db_read.clone(),
 	};
 	let mut tx = kv_db.transaction();
 	while let Some(Ok((k, v))) = iter.next() {
@@ -404,7 +436,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let current_state = management.get_db_state(&block_hash).expect("just added");
 	let historied_db = crate::HistoriedDB {
 		current_state,
-		db: db.clone(),
+		db: db_read.clone(),
 		do_assert: false,
 	};
 	let mut count = 0;
@@ -426,6 +458,48 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	Ok(())
 }
 
+struct ArcKVDB<D: KeyValueDB>(Arc<D>);
+
+impl<D: KeyValueDB> parity_util_mem::MallocSizeOf for ArcKVDB<D> {
+	fn size_of(&self, ops: &mut parity_util_mem::MallocSizeOfOps) -> usize {
+		self.0.size_of(ops)
+	}
+}
+
+impl<D: KeyValueDB> KeyValueDB for ArcKVDB<D> {
+	fn transaction(&self) -> kvdb::DBTransaction {
+		self.0.transaction()
+	}
+
+	fn get(&self, col: u32, key: &[u8]) -> io::Result<Option<Vec<u8>>> {
+		self.0.get(col, key)
+	}
+
+	fn get_by_prefix(&self, col: u32, prefix: &[u8]) -> Option<Box<[u8]>> {
+		self.0.get_by_prefix(col, prefix)
+	}
+
+	fn write(&self, transaction: kvdb::DBTransaction) -> io::Result<()> {
+		self.0.write(transaction)
+	}
+
+	fn iter<'a>(&'a self, col: u32) -> Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a> {
+		self.0.iter(col)
+	}
+
+	fn iter_with_prefix<'a>(
+		&'a self,
+		col: u32,
+		prefix: &'a [u8],
+	) -> Box<dyn Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a> {
+		self.0.iter_with_prefix(col, prefix)
+	}
+
+	fn restore(&self, new_db: &str) -> io::Result<()> {
+		self.0.restore(new_db)
+	}
+}
+
 struct StorageDb<Block>(Arc<kvdb_rocksdb::Database>, PhantomData<Block>);
 
 impl<Block: BlockT> hash_db::HashDBRef<HashFor<Block>, Vec<u8>> for StorageDb<Block> {
@@ -436,6 +510,22 @@ impl<Block: BlockT> hash_db::HashDBRef<HashFor<Block>, Vec<u8>> for StorageDb<Bl
 	fn get(&self, key: &<HashFor::<Block> as hash_db::Hasher>::Out, prefix: hash_db::Prefix) -> Option<sp_trie::DBValue> {
 		let key = sp_trie::prefixed_key::<HashFor<Block>>(key, prefix);
 		self.0.get(crate::columns::STATE, key.as_slice()).expect("bad script")
+	}
+}
+
+impl<Block: BlockT> hash_db::HashDBRef<HashFor<Block>, Vec<u8>> for crate::StorageDb<Block> {
+	fn contains(&self, key: &<HashFor::<Block> as hash_db::Hasher>::Out, prefix: hash_db::Prefix) -> bool {
+		self.get(key, prefix).is_some()
+	}
+
+	fn get(&self, key: &<HashFor::<Block> as hash_db::Hasher>::Out, prefix: hash_db::Prefix) -> Option<sp_trie::DBValue> {
+		if self.prefix_keys {
+			let key = sp_trie::prefixed_key::<HashFor<Block>>(key, prefix);
+			self.state_db.get(&key, self)
+		} else {
+			self.state_db.get(key.as_ref(), self)
+		}
+		.unwrap()
 	}
 }
 
