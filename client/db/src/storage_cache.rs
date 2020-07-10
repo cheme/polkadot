@@ -850,6 +850,10 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 				}));
 
 		if experimental_query_plan.is_none() {
+			// TODO this indicate (except very first block) that we do not
+			// need experimental_cache. This use is related to parent hash
+			// set to none and is not an issue (did not log cache miss for
+			// storage).
 			warn!("No query plan for new cache!!!!! {:?}", parent_hash);
 		}
 		experimental_query_plan.as_ref().map(|qp|
