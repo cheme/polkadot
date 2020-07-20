@@ -34,32 +34,38 @@ use std::sync::Arc;
 
 /// Offchain API
 #[derive(Debug)]
-pub struct Offchain<T: OffchainStorage> {
+pub struct Offchain<T: OffchainStorage, LT: OffchainStorage> {
 	/// Offchain storage
 	storage: Arc<RwLock<T>>,
+	/// Offchain storage for different blockchain states.
+	local_storage: Arc<RwLock<LT>>,
 	deny_unsafe: DenyUnsafe,
 }
 
-impl<T: OffchainStorage> Offchain<T> {
+impl<T: OffchainStorage, LT: OffchainStorage> Offchain<T, LT> {
 	/// Create new instance of Offchain API.
-	pub fn new(storage: T, deny_unsafe: DenyUnsafe) -> Self {
+	pub fn new(storage: T, local_storage: LT, deny_unsafe: DenyUnsafe) -> Self {
 		Offchain {
 			storage: Arc::new(RwLock::new(storage)),
+			local_storage: Arc::new(RwLock::new(local_storage)),
 			deny_unsafe,
 		}
 	}
 }
 
-impl<T: OffchainStorage + 'static> OffchainApi for Offchain<T> {
+impl<T: OffchainStorage + 'static, LT: OffchainStorage + 'static> OffchainApi for Offchain<T, LT> {
 	/// Set offchain local storage under given key and prefix.
 	fn set_local_storage(&self, kind: StorageKind, key: Bytes, value: Bytes) -> Result<()> {
 		self.deny_unsafe.check_if_safe()?;
 
-		let prefix = match kind {
-			StorageKind::PERSISTENT => sp_offchain::STORAGE_PREFIX,
-			StorageKind::LOCAL => return Err(Error::UnavailableStorageKind),
+		match kind {
+			StorageKind::PERSISTENT => {
+				self.storage.write().set(sp_offchain::STORAGE_PREFIX, &*key, &*value)
+			},
+			StorageKind::LOCAL => {
+				self.local_storage.write().set(sp_offchain::LOCAL_STORAGE_PREFIX, &*key, &*value)
+			},
 		};
-		self.storage.write().set(prefix, &*key, &*value);
 		Ok(())
 	}
 
@@ -67,10 +73,9 @@ impl<T: OffchainStorage + 'static> OffchainApi for Offchain<T> {
 	fn get_local_storage(&self, kind: StorageKind, key: Bytes) -> Result<Option<Bytes>> {
 		self.deny_unsafe.check_if_safe()?;
 
-		let prefix = match kind {
-			StorageKind::PERSISTENT => sp_offchain::STORAGE_PREFIX,
-			StorageKind::LOCAL => return Err(Error::UnavailableStorageKind),
-		};
-		Ok(self.storage.read().get(prefix, &*key).map(Into::into))
+		Ok(match kind {
+			StorageKind::PERSISTENT => self.storage.read().get(sp_offchain::STORAGE_PREFIX, &*key).map(Into::into),
+			StorageKind::LOCAL => self.local_storage.read().get(sp_offchain::LOCAL_STORAGE_PREFIX, &*key).map(Into::into),
+		})
 	}
 }

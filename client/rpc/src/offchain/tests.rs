@@ -23,7 +23,8 @@ use sp_core::{Bytes, offchain::storage::InMemOffchainStorage};
 #[test]
 fn local_storage_should_work() {
 	let storage = InMemOffchainStorage::default();
-	let offchain = Offchain::new(storage, DenyUnsafe::No);
+	let local_storage = InMemOffchainStorage::default();
+	let offchain = Offchain::new(storage, local_storage, DenyUnsafe::No);
 	let key = Bytes(b"offchain_storage".to_vec());
 	let value = Bytes(b"offchain_value".to_vec());
 
@@ -40,7 +41,8 @@ fn local_storage_should_work() {
 #[test]
 fn offchain_calls_considered_unsafe() {
 	let storage = InMemOffchainStorage::default();
-	let offchain = Offchain::new(storage, DenyUnsafe::Yes);
+	let local_storage = InMemOffchainStorage::default();
+	let offchain = Offchain::new(storage, local_storage, DenyUnsafe::Yes);
 	let key = Bytes(b"offchain_storage".to_vec());
 	let value = Bytes(b"offchain_value".to_vec());
 

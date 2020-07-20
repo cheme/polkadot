@@ -929,7 +929,8 @@ ServiceBuilder<
 		TExPool,
 		sc_offchain::OffchainWorkers<
 			Client<TBackend, TExec, TBl, TRtApi>,
-			TBackend::OffchainStorage,
+			TBackend::OffchainPersistentStorage,
+			TBackend::OffchainLocalStorage,
 			TBl
 		>,
 	>, Error>
@@ -993,12 +994,13 @@ ServiceBuilder<
 			network_future
 		);
 
-		let offchain_storage = backend.offchain_storage();
-		let offchain_workers = match (config.offchain_worker.clone(), offchain_storage.clone()) {
-			(OffchainWorkerConfig {enabled: true, .. }, Some(db)) => {
-				Some(Arc::new(sc_offchain::OffchainWorkers::new(client.clone(), db)))
+		let offchain_local_storage = backend.offchain_local_storage();
+		let offchain_persistent_storage = backend.offchain_persistent_storage();
+		let offchain_workers = match (config.offchain_worker.clone(), offchain_persistent_storage.clone(), offchain_local_storage.clone()) {
+			(OffchainWorkerConfig {enabled: true, .. }, Some(db), Some(local_db)) => {
+				Some(Arc::new(sc_offchain::OffchainWorkers::new(client.clone(), db, local_db)))
 			},
-			(OffchainWorkerConfig {enabled: true, .. }, None) => {
+			(OffchainWorkerConfig {enabled: true, .. }, _, _) => {
 				warn!("Offchain workers disabled, due to lack of offchain storage support in backend.");
 				None
 			},
@@ -1064,7 +1066,7 @@ ServiceBuilder<
 		let gen_handler = |deny_unsafe: sc_rpc::DenyUnsafe| gen_handler(
 			deny_unsafe, &config, &task_manager, client.clone(), transaction_pool.clone(),
 			keystore.clone(), on_demand.clone(), remote_backend.clone(), &*rpc_extensions_builder,
-			offchain_storage.clone(), system_rpc_tx.clone()
+			offchain_persistent_storage.clone(), offchain_local_storage.clone(), system_rpc_tx.clone()
 		);
 		let rpc = start_rpc_servers(&config, gen_handler)?;
 		// This is used internally, so don't restrict access to unsafe RPC
@@ -1145,7 +1147,8 @@ ServiceBuilder<
 		TExPool,
 		sc_offchain::OffchainWorkers<
 			Client<TBackend, TExec, TBl, TRtApi>,
-			TBackend::OffchainStorage,
+			TBackend::OffchainPersistentStorage,
+			TBackend::OffchainLocalStorage,
 			TBl
 		>,
 	>, Error>
@@ -1200,7 +1203,8 @@ ServiceBuilder<
 		TExPool,
 		sc_offchain::OffchainWorkers<
 			Client<TBackend, TExec, TBl, TRtApi>,
-			TBackend::OffchainStorage,
+			TBackend::OffchainPersistentStorage,
+			TBackend::OffchainLocalStorage,
 			TBl
 		>,
 	>, Error>
@@ -1336,7 +1340,8 @@ fn gen_handler<TBl, TBackend, TExec, TRtApi, TExPool, TRpc>(
 	on_demand: Option<Arc<OnDemand<TBl>>>,
 	remote_backend: Option<Arc<dyn RemoteBlockchain<TBl>>>,
 	rpc_extensions_builder: &(dyn RpcExtensionBuilder<Output = TRpc> + Send),
-	offchain_storage: Option<<TBackend as sc_client_api::backend::Backend<TBl>>::OffchainStorage>,
+	offchain_persistent_storage: Option<<TBackend as sc_client_api::backend::Backend<TBl>>::OffchainPersistentStorage>,
+	offchain_local_storage: Option<<TBackend as sc_client_api::backend::Backend<TBl>>::OffchainLocalStorage>,
 	system_rpc_tx: TracingUnboundedSender<sc_rpc::system::Request<TBl>>
 ) -> jsonrpc_pubsub::PubSubHandler<sc_rpc::Metadata>
 	where
@@ -1396,9 +1401,10 @@ fn gen_handler<TBl, TBackend, TExec, TRtApi, TExPool, TRpc>(
 	);
 	let system = system::System::new(system_info, system_rpc_tx.clone(), deny_unsafe);
 
-	let maybe_offchain_rpc = offchain_storage.clone()
-	.map(|storage| {
-		let offchain = sc_rpc::offchain::Offchain::new(storage, deny_unsafe);
+	let maybe_offchain_rpc = offchain_persistent_storage.clone()
+		.and_then(|storage| offchain_local_storage.clone().map(|local| (storage, local)))
+		.map(|(storage, local_storage)| {
+		let offchain = sc_rpc::offchain::Offchain::new(storage, local_storage, deny_unsafe); // TODO EMCH add local_storage
 		// FIXME: Use plain Option (don't collect into HashMap) when we upgrade to jsonrpc 14.1
 		// https://github.com/paritytech/jsonrpc/commit/20485387ed06a48f1a70bf4d609a7cde6cf0accf
 		let delegate = offchain::OffchainApi::to_delegate(offchain);

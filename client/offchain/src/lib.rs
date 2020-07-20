@@ -48,24 +48,31 @@ use futures::{prelude::*, future::ready};
 mod api;
 use api::SharedClient;
 
-pub use sp_offchain::{OffchainWorkerApi, STORAGE_PREFIX};
+pub use sp_offchain::{OffchainWorkerApi, STORAGE_PREFIX, LOCAL_STORAGE_PREFIX};
 
 /// An offchain workers manager.
-pub struct OffchainWorkers<Client, Storage, Block: traits::Block> {
+pub struct OffchainWorkers<Client, PersistentStorage, LocalStorage, Block: traits::Block> {
 	client: Arc<Client>,
-	db: Storage,
+	db: PersistentStorage,
+	local_db: LocalStorage,
 	_block: PhantomData<Block>,
 	thread_pool: Mutex<ThreadPool>,
 	shared_client: SharedClient,
 }
 
-impl<Client, Storage, Block: traits::Block> OffchainWorkers<Client, Storage, Block> {
+impl<
+	Client,
+	PersistentStorage,
+	LocalStorage,
+	Block: traits::Block,
+> OffchainWorkers<Client, PersistentStorage, LocalStorage, Block> {
 	/// Creates new `OffchainWorkers`.
-	pub fn new(client: Arc<Client>, db: Storage) -> Self {
+	pub fn new(client: Arc<Client>, db: PersistentStorage, local_db: LocalStorage) -> Self {
 		let shared_client = SharedClient::new();
 		Self {
 			client,
 			db,
+			local_db,
 			_block: PhantomData,
 			thread_pool: Mutex::new(ThreadPool::new(num_cpus::get())),
 			shared_client,
@@ -73,9 +80,10 @@ impl<Client, Storage, Block: traits::Block> OffchainWorkers<Client, Storage, Blo
 	}
 }
 
-impl<Client, Storage, Block: traits::Block> fmt::Debug for OffchainWorkers<
+impl<Client, PersistentStorage, LocalStorage, Block: traits::Block> fmt::Debug for OffchainWorkers<
 	Client,
-	Storage,
+	PersistentStorage,
+	LocalStorage,
 	Block,
 > {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -83,15 +91,17 @@ impl<Client, Storage, Block: traits::Block> fmt::Debug for OffchainWorkers<
 	}
 }
 
-impl<Client, Storage, Block> OffchainWorkers<
+impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 	Client,
-	Storage,
+	PersistentStorage,
+	LocalStorage,
 	Block,
 > where
 	Block: traits::Block,
 	Client: ProvideRuntimeApi<Block> + Send + Sync + 'static,
 	Client::Api: OffchainWorkerApi<Block>,
-	Storage: OffchainStorage + 'static,
+	PersistentStorage: OffchainStorage + 'static,
+	LocalStorage: OffchainStorage + 'static,
 {
 	/// Start the offchain workers after given block.
 	#[must_use]
@@ -122,6 +132,7 @@ impl<Client, Storage, Block> OffchainWorkers<
 		if version > 0 {
 			let (api, runner) = api::AsyncApi::new(
 				self.db.clone(),
+				self.local_db.clone(),
 				network_state.clone(),
 				is_validator,
 				self.shared_client.clone(),
@@ -168,10 +179,10 @@ impl<Client, Storage, Block> OffchainWorkers<
 }
 
 /// Inform the offchain worker about new imported blocks
-pub async fn notification_future<Client, Storage, Block, Spawner>(
+pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block, Spawner>(
 	is_validator: bool,
 	client: Arc<Client>,
-	offchain: Arc<OffchainWorkers<Client, Storage, Block>>,
+	offchain: Arc<OffchainWorkers<Client, PersistentStorage, LocalStorage, Block>>,
 	spawner: Spawner,
 	network_state_info: Arc<dyn NetworkStateInfo + Send + Sync>,
 )
@@ -179,7 +190,8 @@ pub async fn notification_future<Client, Storage, Block, Spawner>(
 		Block: traits::Block,
 		Client: ProvideRuntimeApi<Block> + sc_client_api::BlockchainEvents<Block> + Send + Sync + 'static,
 		Client::Api: OffchainWorkerApi<Block>,
-		Storage: OffchainStorage + 'static,
+		PersistentStorage: OffchainStorage + 'static,
+		LocalStorage: OffchainStorage + 'static,
 		Spawner: SpawnNamed
 {
 	client.import_notification_stream().for_each(move |n| {
@@ -256,11 +268,12 @@ mod tests {
 		client.execution_extensions()
 			.register_transaction_pool(Arc::downgrade(&pool.clone()) as _);
 		let db = sc_client_db::offchain::LocalStorage::new_test();
+		let local_db = sc_client_db::offchain::LocalStorage::new_test();
 		let network_state = Arc::new(MockNetworkStateInfo());
 		let header = client.header(&BlockId::number(0)).unwrap().unwrap();
 
 		// when
-		let offchain = OffchainWorkers::new(client, db);
+		let offchain = OffchainWorkers::new(client, db, local_db);
 		futures::executor::block_on(offchain.on_block_imported(&header, network_state, false));
 
 		// then

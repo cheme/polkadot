@@ -32,6 +32,10 @@ pub mod testing;
 /// Local storage prefix used by the Offchain Worker API to
 pub const STORAGE_PREFIX : &'static [u8] = b"storage";
 
+/// Local storage prefix used by the Offchain Worker API to
+/// store data with chain history.
+pub const LOCAL_STORAGE_PREFIX : &'static [u8] = b"history";
+
 /// Offchain workers local storage.
 pub trait OffchainStorage: Clone + Send + Sync {
 	/// Persist a value in storage under given key and prefix.
@@ -53,6 +57,17 @@ pub trait OffchainStorage: Clone + Send + Sync {
 		old_value: Option<&[u8]>,
 		new_value: &[u8],
 	) -> bool;
+}
+
+/// Local storage for different blockchain state.
+pub trait BlockChainOffchainStorage: Clone + Send + Sync {
+	/// OffChainStorage to use at a given block.
+	type OffchainStorage: OffchainStorage;
+
+	/// Block Identifier.
+	type BlockId;
+
+	fn at(&mut self, id: Self::BlockId) -> Option<Self::OffchainStorage>;
 }
 
 /// A type of supported crypto.

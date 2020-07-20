@@ -30,7 +30,7 @@ use sp_core::offchain::{
 	Externalities as OffchainExt, HttpRequestId, Timestamp, HttpRequestStatus, HttpError,
 	OpaqueNetworkState, OpaquePeerId, OpaqueMultiaddr, StorageKind,
 };
-pub use sp_offchain::STORAGE_PREFIX;
+pub use sp_offchain::{STORAGE_PREFIX, LOCAL_STORAGE_PREFIX};
 pub use http::SharedClient;
 
 #[cfg(not(target_os = "unknown"))]
@@ -46,9 +46,11 @@ mod timestamp;
 /// Asynchronous offchain API.
 ///
 /// NOTE this is done to prevent recursive calls into the runtime (which are not supported currently).
-pub(crate) struct Api<Storage> {
+pub(crate) struct Api<PersistentStorage, LocalStorage> {
 	/// Offchain Workers database.
-	db: Storage,
+	db: PersistentStorage,
+	/// Offchain Workers local database.
+	local_db: LocalStorage,
 	/// A NetworkState provider.
 	network_state: Arc<dyn NetworkStateInfo + Send + Sync>,
 	/// Is this node a potential validator?
@@ -65,9 +67,10 @@ fn unavailable_yet<R: Default>(name: &str) -> R {
 	Default::default()
 }
 
-const LOCAL_DB: &str = "LOCAL (fork-aware) DB";
-
-impl<Storage: OffchainStorage> OffchainExt for Api<Storage> {
+impl<
+	PersistentStorage: OffchainStorage,
+	LocalStorage: OffchainStorage,
+> OffchainExt for Api<PersistentStorage, LocalStorage> {
 	fn is_validator(&self) -> bool {
 		self.is_validator
 	}
@@ -97,14 +100,14 @@ impl<Storage: OffchainStorage> OffchainExt for Api<Storage> {
 	fn local_storage_set(&mut self, kind: StorageKind, key: &[u8], value: &[u8]) {
 		match kind {
 			StorageKind::PERSISTENT => self.db.set(STORAGE_PREFIX, key, value),
-			StorageKind::LOCAL => unavailable_yet(LOCAL_DB),
+			StorageKind::LOCAL => self.local_db.set(LOCAL_STORAGE_PREFIX, key, value),
 		}
 	}
 
 	fn local_storage_clear(&mut self, kind: StorageKind, key: &[u8]) {
 		match kind {
 			StorageKind::PERSISTENT => self.db.remove(STORAGE_PREFIX, key),
-			StorageKind::LOCAL => unavailable_yet(LOCAL_DB),
+			StorageKind::LOCAL => self.local_db.remove(LOCAL_STORAGE_PREFIX, key),
 		}
 	}
 
@@ -119,14 +122,16 @@ impl<Storage: OffchainStorage> OffchainExt for Api<Storage> {
 			StorageKind::PERSISTENT => {
 				self.db.compare_and_set(STORAGE_PREFIX, key, old_value, new_value)
 			},
-			StorageKind::LOCAL => unavailable_yet(LOCAL_DB),
+			StorageKind::LOCAL => {
+				self.local_db.compare_and_set(LOCAL_STORAGE_PREFIX, key, old_value, new_value)
+			},
 		}
 	}
 
 	fn local_storage_get(&mut self, kind: StorageKind, key: &[u8]) -> Option<Vec<u8>> {
 		match kind {
 			StorageKind::PERSISTENT => self.db.get(STORAGE_PREFIX, key),
-			StorageKind::LOCAL => unavailable_yet(LOCAL_DB),
+			StorageKind::LOCAL => self.local_db.get(LOCAL_STORAGE_PREFIX, key),
 		}
 	}
 
@@ -257,16 +262,18 @@ pub(crate) struct AsyncApi {
 
 impl AsyncApi {
 	/// Creates new Offchain extensions API implementation  an the asynchronous processing part.
-	pub fn new<S: OffchainStorage>(
-		db: S,
+	pub fn new<PS: OffchainStorage, LS: OffchainStorage>(
+		db: PS,
+		local_db: LS,
 		network_state: Arc<dyn NetworkStateInfo + Send + Sync>,
 		is_validator: bool,
 		shared_client: SharedClient,
-	) -> (Api<S>, Self) {
+	) -> (Api<PS, LS>, Self) {
 		let (http_api, http_worker) = http::http(shared_client);
 
 		let api = Api {
 			db,
+			local_db,
 			network_state,
 			is_validator,
 			http: http_api,
@@ -306,15 +313,17 @@ mod tests {
 		}
 	}
 
-	fn offchain_api() -> (Api<LocalStorage>, AsyncApi) {
+	fn offchain_api() -> (Api<LocalStorage, LocalStorage>, AsyncApi) {
 		let _ = env_logger::try_init();
 		let db = LocalStorage::new_test();
+		let local_db = LocalStorage::new_test();
 		let mock = Arc::new(MockNetworkStateInfo());
 		let shared_client = SharedClient::new();
 
 
 		AsyncApi::new(
 			db,
+			local_db,
 			mock,
 			false,
 			shared_client,

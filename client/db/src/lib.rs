@@ -47,7 +47,6 @@ mod parity_db;
 #[cfg(feature = "with-subdb")]
 mod subdb;
 
-use historied_db::management::tree::{TreeManagement, TreeManagementStorage};
 use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
 	ForkableManagement, Latest, UpdateResult,
@@ -143,7 +142,8 @@ type TreeBackend<'a> = historied_db::backend::in_memory::MemoryOnly<
 
 // Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
 // None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
-type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
+/// Historied value with multiple paralell branches.
+pub type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 
 impl KVBackend for HistoriedDB {
@@ -522,10 +522,14 @@ pub(crate) mod columns {
 	pub const JournalDelete: u32 = 15;
 }
 
-struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
-struct TreeManagementPersistence;
 
-impl TreeManagementStorage for TreeManagementPersistence {
+/// Database backed tree management.
+pub struct TreeManagementPersistence;
+
+/// Database backed tree management for a rocksdb database.
+pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
+
+impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_DELETE: bool = true;
 	type Storage = RocksdbStorage;
 	type Mapping = historied_tree_bindings::Mapping;
@@ -541,8 +545,8 @@ impl TreeManagementStorage for TreeManagementPersistence {
 		unimplemented!("unused")
 	}
 }
-impl RocksdbStorage {
 
+impl RocksdbStorage {
 	pub fn resolve_collection(c: &'static [u8]) -> Option<u32> {
 		if c.len() != 4 {
 			return None;
@@ -1073,6 +1077,14 @@ impl<T: Clone> FrozenForDuration<T> {
 /// Holder for state of historied.
 type HistoriedState = ();
 
+pub type TreeManagement<H, S> = historied_db::management::tree::TreeManagement<
+	H,
+	u32,
+	u32,
+	Vec<u8>,
+	S,
+>;
+
 /// Disk backend.
 ///
 /// Disk backend keeps data in a key-value store. In archive mode, trie nodes are kept from all blocks.
@@ -1080,6 +1092,10 @@ type HistoriedState = ();
 pub struct Backend<Block: BlockT> {
 	storage: Arc<StorageDb<Block>>,
 	offchain_storage: offchain::LocalStorage,
+	offchain_local_storage: offchain::BlockChainLocalStorage<
+		<HashFor<Block> as Hasher>::Out,
+		TreeManagementPersistence,
+	>,
 	changes_tries_storage: DbChangesTrieStorage<Block>,
 	blockchain: BlockchainDb<Block>,
 	canonicalization_delay: u64,
@@ -1091,9 +1107,6 @@ pub struct Backend<Block: BlockT> {
 	state_usage: Arc<StateUsageStats>,
 	historied_management: Arc<RwLock<TreeManagement<
 		<HashFor<Block> as Hasher>::Out,
-		u32,
-		u32,
-		Vec<u8>,
 		TreeManagementPersistence,
 	>>>,
 	historied_state: Arc<kvdb_rocksdb::Database>,
@@ -1154,7 +1167,7 @@ impl<Block: BlockT> Backend<Block> {
 		};
 		let offchain_storage = offchain::LocalStorage::new(db.clone());
 		let changes_tries_storage = DbChangesTrieStorage::new(
-			db,
+			db.clone(),
 			blockchain.header_metadata_cache.clone(),
 			columns::META,
 			columns::CHANGES_TRIE,
@@ -1176,10 +1189,12 @@ impl<Block: BlockT> Backend<Block> {
 		);
 		let historied_state = rocks_histo.clone();
 		let historied_persistence = RocksdbStorage(rocks_histo);
-		let historied_management = TreeManagement::from_ser(historied_persistence);
+		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
+		let offchain_local_storage = offchain::BlockChainLocalStorage::new(db, historied_management.clone());
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
+			offchain_local_storage,
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
@@ -1189,7 +1204,7 @@ impl<Block: BlockT> Backend<Block> {
 			is_archive: is_archive_pruning,
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
 			state_usage: Arc::new(StateUsageStats::new()),
-			historied_management: Arc::new(RwLock::new(historied_management)),
+			historied_management,
 			historied_state,
 			historied_next_finalizable: Arc::new(RwLock::new(None)),
 			historied_state_do_assert: false,
@@ -1735,7 +1750,8 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	type BlockImportOperation = BlockImportOperation<Block>;
 	type Blockchain = BlockchainDb<Block>;
 	type State = SyncingCachingState<RefTrackingState<Block>, Block>;
-	type OffchainStorage = offchain::LocalStorage;
+	type OffchainPersistentStorage = offchain::LocalStorage;
+	type OffchainLocalStorage = offchain::LocalStorage; // TODO EMCH use actual local implem
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		let mut old_state = self.state_at(BlockId::Hash(Default::default()))?;
@@ -1875,8 +1891,13 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		Some(&self.changes_tries_storage)
 	}
 
-	fn offchain_storage(&self) -> Option<Self::OffchainStorage> {
+	fn offchain_persistent_storage(&self) -> Option<Self::OffchainPersistentStorage> {
 		Some(self.offchain_storage.clone())
+	}
+
+	fn offchain_local_storage(&self) -> Option<Self::OffchainLocalStorage> {
+		Some(self.offchain_storage.clone()) // TODO EMCH use local storage backend
+//		Some(self.offchain_local_storage.clone()) // TODO EMCH use local storage backend
 	}
 
 	fn usage_info(&self) -> Option<UsageInfo> {

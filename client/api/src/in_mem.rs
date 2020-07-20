@@ -616,7 +616,8 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 	type BlockImportOperation = BlockImportOperation<Block>;
 	type Blockchain = Blockchain<Block>;
 	type State = InMemoryBackend<HashFor<Block>>;
-	type OffchainStorage = OffchainStorage;
+	type OffchainPersistentStorage = OffchainStorage;
+	type OffchainLocalStorage = OffchainStorage;
 
 	fn begin_operation(&self) -> sp_blockchain::Result<Self::BlockImportOperation> {
 		let old_state = self.state_at(BlockId::Hash(Default::default()))?;
@@ -694,7 +695,11 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 		None
 	}
 
-	fn offchain_storage(&self) -> Option<Self::OffchainStorage> {
+	fn offchain_persistent_storage(&self) -> Option<Self::OffchainPersistentStorage> {
+		None
+	}
+
+	fn offchain_local_storage(&self) -> Option<Self::OffchainLocalStorage> {
 		None
 	}
 
