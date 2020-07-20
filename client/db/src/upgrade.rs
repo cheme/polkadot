@@ -85,6 +85,7 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 		db.add_column().map_err(db_err)?;
 		db.add_column().map_err(db_err)?;
 		db.add_column().map_err(db_err)?;
+		db.add_column().map_err(db_err)?;
 	}
 
 	Ok(())
