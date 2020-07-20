@@ -283,12 +283,11 @@ impl<B: BlockT> ExperimentalCache<B> {
 				}
 			}
 
-			// empty case or unregistered: TODO need a way to distinguish
 			let result = experimental_query_plan
 				.map(|qp| self.management.ref_state_fork(qp))
 				.unwrap_or_else(|| {
-					warn!("#####Using latest state fork!!!");
-					self.management.latest_state_fork()
+					warn!("#####Using init state fork for a new branch");
+					self.management.init_state_fork()
 				});
 //			assert!(result.latest() == &Default::default()); // missing something in mgmt trait here
 			result
@@ -969,7 +968,6 @@ if !self.cache.no_assert {
 	}
 } else {
 	let nb = cache_hits_counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-	// TODO add a atomic counter!!
 	warn!("Std cache it when no experimental cache it {}", nb - 1);
 }
 	
@@ -978,7 +976,6 @@ if !self.cache.no_assert {
 		}
 if exp_v.is_some() {
 	let nb = cache_hits_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-	// TODO add a atomic counter!!
 	warn!("Experimental cache it when no std cache it {}", nb + 1);
 }
 		trace!("Cache miss: {:?}", HexDisplay::from(&key));
