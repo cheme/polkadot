@@ -27,13 +27,13 @@ use sp_runtime::traits::{Block as BlockT, HashFor, NumberFor, Header as HeaderT}
 use crate::HValue;
 use crate::utils::DatabaseType;
 use crate::{StateDb, PruningMode, StateMetaDb};
-use historied_db::historied::tree_management::TreeManagement;
+use historied_db::management::tree::TreeManagement;
 use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
 	ForkableManagement, Latest, UpdateResult,
 	historied::{InMemoryValue, InMemoryValueSlice, Value},
 	historied::tree::Tree,
-	historied::tree_management::{Tree as TreeMgmt, ForkPlan},
+	management::tree::{Tree as TreeMgmt, ForkPlan},
 };
 use codec::{Decode, Encode};
 use kvdb::KeyValueDB;

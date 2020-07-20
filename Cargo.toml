@@ -56,6 +56,7 @@ members = [
 	"client/telemetry",
 	"client/transaction-pool",
 	"client/transaction-pool/graph",
+	"utils/historied-db",
 	"utils/prometheus",
 	"utils/wasm-builder-runner",
 	"frame/assets",

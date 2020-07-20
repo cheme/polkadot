@@ -47,13 +47,13 @@ mod parity_db;
 #[cfg(feature = "with-subdb")]
 mod subdb;
 
-use historied_db::historied::tree_management::{TreeManagement, TreeManagementStorage};
+use historied_db::management::tree::{TreeManagement, TreeManagementStorage};
 use historied_db::{
 	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
 	ForkableManagement, Latest, UpdateResult,
 	historied::{InMemoryValue, Value},
 	historied::tree::Tree,
-	historied::tree_management::{Tree as TreeMgmt, ForkPlan},
+	management::tree::{Tree as TreeMgmt, ForkPlan},
 };
 
 use std::sync::Arc;
@@ -118,16 +118,16 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
-	current_state: historied_db::historied::tree_management::ForkPlan<u32, u32>,
+	current_state: historied_db::management::tree::ForkPlan<u32, u32>,
 	db: Arc<kvdb_rocksdb::Database>,
 	// only assert when spawned from cli command (so tests pass)
 	do_assert: bool,
 }
 
-type LinearBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
+type LinearBackend<'a> = historied_db::backend::encoded_array::EncodedArray<
 	'a,
 	Vec<u8>,
-	historied_db::historied::encoded_array::NoVersion,
+	historied_db::backend::encoded_array::NoVersion,
 >;
 /*
 type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
@@ -136,7 +136,7 @@ type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	historied_db::historied::encoded_array::NoVersion,
 >;
 */
-type TreeBackend<'a> = historied_db::historied::linear::MemoryOnly<
+type TreeBackend<'a> = historied_db::backend::in_memory::MemoryOnly<
 	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
 	u32,
 >;
@@ -240,7 +240,7 @@ impl HistoriedDBMut {
 				new_value = histo;
 				new_value.set(v, &self.current_state)
 			} else {
-				new_value = HValue::new(v, &self.current_state);
+				new_value = HValue::new(v, &self.current_state, ((), ()));
 				historied_db::UpdateResult::Changed(())
 			}
 		} else {
@@ -260,7 +260,7 @@ impl HistoriedDBMut {
 	/// please only use on new empty db.
 	pub fn unchecked_new_single(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
 		v.push(1);
-		let value = HValue::new(v, &self.current_state);
+		let value = HValue::new(v, &self.current_state, ((), ()));
 		let value = value.encode();
 		change_set.put(crate::columns::StateValues, k, value.as_slice());
 		// no need for no value set
@@ -519,14 +519,17 @@ pub(crate) mod columns {
 	pub const TreeBranchs: u32 = 12;
 	pub const StateValues: u32 = 13;
 	pub const StateIndexes: u32 = 14;
+	pub const JournalDelete: u32 = 15;
 }
 
 struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
 struct TreeManagementPersistence;
 
 impl TreeManagementStorage for TreeManagementPersistence {
+	const JOURNAL_DELETE: bool = true;
 	type Storage = RocksdbStorage;
 	type Mapping = historied_tree_bindings::Mapping;
+	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type TouchedGC = historied_tree_bindings::TouchedGC;
 	type CurrentGC = historied_tree_bindings::CurrentGC;
 	type LastIndex = historied_tree_bindings::LastIndex;
@@ -580,6 +583,15 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 		});
 	}
 
+	fn clear(&mut self, c: &'static [u8]) {
+		Self::resolve_collection(c).map(|c| {
+			let mut tx = self.0.transaction();
+			tx.delete_prefix(c, &[]);
+			self.0.write(tx)
+				.expect("Unsupported serialize error")
+		});
+	}
+
 	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
 		Self::resolve_collection(c).and_then(|c| {
 			self.0.get(c, k)
@@ -624,6 +636,7 @@ pub mod historied_tree_bindings {
 
 	static_instance!(Mapping, &[11u8, 0, 0, 0]);
 	static_instance!(TreeState, &[12u8, 0, 0, 0]);
+	static_instance!(JournalDelete, &[15u8, 0, 0, 0]);
 	const CST: &'static[u8] = &[2u8, 0, 0, 0]; // STATE_META collection
 	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
 	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
@@ -1998,8 +2011,9 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					// but we lack a historied db primitive to get default query state
 					// on (0, 0).
 					let current_state = management.get_db_state(&h)
-						.or_else(|| management.append_external_state(h.clone(), &state))
-						.ok_or("Historied management error")?;
+						.or_else(|| management.append_external_state(h.clone(), &state)
+							.and_then(|_| management.get_db_state(&h))
+						).ok_or("Historied management error")?;
 					HistoriedDB {
 						current_state,
 						db: self.historied_state.clone(),

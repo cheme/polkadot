@@ -302,7 +302,7 @@ pub mod tests {
 
 	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256> {
 		let (mdb, root) = test_db();
-		TrieBackend::new(mdb, root)
+		TrieBackend::new(mdb, root, Arc::new(crate::in_memory_backend::KVInMem::default()))
 	}
 
 	#[test]
@@ -334,6 +334,7 @@ pub mod tests {
 		assert!(TrieBackend::<PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256>::new(
 			PrefixedMemoryDB::default(),
 			Default::default(),
+			Arc::new(crate::in_memory_backend::KVInMem::default()),
 		).pairs().is_empty());
 	}
 

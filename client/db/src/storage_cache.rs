@@ -21,7 +21,7 @@ use historied_db::{
 	ForkableManagement, Latest, UpdateResult,
 	historied::{InMemoryValue, Value},
 	historied::tree::Tree,
-	historied::tree_management::{Tree as TreeMgmt, TreeManagement, ForkPlan},
+	management::tree::{Tree as TreeMgmt, TreeManagement, ForkPlan},
 };
 use std::collections::{VecDeque, HashSet, HashMap, BTreeSet};
 use std::sync::Arc;
@@ -46,11 +46,11 @@ const STATE_CACHE_BLOCKS: usize = 12;
 
 type ChildStorageKey = (Vec<u8>, Vec<u8>);
 
-type HistoriedTreeBackend = historied_db::historied::linear::MemoryOnly<
+type HistoriedTreeBackend = historied_db::backend::in_memory::MemoryOnly<
 	historied_db::historied::linear::Linear<Option<Vec<u8>>, u32, HistoriedLinearBackend>,
 	u32,
 >;
-type HistoriedLinearBackend = historied_db::historied::linear::MemoryOnly<Option<Vec<u8>>, u32>;
+type HistoriedLinearBackend = historied_db::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u32>;
 
 /// Shared canonical state cache.
 pub struct Cache<B: BlockT> {
@@ -124,7 +124,7 @@ impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<
 				}
 			}
 		} else {
-			let history = Tree::new(value, at);
+			let history = Tree::new(value, at, ((), ()));
 			if self.lru_storage.add_no_resize(key, history) {
 				self.gc(&mut ());
 			}
@@ -307,12 +307,12 @@ impl<B: BlockT> ExperimentalCache<B> {
 			// TODO EMCH make it debug assert + it breaks test so make it a conditional
 //			assert!(self.management.get_db_state_for_fork(h).is_none());
 			// TODO returning both state on this call???
+			let state_mut =	self.management.append_external_state(h.clone(), &state)
+					.expect("correct state resolution");
 			Some((
-				self.management.append_external_state(h.clone(), &state)
+				self.management.get_db_state(&h)
 					.expect("correct state resolution"),
-				// TODO EMCH this should be return by append operation!!!
-				self.management.get_db_state_mut(&h)
-					.expect("correct state resolution"),
+				state_mut,
 			))
 		} else {
 			None
