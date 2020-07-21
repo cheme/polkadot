@@ -32,15 +32,24 @@ mod rstd {
 	pub use std::collections::{BTreeMap, BTreeSet, btree_map};
 	pub use std::error::Error;
 }
+#[cfg(feature = "std")]
+use println;
 
 #[cfg(not(feature = "std"))]
 mod rstd {
-	pub use core::{borrow, convert, cmp, iter, fmt, hash, marker, mem, ops, result, cell};
-	pub use alloc::{boxed, rc, vec};
+	pub use core::{convert, cmp, iter, fmt, hash, marker, mem, ops, result, cell};
+	pub use alloc::{boxed, rc, vec, borrow};
 	pub use alloc::collections::VecDeque;
-	pub use alloc::collections::{BTreeMap, BTreeSet, btreemap};
+	pub use alloc::collections::{BTreeMap, BTreeSet, btree_map};
 	pub trait Error {}
 	impl<T> Error for T {}
+}
+
+#[cfg(not(feature = "std"))]
+#[macro_export]
+macro_rules! println {
+	() => ($crate::print!("\n"));
+	($($arg:tt)*) => ({ })
 }
 
 use core::marker::PhantomData;
@@ -67,6 +76,8 @@ pub trait InitFrom: Sized {
 /// Minimal simple implementation.
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test;
+
+use rstd::vec::Vec;
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
 ///  result to be able to proceed

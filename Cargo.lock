@@ -7537,6 +7537,7 @@ dependencies = [
  "hash256-std-hasher",
  "hex",
  "hex-literal",
+ "historied-db",
  "impl-serde 0.3.0",
  "lazy_static",
  "libsecp256k1",

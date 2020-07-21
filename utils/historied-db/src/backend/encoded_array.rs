@@ -27,6 +27,7 @@
 use crate::rstd::marker::PhantomData;
 use crate::rstd::borrow::Cow;
 use crate::rstd::ops::Range;
+use crate::rstd::vec::Vec;
 use crate::historied::HistoriedValue;
 use super::{LinearStorage, LinearStorageSlice, LinearStorageRange};
 use codec::{Encode, Decode, Input as CodecInput};

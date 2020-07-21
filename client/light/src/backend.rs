@@ -27,7 +27,7 @@ use codec::{Decode, Encode};
 
 use sp_core::ChangesTrieConfiguration;
 use sp_core::storage::{well_known_keys, ChildInfo};
-use sp_core::offchain::storage::InMemOffchainStorage;
+use sp_core::offchain::storage::{InMemOffchainStorage, BlockChainInMemOffchainStorage};
 use sp_state_machine::{
 	Backend as StateBackend, TrieBackend, InMemoryBackend, ChangesTrieTransaction,
 	StorageCollection, ChildStorageCollection,
@@ -123,7 +123,7 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 	type Blockchain = Blockchain<S>;
 	type State = GenesisOrUnavailableState<HashFor<Block>>;
 	type OffchainPersistentStorage = InMemOffchainStorage;
-	type OffchainLocalStorage = InMemOffchainStorage;
+	type OffchainLocalStorage = BlockChainInMemOffchainStorage<<HashFor<Block> as Hasher>::Out>;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		Ok(ImportOperation {

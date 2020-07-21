@@ -23,6 +23,7 @@
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef, InMemoryValueSlice, InMemoryValue};
 use crate::{UpdateResult, Latest};
 use crate::rstd::marker::PhantomData;
+use crate::rstd::vec::Vec;
 use crate::rstd::convert::TryFrom;
 use crate::rstd::ops::{AddAssign, SubAssign, Range};
 use codec::{Encode, Decode};

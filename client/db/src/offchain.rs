@@ -29,6 +29,7 @@ use historied_db::{Latest, Management, ManagementRef, UpdateResult,
 	management::tree::{TreeManagementStorage, ForkPlan},
 	historied::tree::Tree};
 use codec::{Decode, Encode, Codec};
+use sp_core::offchain::storage::HValue;
 
 /// Offchain local storage
 #[derive(Clone)]
@@ -36,19 +37,6 @@ pub struct LocalStorage {
 	db: Arc<dyn Database<DbHash>>,
 	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
 }
-
-type LinearBackend = historied_db::backend::in_memory::MemoryOnly<
-	Option<Vec<u8>>,
-	u32
->;
-
-type TreeBackend = historied_db::backend::in_memory::MemoryOnly<
-	historied_db::historied::linear::Linear<Option<Vec<u8>>, u32, LinearBackend>,
-	u32,
->;
-
-/// Historied value with multiple paralell branches.
-pub type HValue = Tree<u32, u32, Option<Vec<u8>>, TreeBackend, LinearBackend>;
 
 /// Offchain local storage with blockchain historied storage.
 #[derive(Clone)]
@@ -192,7 +180,7 @@ impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStora
 	type BlockId = H;
 	type OffchainStorage = BlockChainLocalAt;
 
-	fn at(&mut self, id: Self::BlockId) -> Option<Self::OffchainStorage> {
+	fn at(&self, id: Self::BlockId) -> Option<Self::OffchainStorage> {
 		if let Some(at_read) = self.historied_management.write().get_db_state(&id) {
 			let at_write = self.historied_management.write().get_db_state_mut(&id);
 			Some(BlockChainLocalAt {
@@ -338,7 +326,8 @@ impl BlockChainLocalAt {
 					if is_insert {
 						(HValue::new(new_value, self.at_write.as_ref().expect("Synch at start"), ((), ())).encode(), UpdateResult::Changed(()))
 					} else {
-						(Vec::new(), UpdateResult::Cleared(()))
+						// nothing to delete
+						return is_set;
 					}
 				};
 				match update_result {

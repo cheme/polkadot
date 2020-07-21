@@ -24,6 +24,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use sp_core::{
 	storage::well_known_keys, offchain::storage::InMemOffchainStorage as OffchainStorage,
+	offchain::storage::BlockChainInMemOffchainStorage as LocalOffchainStorage,
 };
 use sp_runtime::generic::BlockId;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT, Zero, NumberFor, HashFor};
@@ -617,7 +618,7 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 	type Blockchain = Blockchain<Block>;
 	type State = InMemoryBackend<HashFor<Block>>;
 	type OffchainPersistentStorage = OffchainStorage;
-	type OffchainLocalStorage = OffchainStorage;
+	type OffchainLocalStorage = LocalOffchainStorage<<HashFor<Block> as hash_db::Hasher>::Out>;
 
 	fn begin_operation(&self) -> sp_blockchain::Result<Self::BlockImportOperation> {
 		let old_state = self.state_at(BlockId::Hash(Default::default()))?;

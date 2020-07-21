@@ -37,12 +37,12 @@ use std::{fmt, marker::PhantomData, sync::Arc};
 
 use parking_lot::Mutex;
 use threadpool::ThreadPool;
-use sp_api::{ApiExt, ProvideRuntimeApi};
+use sp_api::{ApiExt, ProvideRuntimeApi, Hasher};
 use futures::future::Future;
 use log::{debug, warn};
 use sc_network::NetworkStateInfo;
-use sp_core::{offchain::{self, OffchainStorage}, ExecutionContext, traits::SpawnNamed};
-use sp_runtime::{generic::BlockId, traits::{self, Header}};
+use sp_core::{offchain::{self, OffchainStorage, BlockChainOffchainStorage}, ExecutionContext, traits::SpawnNamed};
+use sp_runtime::{generic::BlockId, traits::{self, Header, HashFor}};
 use futures::{prelude::*, future::ready};
 
 mod api;
@@ -101,7 +101,7 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 	Client: ProvideRuntimeApi<Block> + Send + Sync + 'static,
 	Client::Api: OffchainWorkerApi<Block>,
 	PersistentStorage: OffchainStorage + 'static,
-	LocalStorage: OffchainStorage + 'static,
+	LocalStorage: BlockChainOffchainStorage<BlockId = <HashFor<Block> as Hasher>::Out> + 'static,
 {
 	/// Start the offchain workers after given block.
 	#[must_use]
@@ -130,9 +130,15 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 		};
 		debug!("Checking offchain workers at {:?}: version:{}", at, version);
 		if version > 0 {
+			let local_db_at = if let Some(local_db_at) = self.local_db.at(header.hash()) {
+				local_db_at
+			} else {
+				log::error!("Error no chain state for offchain local db at {:?}", at);
+				return futures::future::Either::Right(futures::future::ready(()));
+			};
 			let (api, runner) = api::AsyncApi::new(
 				self.db.clone(),
-				self.local_db.clone(),
+				local_db_at.clone(),
 				network_state.clone(),
 				is_validator,
 				self.shared_client.clone(),
@@ -191,7 +197,7 @@ pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block,
 		Client: ProvideRuntimeApi<Block> + sc_client_api::BlockchainEvents<Block> + Send + Sync + 'static,
 		Client::Api: OffchainWorkerApi<Block>,
 		PersistentStorage: OffchainStorage + 'static,
-		LocalStorage: OffchainStorage + 'static,
+		LocalStorage: BlockChainOffchainStorage<BlockId = <HashFor<Block> as Hasher>::Out> + 'static,
 		Spawner: SpawnNamed
 {
 	client.import_notification_stream().for_each(move |n| {
@@ -268,7 +274,7 @@ mod tests {
 		client.execution_extensions()
 			.register_transaction_pool(Arc::downgrade(&pool.clone()) as _);
 		let db = sc_client_db::offchain::LocalStorage::new_test();
-		let local_db = sc_client_db::offchain::LocalStorage::new_test();
+		let local_db = sc_client_db::offchain::BlockChainLocalStorage::new_test();
 		let network_state = Arc::new(MockNetworkStateInfo());
 		let header = client.header(&BlockId::number(0)).unwrap().unwrap();
 

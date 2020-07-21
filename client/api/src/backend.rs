@@ -39,6 +39,7 @@ use crate::{
 use sp_blockchain;
 use sp_consensus::BlockOrigin;
 use parking_lot::RwLock;
+use hash_db::Hasher;
 
 pub use sp_state_machine::Backend as StateBackend;
 use std::marker::PhantomData;
@@ -405,7 +406,7 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// Offchain workers persistent storage.
 	type OffchainPersistentStorage: OffchainStorage;
 	/// Offchain workers local storage.
-	type OffchainLocalStorage: OffchainStorage; // TODO EMCH switch to BlockChainOffchainStorage
+	type OffchainLocalStorage: BlockChainOffchainStorage<BlockId = <HashFor<Block> as Hasher>::Out>;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	///

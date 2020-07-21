@@ -67,7 +67,8 @@ pub trait BlockChainOffchainStorage: Clone + Send + Sync {
 	/// Block Identifier.
 	type BlockId;
 
-	fn at(&mut self, id: Self::BlockId) -> Option<Self::OffchainStorage>;
+	/// Get offchain storage for the given block if the id is defined.
+	fn at(&self, id: Self::BlockId) -> Option<Self::OffchainStorage>;
 }
 
 /// A type of supported crypto.

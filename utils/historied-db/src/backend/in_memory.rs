@@ -22,6 +22,7 @@ use codec::{Encode, Decode, Input as CodecInput};
 use super::{LinearStorage, LinearStorageMem};
 use crate::rstd::mem::replace;
 use crate::InitFrom;
+use crate::rstd::vec::Vec;
 
 /// Size of preallocated history per element.
 /// Currently at two for committed and prospective only.

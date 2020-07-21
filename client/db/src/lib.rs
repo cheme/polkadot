@@ -521,7 +521,7 @@ pub(crate) mod columns {
 	pub const JournalDelete: u32 = 15;
 }
 
-
+#[derive(Clone)]
 /// Database backed tree management.
 pub struct TreeManagementPersistence;
 
@@ -1750,7 +1750,10 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	type Blockchain = BlockchainDb<Block>;
 	type State = SyncingCachingState<RefTrackingState<Block>, Block>;
 	type OffchainPersistentStorage = offchain::LocalStorage;
-	type OffchainLocalStorage = offchain::LocalStorage; // TODO EMCH use actual local implem
+	type OffchainLocalStorage = offchain::BlockChainLocalStorage<
+		<HashFor<Block> as Hasher>::Out,
+		TreeManagementPersistence,
+	>;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		let mut old_state = self.state_at(BlockId::Hash(Default::default()))?;
@@ -1895,8 +1898,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	}
 
 	fn offchain_local_storage(&self) -> Option<Self::OffchainLocalStorage> {
-		Some(self.offchain_storage.clone()) // TODO EMCH use local storage backend
-//		Some(self.offchain_local_storage.clone()) // TODO EMCH use local storage backend
+		Some(self.offchain_local_storage.clone())
 	}
 
 	fn usage_info(&self) -> Option<UsageInfo> {

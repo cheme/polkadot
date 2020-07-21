@@ -27,14 +27,14 @@ use sc_rpc_api::DenyUnsafe;
 use self::error::{Error, Result};
 use sp_core::{
 	Bytes,
-	offchain::{OffchainStorage, StorageKind},
+	offchain::{OffchainStorage, BlockChainOffchainStorage, StorageKind},
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
 
 /// Offchain API
 #[derive(Debug)]
-pub struct Offchain<T: OffchainStorage, LT: OffchainStorage> {
+pub struct Offchain<T: OffchainStorage, LT: BlockChainOffchainStorage> {
 	/// Offchain storage
 	storage: Arc<RwLock<T>>,
 	/// Offchain storage for different blockchain states.
@@ -42,7 +42,7 @@ pub struct Offchain<T: OffchainStorage, LT: OffchainStorage> {
 	deny_unsafe: DenyUnsafe,
 }
 
-impl<T: OffchainStorage, LT: OffchainStorage> Offchain<T, LT> {
+impl<T: OffchainStorage, LT: BlockChainOffchainStorage> Offchain<T, LT> {
 	/// Create new instance of Offchain API.
 	pub fn new(storage: T, local_storage: LT, deny_unsafe: DenyUnsafe) -> Self {
 		Offchain {
@@ -53,7 +53,7 @@ impl<T: OffchainStorage, LT: OffchainStorage> Offchain<T, LT> {
 	}
 }
 
-impl<T: OffchainStorage + 'static, LT: OffchainStorage + 'static> OffchainApi for Offchain<T, LT> {
+impl<T: OffchainStorage + 'static, LT: BlockChainOffchainStorage + 'static> OffchainApi for Offchain<T, LT> {
 	/// Set offchain local storage under given key and prefix.
 	fn set_local_storage(&self, kind: StorageKind, key: Bytes, value: Bytes) -> Result<()> {
 		self.deny_unsafe.check_if_safe()?;
@@ -63,7 +63,10 @@ impl<T: OffchainStorage + 'static, LT: OffchainStorage + 'static> OffchainApi fo
 				self.storage.write().set(sp_offchain::STORAGE_PREFIX, &*key, &*value)
 			},
 			StorageKind::LOCAL => {
-				self.local_storage.write().set(sp_offchain::LOCAL_STORAGE_PREFIX, &*key, &*value)
+				// TODO need to update rpc to pass block hash with storage kind.
+				// Also note that set does not make much sense (we need to modify latest state).
+				//self.local_storage.write().at().set(sp_offchain::LOCAL_STORAGE_PREFIX, &*key, &*value)
+				return Err(Error::UnavailableStorageKind);
 			},
 		};
 		Ok(())
@@ -75,7 +78,10 @@ impl<T: OffchainStorage + 'static, LT: OffchainStorage + 'static> OffchainApi fo
 
 		Ok(match kind {
 			StorageKind::PERSISTENT => self.storage.read().get(sp_offchain::STORAGE_PREFIX, &*key).map(Into::into),
-			StorageKind::LOCAL => self.local_storage.read().get(sp_offchain::LOCAL_STORAGE_PREFIX, &*key).map(Into::into),
+			StorageKind::LOCAL => {
+				//self.local_storage.read().get(sp_offchain::LOCAL_STORAGE_PREFIX, &*key).map(Into::into)
+				return Err(Error::UnavailableStorageKind);
+			},
 		})
 	}
 }

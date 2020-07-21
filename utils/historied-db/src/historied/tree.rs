@@ -24,12 +24,13 @@ use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, Line
 use crate::historied::linear::{Linear, LinearState, LinearGC};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
 use crate::rstd::ops::SubAssign;
+use crate::rstd::vec::Vec;
 use crate::rstd::marker::PhantomData;
 use crate::Latest;
 use crate::InitFrom;
 use codec::{Encode, Decode};
 use derivative::Derivative;
-
+use core::default::Default;
 // TODO for not in memory we need some direct or indexed api, returning value
 // and the info if there can be lower value index (not just a direct index).
 // -> then similar to those reverse iteration with possible early exit.
