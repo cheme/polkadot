@@ -23,7 +23,7 @@ use std::{
 	sync::Arc,
 };
 
-use crate::{columns, Database, DbHash, Transaction, HValue};
+use crate::{columns, Database, DbHash, Transaction};
 use parking_lot::{Mutex, RwLock};
 use historied_db::{Latest, Management, ManagementRef, UpdateResult,
 	management::tree::{TreeManagementStorage, ForkPlan},
@@ -36,6 +36,19 @@ pub struct LocalStorage {
 	db: Arc<dyn Database<DbHash>>,
 	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
 }
+
+type LinearBackend = historied_db::backend::in_memory::MemoryOnly<
+	Option<Vec<u8>>,
+	u32
+>;
+
+type TreeBackend = historied_db::backend::in_memory::MemoryOnly<
+	historied_db::historied::linear::Linear<Option<Vec<u8>>, u32, LinearBackend>,
+	u32,
+>;
+
+/// Historied value with multiple paralell branches.
+pub type HValue = Tree<u32, u32, Option<Vec<u8>>, TreeBackend, LinearBackend>;
 
 /// Offchain local storage with blockchain historied storage.
 #[derive(Clone)]
@@ -239,14 +252,14 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 				v
 			}.and_then(|h| {
 				use historied_db::historied::ValueRef;
-				let v = h.get(&self.at_read);
-				v.and_then(|mut v| {
+				h.get(&self.at_read).flatten()
+				/*v.and_then(|mut v| {
 					match v.pop() {
 						Some(0u8) => None,
 						Some(1u8) => Some(v),
 						None | Some(_) => panic!("inconsistent value, DB corrupted"),
 					}
-				})
+				})*/
 			}))
 	}
 
@@ -294,14 +307,14 @@ impl BlockChainLocalAt {
 				});
 			let val = histo.as_ref().and_then(|h| {
 				use historied_db::historied::ValueRef;
-				let v = h.get(&self.at_read);
-				v.and_then(|mut v| {
+				h.get(&self.at_read).flatten()
+				/*v.and_then(|mut v| {
 					match v.pop() {
 						Some(0u8) => None,
 						Some(1u8) => Some(v),
 						None | Some(_) => panic!("inconsistent value, DB corrupted"),
 					}
-				})
+				})*/
 			});
 
 			is_set = condition.map(|c| c(val.as_ref().map(|v| v.as_slice()))).unwrap_or(true);
@@ -309,13 +322,15 @@ impl BlockChainLocalAt {
 			if is_set {
 				use historied_db::historied::Value;
 				let is_insert = new_value.is_some();
-				let new_value = if let Some(new_value) = new_value {
+				/*let new_value = if let Some(new_value) = new_value {
 					let mut new_value = new_value.to_vec();
 					new_value.push(1u8);
 					new_value
 				} else {
-					vec![0]
-				};
+					//vec![0]
+					None
+				};*/
+				let new_value = new_value.map(|v| v.to_vec());
 				let (new_value, update_result) = if let Some(mut histo) = histo {
 					let update_result = histo.set(new_value, self.at_write.as_ref().expect("Synch at start"));
 					(histo.encode(), update_result)

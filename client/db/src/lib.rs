@@ -145,7 +145,6 @@ type TreeBackend<'a> = historied_db::backend::in_memory::MemoryOnly<
 /// Historied value with multiple paralell branches.
 pub type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
-
 impl KVBackend for HistoriedDB {
 	fn assert_value(&self) -> bool {
 		self.do_assert
