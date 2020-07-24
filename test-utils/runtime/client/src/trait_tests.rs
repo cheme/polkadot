@@ -288,7 +288,7 @@ pub fn test_children_for_backend<B: 'static>(backend: Arc<B>) where
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b4.clone()).unwrap();
+	client.import(BlockOrigin::Own, b4).unwrap();
 
 	// // B2 -> C3
 	let mut builder = client.new_block_at(
@@ -419,7 +419,7 @@ pub fn test_blockchain_query_by_number_gets_canonical<B: 'static>(backend: Arc<B
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b4.clone()).unwrap();
+	client.import(BlockOrigin::Own, b4).unwrap();
 
 	// // B2 -> C3
 	let mut builder = client.new_block_at(
@@ -435,7 +435,7 @@ pub fn test_blockchain_query_by_number_gets_canonical<B: 'static>(backend: Arc<B
 		nonce: 1,
 	}).unwrap();
 	let c3 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, c3.clone()).unwrap();
+	client.import(BlockOrigin::Own, c3).unwrap();
 
 	// A1 -> D2
 	let mut builder = client.new_block_at(
@@ -451,7 +451,7 @@ pub fn test_blockchain_query_by_number_gets_canonical<B: 'static>(backend: Arc<B
 		nonce: 0,
 	}).unwrap();
 	let d2 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, d2.clone()).unwrap();
+	client.import(BlockOrigin::Own, d2).unwrap();
 
 	let genesis_hash = client.chain_info().genesis_hash;
 

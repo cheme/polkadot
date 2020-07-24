@@ -20,6 +20,8 @@ use crate::{chain_spec, service, Cli, Subcommand};
 use node_executor::Executor;
 use node_runtime::{Block, RuntimeApi};
 use sc_cli::{Result, SubstrateCli, RuntimeVersion, Role, ChainSpec};
+use sc_service::ServiceParams;
+use crate::service::new_full_params;
 
 type CompactProof = sc_client_api::CompactProof<sc_client_api::Layout<sc_client_api::HashFor<Block>>>;
 /// State backend type
@@ -101,8 +103,9 @@ pub fn run() -> Result<()> {
 		Some(Subcommand::Base(subcommand)) => {
 			let runner = cli.create_runner(subcommand)?;
 			runner.run_subcommand(subcommand, |config| {
-				let (builder, _, _, _) = new_full_start!(config);
-				Ok(builder.to_chain_ops_parts())
+				let (ServiceParams { client, backend, import_queue, task_manager, .. }, ..)
+					= new_full_params(config)?;
+				Ok((client, backend, import_queue, task_manager))
 			})
 		}
 	}
