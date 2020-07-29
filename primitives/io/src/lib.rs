@@ -425,6 +425,7 @@ pub trait Crypto {
 	/// The `seed` needs to be a valid utf8.
 	///
 	/// Returns the public key.
+	/// Warning if use from a chain runtime, always specify a seed.
 	fn ed25519_generate(&mut self, id: KeyTypeId, seed: Option<Vec<u8>>) -> ed25519::Public {
 		let seed = seed.as_ref().map(|s| std::str::from_utf8(&s).expect("Seed is valid utf8!"));
 		self.extension::<KeystoreExt>()
@@ -555,6 +556,8 @@ pub trait Crypto {
 	/// The `seed` needs to be a valid utf8.
 	///
 	/// Returns the public key.
+	///
+	/// Warning if use from a chain runtime, always specify a seed.
 	fn sr25519_generate(&mut self, id: KeyTypeId, seed: Option<Vec<u8>>) -> sr25519::Public {
 		let seed = seed.as_ref().map(|s| std::str::from_utf8(&s).expect("Seed is valid utf8!"));
 		self.extension::<KeystoreExt>()

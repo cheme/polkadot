@@ -26,6 +26,7 @@ std = [ "full_crypto", "sp-core/std", "codec/std", "serde", "sp-std/std", "sp-io
 
 # This feature enables all crypto primitives for `no_std` builds like microcontrollers
 # or Intel SGX.
+# The memory used for secret key is not erased after use.
 # For the regular wasm runtime builds this should not be used.
 full_crypto = [
 	"sp-core/full_crypto",
