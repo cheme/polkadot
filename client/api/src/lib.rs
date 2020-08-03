@@ -36,7 +36,7 @@ pub use client::*;
 pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
-pub use sp_state_machine::{ProofCommon, SimpleProof, ExecutionStrategy, CloneableSpawn,
+pub use sp_state_machine::{ProofCommon, SimpleProof, ExecutionStrategy,
 	ProofNodes, BackendProof, CompactProof, Layout};
 pub use sp_state_machine::backend::{ProofCheckBackend as ProofCheckBackendT,
 	InstantiableStateBackend, HashDBNodesTransaction, GenesisStateBackend};
