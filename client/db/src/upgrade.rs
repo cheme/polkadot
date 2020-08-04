@@ -149,8 +149,6 @@ fn test_thing<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockc
 				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.estimate-table-readers-mem"));
 				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.size-all-mem-tables"));
 				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.cur-size-all-mem-tables"));
-				let path = db_path.to_str()
-					.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 			}
 		 }
 
@@ -158,13 +156,15 @@ fn test_thing<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockc
 
 		 let mut i = 0;
 		 {
+				let path = db_path.to_str()
+					.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 		 while i < 6 {
 				let db_read = Arc::new(kvdb_rocksdb::Database::open(&db_config, path)
 					.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
 
 				let db_r = RocksdbStorage(db_read.clone());
 				let iter_kv = db_r.iter(i);
-				println!("{:?}, nb_iter {:?}", cf, iter_kv.count());
+				println!("{:?}, nb_iter {:?}", i, iter_kv.count());
 				i += 1;
 
 		 }
