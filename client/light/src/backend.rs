@@ -342,7 +342,9 @@ impl<S, Block> BlockImportOperation<Block> for ImportOperation<Block, S>
 	fn insert_aux<I>(&mut self, ops: I) -> ClientResult<()>
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
-		self.aux_ops.append(&mut ops.into_iter().collect());
+		let mut ops: Vec<(Vec<u8>, Option<Vec<u8>>)> = ops.into_iter().collect();
+				println!("light instert in aux_ops {:?}", ops);
+		self.aux_ops.append(&mut ops);
 		Ok(())
 	}
 
