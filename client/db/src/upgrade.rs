@@ -19,9 +19,18 @@
 use std::fs;
 use std::io::{Read, Write, ErrorKind};
 use std::path::{Path, PathBuf};
+use log::warn;
+use std::marker::PhantomData;
+use std::time::{Duration, Instant};
 
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::traits::{Block as BlockT, HashFor, NumberFor, Header as HeaderT};
 use crate::utils::DatabaseType;
+use crate::{StateDb, PruningMode, StateMetaDb};
+use codec::{Decode, Encode};
+use kvdb::KeyValueDB;
+use std::io;
+
+use std::sync::Arc;
 
 /// Version file name.
 const VERSION_FILE_NAME: &'static str = "db_version";
@@ -30,18 +39,42 @@ const VERSION_FILE_NAME: &'static str = "db_version";
 const CURRENT_VERSION: u32 = 1;
 
 /// Upgrade database to current version.
-pub fn upgrade_db<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
+pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
 	let is_empty = db_path.read_dir().map_or(true, |mut d| d.next().is_none());
 	if !is_empty {
 		let db_version = current_version(db_path)?;
 		match db_version {
 			0 => Err(sp_blockchain::Error::Backend(format!("Unsupported database version: {}", db_version)))?,
 			1 => (),
+			42 => {
+				test_thing::<Block>(db_path, db_type)?;
+			},
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
 	}
 
 	update_version(db_path)
+}
+
+/// Hacky migrate to trigger action on db.
+/// Here drop historied state content.
+fn test_thing<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+
+	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
+   {
+		let option = rocksdb::Options::default();
+		 let cfs = rocksdb::DB::list_cf(&option, db_path).unwrap();
+		 let db = rocksdb::DB::open_cf(&option, db_path, cfs.clone()).unwrap();
+		 for cf in cfs {
+
+			 if let Some(col) = db.cf_handle(&cf) {
+				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.estimate-table-readers-mem"));
+				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.size-all-mem-tables"));
+				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.cur-size-all-mem-tables"));
+			 }
+		 }
+	}
+	Ok(())
 }
 
 
