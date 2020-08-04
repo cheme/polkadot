@@ -340,6 +340,8 @@ impl<Block: BlockT> LightStorage<Block> {
 			let new_cht_end = cht::end_number(cht::size(), new_cht_number);
 			trace!(target: "db", "Replacing blocks [{}..{}] with CHT#{}",
 				new_cht_start, new_cht_end, new_cht_number);
+			println!("Replacing blocks [{}..{}] with CHT#{}",
+				new_cht_start, new_cht_end, new_cht_number);
 
 			while prune_block <= new_cht_end {
 				if let Some(hash) = self.hash(prune_block)? {
@@ -355,6 +357,7 @@ impl<Block: BlockT> LightStorage<Block> {
 				}
 				prune_block += One::one();
 			}
+			println!("PRUNED {:?} blocks up to", prune_block);
 		}
 
 		Ok(())
