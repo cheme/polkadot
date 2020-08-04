@@ -308,6 +308,7 @@ impl<S, Block> BlockImportOperation<Block> for ImportOperation<Block, S>
 
 	fn reset_storage(&mut self, input: Storage) -> ClientResult<Block::Hash> {
 		check_genesis_storage(&input)?;
+		println!("RESET_STORAGE (in mem state): only genesis");
 
 		// changes trie configuration
 		let changes_trie_config = input.top.iter()

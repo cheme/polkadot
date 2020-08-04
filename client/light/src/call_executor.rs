@@ -91,6 +91,7 @@ impl<Block, B, Local> CallExecutor<Block> for
 		strategy: ExecutionStrategy,
 		extensions: Option<Extensions>,
 	) -> ClientResult<Vec<u8>> {
+		println!("A GENESIS CALE EXC ??");
 		match self.backend.is_local_state_available(id) {
 			true => self.local.call(id, method, call_data, strategy, extensions),
 			false => Err(ClientError::NotAvailableOnLightClient),
@@ -125,7 +126,9 @@ impl<Block, B, Local> CallExecutor<Block> for
 		// => we can safely ignore passed values
 
 		match self.backend.is_local_state_available(at) {
-			true => CallExecutor::contextual_call::<
+			true => {
+				println!("A LOCAL CALL EXC at {:?} ??", at);
+				CallExecutor::contextual_call::<
 				_,
 				fn(
 					Result<NativeOrEncoded<R>, Local::Error>,
@@ -147,7 +150,8 @@ impl<Block, B, Local> CallExecutor<Block> for
 				native_call,
 				recorder,
 				extensions,
-			).map_err(|e| ClientError::Execution(Box::new(e.to_string()))),
+			).map_err(|e| ClientError::Execution(Box::new(e.to_string())))
+			},
 			false => Err(ClientError::NotAvailableOnLightClient),
 		}
 	}
