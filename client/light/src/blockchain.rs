@@ -96,12 +96,12 @@ impl<S, Block> HeaderMetadata<Block> for Blockchain<S> where Block: BlockT, S: S
 	}
 
 	fn insert_header_metadata(&self, hash: Block::Hash, metadata: CachedHeaderMetadata<Block>) {
-		println!("Suspicious (rendundant instert header), {:?}", &hash);
+//		println!("Suspicious (rendundant instert header), {:?}", &hash);
 		self.storage.insert_header_metadata(hash, metadata)
 	}
 
 	fn remove_header_metadata(&self, hash: Block::Hash) {
-		println!("Suspicious (rendundant remove header), this is probably read only");
+//		println!("Suspicious (rendundant remove header), this is probably read only");
 		self.storage.remove_header_metadata(hash)
 	}
 }
