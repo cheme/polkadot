@@ -151,6 +151,14 @@ fn test_thing<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockc
 				println!("{:?}, {:?}", cf, db.property_int_value_cf(col, "rocksdb.cur-size-all-mem-tables"));
 				let path = db_path.to_str()
 					.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+			}
+		 }
+
+	}
+
+		 let mut i = 0;
+		 {
+		 while i < 6 {
 				let db_read = Arc::new(kvdb_rocksdb::Database::open(&db_config, path)
 					.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
 
@@ -158,10 +166,10 @@ fn test_thing<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockc
 				let iter_kv = db_r.iter(i);
 				println!("{:?}, nb_iter {:?}", cf, iter_kv.count());
 				i += 1;
-			}
+
+		 }
 		 }
 
-	}
 
 
 	Ok(())
