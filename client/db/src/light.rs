@@ -285,6 +285,7 @@ impl<Block: BlockT> LightStorage<Block> {
 		header: &Block::Header,
 		hash: Block::Hash,
 	) -> ClientResult<()> {
+		println!("note finalized {:?}", hash);
 		let meta = self.meta.read();
 		if &meta.finalized_hash != header.parent_hash() {
 			return Err(::sp_blockchain::Error::NonSequentialFinalization(
@@ -516,6 +517,7 @@ impl<Block> Storage<Block> for LightStorage<Block>
 			let number = header.number();
 
 			let mut transaction = Transaction::new();
+			println!("set head with tx {:?} {:?}", &hash, &number);
 			self.set_head_with_transaction(&mut transaction, hash.clone(), (number.clone(), hash.clone()))?;
 			self.db.commit(transaction)?;
 			self.update_meta(hash, header.number().clone(), true, false);
