@@ -174,6 +174,7 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 			}
 		} else {
 			for (key, maybe_val) in operation.aux_ops {
+				println!("light instert aux_ops {:?}", key);
 				match maybe_val {
 					Some(val) => self.blockchain.storage().insert_aux(
 						&[(&key[..], &val[..])],
