@@ -120,6 +120,7 @@ pub fn check_equivocation<C, H, P>(
 
 	headers_with_sig.push((header.clone(), signer.clone()));
 
+	println!("INSERT AUX {:?}, {:?}", &curr_slot_key[..], &slot_header_start[..]);
 	backend.insert_aux(
 		&[
 			(&curr_slot_key[..], headers_with_sig.encode().as_slice()),
