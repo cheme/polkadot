@@ -85,21 +85,23 @@ pub trait Database<H: Clone>: Send + Sync {
 	/// will reflect the new state.
 	fn commit(&self, transaction: Transaction<H>) -> error::Result<()> {
 		let mut nb_key: u32 = 0;
-		let mut size: i32 = 0;
+		let mut size: usize = 0;
+		let mut nb_rem: i32 = 0;
 		for change in transaction.0.into_iter() {
 			match change {
 				Change::Set(col, key, value) => {
 					nb_key += 1;
-					nb_size += value.len();
+					size += value.len();
 					self.set(col, &key, &value)
 				},
 				Change::Remove(col, key) => {
 					nb_key += 1;
-					nb_size -= value.len();
+					nb_rem += 1;
 					self.remove(col, &key)
 				},
-				Change::Store(hash, preimage) => self.store(&hash, &preimage) => {
+				Change::Store(hash, preimage) => {
 					println!("A store change???");
+					self.store(&hash, &preimage)
 				},
 				Change::Release(hash) => {
 					println!("A store change???");
@@ -107,7 +109,7 @@ pub trait Database<H: Clone>: Send + Sync {
 				},
 			}?;
 		}
-		println!("A db commit: {} key, balance to {}", nb_key, size);
+		println!("A db commit: {} key, balance to {}, {} rem", nb_key, size, nb_rem);
 
 		Ok(())
 	}
