@@ -84,14 +84,30 @@ pub trait Database<H: Clone>: Send + Sync {
 	/// Commit the `transaction` to the database atomically. Any further calls to `get` or `lookup`
 	/// will reflect the new state.
 	fn commit(&self, transaction: Transaction<H>) -> error::Result<()> {
+		let mut nb_key: u32 = 0;
+		let mut size: i32 = 0;
 		for change in transaction.0.into_iter() {
 			match change {
-				Change::Set(col, key, value) => self.set(col, &key, &value),
-				Change::Remove(col, key) => self.remove(col, &key),
-				Change::Store(hash, preimage) => self.store(&hash, &preimage),
-				Change::Release(hash) => self.release(&hash),
+				Change::Set(col, key, value) => {
+					nb_key += 1;
+					nb_size += value.len();
+					self.set(col, &key, &value)
+				},
+				Change::Remove(col, key) => {
+					nb_key += 1;
+					nb_size -= value.len();
+					self.remove(col, &key)
+				},
+				Change::Store(hash, preimage) => self.store(&hash, &preimage) => {
+					println!("A store change???");
+				},
+				Change::Release(hash) => {
+					println!("A store change???");
+					self.release(&hash)
+				},
 			}?;
 		}
+		println!("A db commit: {} key, balance to {}", nb_key, size);
 
 		Ok(())
 	}
