@@ -276,6 +276,13 @@ impl<Block: BlockT> LightStorage<Block> {
 			best_to.0,
 			best_to.1,
 		)?;
+		utils::insert_hash_to_key_mapping(
+			transaction,
+			columns::KEY_LOOKUP,
+			best_to.0,
+			best_to.1,
+		)?;
+
 
 		Ok(())
 	}

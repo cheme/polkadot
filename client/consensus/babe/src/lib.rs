@@ -944,6 +944,7 @@ where
 		let hash = header.hash();
 		let parent_hash = *header.parent_hash();
 
+		println!("query from friggni babe??? {:?}", parent_hash);
 		let parent_header_metadata = self.client.header_metadata(parent_hash)
 			.map_err(Error::<Block>::FetchParentHeader)?;
 
@@ -1110,7 +1111,7 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 	) -> Result<ImportResult, Self::Error> {
 		let hash = block.post_hash();
 		let number = *block.header.number();
-
+println!("in babe import: {:?} {:?}", hash, number)
 		// early exit if block already in chain, otherwise the check for
 		// epoch changes will error when trying to re-import an epoch change
 		match self.client.status(BlockId::Hash(hash)) {
@@ -1119,6 +1120,7 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 			Err(e) => return Err(ConsensusError::ClientImport(e.to_string())),
 		}
 
+println!("in babe unknwo status");
 		let pre_digest = find_pre_digest::<Block>(&block.header)
 			.expect("valid babe headers must contain a predigest; \
 					 header has been already verified; qed");
@@ -1131,6 +1133,7 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 				Error::<Block>::ParentUnavailable(parent_hash, hash)
 			).into()))?;
 
+println!("in babe found parent hash");
 		let parent_slot = find_pre_digest::<Block>(&parent_header)
 			.map(|d| d.slot_number())
 			.expect("parent is non-genesis; valid BABE headers contain a pre-digest; \
@@ -1389,6 +1392,7 @@ pub fn block_import<Client, Block: BlockT, I>(
 	Client: AuxStore + HeaderBackend<Block> + HeaderMetadata<Block, Error = sp_blockchain::Error>,
 {
 	let epoch_changes = aux_schema::load_epoch_changes::<Block, _>(&*client, &config)?;
+println!("in babe bolkc import, got epch changes");
 	let link = BabeLink {
 		epoch_changes: epoch_changes.clone(),
 		time_source: Default::default(),
