@@ -268,6 +268,7 @@ impl<Block: BlockT> LightStorage<Block> {
 			}
 		}
 
+		println!("from reorg {:?}", lookup_key);
 		transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key);
 		utils::insert_number_to_key_mapping(
 			transaction,
