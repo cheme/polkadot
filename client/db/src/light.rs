@@ -201,7 +201,10 @@ impl<Block: BlockT> HeaderMetadata<Block> for LightStorage<Block> {
 					header_metadata.clone(),
 				);
 				header_metadata
-			}).ok_or_else(|| ClientError::UnknownBlock(format!("header not found in db: {}", hash)))
+			}).ok_or_else(|| {
+				panic!("som stack {:?}", hash);
+				ClientError::UnknownBlock(format!("header not found in db: {}", hash))
+			})
 		}, Ok)
 	}
 
@@ -276,13 +279,6 @@ impl<Block: BlockT> LightStorage<Block> {
 			best_to.0,
 			best_to.1,
 		)?;
-		utils::insert_hash_to_key_mapping(
-			transaction,
-			columns::KEY_LOOKUP,
-			best_to.0,
-			best_to.1,
-		)?;
-
 
 		Ok(())
 	}
