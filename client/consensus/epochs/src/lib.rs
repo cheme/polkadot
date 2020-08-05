@@ -619,7 +619,7 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 /*		if !number.is_zero() {
 			panic!("disp the error stack trace");
 		}*/
-		println!("Import Epoch of {:?} parent {:?}", hash, parent_hash);
+		println!("Import Epoch of {:?} parent {:?}", hash.as_ref(), parent_hash.as_ref());
 		let is_descendent_of = descendent_of_builder
 			.build_is_descendent_of(Some((hash, parent_hash)));
 		let header = PersistedEpochHeader::<E>::from(&epoch.0);
