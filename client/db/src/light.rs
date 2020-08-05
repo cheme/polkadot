@@ -193,6 +193,7 @@ impl<Block: BlockT> HeaderMetadata<Block> for LightStorage<Block> {
 
 	fn header_metadata(&self, hash: Block::Hash) -> Result<CachedHeaderMetadata<Block>, Self::Error> {
 		self.header_metadata_cache.header_metadata(hash).map_or_else(|| {
+			println!("query header at {:?}", hash);
 			self.header(BlockId::hash(hash))?.map(|header| {
 				let header_metadata = CachedHeaderMetadata::from(&header);
 				self.header_metadata_cache.insert_header_metadata(
@@ -443,6 +444,7 @@ impl<Block> Storage<Block> for LightStorage<Block>
 		let lookup_key = utils::number_and_hash_to_lookup_key(number, &hash)?;
 
 		if leaf_state.is_best() {
+			println!("set head {:?} parent {:?}", hash, parent_hash);
 			self.set_head_with_transaction(&mut transaction, parent_hash, (number, hash))?;
 		}
 
@@ -452,6 +454,7 @@ impl<Block> Storage<Block> for LightStorage<Block>
 			number,
 			hash,
 		)?;
+			println!("set head {:?} in tx", header.hash());
 		transaction.set_from_vec(columns::HEADER, &lookup_key, header.encode());
 
 		let header_metadata = CachedHeaderMetadata::from(&header);

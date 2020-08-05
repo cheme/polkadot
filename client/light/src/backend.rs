@@ -161,6 +161,7 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 			if let Some(new_config) = operation.changes_trie_config_update {
 				operation.cache.insert(well_known_cache_keys::CHANGES_TRIE_CONFIG, new_config.encode());
 			}
+			println!("backend import_header for {:?}", header.hash);
 			self.blockchain.storage().import_header(
 				header,
 				operation.cache,
@@ -186,6 +187,7 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 		}
 
 		if let Some(set_head) = operation.set_head {
+			println!("backend set_head for {:?}", set_head);
 			self.blockchain.storage().set_head(set_head)?;
 		}
 
