@@ -299,7 +299,7 @@ impl<E: Epoch> AsRef<E> for IncrementedEpoch<E> {
 #[derive(Clone, Encode, Decode, Debug)]
 pub struct EpochChanges<Hash, Number, E: Epoch> {
 	inner: ForkTree<Hash, Number, PersistedEpochHeader<E>>,
-	epochs: BTreeMap<(Hash, Number), PersistedEpoch<E>>,
+	pub epochs: BTreeMap<(Hash, Number), PersistedEpoch<E>>,
 }
 
 // create a fake header hash which hasn't been included in the chain.
