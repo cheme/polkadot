@@ -343,7 +343,7 @@ impl<S, Block> BlockImportOperation<Block> for ImportOperation<Block, S>
 		where I: IntoIterator<Item=(Vec<u8>, Option<Vec<u8>>)>
 	{
 		let mut ops: Vec<(Vec<u8>, Option<Vec<u8>>)> = ops.into_iter().collect();
-				println!("light instert in aux_ops {:?}", ops);
+	//			println!("light instert in aux_ops {:?}", ops);
 		self.aux_ops.append(&mut ops);
 		Ok(())
 	}
