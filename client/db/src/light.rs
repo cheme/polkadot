@@ -354,6 +354,7 @@ impl<Block: BlockT> LightStorage<Block> {
 						prune_block,
 						hash
 					)?;
+			println!("HEADER remove for {:?}", hash);
 					transaction.remove(columns::HEADER, &lookup_key);
 				}
 				prune_block += One::one();
@@ -452,6 +453,7 @@ impl<Block> Storage<Block> for LightStorage<Block>
 			number,
 			hash,
 		)?;
+			println!("HEADER insert for {:?}", hash);
 		transaction.set_from_vec(columns::HEADER, &lookup_key, header.encode());
 
 		let header_metadata = CachedHeaderMetadata::from(&header);
