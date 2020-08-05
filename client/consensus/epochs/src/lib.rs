@@ -296,7 +296,7 @@ impl<E: Epoch> AsRef<E> for IncrementedEpoch<E> {
 /// same DAG entry, pinned to a specific block #1.
 ///
 /// Further epochs (epoch_2, ..., epoch_n) each get their own entry.
-#[derive(Clone, Encode, Decode)]
+#[derive(Clone, Encode, Decode, Debug)]
 pub struct EpochChanges<Hash, Number, E: Epoch> {
 	inner: ForkTree<Hash, Number, PersistedEpochHeader<E>>,
 	epochs: BTreeMap<(Hash, Number), PersistedEpoch<E>>,

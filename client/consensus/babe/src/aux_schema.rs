@@ -101,7 +101,7 @@ pub(crate) fn write_epoch_changes<Block: BlockT, F, R>(
 	F: FnOnce(&[(&'static [u8], &[u8])]) -> R,
 {
 	BABE_EPOCH_CHANGES_CURRENT_VERSION.using_encoded(|version| {
-		println!("babe write epoch changes {:?}");
+		println!("babe write epoch changes {:?}", epoch_changes);
 		let encoded_epoch_changes = epoch_changes.encode();
 		write_aux(
 			&[(BABE_EPOCH_CHANGES_KEY, encoded_epoch_changes.as_slice()),
