@@ -249,7 +249,7 @@ impl<'a, E: Epoch> From<&'a PersistedEpoch<E>> for PersistedEpochHeader<E> {
 }
 
 /// Persisted epoch header stored in ForkTree.
-#[derive(Encode, Decode, PartialEq, Eq, Debug)]
+#[derive(Encode, Decode, PartialEq, Eq)]
 pub enum PersistedEpochHeader<E: Epoch> {
 	/// Genesis persisted epoch header. epoch_0, epoch_1.
 	Genesis(EpochHeader<E>, EpochHeader<E>),
@@ -296,7 +296,7 @@ impl<E: Epoch> AsRef<E> for IncrementedEpoch<E> {
 /// same DAG entry, pinned to a specific block #1.
 ///
 /// Further epochs (epoch_2, ..., epoch_n) each get their own entry.
-#[derive(Clone, Encode, Decode, Debug)]
+#[derive(Clone, Encode, Decode)]
 pub struct EpochChanges<Hash, Number, E: Epoch> {
 	inner: ForkTree<Hash, Number, PersistedEpochHeader<E>>,
 	pub epochs: BTreeMap<(Hash, Number), PersistedEpoch<E>>,
