@@ -616,6 +616,10 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 		parent_hash: Hash,
 		epoch: IncrementedEpoch<E>,
 	) -> Result<(), fork_tree::Error<D::Error>> {
+/*		if !number.is_zero() {
+			panic!("disp the error stack trace");
+		}*/
+		println!("Import Epoch of {:?} parent {:?}", hash, parent_hash);
 		let is_descendent_of = descendent_of_builder
 			.build_is_descendent_of(Some((hash, parent_hash)));
 		let header = PersistedEpochHeader::<E>::from(&epoch.0);

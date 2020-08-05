@@ -1357,6 +1357,7 @@ fn prune_finalized<Block, Client>(
 {
 	let info = client.info();
 
+	println!("prune babe {:?} ", info.finalized_hash);
 	let finalized_slot = {
 		let finalized_header = client.header(BlockId::Hash(info.finalized_hash))
 			.map_err(|e| ConsensusError::ClientImport(format!("{:?}", e)))?
@@ -1368,7 +1369,7 @@ fn prune_finalized<Block, Client>(
 					 valid blocks have a pre-digest; qed")
 			.slot_number()
 	};
-
+	println!("finalized_slot {:?} ", finalized_slot);
 	epoch_changes.prune_finalized(
 		descendent_query(&*client),
 		&info.finalized_hash,

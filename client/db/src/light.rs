@@ -201,10 +201,7 @@ impl<Block: BlockT> HeaderMetadata<Block> for LightStorage<Block> {
 					header_metadata.clone(),
 				);
 				header_metadata
-			}).ok_or_else(|| {
-				panic!("som stack {:?}", hash);
-				ClientError::UnknownBlock(format!("header not found in db: {}", hash))
-			})
+			}).ok_or_else(|| ClientError::UnknownBlock(format!("header not found in db: {}", hash)))
 		}, Ok)
 	}
 
@@ -271,7 +268,7 @@ impl<Block: BlockT> LightStorage<Block> {
 			}
 		}
 
-		println!("from reorg {:?}", lookup_key);
+//		println!("from reorg {:?}", lookup_key);
 		transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key);
 		utils::insert_number_to_key_mapping(
 			transaction,
