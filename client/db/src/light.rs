@@ -268,7 +268,6 @@ impl<Block: BlockT> LightStorage<Block> {
 			}
 		}
 
-//		println!("from reorg {:?}", lookup_key);
 		transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key);
 		utils::insert_number_to_key_mapping(
 			transaction,
@@ -287,7 +286,6 @@ impl<Block: BlockT> LightStorage<Block> {
 		header: &Block::Header,
 		hash: Block::Hash,
 	) -> ClientResult<()> {
-		//println!("note finalized {:?}", hash);
 		let meta = self.meta.read();
 		if &meta.finalized_hash != header.parent_hash() {
 			return Err(::sp_blockchain::Error::NonSequentialFinalization(
@@ -350,6 +348,7 @@ impl<Block: BlockT> LightStorage<Block> {
 				if let Some(hash) = self.hash(prune_block)? {
 					let lookup_key = block_id_to_lookup_key::<Block>(&*self.db, columns::KEY_LOOKUP, BlockId::Number(prune_block))?
 						.expect("retrieved hash for `prune_block` right above. therefore retrieving lookup key must succeed. q.e.d.");
+			println!("CHT remove {:?}", hash);
 					utils::remove_key_mappings(
 						transaction,
 						columns::KEY_LOOKUP,

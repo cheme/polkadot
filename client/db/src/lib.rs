@@ -924,7 +924,6 @@ impl<Block: BlockT> Backend<Block> {
 		}
 
 		let lookup_key = utils::number_and_hash_to_lookup_key(best_to.0, &best_to.1)?;
-		panic!("Not ligh!!");
 		transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key);
 		utils::insert_number_to_key_mapping(
 			transaction,
@@ -1562,7 +1561,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 							);
 							reverted_finalized.insert(removed_hash);
 						}
-						println!("from revert??? {:?}", key);
 						transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, key);
 						transaction.remove(columns::KEY_LOOKUP, removed.hash().as_ref());
 						children::remove_children(&mut transaction, columns::META, meta_keys::CHILDREN_PREFIX, best_hash);

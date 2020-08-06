@@ -175,7 +175,6 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 			}
 		} else {
 			for (key, maybe_val) in operation.aux_ops {
-				println!("light instert aux_ops {:?}", key);
 				match maybe_val {
 					Some(val) => self.blockchain.storage().insert_aux(
 						&[(&key[..], &val[..])],
@@ -187,7 +186,6 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 		}
 
 		if let Some(set_head) = operation.set_head {
-			println!("backend set_head for {:?}", set_head);
 			self.blockchain.storage().set_head(set_head)?;
 		}
 
@@ -311,7 +309,6 @@ impl<S, Block> BlockImportOperation<Block> for ImportOperation<Block, S>
 
 	fn reset_storage(&mut self, input: Storage) -> ClientResult<Block::Hash> {
 		check_genesis_storage(&input)?;
-		println!("RESET_STORAGE (in mem state): only genesis");
 
 		// changes trie configuration
 		let changes_trie_config = input.top.iter()
