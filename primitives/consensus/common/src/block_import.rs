@@ -281,6 +281,21 @@ pub trait BlockImport<B: BlockT> {
 		block: BlockImportParams<B, Self::Transaction>,
 		cache: HashMap<CacheKeyId, Vec<u8>>,
 	) -> Result<ImportResult, Self::Error>;
+
+	/*
+	/// Prune inner data for a given new finalized block.
+	///
+	/// Return the block height that we manage to prune
+	/// (this way the client ensure we don't prune inner
+	/// structure that will be still needed for the next
+	/// block imports).
+	fn prune_inner_data(
+		&mut self,
+		finalized_hash: &HashFor<B>,
+		finalized_number: NumberFor<B>,
+		block: BlockImportParams<B, Self::Transaction>,
+	) -> Result<Option<(HashFor<B>, NumberFor<B>)>, Self::Error>;
+	*/
 }
 
 impl<B: BlockT, Transaction> BlockImport<B> for crate::import_queue::BoxBlockImport<B, Transaction> {
