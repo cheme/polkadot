@@ -80,6 +80,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 		sc_consensus_babe::Config::get_or_compute(&*client)?,
 		grandpa_block_import,
 		client.clone(),
+		None,
 	)?;
 
 	let inherent_data_providers = sp_inherents::InherentDataProviders::new();
@@ -364,6 +365,7 @@ pub fn new_light_base(config: Configuration) -> Result<(
 		sc_consensus_babe::Config::get_or_compute(&*client)?,
 		grandpa_block_import,
 		client.clone(),
+		Some(2048u32.into()), // prune every 2048 as it is done for CHT.
 	)?;
 
 	let inherent_data_providers = sp_inherents::InherentDataProviders::new();

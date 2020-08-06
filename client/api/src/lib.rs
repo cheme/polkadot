@@ -81,6 +81,7 @@ pub mod utils {
 				}
 			}
 
+			/* bad idea
 			let ancestor = match sp_blockchain::lowest_common_ancestor(client, *hash, *base) {
 				Ok(a) => a,
 				// In case the headers got pruned consider non descendent
@@ -90,6 +91,8 @@ pub mod utils {
 					return Err(e);
 				}
 			};
+			*/
+			let ancestor = sp_blockchain::lowest_common_ancestor(client, *hash, *base)?;
 
 			Ok(ancestor.hash == *base)
 		}
