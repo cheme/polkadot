@@ -114,6 +114,7 @@ impl<H, N, V> ForkTree<H, N, V> where
 			predicate,
 		)?;
 
+		println!("past find node");
 		let removed = if let Some(mut root_index) = new_root_index {
 			let mut old_roots = std::mem::take(&mut self.roots);
 
@@ -782,14 +783,14 @@ mod node_implementation {
 				}
 			}
 
-			// Check predicate first.
-			if predicate(&self.data) {
-				// node not found in any of the descendents, if the node we're
-				// searching for is a descendent of this node then we will stop the
-				// search here, since there aren't any more children and we found
-				// the correct node so we don't want to backtrack.
-				let is_descendent_of = known_descendent_of || is_descendent_of(&self.hash, hash)?;
-				if is_descendent_of {
+			// node not found in any of the descendents, if the node we're
+			// searching for is a descendent of this node then we will stop the
+			// search here, since there aren't any more children and we found
+			// the correct node so we don't want to backtrack.
+			let is_descendent_of = known_descendent_of || is_descendent_of(&self.hash, hash)?;
+			if is_descendent_of {
+				// if the predicate passes we return the node
+				if predicate(&self.data) {
 					return Ok(FindOutcome::Found(Vec::new()));
 				}
 			}
