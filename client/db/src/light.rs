@@ -287,7 +287,6 @@ impl<Block: BlockT> LightStorage<Block> {
 		hash: Block::Hash,
 	) -> ClientResult<()> {
 		let meta = self.meta.read();
-			println!("CHTFINALIZED {:?}", meta.finalized_hash);
 		if &meta.finalized_hash != header.parent_hash() {
 			return Err(::sp_blockchain::Error::NonSequentialFinalization(
 				format!("Last finalized {:?} not parent of {:?}",

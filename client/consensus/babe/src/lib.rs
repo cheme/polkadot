@@ -1115,7 +1115,9 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 		let hash = block.post_hash();
 		let number = *block.header.number();
 		if block.finalized {
-			println!("BABEFINALIZED {:?}", hash);
+			// check if it make sense to create a new function to act as a call back (if this is never
+			// reach).
+			panic!("BABEFINALIZED {:?}", hash);
 		}
 		// early exit if block already in chain, otherwise the check for
 		// epoch changes will error when trying to re-import an epoch change
