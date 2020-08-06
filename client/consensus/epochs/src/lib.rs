@@ -397,6 +397,17 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 		let is_descendent_of = descendent_of_builder
 			.build_is_descendent_of(None);
 
+		// we default is_descendant to false when header is not found
+		// the rational is that in some condition (headers pruned in
+		// light client for instance) this can happen and is related
+		// to being post finalization block so is_descendent is false
+		// in this case.
+		let is_descendent_of = move |base, hash| match is_descendent_of(base, hash) {
+			Ok(r) => Ok(r),
+			Err(ClientError::UnknownBlock(_)) => Ok(false),
+			Err(e) => Err(e),
+		};
+
 		let predicate = |epoch: &PersistedEpochHeader<E>| match *epoch {
 			PersistedEpochHeader::Genesis(_, ref epoch_1) =>
 				slot >= epoch_1.end_slot,
