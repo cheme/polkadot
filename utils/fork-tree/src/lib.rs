@@ -782,14 +782,14 @@ mod node_implementation {
 				}
 			}
 
-			// node not found in any of the descendents, if the node we're
-			// searching for is a descendent of this node then we will stop the
-			// search here, since there aren't any more children and we found
-			// the correct node so we don't want to backtrack.
-			let is_descendent_of = known_descendent_of || is_descendent_of(&self.hash, hash)?;
-			if is_descendent_of {
-				// if the predicate passes we return the node
-				if predicate(&self.data) {
+			// Check predicate first.
+			if predicate(&self.data) {
+				// node not found in any of the descendents, if the node we're
+				// searching for is a descendent of this node then we will stop the
+				// search here, since there aren't any more children and we found
+				// the correct node so we don't want to backtrack.
+				let is_descendent_of = known_descendent_of || is_descendent_of(&self.hash, hash)?;
+				if is_descendent_of {
 					return Ok(FindOutcome::Found(Vec::new()));
 				}
 			}

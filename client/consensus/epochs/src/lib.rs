@@ -416,6 +416,7 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 
 		for (hash, number, _) in removed {
 			self.epochs.remove(&(hash, number));
+			// TODO EMCH also remove aux block weight!!!??
 		}
 
 		Ok(())
