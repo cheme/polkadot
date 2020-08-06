@@ -83,6 +83,8 @@ pub mod utils {
 
 			let ancestor = match sp_blockchain::lowest_common_ancestor(client, *hash, *base) {
 				Ok(a) => a,
+				// In case the headers got pruned consider non descendent
+				Err(Error::UnknownBlock(_)) => return Ok(false),
 				Err(e) => {
 					println!("common ancestor failed between {:?} and {:?}", hash, base);
 					return Err(e);

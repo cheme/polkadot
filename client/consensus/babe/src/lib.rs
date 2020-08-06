@@ -1367,6 +1367,7 @@ fn prune_finalized<Block, Client>(
 			.slot_number()
 	};
 	println!("finalized_slot {:?} ", finalized_slot);
+	println!("before {:?} ", epoch_changes.epochs);
 	epoch_changes.prune_finalized(
 		descendent_query(&*client),
 		&info.finalized_hash,
@@ -1374,6 +1375,7 @@ fn prune_finalized<Block, Client>(
 		finalized_slot,
 	).map_err(|e| ConsensusError::ClientImport(format!("{:?}", e)))?;
 
+	println!("after {:?} ", epoch_changes.epochs);
 	Ok(())
 }
 
