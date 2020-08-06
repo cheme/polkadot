@@ -1293,7 +1293,7 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 			old_epoch_changes = Some(epoch_changes.clone());
 			// check if periodic pruning (note that on reorg we prune multiple times
 			// TODO TEST WITH PRUNING EACH BLOCK TO BE SURE IT IS FINE
-			if self.periodic_pruning.map(|p| number % p == Zero::zero()).unwrap_or(false) {
+			if self.periodic_pruning.map(|p| info.finalized_number % p == Zero::zero()).unwrap_or(false) {
 				println!("periodic pruning");
 				if let Err(e) =  prune_finalized(
 					self.client.clone(),
