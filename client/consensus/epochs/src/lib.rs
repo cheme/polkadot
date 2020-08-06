@@ -298,7 +298,7 @@ impl<E: Epoch> AsRef<E> for IncrementedEpoch<E> {
 /// Further epochs (epoch_2, ..., epoch_n) each get their own entry.
 #[derive(Clone, Encode, Decode)]
 pub struct EpochChanges<Hash, Number, E: Epoch> {
-	inner: ForkTree<Hash, Number, PersistedEpochHeader<E>>,
+	pub inner: ForkTree<Hash, Number, PersistedEpochHeader<E>>,
 	pub epochs: BTreeMap<(Hash, Number), PersistedEpoch<E>>,
 }
 

@@ -81,7 +81,13 @@ pub mod utils {
 				}
 			}
 
-			let ancestor = sp_blockchain::lowest_common_ancestor(client, *hash, *base)?;
+			let ancestor = match sp_blockchain::lowest_common_ancestor(client, *hash, *base) {
+				Ok(a) => a,
+				Err(e) => {
+					println!("common ancestor failed between {:?} and {:?}", hash, base);
+					return Err(e);
+				}
+			};
 
 			Ok(ancestor.hash == *base)
 		}

@@ -79,8 +79,8 @@ pub enum FinalizationResult<V> {
 /// when interacting with the tree to establish a node's ancestry.
 #[derive(Clone, Debug, Decode, Encode, PartialEq)]
 pub struct ForkTree<H, N, V> {
-	roots: Vec<Node<H, N, V>>,
-	best_finalized_number: Option<N>,
+	pub roots: Vec<Node<H, N, V>>,
+	pub best_finalized_number: Option<N>,
 }
 
 impl<H, N, V> ForkTree<H, N, V> where

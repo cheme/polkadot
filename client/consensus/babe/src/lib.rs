@@ -1353,6 +1353,7 @@ fn prune_finalized<Block, Client>(
 {
 	let info = client.info();
 
+	println!("epoch change final: {:?}", epoch_changes.inner.best_finalized_number);
 	println!("prune babe {:?} ", info.finalized_hash);
 	let finalized_slot = {
 		let finalized_header = client.header(BlockId::Hash(info.finalized_hash))
