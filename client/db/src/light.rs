@@ -348,7 +348,6 @@ impl<Block: BlockT> LightStorage<Block> {
 				if let Some(hash) = self.hash(prune_block)? {
 					let lookup_key = block_id_to_lookup_key::<Block>(&*self.db, columns::KEY_LOOKUP, BlockId::Number(prune_block))?
 						.expect("retrieved hash for `prune_block` right above. therefore retrieving lookup key must succeed. q.e.d.");
-			println!("CHT remove {:?}", hash);
 					utils::remove_key_mappings(
 						transaction,
 						columns::KEY_LOOKUP,
