@@ -76,7 +76,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 	)?;
 	let justification_import = grandpa_block_import.clone();
 
-	let (block_import, babe_link) = sc_consensus_babe::block_import(
+	let (block_import, babe_link, _pruning_callbacks) = sc_consensus_babe::block_import(
 		sc_consensus_babe::Config::get_or_compute(&*client)?,
 		grandpa_block_import,
 		client.clone(),
@@ -361,6 +361,10 @@ pub fn new_light_base(config: Configuration) -> Result<(
 	let finality_proof_request_builder =
 		finality_proof_import.create_finality_proof_request_builder();
 
+	// TODO change direction: have light storage return a msg sender for header pruning constraint (a struct
+	// where one can set/update a pruning constraint (aka only finalize headers up to this block
+	// number).
+	// Then put the constraint in block_import_constructor.
 	let (babe_block_import, babe_link) = sc_consensus_babe::block_import(
 		sc_consensus_babe::Config::get_or_compute(&*client)?,
 		grandpa_block_import,

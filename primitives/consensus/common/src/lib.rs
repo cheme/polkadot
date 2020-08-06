@@ -53,6 +53,7 @@ pub use self::error::Error;
 pub use block_import::{
 	BlockImport, BlockOrigin, ForkChoiceStrategy, ImportedAux, BlockImportParams, BlockCheckParams,
 	ImportResult, JustificationImport, FinalityProofImport,
+	BlockImportPruning,
 };
 pub use select_chain::SelectChain;
 pub use sp_state_machine::Backend as StateBackend;

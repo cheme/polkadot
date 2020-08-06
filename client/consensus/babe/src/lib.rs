@@ -76,7 +76,7 @@ pub use sp_consensus_babe::{
 pub use sp_consensus::SyncOracle;
 use std::{
 	collections::HashMap, sync::Arc, u64, pin::Pin, time::{Instant, Duration},
-	any::Any, borrow::Cow, convert::TryInto,
+	any::Any, borrow::Cow, convert::TryInto, marker::PhantomData,
 };
 use sp_consensus::{ImportResult, CanAuthorWith};
 use sp_consensus::import_queue::{
@@ -88,7 +88,7 @@ use sp_runtime::{
 	generic::{BlockId, OpaqueDigestItemId}, Justification,
 	traits::{Block as BlockT, Header, DigestItemFor, Zero},
 };
-use sp_api::{ProvideRuntimeApi, NumberFor};
+use sp_api::{ProvideRuntimeApi, NumberFor, HashFor};
 use sc_keystore::KeyStorePtr;
 use parking_lot::Mutex;
 use sp_inherents::{InherentDataProviders, InherentData};
@@ -97,6 +97,7 @@ use sp_consensus::{
 	self, BlockImport, Environment, Proposer, BlockCheckParams,
 	ForkChoiceStrategy, BlockImportParams, BlockOrigin, Error as ConsensusError,
 	SelectChain, SlotData,
+	BlockImportPruning,
 };
 use sp_consensus_babe::inherents::BabeInherentData;
 use sp_timestamp::{TimestampInherentData, InherentType as TimestampInherent};
@@ -1373,6 +1374,48 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 	}
 }
 
+impl<Block, Client, Inner> BabeBlockImport<Block, Client, Inner> where
+	Block: BlockT,
+	Client: AuxStore + HeaderBackend<Block> + HeaderMetadata<Block, Error = sp_blockchain::Error>,
+{
+	/// Provide callbacks for pruning babe artefacts.
+	pub fn pruning_callbacks(&mut self) -> BabeBlockImportPruning<Client, Block> {
+		BabeBlockImportPruning(PhantomData)
+	}
+}
+
+/// Callbacks to cleanup babe artefacts on pruning.
+pub struct BabeBlockImportPruning<Client, Block>(PhantomData<(Client, Block)>);
+
+impl<Client, Block> BlockImportPruning<Block, sp_api::TransactionFor<Client, Block>>
+	for BabeBlockImportPruning<Client, Block> where
+	Block: BlockT,
+	Client: HeaderBackend<Block> + HeaderMetadata<Block, Error = sp_blockchain::Error>
+		+ AuxStore + ProvideRuntimeApi<Block> + ProvideCache<Block> + Send + Sync + 'static,
+	Client::Api: BabeApi<Block> + ApiExt<Block>,
+{
+	fn prune_inner_data(
+		&mut self,
+		finalized_hash: &HashFor<Block>,
+		finalized_number: NumberFor<Block>,
+		transaction: &mut sp_api::TransactionFor<Client, Block>,
+	) -> Result<Option<(HashFor<Block>, NumberFor<Block>)>, ()> {
+		println!("ENTeRING prune inner data");
+		Ok(None)
+	}
+
+	/// Clean aux data used internally when the block 
+	fn remove_aux_on_block_pruned(
+		&mut self,
+		finalized_hash: &HashFor<Block>,
+		finalized_number: NumberFor<Block>,
+		transaction: &mut sp_api::TransactionFor<Client, Block>,
+	) -> Result<(), ()> {
+		println!("ENTeRING prune aux");
+		Ok(())
+	}
+}
+
 /// Gets the best finalized block and its slot, and prunes the given epoch tree.
 fn prune_finalized<Block, Client>(
 	client: Arc<Client>,
@@ -1419,7 +1462,7 @@ pub fn block_import<Client, Block: BlockT, I>(
 	wrapped_block_import: I,
 	client: Arc<Client>,
 	periodic_pruning: Option<NumberFor<Block>>,
-) -> ClientResult<(BabeBlockImport<Block, Client, I>, BabeLink<Block>)> where
+) -> ClientResult<(BabeBlockImport<Block, Client, I>, BabeLink<Block>, BabeBlockImportPruning<Client, Block>)> where
 	Client: AuxStore + HeaderBackend<Block> + HeaderMetadata<Block, Error = sp_blockchain::Error>,
 {
 	let epoch_changes = aux_schema::load_epoch_changes::<Block, _>(&*client, &config)?;
@@ -1437,7 +1480,7 @@ pub fn block_import<Client, Block: BlockT, I>(
 		&mut epoch_changes.lock(),
 	)?;
 
-	let import = BabeBlockImport::new(
+	let mut import = BabeBlockImport::new(
 		client,
 		epoch_changes,
 		wrapped_block_import,
@@ -1445,7 +1488,8 @@ pub fn block_import<Client, Block: BlockT, I>(
 		periodic_pruning,
 	);
 
-	Ok((import, link))
+	let pruning = import.pruning_callbacks();
+	Ok((import, link, pruning))
 }
 
 /// Start an import queue for the BABE consensus algorithm.

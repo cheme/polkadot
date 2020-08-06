@@ -43,6 +43,7 @@ use crate::cache::{DbCacheSync, DbCache, ComplexBlockId, EntryType as CacheEntry
 use crate::utils::{self, meta_keys, DatabaseType, Meta, read_db, block_id_to_lookup_key, read_meta};
 use crate::{DatabaseSettings, FrozenForDuration, DbHash};
 use log::{trace, warn, debug};
+use sp_consensus::BlockImportPruning;
 
 pub(crate) mod columns {
 	pub const META: u32 = crate::utils::COLUMN_META;
@@ -65,12 +66,17 @@ pub struct LightStorage<Block: BlockT> {
 	meta: RwLock<Meta<NumberFor<Block>, Block::Hash>>,
 	cache: Arc<DbCacheSync<Block>>,
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
-
+	pruning_callbacks: Vec<Arc<dyn BlockImportPruning<Block, Transaction<DbHash>>>>,
 	#[cfg(not(target_os = "unknown"))]
 	io_stats: FrozenForDuration<kvdb::IoStats>,
 }
 
 impl<Block: BlockT> LightStorage<Block> {
+	/// Append some callbacks for pruning.
+	pub fn append_pruning_callback(&mut self, callback: Arc<dyn BlockImportPruning<Block, Transaction<DbHash>>>) {
+		self.pruning_callbacks.push(callback);
+	}
+
 	/// Create new storage with given settings.
 	pub fn new(config: DatabaseSettings) -> ClientResult<Self> {
 		let db = crate::utils::open_database::<Block>(&config, DatabaseType::Light)?;
@@ -102,6 +108,7 @@ impl<Block: BlockT> LightStorage<Block> {
 			meta: RwLock::new(meta),
 			cache: Arc::new(DbCacheSync(RwLock::new(cache))),
 			header_metadata_cache,
+			pruning_callbacks: Vec::new(),
 			#[cfg(not(target_os = "unknown"))]
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
 		})
