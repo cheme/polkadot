@@ -355,10 +355,10 @@ impl<Block: BlockT> LightStorage<Block> {
 			}
 
 			let new_cht_end = cht::end_number(cht::size(), new_cht_number);
-			self.try_prune_pending(transaction)?;
+			self.try_prune_pending(transaction, false)?;
 			self.prune_range(new_cht_start, new_cht_end, transaction)?;
 		} else {
-			self.try_prune_pending(transaction)?;
+			self.try_prune_pending(transaction, true)?;
 		}
 
 		Ok(())
@@ -444,9 +444,9 @@ impl<Block: BlockT> LightStorage<Block> {
 	}
 
 	#[cfg(test)]
-	fn try_prune_pending_test(&self) -> ClientResult<()> {
+	fn try_prune_pending_test(&self, do_check: bool) -> ClientResult<()> {
 		let mut transaction = Transaction::new();
-		self.try_prune_pending(&mut transaction)?;
+		self.try_prune_pending(&mut transaction, do_check)?;
 		self.db.commit(transaction)?;
 		Ok(())
 	}
@@ -455,11 +455,21 @@ impl<Block: BlockT> LightStorage<Block> {
 	fn try_prune_pending(
 		&self,
 		transaction: &mut Transaction<DbHash>,
+		do_check: bool,
 	) -> ClientResult<()> {
 		let mut changed = false;
 		let mut to_prune = VecDeque::new();
+		println!("try pending {:?}", !self.pending_cht_pruning.read().is_empty());
+		// TODO this for debugging, switch to boolean condition
+		let pass = if do_check {
+			let pass = self.shared_pruning_requirements.modification_check();
+			println!("modification check {:?}", pass);
+			pass
+		} else {
+			true
+		};
 		if !self.pending_cht_pruning.read().is_empty()
-			&& self.shared_pruning_requirements.modification_check() {
+			&& pass {
 			match self.shared_pruning_requirements.finalized_headers_needed() {
 				PruningLimit::Locked => {
 					println!("try prune locked");
@@ -965,14 +975,14 @@ pub(crate) mod tests {
 		assert!((0..cht_size as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_some()));
 
 		assert!(pruning_limit.set_finalized_headers_needed(PruningLimit::Some(1000)));
-		db.try_prune_pending_test().unwrap();
+		db.try_prune_pending_test(true).unwrap();
 		assert_eq!(raw_db.count(columns::HEADER), (2 + 2 * cht_size) as usize - 999);
 		assert_eq!(raw_db.count(columns::KEY_LOOKUP), (2 * (2 + 2 * cht_size - 999)) as usize);
 		assert!((1..999 as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_none()));
 		assert!((999..cht_size as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_some()));
 
 		assert!(pruning_limit.set_finalized_headers_needed(PruningLimit::None));
-		db.try_prune_pending_test().unwrap();
+		db.try_prune_pending_test(true).unwrap();
 		assert_eq!(raw_db.count(columns::HEADER), (1 + cht_size + 1) as usize);
 		assert_eq!(raw_db.count(columns::KEY_LOOKUP), (2 * (1 + cht_size + 1)) as usize);
 		assert!((0..cht_size as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_none()));
