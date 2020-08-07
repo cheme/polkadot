@@ -536,3 +536,104 @@ pub fn changes_tries_state_at_block<'a, Block: BlockT>(
 		None => Ok(None),
 	}
 }
+
+#[derive(Clone)]
+/// Pruning requirement to share between multiple client component.
+///
+/// This allows pruning related synchronisation. For instance in light
+/// client we need to synchronize header pruning from CHT (every N blocks)
+/// with the pruning from consensus used (babe for instance require that
+/// its epoch headers are not pruned which works as long as the slot length
+/// is less than the CHT pruning window.
+/// Each compenent register at a given index (call are done by this order).
+///
+/// Note that this struct could be split in two different struct (provider without
+/// component and Component), depending on future usage of this shared info.
+pub struct SharedPruningRequirements<Block: BlockT> {
+	shared: Arc<RwLock<Vec<ComponentPruningRequirements<Block>>>>,
+	component: Option<usize>,
+}
+
+impl<Block: BlockT> Default for SharedPruningRequirements<Block> {
+	fn default() -> Self {
+		SharedPruningRequirements {
+			shared: Arc::new(RwLock::new(Vec::new())),
+			component: None,
+		}
+	}
+}
+
+impl<Block: BlockT> SharedPruningRequirements<Block> {
+	/// Add a following requirement to apply.
+	/// Returns the shared requirement to use from this component.
+	pub fn next_instance(
+		&self,
+	) -> SharedPruningRequirements<Block> {
+		let req = ComponentPruningRequirements::default();
+		let index = {
+			let mut shared = self.shared.write();
+			let index = shared.len();
+			shared.push(req);
+			index
+		};
+		let mut result = self.clone();
+		result.component = Some(index);
+		result
+	}
+
+	/// Resolve a finalized block headers to keep.
+	pub fn finalized_headers_needed(&self) -> PruningLimit<NumberFor<Block>> {
+		let mut result = PruningLimit::None;
+		for req in self.shared.read().iter() {
+			match &req.requires_finalized_header_up_to {
+				PruningLimit::Locked => return PruningLimit::Locked,
+				PruningLimit::None => (),
+				PruningLimit::Some(n) => {
+					if let PruningLimit::Some(p) = result {
+						if &p < n {
+							result = PruningLimit::Some(p);
+							continue;
+						}
+					}
+					result = PruningLimit::Some(n.clone());
+				},
+			}
+		}
+		result
+	}
+
+	/// Set new requirement on finalized headers.
+	/// Returns false if we do not have a handle on the shared requirement.
+	pub fn set_finalized_headers_needed(&self, limit: PruningLimit<NumberFor<Block>>) -> bool {
+		if let Some(index) = self.component {
+			self.shared.write()[index].requires_finalized_header_up_to = limit;
+			true
+		} else {
+			false
+		}
+	}
+}
+
+/// Individual pruning requirement for any substrate component.
+struct ComponentPruningRequirements<Block: BlockT> {
+	requires_finalized_header_up_to: PruningLimit<NumberFor<Block>>,
+}
+
+impl<Block: BlockT> Default for ComponentPruningRequirements<Block> {
+	fn default() -> Self {
+		ComponentPruningRequirements {
+			requires_finalized_header_up_to: PruningLimit::None,
+		}
+	}
+}
+
+/// Define a block number limit to apply.
+pub enum PruningLimit<N> {
+	/// Ignore.
+	None,
+	/// The component require at least this number
+	/// of unpruned elements.
+	Some(N),
+	/// We lock all pruning.
+	Locked,
+}

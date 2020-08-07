@@ -27,7 +27,7 @@ use sc_client_api::{
 	blockchain::{
 		BlockStatus, Cache as BlockchainCache, Info as BlockchainInfo,
 	},
-	Storage
+	Storage, SharedPruningRequirements,
 };
 use sp_blockchain::{
 	CachedHeaderMetadata, HeaderMetadata, HeaderMetadataCache,
@@ -65,6 +65,7 @@ pub struct LightStorage<Block: BlockT> {
 	meta: RwLock<Meta<NumberFor<Block>, Block::Hash>>,
 	cache: Arc<DbCacheSync<Block>>,
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
+	shared_pruning_requirements: SharedPruningRequirements<Block>,
 
 	#[cfg(not(target_os = "unknown"))]
 	io_stats: FrozenForDuration<kvdb::IoStats>,
@@ -72,19 +73,26 @@ pub struct LightStorage<Block: BlockT> {
 
 impl<Block: BlockT> LightStorage<Block> {
 	/// Create new storage with given settings.
-	pub fn new(config: DatabaseSettings) -> ClientResult<Self> {
+	pub fn new(
+		config: DatabaseSettings,
+		shared_pruning_requirements: SharedPruningRequirements<Block>,
+	) -> ClientResult<Self> {
 		let db = crate::utils::open_database::<Block>(&config, DatabaseType::Light)?;
-		Self::from_kvdb(db as Arc<_>)
+		Self::from_kvdb(db as Arc<_>, shared_pruning_requirements)
 	}
 
 	/// Create new memory-backed `LightStorage` for tests.
 	#[cfg(any(test, feature = "test-helpers"))]
 	pub fn new_test() -> Self {
 		let db = Arc::new(sp_database::MemDb::default());
-		Self::from_kvdb(db as Arc<_>).expect("failed to create test-db")
+		let shared_pruning_requirements = SharedPruningRequirements::default();
+		Self::from_kvdb(db as Arc<_>, shared_pruning_requirements).expect("failed to create test-db")
 	}
 
-	fn from_kvdb(db: Arc<dyn Database<DbHash>>) -> ClientResult<Self> {
+	fn from_kvdb(
+		db: Arc<dyn Database<DbHash>>,
+		shared_pruning_requirements: SharedPruningRequirements<Block>,
+	) -> ClientResult<Self> {
 		let meta = read_meta::<Block>(&*db, columns::HEADER)?;
 		let header_metadata_cache = Arc::new(HeaderMetadataCache::default());
 		let cache = DbCache::new(
@@ -104,6 +112,7 @@ impl<Block: BlockT> LightStorage<Block> {
 			header_metadata_cache,
 			#[cfg(not(target_os = "unknown"))]
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
+			shared_pruning_requirements,
 		})
 	}
 
@@ -745,7 +754,7 @@ pub(crate) mod tests {
 	#[test]
 	fn import_header_works() {
 		let raw_db = Arc::new(sp_database::MemDb::default());
-		let db = LightStorage::from_kvdb(raw_db.clone()).unwrap();
+		let db = LightStorage::from_kvdb(raw_db.clone(), Default::default()).unwrap();
 
 		let genesis_hash = insert_block(&db, HashMap::new(), || default_header(&Default::default(), 0));
 		assert_eq!(raw_db.count(columns::HEADER), 1);
@@ -757,12 +766,13 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	// TODO same test with limiter param
 	fn finalized_ancient_headers_are_replaced_with_cht() {
 		fn insert_headers<F: Fn(&Hash, u64) -> Header>(header_producer: F) ->
 			(Arc<sp_database::MemDb<DbHash>>, LightStorage<Block>)
 		{
 			let raw_db = Arc::new(sp_database::MemDb::default());
-			let db = LightStorage::from_kvdb(raw_db.clone()).unwrap();
+			let db = LightStorage::from_kvdb(raw_db.clone(), Default::default()).unwrap();
 			let cht_size: u64 = cht::size();
 			let ucht_size: usize = cht_size as _;
 
@@ -1145,7 +1155,7 @@ pub(crate) mod tests {
 		assert_eq!(db.header(BlockId::Hash(hash0)).unwrap().unwrap().hash(), hash0);
 
 		let db = db.db;
-		let db = LightStorage::from_kvdb(db).unwrap();
+		let db = LightStorage::from_kvdb(db, Default::default()).unwrap();
 		assert_eq!(db.info().best_hash, hash0);
 		assert_eq!(db.header(BlockId::Hash::<Block>(hash0)).unwrap().unwrap().hash(), hash0);
 	}
@@ -1206,7 +1216,8 @@ pub(crate) mod tests {
 		};
 
 		// restart && check that after restart value is read from the cache
-		let db = LightStorage::<Block>::from_kvdb(storage as Arc<_>).expect("failed to create test-db");
+		let db = LightStorage::<Block>::from_kvdb(storage as Arc<_>, Default::default())
+			.expect("failed to create test-db");
 		assert_eq!(
 			db.cache().get_at(b"test", &BlockId::Number(0)).unwrap(),
 			Some(((0, genesis_hash.unwrap()), None, vec![42])),

@@ -104,6 +104,7 @@ use sp_consensus::import_queue::{Verifier, BasicQueue, DefaultImportQueue, Cache
 use sc_client_api::{
 	backend::AuxStore,
 	BlockchainEvents, ProvideUncles,
+	SharedPruningRequirements, PruningLimit,
 };
 use sp_block_builder::BlockBuilder as BlockBuilderApi;
 use futures::channel::mpsc::{channel, Sender, Receiver};
@@ -1063,7 +1064,7 @@ pub struct BabeBlockImport<Block: BlockT, Client, I> {
 	client: Arc<Client>,
 	epoch_changes: SharedEpochChanges<Block, Epoch>,
 	config: Config,
-	periodic_pruning: Option<NumberFor<Block>>,
+	shared_pruning_requirements: Option<SharedPruningRequirements<Block>>,
 }
 
 impl<Block: BlockT, I: Clone, Client> Clone for BabeBlockImport<Block, Client, I> {
@@ -1073,7 +1074,7 @@ impl<Block: BlockT, I: Clone, Client> Clone for BabeBlockImport<Block, Client, I
 			client: self.client.clone(),
 			epoch_changes: self.epoch_changes.clone(),
 			config: self.config.clone(),
-			periodic_pruning: self.periodic_pruning.clone(),
+			shared_pruning_requirements: self.shared_pruning_requirements.clone(),
 		}
 	}
 }
@@ -1084,14 +1085,19 @@ impl<Block: BlockT, Client, I> BabeBlockImport<Block, Client, I> {
 		epoch_changes: SharedEpochChanges<Block, Epoch>,
 		block_import: I,
 		config: Config,
-		periodic_pruning: Option<NumberFor<Block>>,
+		shared_pruning_requirements: Option<&SharedPruningRequirements<Block>>,
 	) -> Self {
+		let shared_pruning_requirements = shared_pruning_requirements.map(|shared| {
+			let req = shared.next_instance();
+			assert!(req.set_finalized_headers_needed(PruningLimit::Locked));
+			req
+		});
 		BabeBlockImport {
 			client,
 			inner: block_import,
 			epoch_changes,
 			config,
-			periodic_pruning,
+			shared_pruning_requirements,
 		}
 	}
 }
@@ -1294,27 +1300,6 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 					insert.iter().map(|(k, v)| (k.to_vec(), Some(v.to_vec())))
 				)
 			);
-		} else {
-			old_epoch_changes = Some(epoch_changes.clone());
-			// check if periodic pruning (note that on reorg we prune multiple times
-			// TODO TEST WITH PRUNING EACH BLOCK TO BE SURE IT IS FINE
-			if self.periodic_pruning.map(|p| info.finalized_number % p == Zero::zero()).unwrap_or(false) {
-				println!("periodic pruning");
-				if let Err(e) =  prune_finalized(
-					self.client.clone(),
-					&mut epoch_changes,
-				) {
-					debug!(target: "babe", "Failed to periodic prune: {:?}", e);
-					*epoch_changes = old_epoch_changes.expect("set `Some` above and not taken; qed");
-					return Err(e);
-				}
-				crate::aux_schema::write_epoch_changes::<Block, _, _>(
-					&*epoch_changes,
-					|insert| block.auxiliary.extend(
-						insert.iter().map(|(k, v)| (k.to_vec(), Some(v.to_vec())))
-					)
-				);
-			}
 		}
 
 		aux_schema::write_block_weight(
@@ -1418,7 +1403,7 @@ pub fn block_import<Client, Block: BlockT, I>(
 	config: Config,
 	wrapped_block_import: I,
 	client: Arc<Client>,
-	periodic_pruning: Option<NumberFor<Block>>,
+	shared_pruning_requirements: Option<&SharedPruningRequirements<Block>>,
 ) -> ClientResult<(BabeBlockImport<Block, Client, I>, BabeLink<Block>)> where
 	Client: AuxStore + HeaderBackend<Block> + HeaderMetadata<Block, Error = sp_blockchain::Error>,
 {
@@ -1442,7 +1427,7 @@ pub fn block_import<Client, Block: BlockT, I>(
 		epoch_changes,
 		wrapped_block_import,
 		config,
-		periodic_pruning,
+		shared_pruning_requirements,
 	);
 
 	Ok((import, link))
