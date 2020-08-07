@@ -443,11 +443,15 @@ impl<Block: BlockT> LightStorage<Block> {
 		if !self.pending_cht_pruning.read().is_empty()
 			&& self.shared_pruning_requirements.modification_check() {
 			match self.shared_pruning_requirements.finalized_headers_needed() {
-				PruningLimit::Locked => (),
+				PruningLimit::Locked => {
+					println!("try prune locked");
+				},
 				PruningLimit::None => {
+					println!("try prune UNlocked");
 					to_prune = std::mem::replace(&mut *self.pending_cht_pruning.write(), VecDeque::new());
 				},
 				PruningLimit::Some(limit) => {
+					println!("try prune limit {:?}", limit);
 					let mut shared = self.pending_cht_pruning.write();
 					while let Some(range) = shared.pop_back() {
 						if limit < range.0 {
