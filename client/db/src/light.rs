@@ -380,13 +380,13 @@ impl<Block: BlockT> LightStorage<Block> {
 			PruningLimit::Some(limit) => {
 				println!("prune range limit {:?}", limit);
 				if limit > end {
-					self.add_prune_range_pending(start, end, transaction)?;
-					None
+					Some((start, end))
 				} else if limit > start {
 					self.add_prune_range_pending(limit, end, transaction)?;
 					Some((start, limit - One::one()))
 				} else {
-					Some((start, end))
+					self.add_prune_range_pending(start, end, transaction)?;
+					None
 				}
 			},
 			PruningLimit::Locked => {
@@ -471,16 +471,16 @@ impl<Block: BlockT> LightStorage<Block> {
 				PruningLimit::Some(limit) => {
 					println!("try prune limit {:?}", limit);
 					let mut shared = self.pending_cht_pruning.write();
-					while let Some(range) = shared.pop_back() {
+					while let Some(range) = shared.pop_front() {
 						if limit > range.1 {
-							shared.push_back((range.0, range.1));
-							break;
+							to_prune.push_back(range);
 						} else if limit > range.0 {
-							to_prune.push_front((range.0, limit - One::one()));
-							shared.push_back((limit, range.1));
+							to_prune.push_back((range.0, limit - One::one()));
+							shared.push_front((limit, range.1));
 							break;
 						} else {
-							to_prune.push_front(range);
+							shared.push_front((range.0, range.1));
+							break;
 						}
 					}
 				},
