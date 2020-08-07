@@ -1305,7 +1305,7 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 			if let Some(shared_pruning_requirements) = self.shared_pruning_requirements.as_ref() {
 				let needed_height = epoch_changes.needed_parent_relation();
 				debug!(target: "babe", "Using prune limit {:?}", needed_height);
-				println!("Using prune limit {:?} for {:?}", needed_height, epoch_changes.epoch);
+				println!("Using prune limit {:?} for {:?}", needed_height, epoch_changes.epochs);
 				// TODO only set if changed!!
 				if let Some(height) = needed_height {
 					shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Some(height));
