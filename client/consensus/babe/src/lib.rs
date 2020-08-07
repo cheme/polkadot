@@ -1100,7 +1100,7 @@ impl<Block: BlockT, Client, I> BabeBlockImport<Block, Client, I> {
 			inner: block_import,
 			epoch_changes,
 			config,
-			previous_needed_height: None,
+			previous_needed_height: Some(Zero::zero()),
 			shared_pruning_requirements,
 		}
 	}
