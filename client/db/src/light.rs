@@ -365,36 +365,49 @@ impl<Block: BlockT> LightStorage<Block> {
 	}
 
 	/// Prune headers that are replaced with CHT.
+	/// End is inclusive.
 	fn prune_range(
 		&self,
 		start: NumberFor<Block>,
 		end: NumberFor<Block>,
 		transaction: &mut Transaction<DbHash>,
 	) -> ClientResult<()> {
-		let mut prune_block = match self.shared_pruning_requirements.finalized_headers_needed() {
+		if let Some((start, end)) = match self.shared_pruning_requirements.finalized_headers_needed() {
 			PruningLimit::None => {
 				println!("prune range limit none");
-				start
+				Some((start, end))
 			},
 			PruningLimit::Some(limit) => {
 				println!("prune range limit {:?}", limit);
-				if limit >= end {
-					self.prune_range_pending(start, end, transaction)?;
-					return Ok(());
-				} else if limit >= start {
-					let limit = limit + One::one() ;
-					self.prune_range_pending(start, limit, transaction)?;
-					limit
+				if limit > end {
+					self.add_prune_range_pending(start, end, transaction)?;
+					None
+				} else if limit > start {
+					self.add_prune_range_pending(limit, end, transaction)?;
+					Some((start, limit - One::one()))
 				} else {
-					start
+					Some((start, end))
 				}
 			},
 			PruningLimit::Locked => {
 				println!("prune range limit lockde");
-				self.prune_range_pending(start, end, transaction)?;
-				return Ok(());
+				self.add_prune_range_pending(start, end, transaction)?;
+				None
 			},
-		};
+		} {
+			self.prune_range_unchecked(start, end, transaction)?;
+		}
+		Ok(())
+	}
+	
+	/// End is inclusive.
+	fn prune_range_unchecked(
+		&self,
+		start: NumberFor<Block>,
+		end: NumberFor<Block>,
+		transaction: &mut Transaction<DbHash>,
+	) -> ClientResult<()> {
+		let mut prune_block = start;
 		while prune_block <= end {
 			if let Some(hash) = self.hash(prune_block)? {
 				let lookup_key = block_id_to_lookup_key::<Block>(&*self.db, columns::KEY_LOOKUP, BlockId::Number(prune_block))?
@@ -414,7 +427,7 @@ impl<Block: BlockT> LightStorage<Block> {
 	}
 
 	/// Stack some pending pruning range.
-	fn prune_range_pending(
+	fn add_prune_range_pending(
 		&self,
 		start: NumberFor<Block>,
 		end: NumberFor<Block>,
@@ -459,15 +472,15 @@ impl<Block: BlockT> LightStorage<Block> {
 					println!("try prune limit {:?}", limit);
 					let mut shared = self.pending_cht_pruning.write();
 					while let Some(range) = shared.pop_back() {
-						if limit < range.0 {
-							to_prune.push_front(range);
-						} else if limit < range.1 {
-							to_prune.push_front((limit, range.1));
-							shared.push_back((range.0, limit));
-							break;
-						} else {
+						if limit > range.1 {
 							shared.push_back((range.0, range.1));
 							break;
+						} else if limit > range.0 {
+							to_prune.push_front((range.0, limit - One::one()));
+							shared.push_back((limit, range.1));
+							break;
+						} else {
+							to_prune.push_front(range);
 						}
 					}
 				},
@@ -475,7 +488,7 @@ impl<Block: BlockT> LightStorage<Block> {
 		}
 		for range in to_prune {
 			changed = true;
-			self.prune_range(range.0, range.1, transaction)?;
+			self.prune_range_unchecked(range.0, range.1, transaction)?;
 		}
 
 		if changed {
@@ -954,10 +967,10 @@ pub(crate) mod tests {
 
 		assert!(pruning_limit.set_finalized_headers_needed(PruningLimit::Some(1000)));
 		db.try_prune_pending_test().unwrap();
-		assert_eq!(raw_db.count(columns::HEADER), (1 + cht_size + 1 + 1000) as usize);
-		assert_eq!(raw_db.count(columns::KEY_LOOKUP), (2 * (1 + cht_size + 1 + 1000)) as usize);
-		assert!((0..1000 as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_some()));
-		assert!((1000..cht_size as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_none()));
+		assert_eq!(raw_db.count(columns::HEADER), (2 + 2 * cht_size) as usize - 999);
+		assert_eq!(raw_db.count(columns::KEY_LOOKUP), (2 * (2 + 2 * cht_size - 999)) as usize);
+		assert!((1..999 as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_none()));
+		assert!((999..cht_size as _).all(|i| db.header(BlockId::Number(1 + i)).unwrap().is_some()));
 
 		assert!(pruning_limit.set_finalized_headers_needed(PruningLimit::None));
 		db.try_prune_pending_test().unwrap();
