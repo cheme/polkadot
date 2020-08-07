@@ -1087,6 +1087,7 @@ impl<Block: BlockT, Client, I> BabeBlockImport<Block, Client, I> {
 		config: Config,
 		shared_pruning_requirements: Option<&SharedPruningRequirements<Block>>,
 	) -> Self {
+		println!("has shared p r {:?}", shared_pruning_requirements.is_some());
 		let shared_pruning_requirements = shared_pruning_requirements.map(|shared| {
 			let req = shared.next_instance();
 			assert!(req.set_finalized_headers_needed(PruningLimit::Locked));
@@ -1308,9 +1309,9 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 				println!("Using prune limit {:?} for {:?}", needed_height, epoch_changes.epochs);
 				// TODO only set if changed!!
 				if let Some(height) = needed_height {
-					shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Some(height));
+					assert!(shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Some(height)));
 				} else {
-					shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Locked);
+					assert!(shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Locked));
 				}
 			}
 		}

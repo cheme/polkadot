@@ -372,8 +372,12 @@ impl<Block: BlockT> LightStorage<Block> {
 		transaction: &mut Transaction<DbHash>,
 	) -> ClientResult<()> {
 		let mut prune_block = match self.shared_pruning_requirements.finalized_headers_needed() {
-			PruningLimit::None => start,
+			PruningLimit::None => {
+				println!("prune range limit none");
+				start
+			},
 			PruningLimit::Some(limit) => {
+				println!("prune range limit {:?}", limit);
 				if limit >= end {
 					self.prune_range_pending(start, end, transaction)?;
 					return Ok(());
@@ -386,6 +390,7 @@ impl<Block: BlockT> LightStorage<Block> {
 				}
 			},
 			PruningLimit::Locked => {
+				println!("prune range limit lockde");
 				self.prune_range_pending(start, end, transaction)?;
 				return Ok(());
 			},
