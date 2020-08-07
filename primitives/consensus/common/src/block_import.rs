@@ -266,6 +266,7 @@ pub trait BlockImport<B: BlockT> {
 	type Error: std::error::Error + Send + 'static;
 	/// The transaction type used by the backend.
 	type Transaction;
+
 	/// Check block preconditions.
 	fn check_block(
 		&mut self,
@@ -280,49 +281,21 @@ pub trait BlockImport<B: BlockT> {
 		block: BlockImportParams<B, Self::Transaction>,
 		cache: HashMap<CacheKeyId, Vec<u8>>,
 	) -> Result<ImportResult, Self::Error>;
-}
 
-/// Block import pruning remote cleanup calls.
-pub trait BlockImportPruning<B: BlockT, Transaction>: Send + Sync {
+	/*
 	/// Prune inner data for a given new finalized block.
 	///
-	/// Return the block height that we manage to prune.
-	/// Note that this explicitely indicate that we shall
-	/// keep the block that were not pruned.
+	/// Return the block height that we manage to prune
+	/// (this way the client ensure we don't prune inner
+	/// structure that will be still needed for the next
+	/// block imports).
 	fn prune_inner_data(
 		&mut self,
 		finalized_hash: &HashFor<B>,
 		finalized_number: NumberFor<B>,
-		transaction: &mut Transaction,
-	) -> Result<Option<(HashFor<B>, NumberFor<B>)>, ()>;
-
-	/// Clean aux data used internally when the block 
-	fn remove_aux_on_block_pruned(
-		&mut self,
-		finalized_hash: &HashFor<B>,
-		finalized_number: NumberFor<B>,
-		transaction: &mut Transaction,
-	) -> Result<(), ()>;
-}
-
-impl<B: BlockT, T> BlockImportPruning<B, T> for () {
-	fn prune_inner_data(
-		&mut self,
-		_finalized_hash: &HashFor<B>,
-		_finalized_number: NumberFor<B>,
-		_transaction: &mut T,
-	) -> Result<Option<(HashFor<B>, NumberFor<B>)>, ()> {
-		Ok(None)
-	}
-
-	fn remove_aux_on_block_pruned(
-		&mut self,
-		_finalized_hash: &HashFor<B>,
-		_finalized_number: NumberFor<B>,
-		_transaction: &mut T,
-	) -> Result<(), ()> {
-		Ok(())
-	}
+		block: BlockImportParams<B, Self::Transaction>,
+	) -> Result<Option<(HashFor<B>, NumberFor<B>)>, Self::Error>;
+	*/
 }
 
 impl<B: BlockT, Transaction> BlockImport<B> for crate::import_queue::BoxBlockImport<B, Transaction> {
