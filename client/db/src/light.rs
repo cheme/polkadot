@@ -365,7 +365,7 @@ impl<Block: BlockT> LightStorage<Block> {
 	}
 
 	/// Prune headers that are replaced with CHT.
-	/// End is inclusive.
+	/// Note that end index is inclusive (as start).
 	fn prune_range(
 		&self,
 		start: NumberFor<Block>,
@@ -400,13 +400,13 @@ impl<Block: BlockT> LightStorage<Block> {
 		Ok(())
 	}
 	
-	/// End is inclusive.
 	fn prune_range_unchecked(
 		&self,
 		start: NumberFor<Block>,
 		end: NumberFor<Block>,
 		transaction: &mut Transaction<DbHash>,
 	) -> ClientResult<()> {
+		println!("PRUNING {:?} blocks up to inclusive {:?}", start, end);
 		let mut prune_block = start;
 		while prune_block <= end {
 			if let Some(hash) = self.hash(prune_block)? {
@@ -498,7 +498,6 @@ impl<Block: BlockT> LightStorage<Block> {
 
 		Ok(())
 	}
-
 
 	/// Read CHT root of given type for the block.
 	fn read_cht_root(

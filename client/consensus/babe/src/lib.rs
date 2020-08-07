@@ -1064,6 +1064,7 @@ pub struct BabeBlockImport<Block: BlockT, Client, I> {
 	client: Arc<Client>,
 	epoch_changes: SharedEpochChanges<Block, Epoch>,
 	config: Config,
+	previous_needed_height: Option<NumberFor<Block>>,
 	shared_pruning_requirements: Option<SharedPruningRequirements<Block>>,
 }
 
@@ -1074,6 +1075,7 @@ impl<Block: BlockT, I: Clone, Client> Clone for BabeBlockImport<Block, Client, I
 			client: self.client.clone(),
 			epoch_changes: self.epoch_changes.clone(),
 			config: self.config.clone(),
+			previous_needed_height: self.previous_needed_height.clone(),
 			shared_pruning_requirements: self.shared_pruning_requirements.clone(),
 		}
 	}
@@ -1098,6 +1100,7 @@ impl<Block: BlockT, Client, I> BabeBlockImport<Block, Client, I> {
 			inner: block_import,
 			epoch_changes,
 			config,
+			previous_needed_height: None,
 			shared_pruning_requirements,
 		}
 	}
@@ -1307,11 +1310,13 @@ impl<Block, Client, Inner> BlockImport<Block> for BabeBlockImport<Block, Client,
 				let needed_height = epoch_changes.needed_parent_relation();
 				debug!(target: "babe", "Using prune limit {:?}", needed_height);
 				println!("Using prune limit {:?} for {:?}", needed_height, epoch_changes.epochs);
-				// TODO only set if changed!!
-				if let Some(height) = needed_height {
-					assert!(shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Some(height)));
-				} else {
-					assert!(shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Locked));
+				if needed_height != self.previous_needed_height {
+					self.previous_needed_height = needed_height.clone();
+					if let Some(height) = needed_height {
+						assert!(shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Some(height)));
+					} else {
+						assert!(shared_pruning_requirements.set_finalized_headers_needed(PruningLimit::Locked));
+					}
 				}
 			}
 		}
