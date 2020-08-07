@@ -550,14 +550,14 @@ pub fn changes_tries_state_at_block<'a, Block: BlockT>(
 /// Note that this struct could be split in two different struct (provider without
 /// component and Component), depending on future usage of this shared info.
 pub struct SharedPruningRequirements<Block: BlockT> {
-	shared: Arc<RwLock<Vec<ComponentPruningRequirements<Block>>>>,
+	shared: Arc<RwLock<(Vec<ComponentPruningRequirements<Block>>, usize)>>,
 	component: Option<usize>,
 }
 
 impl<Block: BlockT> Default for SharedPruningRequirements<Block> {
 	fn default() -> Self {
 		SharedPruningRequirements {
-			shared: Arc::new(RwLock::new(Vec::new())),
+			shared: Arc::new(RwLock::new((Vec::new(), 0))),
 			component: None,
 		}
 	}
@@ -572,8 +572,16 @@ impl<Block: BlockT> SharedPruningRequirements<Block> {
 		let req = ComponentPruningRequirements::default();
 		let index = {
 			let mut shared = self.shared.write();
-			let index = shared.len();
-			shared.push(req);
+			let index = shared.0.len();
+			shared.0.push(req);
+			shared.1 += 1;
+			if shared.1 == usize::max_value() {
+				shared.1 = 1;
+				// marking all as changed is the safest
+				for component in shared.0.iter_mut() {
+					component.last_modified_check = 0;
+				}
+			}
 			index
 		};
 		let mut result = self.clone();
@@ -581,10 +589,32 @@ impl<Block: BlockT> SharedPruningRequirements<Block> {
 		result
 	}
 
+	/// Check if some content was modified after last check.
+	pub fn modification_check(&self) -> bool {
+		if let Some(index) = self.component {
+			let modified = {
+				let read = self.shared.read();
+				if read.0[index].last_modified_check < read.1 {
+					Some(read.1.clone())	
+				} else {
+					None
+				}
+			};
+			if let Some(modified) = modified {
+				self.shared.write().0[index].last_modified_check = modified;
+				true
+			} else {
+				false
+			}
+		} else {
+			false
+		}
+	}
+	
 	/// Resolve a finalized block headers to keep.
 	pub fn finalized_headers_needed(&self) -> PruningLimit<NumberFor<Block>> {
 		let mut result = PruningLimit::None;
-		for req in self.shared.read().iter() {
+		for req in self.shared.read().0.iter() {
 			match &req.requires_finalized_header_up_to {
 				PruningLimit::Locked => return PruningLimit::Locked,
 				PruningLimit::None => (),
@@ -606,7 +636,18 @@ impl<Block: BlockT> SharedPruningRequirements<Block> {
 	/// Returns false if we do not have a handle on the shared requirement.
 	pub fn set_finalized_headers_needed(&self, limit: PruningLimit<NumberFor<Block>>) -> bool {
 		if let Some(index) = self.component {
-			self.shared.write()[index].requires_finalized_header_up_to = limit;
+			let mut shared = self.shared.write();
+			if shared.0[index].requires_finalized_header_up_to != limit { 
+				shared.0[index].requires_finalized_header_up_to = limit;
+				shared.1 += 1;
+				if shared.1 == usize::max_value() {
+					shared.1 = 1;
+					// marking all as changed is the safest
+					for component in shared.0.iter_mut() {
+						component.last_modified_check = 0;
+					}
+				}
+			}
 			true
 		} else {
 			false
@@ -617,16 +658,19 @@ impl<Block: BlockT> SharedPruningRequirements<Block> {
 /// Individual pruning requirement for any substrate component.
 struct ComponentPruningRequirements<Block: BlockT> {
 	requires_finalized_header_up_to: PruningLimit<NumberFor<Block>>,
+	last_modified_check: usize,
 }
 
 impl<Block: BlockT> Default for ComponentPruningRequirements<Block> {
 	fn default() -> Self {
 		ComponentPruningRequirements {
 			requires_finalized_header_up_to: PruningLimit::None,
+			last_modified_check: 0,
 		}
 	}
 }
 
+#[derive(Eq, PartialEq)]
 /// Define a block number limit to apply.
 pub enum PruningLimit<N> {
 	/// Ignore.
