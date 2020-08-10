@@ -115,7 +115,8 @@ impl<Block: BlockT> GrandpaJustification<Block> {
 		NumberFor<Block>: finality_grandpa::BlockNumberOps,
 	{
 		use finality_grandpa::Chain;
-
+		// TODO EMCH while debugging I see this empty in light client (but actually all votes are on exact
+		// block number so does not matter. TODO read code to see how it is initialized
 		let ancestry_chain = AncestryChain::<Block>::new(&self.votes_ancestries);
 
 		match finality_grandpa::validate_commit(

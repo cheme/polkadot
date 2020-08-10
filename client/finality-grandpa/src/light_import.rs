@@ -97,6 +97,7 @@ impl<BE, Block: BlockT, Client> Clone for GrandpaLightBlockImport<BE, Block, Cli
 /// Mutable data of light block importer.
 struct LightImportData<Block: BlockT> {
 	last_finalized: Block::Hash,
+	last_finalized2: Block::Hash,
 	authority_set: LightAuthoritySet,
 	consensus_changes: ConsensusChanges<Block::Hash, NumberFor<Block>>,
 }
@@ -225,10 +226,11 @@ impl LightAuthoritySet {
 struct GrandpaFinalityProofRequestBuilder<B: BlockT>(Arc<RwLock<LightImportData<B>>>);
 
 impl<B: BlockT> FinalityProofRequestBuilder<B> for GrandpaFinalityProofRequestBuilder<B> {
-	fn build_request_data(&mut self, _hash: &B::Hash) -> Vec<u8> {
+	fn build_request_data(&mut self, hash: &B::Hash) -> Vec<u8> {
 		let data = self.0.read();
+		warn!(target: "afg", "Requesting finality to {:?}, from {:?} bef {:?}", hash, data.last_finalized2, data.last_finalized);
 		make_finality_proof_request(
-			data.last_finalized,
+			data.last_finalized2,
 			data.authority_set.set_id(),
 		)
 	}
@@ -492,6 +494,7 @@ fn do_finalize_block<B, C, Block: BlockT>(
 	}
 
 	// update last finalized block reference
+	data.last_finalized2 = data.last_finalized.clone();
 	data.last_finalized = hash;
 
 	// we just finalized this block, so if we were importing it, it is now the new best
@@ -538,6 +541,7 @@ fn load_aux_import_data<B, Block>(
 	};
 
 	Ok(LightImportData {
+		last_finalized2: last_finalized.clone(),
 		last_finalized,
 		authority_set,
 		consensus_changes,
