@@ -227,6 +227,7 @@ struct GrandpaFinalityProofRequestBuilder<B: BlockT>(Arc<RwLock<LightImportData<
 impl<B: BlockT> FinalityProofRequestBuilder<B> for GrandpaFinalityProofRequestBuilder<B> {
 	fn build_request_data(&mut self, _hash: &B::Hash) -> Vec<u8> {
 		let data = self.0.read();
+		warn!(target: "afg", "Requesting finality to {:?}, from {:?}", hash, data.last_finalized);
 		make_finality_proof_request(
 			data.last_finalized,
 			data.authority_set.set_id(),
