@@ -221,7 +221,7 @@ pub(crate) fn import_single_block_metered<B: BlockT, V: Verifier<B>, Transaction
 		},
 	};
 
-	assert!(block.body.is_none(), "testing light (no body in blocks)");
+	//assert!(block.body.is_none(), "testing light (no body in blocks)");
 
 	trace!(target: "sync", "Header {} has {:?} logs", block.hash, header.digest().logs().len());
 
