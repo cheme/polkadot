@@ -92,7 +92,11 @@ impl<BE, Block: BlockT> AuthoritySetForFinalityProver<Block> for Arc<dyn Storage
 	fn authorities(&self, block: &BlockId<Block>) -> ClientResult<AuthorityList> {
 		let storage_key = StorageKey(GRANDPA_AUTHORITIES_KEY.to_vec());
 		self.storage(block, &storage_key)?
-			.and_then(|encoded| VersionedAuthorityList::decode(&mut encoded.0.as_slice()).ok())
+			.and_then(|encoded| {
+				let auths = VersionedAuthorityList::decode(&mut encoded.0.as_slice()).ok();
+				auths.as_ref().map(|auths| println!("auths {:?}", &auths.0));
+				auths
+			})
 			.map(|versioned| versioned.into())
 			.ok_or(ClientError::InvalidAuthoritiesSet)
 	}

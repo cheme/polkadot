@@ -302,8 +302,7 @@ fn do_import_block<B, C, Block: BlockT, J>(
 		Err(e) => return Err(ConsensusError::ClientImport(e.to_string())),
 	};
 
-	if let Some(pending_authorities) =  authority_set_hard_forks.get(&hash) {
-		// TODO should we run that maybe more on do_import_justification??
+	if let Some(pending_authorities) = authority_set_hard_forks.get(&hash) {
 		unimplemented!("TODO");
 	}
 
@@ -762,6 +761,7 @@ pub mod tests {
 				&mut import_data,
 				block,
 				new_cache,
+				&Default::default(),
 			).unwrap(),
 			client,
 			backend,
@@ -914,6 +914,7 @@ pub mod tests {
 				},
 			].encode(),
 			&mut verifier,
+			&Default::default(),
 		).unwrap();
 
 		// verify that new authorities set has been saved to the aux storage

@@ -414,7 +414,7 @@ const AUTHORITIES_VERSION: u8 = 1;
 /// AuthorityList are differentiable. Attempting to decode an authority list with an unknown
 /// version will fail.
 #[derive(Default)]
-pub struct VersionedAuthorityList<'a>(Cow<'a, AuthorityList>);
+pub struct VersionedAuthorityList<'a>(pub Cow<'a, AuthorityList>);
 
 impl<'a> From<AuthorityList> for VersionedAuthorityList<'a> {
 	fn from(authorities: AuthorityList) -> Self {
