@@ -29,7 +29,7 @@ use sp_consensus::{
 use sc_network::config::{BoxFinalityProofRequestBuilder, FinalityProofRequestBuilder};
 use sp_runtime::Justification;
 use sp_runtime::traits::{NumberFor, Block as BlockT, Header as HeaderT, DigestFor};
-use sp_finality_grandpa::{self, AuthorityList};
+use sp_finality_grandpa::{self, AuthorityList, SetId};
 use sp_runtime::generic::BlockId;
 
 use crate::GenesisAuthoritySetProvider;
@@ -57,17 +57,47 @@ pub fn light_block_import<BE, Block: BlockT, Client>(
 		BE: Backend<Block>,
 		Client: crate::ClientForGrandpa<Block, BE>,
 {
+	light_block_import_with_authority_set_hard_forks(
+		client,
+		backend,
+		genesis_authorities_provider,
+		authority_set_provider,
+		Default::default(),
+	)
+}
+
+/// Create light block importer with authority hard fork sets.
+pub fn light_block_import_with_authority_set_hard_forks<BE, Block: BlockT, Client>(
+	client: Arc<Client>,
+	backend: Arc<BE>,
+	genesis_authorities_provider: &dyn GenesisAuthoritySetProvider<Block>,
+	authority_set_provider: Arc<dyn AuthoritySetForFinalityChecker<Block>>,
+	authority_set_hard_forks: Vec<(SetId, (Block::Hash, NumberFor<Block>), AuthorityList)>,
+) -> Result<GrandpaLightBlockImport<BE, Block, Client>, ClientError>
+	where
+		BE: Backend<Block>,
+		Client: crate::ClientForGrandpa<Block, BE>,
+{
 	let info = client.info();
 	let import_data = load_aux_import_data(
 		info.finalized_hash,
 		&*client,
 		genesis_authorities_provider,
 	)?;
+
+	let authority_set_hard_forks = authority_set_hard_forks
+		.into_iter()
+		.map(|(set_id, (hash, number), authorities)| {
+			(hash, (set_id, number, authorities))
+		})
+		.collect::<HashMap<_, _>>();
+
 	Ok(GrandpaLightBlockImport {
 		client,
 		backend,
 		authority_set_provider,
 		data: Arc::new(RwLock::new(import_data)),
+		authority_set_hard_forks,
 	})
 }
 
@@ -81,6 +111,7 @@ pub struct GrandpaLightBlockImport<BE, Block: BlockT, Client> {
 	backend: Arc<BE>,
 	authority_set_provider: Arc<dyn AuthoritySetForFinalityChecker<Block>>,
 	data: Arc<RwLock<LightImportData<Block>>>,
+	authority_set_hard_forks: HashMap<Block::Hash, (SetId, NumberFor<Block>, AuthorityList)>,
 }
 
 impl<BE, Block: BlockT, Client> Clone for GrandpaLightBlockImport<BE, Block, Client> {
@@ -90,6 +121,7 @@ impl<BE, Block: BlockT, Client> Clone for GrandpaLightBlockImport<BE, Block, Cli
 			backend: self.backend.clone(),
 			authority_set_provider: self.authority_set_provider.clone(),
 			data: self.data.clone(),
+			authority_set_hard_forks: self.authority_set_hard_forks.clone(),
 		}
 	}
 }
@@ -135,7 +167,7 @@ impl<BE, Block: BlockT, Client> BlockImport<Block>
 		new_cache: HashMap<well_known_cache_keys::Id, Vec<u8>>,
 	) -> Result<ImportResult, Self::Error> {
 		do_import_block::<_, _, _, GrandpaJustification<Block>>(
-			&*self.client, &mut *self.data.write(), block, new_cache
+			&*self.client, &mut *self.data.write(), block, new_cache, &self.authority_set_hard_forks,
 		)
 	}
 
@@ -192,6 +224,7 @@ impl<BE, Block: BlockT, Client> FinalityProofImport<Block>
 			number,
 			finality_proof,
 			verifier,
+			&self.authority_set_hard_forks,
 		)
 	}
 }
@@ -200,7 +233,7 @@ impl LightAuthoritySet {
 	/// Get a genesis set with given authorities.
 	pub fn genesis(initial: AuthorityList) -> Self {
 		LightAuthoritySet {
-			set_id: sp_finality_grandpa::SetId::default(),
+			set_id: SetId::default(),
 			authorities: initial,
 		}
 	}
@@ -242,6 +275,7 @@ fn do_import_block<B, C, Block: BlockT, J>(
 	data: &mut LightImportData<Block>,
 	mut block: BlockImportParams<Block, TransactionFor<B, Block>>,
 	new_cache: HashMap<well_known_cache_keys::Id, Vec<u8>>,
+	authority_set_hard_forks: &HashMap<Block::Hash, (SetId, NumberFor<Block>, AuthorityList)>,
 ) -> Result<ImportResult, ConsensusError>
 	where
 		C: HeaderBackend<Block>
@@ -267,6 +301,11 @@ fn do_import_block<B, C, Block: BlockT, J>(
 		Ok(r) => return Ok(r),
 		Err(e) => return Err(ConsensusError::ClientImport(e.to_string())),
 	};
+
+	if let Some(pending_authorities) =  authority_set_hard_forks.get(&hash) {
+		// TODO should we run that maybe more on do_import_justification??
+		unimplemented!("TODO");
+	}
 
 	match justification {
 		Some(justification) => {
@@ -305,6 +344,7 @@ fn do_import_finality_proof<B, C, Block: BlockT, J>(
 	_number: NumberFor<Block>,
 	finality_proof: Vec<u8>,
 	verifier: &mut dyn Verifier<Block>,
+	authority_set_hard_forks: &HashMap<Block::Hash, (SetId, NumberFor<Block>, AuthorityList)>,
 ) -> Result<(Block::Hash, NumberFor<Block>), ConsensusError>
 	where
 		C: HeaderBackend<Block>
@@ -350,6 +390,7 @@ fn do_import_finality_proof<B, C, Block: BlockT, J>(
 			data,
 			block_to_import.convert_transaction(),
 			cache,
+			authority_set_hard_forks,
 		)?;
 	}
 
