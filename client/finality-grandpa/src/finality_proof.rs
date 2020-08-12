@@ -184,7 +184,7 @@ impl<B, Block> FinalityProofProvider<B, Block>
 		hash_fin.as_mut().copy_from_slice(&[
 			153, 36, 204, 170, 241, 36, 253, 126, 147, 194, 33, 69, 189, 191, 23, 109, 1, 40, 147, 51, 216, 211, 230, 123, 147, 140, 145, 69, 243, 57, 147, 244,
 		][..]);
-		let slot_id = 0u64;
+		let slot_id = 1u64;
 		let request = make_finality_proof_request(hash_fin, slot_id);
 		use sc_network::config::FinalityProofProvider as _;
 		let _ = pp.prove_finality(hash, &request[..]);
