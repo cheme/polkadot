@@ -261,8 +261,8 @@ impl<B: BlockT> FinalityProofRequestBuilder<B> for GrandpaFinalityProofRequestBu
 	fn build_request_data(&mut self, hash: &B::Hash) -> Vec<u8> {
 		let data = self.0.read();
 		// This is for getting a changed authority set proof, then we query next authority set.
-		//let set_id = data.authority_set.set_id() + 1;
-		let set_id = data.authority_set.set_id();
+		let set_id = data.authority_set.set_id() + 1;
+		//let set_id = data.authority_set.set_id();
 		warn!(target: "afg", "Requesting finality to {:?}, from {:?} at {:?}", hash, data.last_finalized, set_id);
 		make_finality_proof_request(
 			data.last_finalized,
