@@ -540,8 +540,12 @@ fn check_finality_proof_fragment<Block: BlockT, B, J>(
 	justification.verify(current_set_id, &current_authorities)
 		.or_else(|e| {
 			identical_set_update = true;
-			justification.verify(current_set_id + 1, &current_authorities)
-				.or(Err(e))
+			let result = justification.verify(current_set_id + 1, &current_authorities)
+				.or(Err(e));
+			if result.is_ok() {
+				println!("!!!!!! justification check on id + 1 passed at {:?}", current_set_id + 1);
+			}
+			result
 		})?;
 
 	// and now verify new authorities proof (if provided)
