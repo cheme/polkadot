@@ -528,12 +528,17 @@ fn check_finality_proof_fragment<Block: BlockT, B, J>(
 {
 	// verify justification using previous authorities set
 	let (mut current_set_id, mut current_authorities) = authority_set.extract_authorities();
+	// on update to same set we can have a new set without a proof fragment
+	// for the change.
+	let mut identical_set_update = false;
 	let justification: J = Decode::decode(&mut &proof_fragment.justification[..])
 		.map_err(|_| ClientError::JustificationDecode)?;
 	justification.verify(current_set_id, &current_authorities)
-		// on update to same set we can have a new set without a proof fragment
-		// for the change.
-		.or_else(|_e| justification.verify(current_set_id + 1, &current_authorities))?;
+		.or_else(|e| {
+			identical_set_update = true;
+			justification.verify(current_set_id + 1, &current_authorities)
+				.or(Err(e))
+		})?;
 
 	// and now verify new authorities proof (if provided)
 	if let Some(new_authorities_proof) = proof_fragment.authorities_proof {
@@ -551,6 +556,10 @@ fn check_finality_proof_fragment<Block: BlockT, B, J>(
 			new_authorities_proof,
 		)?;
 
+		current_set_id += 1;
+	}
+
+	if identical_set_update {
 		current_set_id += 1;
 	}
 
