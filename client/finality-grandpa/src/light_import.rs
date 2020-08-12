@@ -459,11 +459,18 @@ fn do_import_justification<B, C, Block: BlockT, J>(
 	).or_else(|e| {
 		// Check for a new authority set with same
 		// authorities.
-		J::decode_and_verify(
+		let authorities = data.authority_set.authorities();
+		let set_id = authority_set_id + 1;
+		let result = J::decode_and_verify(
 			&justification,
-			authority_set_id + 1,
-			&data.authority_set.authorities(),
-		).or(Err(e))
+			set_id,
+			&authorities,
+		).or(Err(e));
+		if result.is_ok() {
+			println!("A not change set update!!!");
+			data.authority_set.update(set_id, authorities);
+		}
+		result
 	});
 
 	// BadJustification error means that justification has been successfully decoded, but
