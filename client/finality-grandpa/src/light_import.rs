@@ -469,6 +469,14 @@ fn do_import_justification<B, C, Block: BlockT, J>(
 		if result.is_ok() {
 			println!("A not change set update!!!");
 			data.authority_set.update(set_id, authorities);
+
+			// store new authorities set
+			require_insert_aux(
+				&client,
+				LIGHT_AUTHORITY_SET_KEY,
+				&data.authority_set,
+				"authority set",
+			)?;
 		}
 		result
 	});
