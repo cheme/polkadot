@@ -43,7 +43,7 @@ use crate::justification::GrandpaJustification;
 
 /// LightAuthoritySet is saved under this key in aux storage.
 const LIGHT_AUTHORITY_SET_KEY: &[u8] = b"grandpa_voters";
-/// ConsensusChanges is saver under this key in aux storage.
+/// ConsensusChanges is saved under this key in aux storage.
 const LIGHT_CONSENSUS_CHANGES_KEY: &[u8] = b"grandpa_consensus_changes";
 
 /// Create light block importer.
@@ -129,6 +129,10 @@ impl<BE, Block: BlockT, Client> Clone for GrandpaLightBlockImport<BE, Block, Cli
 /// Mutable data of light block importer.
 struct LightImportData<Block: BlockT> {
 	last_finalized: Block::Hash,
+	// some query are done a block ahead (seems like not all set id increase
+	// are registered eg no change in authority set).
+	// Correspond to `previous_identical_set` case if finality_proof.rs
+	last_queried_at: bool,
 	authority_set: LightAuthoritySet,
 	consensus_changes: ConsensusChanges<Block::Hash, NumberFor<Block>>,
 }
@@ -259,12 +263,16 @@ struct GrandpaFinalityProofRequestBuilder<B: BlockT>(Arc<RwLock<LightImportData<
 
 impl<B: BlockT> FinalityProofRequestBuilder<B> for GrandpaFinalityProofRequestBuilder<B> {
 	fn build_request_data(&mut self, hash: &B::Hash) -> Vec<u8> {
-		let data = self.0.read();
+		let mut data = self.0.write();
 		// This is for getting a changed authority set proof, then we query next authority set when
 		// from genesis.
 		let mut set_id = data.authority_set.set_id();
-		//if set_id == 0 {
+		if data.last_queried_at {
+			data.last_queried_at = false;
 			set_id += 1;
+		} else {
+			data.last_queried_at = true;
+		}
 		//}
 		//let set_id = data.authority_set.set_id();
 		warn!(target: "afg", "Requesting finality to {:?}, from {:?} at {:?}", hash, data.last_finalized, set_id);
@@ -474,7 +482,9 @@ fn do_import_justification<B, C, Block: BlockT, J>(
 			println!("A not change set update!!!");
 			data.authority_set.update(set_id, authorities);
 
-			// store new authorities set
+			// TODO this is actually incorrect: in case the set did change,
+			// we would need a proof of the new set, and a proof of the
+			// change of slot.
 			require_insert_aux(
 				&client,
 				LIGHT_AUTHORITY_SET_KEY,
@@ -610,6 +620,7 @@ fn load_aux_import_data<B, Block>(
 
 	Ok(LightImportData {
 		last_finalized,
+		last_queried_at: false,
 		authority_set,
 		consensus_changes,
 	})
@@ -770,6 +781,7 @@ pub mod tests {
 			last_finalized: Default::default(),
 			authority_set: LightAuthoritySet::genesis(vec![(AuthorityId::from_slice(&[1; 32]), 1)]),
 			consensus_changes: ConsensusChanges::empty(),
+			last_queried_at: false,
 		};
 		let mut block = BlockImportParams::new(
 			BlockOrigin::Own,
@@ -919,6 +931,7 @@ pub mod tests {
 			last_finalized: Default::default(),
 			authority_set: LightAuthoritySet::genesis(initial_set.clone()),
 			consensus_changes: ConsensusChanges::empty(),
+			last_queried_at: false,
 		};
 
 		// import finality proof
