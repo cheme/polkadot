@@ -322,7 +322,7 @@ fn do_import_block<B, C, Block: BlockT, J>(
 		hash,
 		authority_set_hard_forks,
 	) {
-		warn!(target: "afg", "Reach finality pending change at {:?} {:?} {:?}", number, pending_auth_change, new_set_id);
+		warn!(target: "afg", "Reach finality pending change at {:?} {:?}", number, new_set_id);
 
 		let (hash_from, trigger_at) = if pending_auth_change.delay == Zero::zero() {
 			(Some(hash), None)
@@ -483,8 +483,27 @@ fn do_import_finality_proof<B, C, Block: BlockT, J>(
 		authority_set_id,
 		authorities,
 		authority_set_provider,
-		finality_proof,
-	).map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
+		finality_proof.clone(),
+	).or_else(|e| {
+		let authorities = data.authority_set.authorities();
+		let res = crate::finality_proof::check_finality_proof::<_, _, J>(
+			backend.blockchain(),
+			authority_set_id + 1,
+			authorities,
+			authority_set_provider,
+			finality_proof,
+		).or(Err(e));
+		if res.is_ok() {
+			warn!(
+				target: "afg",
+				"Success check finality proof + 1 {:?}",
+				authority_set_id + 1,
+			);
+		}
+		res
+	})
+
+		.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
 
 	// try to import all new headers
 	let block_origin = BlockOrigin::NetworkBroadcast;
