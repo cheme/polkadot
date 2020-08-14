@@ -28,9 +28,10 @@ use sp_consensus::{
 };
 use sc_network::config::{BoxFinalityProofRequestBuilder, FinalityProofRequestBuilder};
 use sp_runtime::Justification;
-use sp_runtime::traits::{NumberFor, Block as BlockT, Header as HeaderT, DigestFor};
+use sp_runtime::traits::{NumberFor, Block as BlockT, Header as HeaderT, DigestFor, Zero};
 use sp_finality_grandpa::{self, AuthorityList, SetId};
 use sp_runtime::generic::BlockId;
+use crate::authorities;
 
 use crate::GenesisAuthoritySetProvider;
 use crate::aux_schema::load_decode;
@@ -45,6 +46,9 @@ use crate::justification::GrandpaJustification;
 const LIGHT_AUTHORITY_SET_KEY: &[u8] = b"grandpa_voters";
 /// ConsensusChanges is saved under this key in aux storage.
 const LIGHT_CONSENSUS_CHANGES_KEY: &[u8] = b"grandpa_consensus_changes";
+/// Technical queue of incoming change, helps with determining authority set
+/// id.
+const LIGHT_FINALITY_PROOF_QUERY_QUEUE: &[u8] = b"grandpa_finality_queue";
 
 /// Create light block importer.
 pub fn light_block_import<BE, Block: BlockT, Client>(
@@ -132,9 +136,12 @@ struct LightImportData<Block: BlockT> {
 	// some query are done a block ahead (seems like not all set id increase
 	// are registered eg no change in authority set).
 	// Correspond to `previous_identical_set` case if finality_proof.rs
+	// TODO this should be remove as query on error.
 	last_queried_at: bool,
 	authority_set: LightAuthoritySet,
-	consensus_changes: ConsensusChanges<Block::Hash, NumberFor<Block>>,
+	consensus_changes: ConsensusChanges<Block::Hash, NumberFor<Block>>, // TODO this seems redundant with incomming changes
+	incoming_changes: Vec<FinalityPendingRequest<Block>>,
+	adjusted_set_id: u64, // TODO this is just for debugging
 }
 
 /// Latest authority set tracker.
@@ -149,6 +156,7 @@ impl<BE, Block: BlockT, Client> GrandpaLightBlockImport<BE, Block, Client> {
 	pub fn create_finality_proof_request_builder(&self) -> BoxFinalityProofRequestBuilder<Block> {
 		Box::new(GrandpaFinalityProofRequestBuilder(self.data.clone())) as _
 	}
+
 }
 
 impl<BE, Block: BlockT, Client> BlockImport<Block>
@@ -275,7 +283,9 @@ impl<B: BlockT> FinalityProofRequestBuilder<B> for GrandpaFinalityProofRequestBu
 		}
 		//}
 		//let set_id = data.authority_set.set_id();
-		warn!(target: "afg", "Requesting finality to {:?}, from {:?} at {:?}", hash, data.last_finalized, set_id);
+		let set_id_to_use = data.adjusted_set_id;
+		warn!(target: "afg", "Requesting finality to {:?}, from {:?} at {:?} to_use {:?}", hash, data.last_finalized, set_id, set_id_to_use);
+		warn!(target: "afg", "Current pending {:?}", data.incoming_changes);
 		make_finality_proof_request(
 			data.last_finalized,
 			set_id,
@@ -302,8 +312,54 @@ fn do_import_block<B, C, Block: BlockT, J>(
 		DigestFor<Block>: Encode,
 		J: ProvableJustification<Block::Header>,
 {
-	let hash = block.post_hash();
+	let hash = block.post_hash().clone();
 	let number = *block.header.number();
+
+	let mut needs_finality_proof = false;
+	// check for authority change
+	if let Some((pending_auth_change, new_set_id)) = check_new_change::<Block>(
+		&block.header,
+		hash,
+		authority_set_hard_forks,
+	) {
+		warn!(target: "afg", "Reach finality pending change at {:?} {:?} {:?}", number, pending_auth_change, new_set_id);
+
+		let (hash_from, trigger_at) = if pending_auth_change.delay == Zero::zero() {
+			(Some(hash), None)
+		} else {
+			(None, Some(number))
+		};
+
+		match pending_auth_change.delay_kind {
+			authorities::DelayKind::Best{ median_last_finalized } => {
+				data.incoming_changes.push(FinalityPendingRequest {
+					number_from: number,
+					hash_from,
+					trigger_at: Some(median_last_finalized),
+				});
+			},
+			authorities::DelayKind::Finalized => {
+				if pending_auth_change.delay == Zero::zero() {
+					// TODO only note change on finality proof read??
+					data.consensus_changes.note_change((number, hash));
+					needs_finality_proof = true;
+				} else {
+					data.incoming_changes.push(FinalityPendingRequest {
+						number_from: number,
+						hash_from,
+						trigger_at,
+					});
+				}
+			},
+		}
+
+		require_insert_aux(
+			&client,
+			LIGHT_FINALITY_PROOF_QUERY_QUEUE,
+			&data.incoming_changes,
+			"pending changes",
+		)?;
+	}
 
 	// we don't want to finalize on `inner.import_block`
 	let justification = block.justification.take();
@@ -316,9 +372,7 @@ fn do_import_block<B, C, Block: BlockT, J>(
 		Err(e) => return Err(ConsensusError::ClientImport(e.to_string())),
 	};
 
-	if let Some(pending_authorities) = authority_set_hard_forks.get(&hash) {
-		unimplemented!("TODO");
-	}
+	imported_aux.needs_finality_proof |= needs_finality_proof;
 
 	match justification {
 		Some(justification) => {
@@ -345,6 +399,58 @@ fn do_import_block<B, C, Block: BlockT, J>(
 		},
 		None => Ok(ImportResult::Imported(imported_aux)),
 	}
+}
+
+#[derive(Encode, Decode, Debug)]
+/// Current finality request to run.
+/// TODO redundant with lightImportData?
+struct FinalityPendingRequest<Block: BlockT> {
+	// either the actual number or the targetted number
+	// (will update on hash).
+	number_from: NumberFor<Block>,
+	// update when number is reached and trigger request.
+	hash_from: Option<Block::Hash>,
+	// for later proof trigger
+	trigger_at: Option<NumberFor<Block>>,
+}
+
+// check for a new authority set change.
+fn check_new_change<Block: BlockT>(
+	header: &Block::Header,
+	hash: Block::Hash,
+	authority_set_hard_forks: &HashMap<Block::Hash, (SetId, NumberFor<Block>, AuthorityList)>,
+) -> Option<(authorities::PendingChange<Block::Hash, NumberFor<Block>>, Option<u64>)> {
+	// check for forced authority set hard forks
+	if let Some(pending_authorities) = authority_set_hard_forks.get(&hash).cloned() {
+			return Some((authorities::PendingChange {
+			next_authorities: pending_authorities.2,
+			delay: Zero::zero(),
+			canon_hash: hash.clone(),
+			canon_height: pending_authorities.1,
+			delay_kind: authorities::DelayKind::Finalized,
+		}, Some(pending_authorities.0)));
+	}
+
+	// check for forced change.
+	if let Some((median_last_finalized, change)) = crate::import::find_forced_change::<Block>(header) {
+		return Some((authorities::PendingChange {
+			next_authorities: change.next_authorities,
+			delay: change.delay,
+			canon_height: *header.number(),
+			canon_hash: hash,
+			delay_kind: authorities::DelayKind::Best { median_last_finalized },
+		}, None));
+	}
+
+	// check normal scheduled change.
+	let change = crate::import::find_scheduled_change::<Block>(header)?;
+	Some((authorities::PendingChange {
+		next_authorities: change.next_authorities,
+		delay: change.delay,
+		canon_height: *header.number(),
+		canon_hash: hash,
+		delay_kind: authorities::DelayKind::Finalized,
+	}, None))
 }
 
 /// Try to import finality proof.
@@ -420,6 +526,24 @@ fn do_import_finality_proof<B, C, Block: BlockT, J>(
 		finality_effects.justification.encode(),
 	)?;
 
+	let mut number_finalized = 0;
+	for pending_req in data.incoming_changes.iter() {
+		if pending_req.number_from > finalized_block_number {
+			// TODO for delayed?? maybe delayed should not be here
+			break;
+		}
+
+		number_finalized += 1;
+	}
+	data.incoming_changes = data.incoming_changes.split_off(number_finalized);
+	data.adjusted_set_id += number_finalized as u64;
+
+	warn!(
+		target: "afg",
+		"Number finalized from headers {:?}, form proof check {:?}",
+		data.authority_set.set_id + number_finalized as u64,
+		finality_effects.new_set_id,
+	);
 	// apply new authorities set
 	data.authority_set.update(
 		finality_effects.new_set_id,
@@ -432,6 +556,13 @@ fn do_import_finality_proof<B, C, Block: BlockT, J>(
 		LIGHT_AUTHORITY_SET_KEY,
 		&data.authority_set,
 		"authority set",
+	)?;
+
+	require_insert_aux(
+		&client,
+		LIGHT_FINALITY_PROOF_QUERY_QUEUE,
+		&data.incoming_changes,
+		"pending changes",
 	)?;
 
 	Ok((finalized_block_hash, finalized_block_number))
@@ -618,11 +749,19 @@ fn load_aux_import_data<B, Block>(
 		},
 	};
 
+	let incoming_changes = match load_decode(aux_store, LIGHT_FINALITY_PROOF_QUERY_QUEUE)? {
+		Some(consensus_changes) => consensus_changes,
+		None => Default::default(),
+	};
+
+	let adjusted_set_id = authority_set.set_id;
 	Ok(LightImportData {
 		last_finalized,
 		last_queried_at: false,
 		authority_set,
 		consensus_changes,
+		adjusted_set_id,
+		incoming_changes,
 	})
 }
 
@@ -782,6 +921,8 @@ pub mod tests {
 			authority_set: LightAuthoritySet::genesis(vec![(AuthorityId::from_slice(&[1; 32]), 1)]),
 			consensus_changes: ConsensusChanges::empty(),
 			last_queried_at: false,
+			adjusted_set_id: 0,
+			incoming_changes: Default::default(),
 		};
 		let mut block = BlockImportParams::new(
 			BlockOrigin::Own,
@@ -932,6 +1073,8 @@ pub mod tests {
 			authority_set: LightAuthoritySet::genesis(initial_set.clone()),
 			consensus_changes: ConsensusChanges::empty(),
 			last_queried_at: false,
+			adjusted_set_id: 0,
+			incoming_changes: Default::default(),
 		};
 
 		// import finality proof
