@@ -21,7 +21,7 @@ use crate::{
 	chain::{Client, FinalityProofProvider},
 	config::{BoxFinalityProofRequestBuilder, ProtocolId, TransactionPool, TransactionImportFuture, TransactionImport},
 	error,
-	utils::interval
+	utils::{interval, LruHashSet},
 };
 
 use bytes::{Bytes, BytesMut};
@@ -49,7 +49,10 @@ use sp_runtime::traits::{
 use sp_arithmetic::traits::SaturatedConversion;
 use message::{BlockAnnounce, Message};
 use message::generic::{Message as GenericMessage, Roles};
-use prometheus_endpoint::{Registry, Gauge, Counter, GaugeVec, PrometheusError, Opts, register, U64};
+use prometheus_endpoint::{
+	Registry, Gauge, Counter, CounterVec, GaugeVec,
+	PrometheusError, Opts, register, U64
+};
 use sync::{ChainSync, SyncState};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque, hash_map::Entry};
@@ -58,11 +61,9 @@ use std::fmt::Write;
 use std::{cmp, io, num::NonZeroUsize, pin::Pin, task::Poll, time};
 use log::{log, Level, trace, debug, warn, error};
 use sc_client_api::{ChangesProof, ProofCommon, SimpleProof};
-use util::LruHashSet;
 use wasm_timer::Instant;
 
 mod generic_proto;
-mod util;
 
 pub mod message;
 pub mod event;
@@ -93,6 +94,9 @@ pub(crate) const MIN_VERSION: u32 = 3;
 
 // Maximum allowed entries in `BlockResponse`
 const MAX_BLOCK_DATA_RESPONSE: u32 = 128;
+// Maximum total bytes allowed for block bodies in `BlockResponse`
+const MAX_BODIES_BYTES: usize = 8 * 1024 * 1024;
+
 /// When light node connects to the full node and the full node is behind light node
 /// for at least `LIGHT_MAXIMAL_BLOCKS_DIFFERENCE` blocks, we consider it not useful
 /// and disconnect to free connection slot.
@@ -143,7 +147,7 @@ struct Metrics {
 	finality_proofs: GaugeVec<U64>,
 	justifications: GaugeVec<U64>,
 	propagated_transactions: Counter<U64>,
-	legacy_requests_received: Counter<U64>,
+	legacy_requests_received: CounterVec<U64>,
 }
 
 impl Metrics {
@@ -189,9 +193,12 @@ impl Metrics {
 				"sync_propagated_transactions",
 				"Number of transactions propagated to at least one peer",
 			)?, r)?,
-			legacy_requests_received: register(Counter::new(
-				"sync_legacy_requests_received",
-				"Number of block/finality/light-client requests received on the legacy substream",
+			legacy_requests_received: register(CounterVec::new(
+				Opts::new(
+					"sync_legacy_requests_received",
+					"Number of block/finality/light-client requests received on the legacy substream",
+				),
+				&["kind"]
 			)?, r)?,
 		})
 	}
@@ -729,7 +736,7 @@ impl<B, H, P> Protocol<B, H, P>
 
 	fn on_block_request(&mut self, peer: PeerId, request: message::BlockRequest<B>) {
 		if let Some(metrics) = &self.metrics {
-			metrics.legacy_requests_received.inc();
+			metrics.legacy_requests_received.with_label_values(&["block-request"]).inc();
 		}
 
 		trace!(target: "sync", "BlockRequest {} from {}: from {:?} to {:?} max {:?} for {:?}",
@@ -760,8 +767,9 @@ impl<B, H, P> Protocol<B, H, P>
 		let get_justification = request
 			.fields
 			.contains(message::BlockAttributes::JUSTIFICATION);
+		let mut total_size = 0;
 		while let Some(header) = self.context_data.chain.header(id).unwrap_or(None) {
-			if blocks.len() >= max {
+			if blocks.len() >= max || (blocks.len() >= 1 && total_size > MAX_BODIES_BYTES) {
 				break;
 			}
 			let number = *header.number();
@@ -792,6 +800,7 @@ impl<B, H, P> Protocol<B, H, P>
 				trace!(target: "sync", "Missing data for block request.");
 				break;
 			}
+			total_size += block_data.body.as_ref().map_or(0, |b| b.len());
 			blocks.push(block_data);
 			match request.direction {
 				message::Direction::Ascending => id = BlockId::Number(number + One::one()),
@@ -1405,7 +1414,7 @@ impl<B, H, P> Protocol<B, H, P>
 		);
 
 		if let Some(metrics) = &self.metrics {
-			metrics.legacy_requests_received.inc();
+			metrics.legacy_requests_received.with_label_values(&["remote-call"]).inc();
 		}
 
 		let proof = match self.context_data.chain.execution_proof(
@@ -1529,7 +1538,7 @@ impl<B, H, P> Protocol<B, H, P>
 		request: message::RemoteReadRequest<B::Hash>,
 	) {
 		if let Some(metrics) = &self.metrics {
-			metrics.legacy_requests_received.inc();
+			metrics.legacy_requests_received.with_label_values(&["remote-read"]).inc();
 		}
 
 		if request.keys.is_empty() {
@@ -1582,7 +1591,7 @@ impl<B, H, P> Protocol<B, H, P>
 		request: message::RemoteReadChildRequest<B::Hash>,
 	) {
 		if let Some(metrics) = &self.metrics {
-			metrics.legacy_requests_received.inc();
+			metrics.legacy_requests_received.with_label_values(&["remote-child"]).inc();
 		}
 
 		if request.keys.is_empty() {
@@ -1642,7 +1651,7 @@ impl<B, H, P> Protocol<B, H, P>
 		request: message::RemoteHeaderRequest<NumberFor<B>>,
 	) {
 		if let Some(metrics) = &self.metrics {
-			metrics.legacy_requests_received.inc();
+			metrics.legacy_requests_received.with_label_values(&["remote-header"]).inc();
 		}
 
 		trace!(target: "sync", "Remote header proof request {} from {} ({})",
@@ -1676,7 +1685,7 @@ impl<B, H, P> Protocol<B, H, P>
 		request: message::RemoteChangesRequest<B::Hash>,
 	) {
 		if let Some(metrics) = &self.metrics {
-			metrics.legacy_requests_received.inc();
+			metrics.legacy_requests_received.with_label_values(&["remote-changes"]).inc();
 		}
 
 		trace!(target: "sync", "Remote changes proof request {} from {} for key {} ({}..{})",
@@ -1743,7 +1752,7 @@ impl<B, H, P> Protocol<B, H, P>
 		request: message::FinalityProofRequest<B::Hash>,
 	) {
 		if let Some(metrics) = &self.metrics {
-			metrics.legacy_requests_received.inc();
+			metrics.legacy_requests_received.with_label_values(&["finality-proof"]).inc();
 		}
 
 		trace!(target: "sync", "Finality proof request from {} for {}", who, request.block);
