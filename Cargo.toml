@@ -263,3 +263,4 @@ memory-db = { git="https://github.com/cheme/trie", branch="key_val_indexed2" }
 hash-db = { git="https://github.com/cheme/trie", branch="key_val_indexed2" }
 trie-root = { git="https://github.com/cheme/trie", branch="key_val_indexed2" }
 trie-bench = { git="https://github.com/cheme/trie", branch="key_val_indexed2" }
+trie-standardmap = { git="https://github.com/cheme/trie", branch="key_val_indexed2" }
