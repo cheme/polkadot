@@ -1953,8 +1953,7 @@ dependencies = [
 [[package]]
 name = "hash-db"
 version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#f5af5f76c19b079cc1385087ce89020c614abdf0"
 
 [[package]]
 name = "hash256-std-hasher"
@@ -9053,8 +9052,7 @@ dependencies = [
 [[package]]
 name = "trie-root"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "652931506d2c1244d7217a70b99f56718a7b4161b37f04e7cd868072a99f68cd"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#f5af5f76c19b079cc1385087ce89020c614abdf0"
 dependencies = [
  "hash-db",
 ]
@@ -9723,3 +9721,18 @@ dependencies = [
  "glob 0.3.0",
  "libc",
 ]
+
+[[patch.unused]]
+name = "memory-db"
+version = "0.24.0"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#f5af5f76c19b079cc1385087ce89020c614abdf0"
+
+[[patch.unused]]
+name = "trie-bench"
+version = "0.24.0"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#f5af5f76c19b079cc1385087ce89020c614abdf0"
+
+[[patch.unused]]
+name = "trie-db"
+version = "0.22.0"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#f5af5f76c19b079cc1385087ce89020c614abdf0"
