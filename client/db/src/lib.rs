@@ -2877,7 +2877,7 @@ pub(crate) mod tests {
 	fn header_cht_root_works() {
 		use sc_client_api::ProvideChtRoots;
 
-		let backend = Backend::<Block>::new_test(10, 10);
+		let backend = Backend::<Block>::new_test(10, 10, Default::default());
 
 		// insert 1 + SIZE + SIZE + 1 blocks so that CHT#0 is created
 		let mut prev_hash = insert_header(&backend, 0, Default::default(), None, Default::default());

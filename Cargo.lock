@@ -1651,7 +1651,7 @@ dependencies = [
  "log",
  "once_cell 1.4.0",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "paste",
  "pretty_assertions",
  "serde",
@@ -2173,12 +2173,12 @@ checksum = "d36fab90f82edc3c747f9d438e06cf0a491055896f2a279638bb5beed6c40177"
 [[package]]
 name = "hash-db"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 
 [[package]]
 name = "hash256-std-hasher"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 dependencies = [
  "crunchy",
 ]
@@ -2713,7 +2713,7 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "keccak-hasher"
 version = "0.15.3"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 dependencies = [
  "hash-db",
  "hash256-std-hasher 0.15.2 (git+https://github.com/cheme/trie?branch=key_val_indexed2)",
@@ -2741,21 +2741,11 @@ dependencies = [
 
 [[package]]
 name = "kvdb"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e763b2a9b500ba47948061d1e8bc3b5f03a8a1f067dbcf822a4d2c84d2b54a3a"
-dependencies = [
- "parity-util-mem 0.6.0",
- "smallvec 1.4.1",
-]
-
-[[package]]
-name = "kvdb"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0315ef2f688e33844400b31f11c263f2b3dc21d8b9355c6891c5f185fae43f9a"
 dependencies = [
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "smallvec 1.4.1",
 ]
 
@@ -2765,8 +2755,8 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73de822b260a3bdfb889dbbb65bb2d473eee2253973d6fa4a5d149a2a4a7c66e"
 dependencies = [
- "kvdb 0.7.0",
- "parity-util-mem 0.7.0",
+ "kvdb",
+ "parity-util-mem",
  "parking_lot 0.10.2",
 ]
 
@@ -2777,11 +2767,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c341ef15cfb1f923fa3b5138bfbd2d4813a2c1640b473727a53351c7f0b0fa2"
 dependencies = [
  "fs-swap",
- "kvdb 0.7.0",
+ "kvdb",
  "log",
  "num_cpus",
  "owning_ref",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "parking_lot 0.10.2",
  "regex",
  "rocksdb",
@@ -2796,10 +2786,10 @@ checksum = "2701a1369d6ea4f1b9f606db46e5e2a4a8e47f22530a07823d653f85ab1f6c34"
 dependencies = [
  "futures 0.3.5",
  "js-sys",
- "kvdb 0.7.0",
+ "kvdb",
  "kvdb-memorydb",
  "log",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "send_wrapper 0.3.0",
  "wasm-bindgen",
  "web-sys",
@@ -3492,11 +3482,11 @@ dependencies = [
 [[package]]
 name = "memory-db"
 version = "0.24.1"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 dependencies = [
  "hash-db",
  "hashbrown 0.8.1",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
 ]
 
 [[package]]
@@ -3702,7 +3692,7 @@ dependencies = [
  "futures 0.3.5",
  "hash-db",
  "hex",
- "kvdb 0.7.0",
+ "kvdb",
  "kvdb-rocksdb",
  "lazy_static",
  "log",
@@ -3710,7 +3700,7 @@ dependencies = [
  "node-runtime",
  "node-testing",
  "parity-db",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "rand 0.7.3",
  "sc-basic-authorship",
  "sc-cli",
@@ -5234,18 +5224,6 @@ dependencies = [
 
 [[package]]
 name = "parity-util-mem"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e42755f26e5ea21a6a819d9e63cbd70713e9867a2b767ec2cc65ca7659532c5"
-dependencies = [
- "cfg-if",
- "impl-trait-for-tuples",
- "parity-util-mem-derive",
- "winapi 0.3.9",
-]
-
-[[package]]
-name = "parity-util-mem"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "297ff91fa36aec49ce183484b102f6b75b46776822bd81525bfc4cc9b0dd0f5c"
@@ -6412,7 +6390,7 @@ dependencies = [
  "names",
  "nix",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "rand 0.7.3",
  "regex",
  "rpassword",
@@ -6451,7 +6429,7 @@ dependencies = [
  "futures 0.3.5",
  "hash-db",
  "hex-literal",
- "kvdb 0.7.0",
+ "kvdb",
  "kvdb-memorydb",
  "lazy_static",
  "log",
@@ -6488,14 +6466,14 @@ dependencies = [
  "env_logger",
  "hash-db",
  "historied-db",
- "kvdb 0.7.0",
+ "kvdb",
  "kvdb-memorydb",
  "kvdb-rocksdb",
  "linked-hash-map",
  "log",
  "parity-db",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "parking_lot 0.10.2",
  "quickcheck",
  "rocksdb",
@@ -6912,7 +6890,7 @@ dependencies = [
  "ansi_term 0.12.1",
  "futures 0.3.5",
  "log",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "sc-client-api",
  "sc-network",
  "sp-blockchain",
@@ -7221,7 +7199,7 @@ dependencies = [
  "lazy_static",
  "log",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "parking_lot 0.10.2",
  "pin-project",
  "rand 0.7.3",
@@ -7313,7 +7291,7 @@ dependencies = [
  "env_logger",
  "log",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "parity-util-mem-derive",
  "parking_lot 0.10.2",
  "sc-client-api",
@@ -7368,7 +7346,7 @@ dependencies = [
  "linked-hash-map",
  "log",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "parking_lot 0.10.2",
  "retain_mut",
  "serde",
@@ -7393,7 +7371,7 @@ dependencies = [
  "intervalier",
  "log",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "parking_lot 0.10.2",
  "sc-block-builder",
  "sc-client-api",
@@ -8099,7 +8077,7 @@ dependencies = [
  "merlin",
  "num-traits",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "parking_lot 0.10.2",
  "pretty_assertions",
  "primitive-types",
@@ -8129,8 +8107,8 @@ dependencies = [
 name = "sp-database"
 version = "2.0.0-rc6"
 dependencies = [
- "kvdb 0.6.0",
- "parity-util-mem 0.7.0",
+ "kvdb",
+ "parity-util-mem",
  "parking_lot 0.10.2",
 ]
 
@@ -8289,7 +8267,7 @@ dependencies = [
  "impl-trait-for-tuples",
  "log",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "paste",
  "rand 0.7.3",
  "serde",
@@ -8459,7 +8437,7 @@ name = "sp-test-primitives"
 version = "2.0.0-rc6"
 dependencies = [
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "serde",
  "sp-application-crypto",
  "sp-core",
@@ -8818,7 +8796,7 @@ dependencies = [
  "pallet-babe",
  "pallet-timestamp",
  "parity-scale-codec",
- "parity-util-mem 0.7.0",
+ "parity-util-mem",
  "sc-block-builder",
  "sc-executor",
  "sc-service",
@@ -9516,7 +9494,7 @@ checksum = "a7f741b240f1a48843f9b8e0444fb55fb2a4ff67293b50a9179dfd5ea67f8d41"
 [[package]]
 name = "trie-bench"
 version = "0.25.0"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 dependencies = [
  "criterion",
  "hash-db",
@@ -9531,7 +9509,7 @@ dependencies = [
 [[package]]
 name = "trie-db"
 version = "0.22.1"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 dependencies = [
  "hash-db",
  "hashbrown 0.8.1",
@@ -9543,7 +9521,7 @@ dependencies = [
 [[package]]
 name = "trie-root"
 version = "0.16.0"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 dependencies = [
  "hash-db",
 ]
@@ -9551,7 +9529,7 @@ dependencies = [
 [[package]]
 name = "trie-standardmap"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#24bcbf7867f4ce1e8e4b9ee9443c2e92e933c886"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#90e7f96fd436583c17d42a6b4e320567757e1133"
 dependencies = [
  "hash-db",
  "keccak-hasher",

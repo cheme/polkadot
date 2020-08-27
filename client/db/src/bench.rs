@@ -123,7 +123,8 @@ impl<B: BlockT> BenchmarkingState<B> {
 			genesis_root: Default::default(),
 			record: Default::default(),
 			shared_cache,
-			key_tracker: Default::default(),
+			main_key_tracker: Default::default(),
+			child_key_tracker: Default::default(),
 			read_write_tracker: Default::default(),
 			whitelist: Default::default(),
 		};
