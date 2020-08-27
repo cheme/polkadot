@@ -26,9 +26,9 @@
 use sp_std::prelude::*;
 use frame_support::{
 	decl_module, decl_storage, decl_event, decl_error,
-	traits::{ChangeMembers, InitializeMembers, EnsureOrigin},
+	traits::{ChangeMembers, InitializeMembers, EnsureOrigin, Contains},
 };
-use frame_system::{self as system, ensure_signed};
+use frame_system::ensure_signed;
 
 pub trait Trait<I=DefaultInstance>: frame_system::Trait {
 	/// The overarching event type.
@@ -264,6 +264,16 @@ impl<T: Trait<I>, I: Instance> Module<T, I> {
 	}
 }
 
+impl<T: Trait<I>, I: Instance> Contains<T::AccountId> for Module<T, I> {
+	fn sorted_members() -> Vec<T::AccountId> {
+		Self::members()
+	}
+
+	fn count() -> usize {
+		Members::<T, I>::decode_len().unwrap_or(0)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -274,18 +284,13 @@ mod tests {
 		ord_parameter_types
 	};
 	use sp_core::H256;
-	// The testing primitives are very useful for avoiding having to work with signatures
-	// or public keys. `u64` is used as the `AccountId` and no `Signature`s are required.
 	use sp_runtime::{Perbill, traits::{BlakeTwo256, IdentityLookup, BadOrigin}, testing::Header};
 	use frame_system::EnsureSignedBy;
 
 	impl_outer_origin! {
-		pub enum Origin for Test  where system = frame_system {}
+		pub enum Origin for Test where system = frame_system {}
 	}
 
-	// For testing the pallet, we construct most of a mock runtime. This means
-	// first constructing a configuration type (`Test`) which `impl`s each of the
-	// configuration traits of pallets we want to use.
 	#[derive(Clone, Eq, PartialEq)]
 	pub struct Test;
 	parameter_types! {
@@ -319,6 +324,7 @@ mod tests {
 		type AccountData = ();
 		type OnNewAccount = ();
 		type OnKilledAccount = ();
+		type SystemWeightInfo = ();
 	}
 	ord_parameter_types! {
 		pub const One: u64 = 1;
@@ -370,8 +376,6 @@ mod tests {
 
 	type Membership = Module<Test>;
 
-	// This function basically just builds a genesis storage key/value store according to
-	// our desired mockup.
 	fn new_test_ext() -> sp_io::TestExternalities {
 		let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
 		// We use default for brevity, but you can configure as desired if needed.

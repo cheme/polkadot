@@ -180,8 +180,8 @@ pub fn insert_hash_to_key_mapping<N: TryInto<u32>, H: AsRef<[u8]> + Clone>(
 ) -> sp_blockchain::Result<()> {
 	transaction.set_from_vec(
 		key_lookup_col,
-		hash.clone().as_ref(),
-		number_and_hash_to_lookup_key(number, hash)?,
+		hash.as_ref(),
+		number_and_hash_to_lookup_key(number, hash.clone())?,
 	);
 	Ok(())
 }
@@ -322,7 +322,7 @@ pub fn check_database_type(db: &dyn Database<DbHash>, db_type: DatabaseType) -> 
 		None => {
 			let mut transaction = Transaction::new();
 			transaction.set(COLUMN_META, meta_keys::TYPE, db_type.as_str().as_bytes());
-			db.commit(transaction)
+			db.commit(transaction)?;
 		},
 	}
 

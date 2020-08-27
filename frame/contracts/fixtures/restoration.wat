@@ -1,14 +1,33 @@
 (module
-	(import "env" "ext_set_storage" (func $ext_set_storage (param i32 i32 i32)))
-	(import "env" "ext_restore_to"
-		(func $ext_restore_to
+	(import "seal0" "seal_set_storage" (func $seal_set_storage (param i32 i32 i32)))
+	(import "seal0" "seal_input" (func $seal_input (param i32 i32)))
+	(import "seal0" "seal_restore_to"
+		(func $seal_restore_to
 			(param i32 i32 i32 i32 i32 i32 i32 i32)
 		)
 	)
 	(import "env" "memory" (memory 1 1))
 
+	(func $assert (param i32)
+		(block $ok
+			(br_if $ok
+				(get_local 0)
+			)
+			(unreachable)
+		)
+	)
+
 	(func (export "call")
-		(call $ext_restore_to
+		;; copy code hash to contract memory
+		(call $seal_input (i32.const 264) (i32.const 304))
+		(call $assert
+			(i32.eq
+				(i32.load (i32.const 304))
+				(i32.const 32)
+			)
+		)
+
+		(call $seal_restore_to
 			;; Pointer and length of the encoded dest buffer.
 			(i32.const 256)
 			(i32.const 8)
@@ -26,14 +45,14 @@
 	)
 	(func (export "deploy")
 		;; Data to restore
-		(call $ext_set_storage
+		(call $seal_set_storage
 			(i32.const 0)
 			(i32.const 0)
 			(i32.const 4)
 		)
 
 		;; ACL
-		(call $ext_set_storage
+		(call $seal_set_storage
 			(i32.const 100)
 			(i32.const 0)
 			(i32.const 4)
@@ -49,12 +68,11 @@
 	;; Address of bob
 	(data (i32.const 256) "\02\00\00\00\00\00\00\00")
 
-	;; Code hash of SET_RENT
-	(data (i32.const 264)
-		"\ab\d6\58\65\1e\83\6e\4a\18\0d\f2\6d\bc\42\ba\e9"
-		"\3d\64\76\e5\30\5b\33\46\bb\4d\43\99\38\21\ee\32"
-	)
+	;; [264, 296) Code hash of SET_RENT (copied here by seal_input)
 
-	;; Rent allowance
+	;; [296, 304) Rent allowance
 	(data (i32.const 296) "\32\00\00\00\00\00\00\00")
+
+	;; [304, 308) Size of SET_RENT buffer
+	(data (i32.const 304) "\20")
 )
