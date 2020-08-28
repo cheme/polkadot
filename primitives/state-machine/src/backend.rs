@@ -19,9 +19,15 @@
 
 use hash_db::Hasher;
 use codec::{Decode, Encode};
-use sp_core::{traits::RuntimeCode, storage::{ChildInfo, well_known_keys}};
-use crate::{UsageInfo, StorageKey, StorageValue, StorageCollection};
+use sp_core::{
+	traits::RuntimeCode,
+	storage::{ChildInfo, well_known_keys, TrackedStorageKey}
+};
+use crate::{
+	UsageInfo, StorageKey, StorageValue, StorageCollection, ChildStorageCollection,
+};
 use sp_trie::{ProofInput, BackendProof};
+
 
 /// Access the state of the recording proof backend of a backend.
 pub type RecordBackendFor<B, H> = sp_trie::RecordBackendFor<<B as Backend<H>>::StorageProof, H>;
@@ -232,7 +238,13 @@ pub trait Backend<H: Hasher>: Sized + std::fmt::Debug {
 	}
 
 	/// Commit given transaction to storage.
-	fn commit(&self, _: H::Out, _: Self::Transaction, _: StorageCollection) -> Result<(), Self::Error> {
+	fn commit(
+		&self,
+		_: H::Out,
+		_: Self::Transaction,
+		_: StorageCollection,
+		_: ChildStorageCollection,
+	) -> Result<(), Self::Error> {
 		unimplemented!()
 	}
 
@@ -246,10 +258,13 @@ pub trait Backend<H: Hasher>: Sized + std::fmt::Debug {
 		unimplemented!()
 	}
 
-	/// Update the whitelist for tracking db reads/writes
-	fn set_whitelist(&self, _: Vec<Vec<u8>>) {
-		unimplemented!()
+	/// Get the whitelist for tracking db reads/writes
+	fn get_whitelist(&self) -> Vec<TrackedStorageKey> {
+		Default::default()
 	}
+
+	/// Update the whitelist for tracking db reads/writes
+	fn set_whitelist(&self, _: Vec<TrackedStorageKey>) {}
 }
 
 /// Backend that can be instantiated from intital content.
