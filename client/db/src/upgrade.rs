@@ -412,7 +412,9 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		db: db_read.clone(),
 	};
 	let mut tx = kv_db.transaction();
+	let mut longest_key = 0;
 	while let Some(Ok((k, v))) = iter.next() {
+		longest_key = std::cmp::max(longest_key, k.as_slice().len());
 		kv_db.unchecked_new_single(k.as_slice(), v, &mut tx);
 		count_tx += 1;
 		if count_tx == 1000 {
@@ -424,6 +426,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		}
 	}
 	kv_db.write_change_set(tx).expect("write_tx last");
+	println!("longest key is {} byte", longest_key);
 
 	let now = Instant::now();
 	let mut iter = sp_trie::TrieDBIterator::new(&trie).expect("titer");
