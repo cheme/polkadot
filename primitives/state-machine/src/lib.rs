@@ -72,7 +72,7 @@ pub use overlayed_changes::{
 pub use proving_backend::{
 	create_proof_check_backend, ProofRecorder, ProvingBackend, ProvingBackendRecorder,
 };
-pub use trie_backend_essence::{TrieBackendStorage, Storage};
+pub use trie_backend_essence::{TrieBackendStorage, Storage, OverlayWithIndexes};
 pub use trie_backend::TrieBackend;
 pub use error::{Error, ExecutionError};
 pub use in_memory_backend::{new_in_mem, KVInMem};
@@ -1323,7 +1323,7 @@ mod tests {
 			cache.transaction.unwrap()
 		};
 		let mut duplicate = false;
-		for (k, (value, rc)) in transaction.drain().iter() {
+		for (k, (value, rc)) in transaction.db.drain().iter() {
 			// look for a key inserted twice: transaction rc is 2
 			if *rc == 2 {
 				duplicate = true;

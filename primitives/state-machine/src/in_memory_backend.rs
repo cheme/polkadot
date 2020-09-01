@@ -78,7 +78,16 @@ where
 {
 	let db = MemoryDB::default();
 	let kv_db = KVInMem::default();
-	let mut backend = TrieBackend::new(db, Default::default(), Arc::new(kv_db));
+	// this does not share values with kvdb that is bad TODO ??
+	let kv_db_2 = BTreeMap::new();
+	let indexes = BTreeMap::new();
+	let mut backend = TrieBackend::new(
+		db,
+		Default::default(),
+		Arc::new(kv_db),
+		Arc::new(kv_db_2),
+		Arc::new(indexes),
+	);
 	backend.insert(std::iter::empty());
 	backend
 }
@@ -138,7 +147,13 @@ where
 	pub fn update_backend(&self, root: H::Out, changes: MemoryDB<H>) -> Self {
 		let mut clone = self.backend_storage().clone();
 		clone.consolidate(changes);
-		Self::new(clone, root, self.alternative.clone())
+		Self::new(
+			clone,
+			root,
+			self.alternative.clone(),
+			self.alternative_trie_values.clone(),
+			self.alternative_indexes.clone(),
+		)
 	}
 
 	/// Compare with another in-memory backend.
@@ -152,7 +167,13 @@ where
 	H::Out: Codec + Ord,
 {
 	fn clone(&self) -> Self {
-		TrieBackend::new(self.backend_storage().clone(), self.root().clone(), self.alternative.clone())
+		TrieBackend::new(
+			self.backend_storage().clone(),
+			self.root().clone(),
+			self.alternative.clone(),
+			self.alternative_trie_values.clone(),
+			self.alternative_indexes.clone(),
+		)
 	}
 }
 

@@ -186,6 +186,8 @@ impl core::Benchmark for TrieReadBenchmark {
 			storage,
 			self.root,
 			Arc::new(alternative),
+			Arc::new(std::collections::BTreeMap::new()),
+			Arc::new(std::collections::BTreeMap::new()),
 		);
 		for (warmup_key, warmup_value) in self.warmup_keys.iter() {
 			let value = trie_backend.storage(&warmup_key[..])

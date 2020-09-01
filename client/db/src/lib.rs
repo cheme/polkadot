@@ -71,7 +71,7 @@ use sp_blockchain::{
 };
 use codec::{Decode, Encode};
 use hash_db::Prefix;
-use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
+use sp_trie::{MemoryDB, prefixed_key};
 use sp_database::Transaction;
 use parking_lot::RwLock;
 use sp_core::{ChangesTrieConfiguration, Hasher};
@@ -86,7 +86,7 @@ use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
 	StorageCollection, ChildStorageCollection,
 	backend::Backend as StateBackend, StateMachineStats,
-	kv_backend::KVBackend,
+	kv_backend::KVBackend, OverlayWithIndexes,
 };
 use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
@@ -183,10 +183,10 @@ impl trie_db::partial_db::KVBackend for HistoriedDB {
 		self.storage_inner(key, crate::columns::StateValues)
 			.unwrap()
 	}
-	fn write(&mut self, key: &[u8], value: &[u8]) {
+	fn write(&mut self, _key: &[u8], _value: &[u8]) {
 		unimplemented!("Historied db is read only")
 	}
-	fn remove(&mut self, key: &[u8]) {
+	fn remove(&mut self, _key: &[u8]) {
 		unimplemented!("Historied db is read only")
 	}
 	fn iter<'a>(&'a self) -> trie_db::partial_db::KVBackendIter<'a> {
@@ -214,7 +214,7 @@ fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
 	result
 }
 
-pub mod impl_index_backend {
+mod impl_index_backend {
 	use super::*;
 	use trie_db::partial_db::{index_tree_key, value_prefix_index, Index, IndexPosition, IndexBackendIter};
 	// TODO those trait needs error handling
@@ -224,10 +224,10 @@ pub mod impl_index_backend {
 				.unwrap()
 				.map(decode_index)
 		}
-		fn write(&mut self, depth: usize, mut position: IndexPosition, index: Index) {
+		fn write(&mut self, _depth: usize, _position: IndexPosition, _index: Index) {
 			unimplemented!("Historied db is read only")
 		}
-		fn remove(&mut self, depth: usize, index: IndexPosition) {
+		fn remove(&mut self, _depth: usize, _index: IndexPosition) {
 			unimplemented!("Historied db is read only")
 		}
 		fn iter<'a>(&'a self, depth: usize, depth_base: usize, from_index: &[u8]) -> IndexBackendIter<'a> {
@@ -1006,7 +1006,7 @@ impl<Block: BlockT> ProvideChtRoots<Block> for BlockchainDb<Block> {
 /// Database transaction
 pub struct BlockImportOperation<Block: BlockT> {
 	old_state: SyncingCachingState<RefTrackingState<Block>, Block>,
-	db_updates: PrefixedMemoryDB<HashFor<Block>>,
+	db_updates: OverlayWithIndexes<HashFor<Block>>,
 	storage_updates: StorageCollection,
 	child_storage_updates: ChildStorageCollection,
 	offchain_storage_updates: OffchainOverlayedChanges,
@@ -1076,7 +1076,7 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 		// Currently cache isn't implemented on full nodes.
 	}
 
-	fn update_db_storage(&mut self, update: PrefixedMemoryDB<HashFor<Block>>) -> ClientResult<()> {
+	fn update_db_storage(&mut self, update: OverlayWithIndexes<HashFor<Block>>) -> ClientResult<()> {
 		self.db_updates = update;
 		Ok(())
 	}
@@ -1623,7 +1623,7 @@ impl<Block: BlockT> Backend<Block> {
 				let mut bytes: u64 = 0;
 				let mut removal: u64 = 0;
 				let mut bytes_removal: u64 = 0;
-				for (mut key, (val, rc)) in operation.db_updates.drain() {
+				for (mut key, (val, rc)) in operation.db_updates.db.drain() {
 					if !self.storage.prefix_keys {
 						// Strip prefix
 						key.drain(0 .. key.len() - DB_HASH_LEN);
@@ -1938,7 +1938,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		Ok(BlockImportOperation {
 			pending_block: None,
 			old_state,
-			db_updates: PrefixedMemoryDB::default(),
+			db_updates: OverlayWithIndexes::default(),
 			storage_updates: Default::default(),
 			child_storage_updates: Default::default(),
 			offchain_storage_updates: Default::default(),
@@ -1978,6 +1978,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		});
 
 		let historied_update = operation.storage_updates.clone();
+		let index_changeset = operation.db_updates.indexes.clone(); // TODO see how to avoid this clone later
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
 				// TODO avoid failure or manage pending on those historied operation
@@ -2022,6 +2023,19 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					};
 					let (tx, nb) = historied_db.process_change_set(historied_update);
 					warn!("committed {:?} change in historied db", nb);
+					historied_db.write_change_set(tx)?;
+					// write indexes
+					let mut tx = historied_db.transaction();
+					let mut nb = 0;
+					for (k, index) in index_changeset {
+						nb += 1;
+						historied_db.update_single_index(
+							k.as_slice(),
+							Some(crate::encode_index(index)),
+							&mut tx,
+						); 
+					}
+					warn!("committed {:?} index in historied db", nb);
 					historied_db.write_change_set(tx)?;
 				}
 				if let Some(latest_final) = last_final {
@@ -2244,7 +2258,14 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						do_assert: self.historied_state_do_assert,
 					}
 				};
-				let db_state = DbState::<Block>::new(Arc::new(genesis_storage), root, Arc::new(alternative));
+				let alternative = Arc::new(alternative);
+				let db_state = DbState::<Block>::new(
+					Arc::new(genesis_storage),
+					root,
+					alternative.clone(),
+					alternative.clone(),
+					alternative.clone(),
+				);
 				let state = RefTrackingState::new(db_state, self.storage.clone(), None);
 				let caching_state = CachingState::new(
 					state,
@@ -2295,7 +2316,14 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						}
 					};
 
-					let db_state = DbState::<Block>::new(self.storage.clone(), root, Arc::new(alternative));
+					let alternative = Arc::new(alternative);
+					let db_state = DbState::<Block>::new(
+						self.storage.clone(),
+						root,
+						alternative.clone(),
+						alternative.clone(),
+						alternative.clone(),
+					);
 					let state = RefTrackingState::new(
 						db_state,
 						self.storage.clone(),

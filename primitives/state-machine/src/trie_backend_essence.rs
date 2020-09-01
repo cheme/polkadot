@@ -332,17 +332,81 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> hash_db::HashDBRef<H, DBValue
 	}
 }
 
+pub trait IndexChanges {
+	fn push_index_change(&mut self, changes: std::collections::BTreeMap<Vec<u8>, trie_db::partial_db::Index>);
+}
+
 /// Key-value pairs storage that is used by trie backend essence.
 pub trait TrieBackendStorage<H: Hasher>: Send + Sync {
 	/// Type of in-memory overlay.
-	type Overlay: hash_db::HashDB<H, DBValue> + Default + Consolidate;
+	type Overlay: hash_db::HashDB<H, DBValue> + Default + Consolidate + IndexChanges;
 	/// Get the value stored at key.
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String>;
 }
 
+#[derive(Clone)]
+pub struct OverlayWithIndexes<H: Hasher> {
+	pub db: PrefixedMemoryDB<H>,
+	pub indexes: std::collections::BTreeMap<Vec<u8>, trie_db::partial_db::Index>,
+}
+
+impl<H: Hasher> hash_db::HashDB<H, DBValue> for OverlayWithIndexes<H> {
+	fn get(&self, key: &H::Out, prefix: Prefix) -> Option<DBValue> {
+		self.db.get(key, prefix)
+	}
+
+	fn contains(&self, hash: &H::Out, prefix: Prefix) -> bool {
+		self.db.contains(hash, prefix)
+	}
+
+	fn insert(&mut self, prefix: Prefix, value: &[u8]) -> H::Out {
+		self.db.insert(prefix, value)
+	}
+
+	fn emplace(&mut self, key: H::Out, prefix: Prefix, value: DBValue) {
+		self.db.emplace(key, prefix, value)
+	}
+
+	fn remove(&mut self, key: &H::Out, prefix: Prefix) {
+		self.db.remove(key, prefix)
+	}
+}
+
+impl<H: Hasher> hash_db::AsHashDB<H, DBValue> for OverlayWithIndexes<H> {
+	fn as_hash_db<'b>(&'b self) -> &'b (dyn hash_db::HashDB<H, DBValue> + 'b) { self }
+	fn as_hash_db_mut<'b>(&'b mut self) -> &'b mut (dyn hash_db::HashDB<H, DBValue> + 'b) { self }
+}
+
+impl<H: Hasher> Consolidate for OverlayWithIndexes<H> {
+	fn consolidate(&mut self, other: Self) {
+		self.db.consolidate(other.db);
+		for (k, v) in other.indexes.into_iter() {
+			self.indexes.insert(k, v);
+		}
+	}
+}
+
+impl<H: Hasher> IndexChanges for OverlayWithIndexes<H> {
+	fn push_index_change(
+		&mut self,
+		changes: std::collections::BTreeMap<Vec<u8>, trie_db::partial_db::Index>,
+	) {
+		self.indexes = changes;
+	}
+}
+
+impl<H: Hasher> Default for OverlayWithIndexes<H> {
+	fn default() -> Self {
+		OverlayWithIndexes {
+			db: Default::default(),
+			indexes: Default::default(),
+		}
+	}
+}
+
 // This implementation is used by normal storage trie clients.
 impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {
-	type Overlay = PrefixedMemoryDB<H>;
+	type Overlay = OverlayWithIndexes<H>;
 
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
 		Storage::<H>::get(self.deref(), key, prefix)
@@ -350,11 +414,11 @@ impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {
 }
 
 // This implementation is used by test storage trie clients.
-impl<H: Hasher> TrieBackendStorage<H> for PrefixedMemoryDB<H> {
-	type Overlay = PrefixedMemoryDB<H>;
+impl<H: Hasher> TrieBackendStorage<H> for OverlayWithIndexes<H> {
+	type Overlay = OverlayWithIndexes<H>;
 
 	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
-		Ok(hash_db::HashDB::get(self, key, prefix))
+		Ok(hash_db::HashDB::get(&self.db, key, prefix))
 	}
 }
 
@@ -422,7 +486,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> hash_db::HashDBRef<H, DBValue>
 #[cfg(test)]
 mod test {
 	use sp_core::{Blake2Hasher, H256};
-	use sp_trie::{TrieMut, PrefixedMemoryDB, trie_types::TrieDBMut, KeySpacedDBMut};
+	use sp_trie::{TrieMut, trie_types::TrieDBMut, KeySpacedDBMut};
+	use crate::OverlayWithIndexes;
 	use super::*;
 
 	#[test]
@@ -434,7 +499,7 @@ mod test {
 		// Contains child trie
 		let mut root_2 = H256::default();
 
-		let mut mdb = PrefixedMemoryDB::<Blake2Hasher>::default();
+		let mut mdb = OverlayWithIndexes::<Blake2Hasher>::default();
 		{
 			let mut trie = TrieDBMut::new(&mut mdb, &mut root_1);
 			trie.insert(b"3", &[1]).expect("insert failed");
