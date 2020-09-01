@@ -145,13 +145,9 @@ type TreeBackend<'a> = historied_db::backend::in_memory::MemoryOnly<
 /// Historied value with multiple paralell branches.
 pub type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
-impl KVBackend for HistoriedDB {
-	fn assert_value(&self) -> bool {
-		self.do_assert
-	}
-
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		if let Some(v) = self.db.get(crate::columns::StateValues, key)
+impl HistoriedDB {
+	fn storage_inner(&self, key: &[u8], column: u32) -> Result<Option<Vec<u8>>, String> {
+		if let Some(v) = self.db.get(column, key)
 			.map_err(|e| format!("KVDatabase backend error: {:?}", e))? {
 			let v: HValue = Decode::decode(&mut &v[..])
 				.map_err(|e| format!("KVDatabase decode error: {:?}", e))?;
@@ -166,6 +162,92 @@ impl KVBackend for HistoriedDB {
 			}))
 		} else {
 			Ok(None)
+		}
+	}
+
+}
+impl KVBackend for HistoriedDB {
+	fn assert_value(&self) -> bool {
+		self.do_assert
+	}
+
+	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+		self.storage_inner(key, crate::columns::StateValues)
+	}
+}
+
+// TODO those trait needs error handling
+// TODO split trait between mut and not mut.
+impl trie_db::partial_db::KVBackend for HistoriedDB {
+	fn read(&self, key: &[u8]) -> Option<Vec<u8>> {
+		self.storage_inner(key, crate::columns::StateValues)
+			.unwrap()
+	}
+	fn write(&mut self, key: &[u8], value: &[u8]) {
+		unimplemented!("Historied db is read only")
+	}
+	fn remove(&mut self, key: &[u8]) {
+		unimplemented!("Historied db is read only")
+	}
+	fn iter<'a>(&'a self) -> trie_db::partial_db::KVBackendIter<'a> {
+		Box::new(self.iter().map(|(k, v)| (k.to_vec(), v)))
+	}
+	fn iter_from<'a>(&'a self, start: &[u8]) -> trie_db::partial_db::KVBackendIter<'a> {
+		Box::new(self.iter_from(start, crate::columns::StateValues).map(|(k, v)| (k.to_vec(), v)))
+	}
+}
+fn decode_index(mut encoded: Vec<u8>) -> trie_db::partial_db::Index {
+	let mut buff: [u8; 4] = [0, 0, 0, 0]; 
+	let start = encoded.len() - 4;
+	buff.copy_from_slice(&encoded[start..]);
+	let actual_depth = u32::from_le_bytes(buff) as usize;
+	encoded.truncate(start);
+	trie_db::partial_db::Index {
+		hash: encoded,
+		actual_depth,
+	}
+}
+fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
+	let mut result = index.hash;
+	let depth = index.actual_depth.to_le_bytes();
+	result.extend_from_slice(&depth[..]);
+	result
+}
+
+pub mod impl_index_backend {
+	use super::*;
+	use trie_db::partial_db::{index_tree_key, value_prefix_index, Index, IndexPosition, IndexBackendIter};
+	// TODO those trait needs error handling
+	impl trie_db::partial_db::IndexBackend for HistoriedDB {
+		fn read(&self, depth: usize, index: &[u8]) -> Option<Index> {
+			self.storage_inner(&index_tree_key(depth, index)[..], crate::columns::StateIndexes)
+				.unwrap()
+				.map(decode_index)
+		}
+		fn write(&mut self, depth: usize, mut position: IndexPosition, index: Index) {
+			unimplemented!("Historied db is read only")
+		}
+		fn remove(&mut self, depth: usize, index: IndexPosition) {
+			unimplemented!("Historied db is read only")
+		}
+		fn iter<'a>(&'a self, depth: usize, depth_base: usize, from_index: &[u8]) -> IndexBackendIter<'a> {
+			let l_size = std::mem::size_of::<u32>();
+			let depth_prefix = &(depth as u32).to_be_bytes()[..];
+			let base = depth_prefix.len();
+			let start = &index_tree_key(depth, from_index);
+			let iter = self.iter_from(start, crate::columns::StateIndexes);
+			// TODO switch to IndexPosition instead of vecs
+			let end = value_prefix_index(depth_base, start.to_vec(), base);
+			// TODO the end filter is not optimal, can result in more query
+			// and there is primitive to do it in rocksdb
+			Box::new(iter.into_iter().filter_map(move |(k, ix)| {
+				if end.as_ref().map(|end| &k[..] < &end[..]).unwrap_or(true) {
+					let k = k[l_size..].to_vec();
+					Some((k, decode_index(ix)))
+				} else {
+					None
+				}
+			}))
 		}
 	}
 }
@@ -192,6 +274,28 @@ impl HistoriedDB {
 			}
 		})
 	}
+	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Box<[u8]>, Vec<u8>)> + 'a {
+		let current_state = &self.current_state;
+		self.db.iter_from(column, start).filter_map(move |(k, v)| {
+			let v: HValue = Decode::decode(&mut &v[..])
+				.map_err(|e| {
+					warn!("k {:?}, v {:?}", k, v);
+					e
+				})
+				.expect("Invalid encoded historied value, DB corrupted");
+			use historied_db::historied::ValueRef;
+			if let Some(mut v) = v.get(&current_state) {
+				match v.pop() {
+					Some(0u8) => None,
+					Some(1u8) => Some((k, v)),
+					None | Some(_) => panic!("inconsistent value, DB corrupted"),
+				}
+			} else {
+				None
+			}
+		})
+	}
+
 }
 
 /// Key value db change for at a given block of an historied DB.

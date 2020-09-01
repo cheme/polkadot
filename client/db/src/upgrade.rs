@@ -495,8 +495,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 			};
 			let mut tx = historied_db.transaction();
 			for (k, v) in indexes {
-				historied_db.unchecked_new_single_index(k.as_slice(), v.hash, &mut tx);
-				//historied_db.update_single(k.as_slice(), Some(v.hash), &mut tx);
+				historied_db.unchecked_new_single_index(k.as_slice(), crate::encode_index(v), &mut tx);
 			}
 			historied_db.write_change_set(tx);
 			println!("in mem index calculated rocksdb write : {}", now.elapsed().as_millis());
