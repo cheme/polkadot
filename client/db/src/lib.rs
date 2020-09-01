@@ -221,10 +221,14 @@ impl HistoriedDBMut {
 
 	/// write a single value in change set.
 	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
-		let histo = if let Ok(Some(histo)) = self.db.get(
-			crate::columns::StateValues,
-			k,
-		) {
+		self.update_single_inner(k, change, change_set, crate::columns::StateValues)
+	}
+	pub fn update_single_index(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
+		self.update_single_inner(k, change, change_set, crate::columns::StateIndexes)
+	}
+	/// write a single value in change set.
+	pub fn update_single_inner(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction, column: u32) {
+		let histo = if let Ok(Some(histo)) = self.db.get(column, k) {
 			Some(HValue::decode(&mut &histo[..]).expect("Bad encoded value in db, closing"))
 		} else {
 			if change.is_none() {
@@ -247,10 +251,10 @@ impl HistoriedDBMut {
 			new_value.set(vec![0], &self.current_state)
 		} {
 			historied_db::UpdateResult::Changed(()) => {
-				change_set.put(crate::columns::StateValues, k, new_value.encode().as_slice());
+				change_set.put(column, k, new_value.encode().as_slice());
 			},
 			historied_db::UpdateResult::Cleared(()) => {
-				change_set.delete(crate::columns::StateValues, k);
+				change_set.delete(column, k);
 			},
 			historied_db::UpdateResult::Unchanged => (), 
 		}
@@ -258,10 +262,16 @@ impl HistoriedDBMut {
 	/// write a single value, without checking current state,
 	/// please only use on new empty db.
 	pub fn unchecked_new_single(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
+		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateValues)
+	}
+	pub fn unchecked_new_single_index(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
+		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateIndexes)
+	}
+	pub fn unchecked_new_single_inner(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction, column: u32) {
 		v.push(1);
 		let value = HValue::new(v, &self.current_state, ((), ()));
 		let value = value.encode();
-		change_set.put(crate::columns::StateValues, k, value.as_slice());
+		change_set.put(column, k, value.as_slice());
 		// no need for no value set
 	}
 }

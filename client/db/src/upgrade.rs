@@ -281,6 +281,23 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	let hash = root_callback.root;
 	println!("hash calculated {:?} : {}", hash, now.elapsed().as_millis());
 
+	let now = Instant::now();
+
+	let mut indexes = std::collections::BTreeMap::new();
+	let indexes_conf = trie_db::partial_db::DepthIndexes::new(&[8]);
+	let mut root_callback = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut indexes, &indexes_conf);
+	let _state = management.get_db_state(&hash_for_root).expect("just added");
+	let iter_kv = historied_db.iter();
+	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
+	println!("in mem index calculated {:?} : {}", indexes.len(), now.elapsed().as_millis());
+	let now = Instant::now();
+
+	println!("in mem index calculated rocksdb write : {}", now.elapsed().as_millis());
+/*	let iter_indexes = 
+	trie_db::trie_visit_with_indexes::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
+	let hash = root_callback.root;*/
+
+
 	Ok(())
 }
 
@@ -459,6 +476,36 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let hash = root_callback.root;
 	println!("hash calcuated {:?} : {}", hash, now.elapsed().as_millis());
 
+	let now = Instant::now();
+
+	let mut try_index = |indexes_conf: &'static[u32], do_write: bool| { 
+		println!("index {:?}", indexes_conf);
+		let indexes_conf = trie_db::partial_db::DepthIndexes::new(indexes_conf);
+		let mut indexes = std::collections::BTreeMap::new();
+		let mut root_callback = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut indexes, &indexes_conf);
+		let iter_kv = historied_db.iter();
+		trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
+		println!("in mem index calculated {:?} : {}", indexes.len(), now.elapsed().as_millis());
+		if do_write {
+			let now = Instant::now();
+			let state = management.latest_state();
+			let mut historied_db = crate::HistoriedDBMut {
+				current_state: state,
+				db: db_read.clone(),
+			};
+			let mut tx = historied_db.transaction();
+			for (k, v) in indexes {
+				historied_db.unchecked_new_single_index(k.as_slice(), v.hash, &mut tx);
+				//historied_db.update_single(k.as_slice(), Some(v.hash), &mut tx);
+			}
+			historied_db.write_change_set(tx);
+			println!("in mem index calculated rocksdb write : {}", now.elapsed().as_millis());
+		}
+	};
+	// last checked max length was 120 so 240 index
+	try_index(&[8], false);
+	try_index(&[230], false);
+	try_index(&[100], true);
 	Ok(())
 }
 
