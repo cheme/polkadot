@@ -502,13 +502,15 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		}
 	};
 	// last checked max length was 120 so 240 index
-	try_index(&[8], false);
+/*	try_index(&[8], false);
 	try_index(&[16], false);
 	try_index(&[64], false);
 	try_index(&[96], false);
 	try_index(&[128], false);
 	try_index(&[230], false);
-	try_index(&[80], true);
+	try_index(&[80], true);*/
+
+	try_index(&[8], true);
 	Ok(())
 }
 
