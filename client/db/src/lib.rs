@@ -209,11 +209,10 @@ fn decode_index(mut encoded: Vec<u8>) -> trie_db::partial_db::Index {
 }
 fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
 	let mut result = index.hash;
-	let depth = index.actual_depth.to_le_bytes();
+	let depth = (index.actual_depth as u32).to_le_bytes();
 	result.extend_from_slice(&depth[..]);
 	result
 }
-
 mod impl_index_backend {
 	use super::*;
 	use trie_db::partial_db::{index_tree_key, value_prefix_index, Index, IndexPosition, IndexBackendIter};
