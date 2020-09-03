@@ -477,6 +477,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 				db: db_read.clone(),
 			};
 			let mut tx = historied_db.transaction();
+			let indexes_check = indexes.clone();
 			for (k, v) in indexes {
 				historied_db.unchecked_new_single_index(k.as_slice(), crate::encode_index(v), &mut tx);
 			}
@@ -497,7 +498,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 				let mut cb = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut result_indexes, &indexes);
 				let iter = trie_db::partial_db::RootIndexIterator::new(
 					&historied_db,
-					&historied_db,
+					//&historied_db,
+					&indexes_check,
 					&indexes,
 					std::iter::empty(),
 					Vec::new(),
