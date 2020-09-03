@@ -281,23 +281,6 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	let hash = root_callback.root;
 	println!("hash calculated {:?} : {}", hash, now.elapsed().as_millis());
 
-	let now = Instant::now();
-
-	let mut indexes = std::collections::BTreeMap::new();
-	let indexes_conf = trie_db::partial_db::DepthIndexes::new(&[40]);
-	let mut root_callback = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut indexes, &indexes_conf);
-	let _state = management.get_db_state(&hash_for_root).expect("just added");
-	let iter_kv = historied_db.iter();
-	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
-	println!("in mem index calculated {:?} : {}", indexes.len(), now.elapsed().as_millis());
-	let now = Instant::now();
-
-	println!("in mem index calculated rocksdb write : {}", now.elapsed().as_millis());
-/*	let iter_indexes = 
-	trie_db::trie_visit_with_indexes::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
-	let hash = root_callback.root;*/
-
-
 	Ok(())
 }
 
@@ -499,6 +482,32 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 			}
 			historied_db.write_change_set(tx);
 			println!("in mem index calculated rocksdb write : {}", now.elapsed().as_millis());
+
+			let now = Instant::now();
+			// TODO put depth indexes in trait: here need copy with upgrade client static def.
+			let indexes = trie_db::partial_db::DepthIndexes::new(&[80]);
+			let mut result_indexes = std::collections::BTreeMap::new();
+			let state = management.get_db_state(&block_hash).expect("just added");
+			let historied_db = 	crate::HistoriedDB {
+				current_state: state,
+				db: db_read.clone(),
+				do_assert: false,
+			};
+			let root_new: <HashFor<Block> as hash_db::Hasher>::Out = {
+				let mut cb = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut result_indexes, &indexes);
+				let iter = trie_db::partial_db::RootIndexIterator::new(
+					&historied_db,
+					&historied_db,
+					&indexes,
+					std::iter::empty(),
+					Vec::new(),
+				);
+				trie_db::trie_visit_with_indexes::<sp_trie::Layout<HashFor<Block>>, _, _, _>(iter, &mut cb);
+				cb.root.unwrap_or(Default::default())
+			};
+
+			println!("check root with index {:?} in : {} with {:?}", Some(root_new) == hash, now.elapsed().as_millis(), result_indexes.len());
+
 		}
 	};
 	/*
@@ -535,7 +544,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	try_index(&[230], false);
 	try_index(&[80], true);*/
 
-	try_index(&[40], true);
+	try_index(&[80], true);
 	Ok(())
 }
 
