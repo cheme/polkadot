@@ -486,7 +486,6 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 			let now = Instant::now();
 			// TODO put depth indexes in trait: here need copy with upgrade client static def.
-			let indexes = trie_db::partial_db::DepthIndexes::new(&[80]);
 			let mut result_indexes = std::collections::BTreeMap::new();
 			let state = management.get_db_state(&block_hash).expect("just added");
 			let historied_db = 	crate::HistoriedDB {
@@ -495,12 +494,12 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 				do_assert: false,
 			};
 			let root_new: <HashFor<Block> as hash_db::Hasher>::Out = {
-				let mut cb = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut result_indexes, &indexes);
+				let mut cb = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut result_indexes, &indexes_conf);
 				let iter = trie_db::partial_db::RootIndexIterator::new(
 					&historied_db,
 					//&historied_db,
 					&indexes_check,
-					&indexes,
+					&indexes_conf,
 					std::iter::empty(),
 					Vec::new(),
 				);
@@ -546,7 +545,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	try_index(&[230], false);
 	try_index(&[80], true);*/
 
-	try_index(&[80], true);
+	try_index(&[60], true);
 	Ok(())
 }
 
