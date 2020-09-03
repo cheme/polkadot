@@ -115,7 +115,8 @@ mod aux_schema;
 mod communication;
 mod consensus_changes;
 mod environment;
-mod finality_proof;
+// TODO remove pub
+pub mod finality_proof;
 mod import;
 mod justification;
 mod light_import;
