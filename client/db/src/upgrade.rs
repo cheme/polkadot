@@ -537,6 +537,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	try_index(every_five, false);
 	try_index(every_ten, false);
 	*/
+	let every_five = &
+[5u32, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230, 235];
 /*	try_index(&[8], false);
 	try_index(&[16], false);
 	try_index(&[64], false);
@@ -546,7 +548,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	try_index(&[80], true);*/
 
 //	try_index(&[32, 64, 96], true);
-	try_index(&[65, 129], true);
+	try_index(every_five, true);
 	Ok(())
 }
 
