@@ -260,7 +260,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 			let now = Instant::now();
 			// TODO put depth indexes in trait: here need copy with upgrade client static def.
-			let indexes = trie_db::partial_db::DepthIndexes::new(&[65]);
+			let indexes = trie_db::partial_db::DepthIndexes::new(&[33, 65]);
 			let mut result_indexes = std::collections::BTreeMap::new();
 			let root_new: <H as Hasher>::Out = {
 				let mut cb = trie_db::TrieRootIndexes::<H, _, _>::new(&mut result_indexes, &indexes);
