@@ -545,7 +545,8 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	try_index(&[230], false);
 	try_index(&[80], true);*/
 
-	try_index(&[80], true);
+//	try_index(&[32, 64, 96], true);
+	try_index(&[65, 80], true);
 	Ok(())
 }
 
