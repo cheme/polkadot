@@ -229,12 +229,27 @@ mod impl_index_backend {
 		fn remove(&mut self, _depth: usize, _index: IndexPosition) {
 			unimplemented!("Historied db is read only")
 		}
-		fn iter<'a>(&'a self, depth: usize, depth_base: usize, from_index: &[u8]) -> IndexBackendIter<'a> {
+		fn iter<'a>(&'a self, depth: usize, depth_base: usize, change: &[u8]) -> IndexBackendIter<'a> {
 			let l_size = std::mem::size_of::<u32>();
 			let depth_prefix = &(depth as u32).to_be_bytes()[..];
 			let base = depth_prefix.len();
-			let start = &index_tree_key(depth, from_index);
-			let iter = self.iter_from(start, crate::columns::StateIndexes);
+			let start = if depth_base > 0 {
+
+				let mut start = index_tree_key(depth, change);
+				let truncate = ((depth_base - 1) / trie_db::nibble_ops::NIBBLE_PER_BYTE) + 1;
+				start.truncate(truncate + base);
+				let unaligned = depth_base % trie_db::nibble_ops::NIBBLE_PER_BYTE;
+				if unaligned != 0 {
+					start.last_mut().map(|l| 
+						*l = *l & !(255 >> (unaligned * trie_db::nibble_ops::BIT_PER_NIBBLE))
+					);
+				}
+				start
+			} else {
+				index_tree_key(depth, &[])
+			};
+	
+			let iter = self.iter_from(&start, crate::columns::StateIndexes);
 			// TODO switch to IndexPosition instead of vecs
 			let end = value_prefix_index(depth_base, start.to_vec(), base);
 			// TODO the end filter is not optimal, can result in more query

@@ -2173,12 +2173,12 @@ checksum = "d36fab90f82edc3c747f9d438e06cf0a491055896f2a279638bb5beed6c40177"
 [[package]]
 name = "hash-db"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 
 [[package]]
 name = "hash256-std-hasher"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 dependencies = [
  "crunchy",
 ]
@@ -2713,7 +2713,7 @@ checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
 [[package]]
 name = "keccak-hasher"
 version = "0.15.3"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 dependencies = [
  "hash-db",
  "hash256-std-hasher 0.15.2 (git+https://github.com/cheme/trie?branch=key_val_indexed2)",
@@ -3481,7 +3481,7 @@ dependencies = [
 [[package]]
 name = "memory-db"
 version = "0.24.1"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 dependencies = [
  "hash-db",
  "hashbrown 0.8.1",
@@ -9494,7 +9494,7 @@ checksum = "a7f741b240f1a48843f9b8e0444fb55fb2a4ff67293b50a9179dfd5ea67f8d41"
 [[package]]
 name = "trie-bench"
 version = "0.25.0"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 dependencies = [
  "criterion",
  "hash-db",
@@ -9509,7 +9509,7 @@ dependencies = [
 [[package]]
 name = "trie-db"
 version = "0.22.1"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 dependencies = [
  "hash-db",
  "hashbrown 0.8.1",
@@ -9521,7 +9521,7 @@ dependencies = [
 [[package]]
 name = "trie-root"
 version = "0.16.0"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 dependencies = [
  "hash-db",
 ]
@@ -9529,7 +9529,7 @@ dependencies = [
 [[package]]
 name = "trie-standardmap"
 version = "0.15.2"
-source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#6a800bd65af74165d5dfddfd86670628caf1f838"
+source = "git+https://github.com/cheme/trie?branch=key_val_indexed2#c7511edcf46b572a8d13afe9f8a1993a6c4e7974"
 dependencies = [
  "hash-db",
  "keccak-hasher",
