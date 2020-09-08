@@ -203,13 +203,13 @@ fn decode_index(mut encoded: Vec<u8>) -> trie_db::partial_db::Index {
 	let actual_depth = u32::from_le_bytes(buff) as usize;
 	buff.copy_from_slice(&encoded[start + 4..start + 8]);
 	let top_depth = u32::from_le_bytes(buff) as usize;
-	let has_top_index = encoded[start + 8] == 1;
+	let is_top_index = encoded[start + 8] == 1;
 	encoded.truncate(start);
 	trie_db::partial_db::Index {
 		hash: encoded,
 		actual_depth,
 		top_depth,
-		has_top_index,
+		is_top_index,
 	}
 }
 fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
@@ -218,7 +218,7 @@ fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
 	result.extend_from_slice(&depth[..]);
 	let top_depth = (index.top_depth as u32).to_le_bytes();
 	result.extend_from_slice(&top_depth[..]);
-	if index.has_top_index {
+	if index.is_top_index {
 		result.push(1);
 	} else {
 		result.push(0);
@@ -231,13 +231,13 @@ fn enc_dec() {
 		hash: vec![1u8, 2, 3],
 		actual_depth: 18,
 		top_depth: 26,
-		has_top_index: false,
+		is_top_index: false,
 	};
 	let index2 = decode_index(encode_index(index.clone()));
 	assert_eq!(index.hash, index2.hash);
 	assert_eq!(index.actual_depth, index2.actual_depth);
 	assert_eq!(index.top_depth, index2.top_depth);
-	assert_eq!(index.has_top_index, index2.has_top_index);
+	assert_eq!(index.is_top_index, index2.is_top_index);
 }
 mod impl_index_backend {
 	use super::*;
