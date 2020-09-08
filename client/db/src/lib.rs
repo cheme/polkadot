@@ -198,19 +198,31 @@ impl trie_db::partial_db::KVBackend for HistoriedDB {
 }
 fn decode_index(mut encoded: Vec<u8>) -> trie_db::partial_db::Index {
 	let mut buff: [u8; 4] = [0, 0, 0, 0]; 
-	let start = encoded.len() - 4;
-	buff.copy_from_slice(&encoded[start..]);
+	let start = encoded.len() - 9;
+	buff.copy_from_slice(&encoded[start..start + 4]);
 	let actual_depth = u32::from_le_bytes(buff) as usize;
+	buff.copy_from_slice(&encoded[start + 4..start + 8]);
+	let top_depth = u32::from_le_bytes(buff) as usize;
+	let has_top_index = encoded[start + 8] == 1;
 	encoded.truncate(start);
 	trie_db::partial_db::Index {
 		hash: encoded,
 		actual_depth,
+		top_depth,
+		has_top_index,
 	}
 }
 fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
 	let mut result = index.hash;
 	let depth = (index.actual_depth as u32).to_le_bytes();
 	result.extend_from_slice(&depth[..]);
+	let top_depth = (index.top_depth as u32).to_le_bytes();
+	result.extend_from_slice(&top_depth[..]);
+	if index.has_top_index {
+		result.push(1);
+	} else {
+		result.push(0);
+	}
 	result
 }
 mod impl_index_backend {
