@@ -225,6 +225,20 @@ fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
 	}
 	result
 }
+#[test]
+fn enc_dec() {
+	let index = trie_db::partial_db::Index {
+		hash: vec![1u8, 2, 3],
+		actual_depth: 18,
+		top_depth: 26,
+		has_top_index: false,
+	};
+	let index2 = decode_index(encode_index(index.clone()));
+	assert_eq!(index.hash, index2.hash);
+	assert_eq!(index.actual_depth, index2.actual_depth);
+	assert_eq!(index.top_depth, index2.top_depth);
+	assert_eq!(index.has_top_index, index2.has_top_index);
+}
 mod impl_index_backend {
 	use super::*;
 	use trie_db::partial_db::{index_tree_key, value_prefix_index, Index, IndexPosition, IndexBackendIter};
