@@ -73,6 +73,7 @@ pub trait Value<V>: ValueRef<V> + InitFrom {
 
 	/// Index a single history item.
 	type Index;
+
 	//type SE = Self::S; TODO next nightly and future stable should accept it
 	/// GC strategy that can be applied.
 	/// GC can be run in parallel, it does not

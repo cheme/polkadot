@@ -230,7 +230,6 @@ pub trait Management<H>: ManagementRef<H> + Sized {
 	/// All previously fetch states are unvalid.
 	/// There is no type constraint of this, because migration is a specific
 	/// case the general type should not be complexified.
-	/// TODO see if Pin could do something for us.
 	fn applied_migrate(&mut self);
 }
 
@@ -374,6 +373,8 @@ pub trait ManagedDB {
 /// Note that it is only informational and does not guaranty the state
 /// is the latest.
 /// TODO repr Transparent and cast ptr for tree?
+/// TODO have index trait and Latest<S: Index> just inherit while
+/// forcing constant NoInsert property (tip insert only).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Latest<S>(S);
 
