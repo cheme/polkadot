@@ -33,6 +33,7 @@ pub trait EstimateSize {
 }
 
 /// Node storage metadata
+/// TODO use associated constant
 pub trait NodesMeta: Sized {
 	fn max_head_len() -> usize;
 	/// for imbrincated nodes we can limit
@@ -45,7 +46,8 @@ pub trait NodesMeta: Sized {
 	fn storage_prefix() -> &'static [u8];
 }
 
-pub trait NodeStorageHandle<V, S, D, M: NodesMeta>: Clone {
+/// Backend storing nodes.
+pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
 	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<Node<V, S, D, M>>;
 
 	/// a default addressing scheme for storage that natively works
@@ -59,7 +61,6 @@ pub trait NodeStorageHandle<V, S, D, M: NodesMeta>: Clone {
 		result.extend_from_slice(&relative_index.to_be_bytes());
 		result
 	}
-
 }
 
 pub trait NodeStorageMut<V, S, D, M> {
@@ -68,7 +69,7 @@ pub trait NodeStorageMut<V, S, D, M> {
 }
 
 // Note that this should not be use out of test as it clone the whole btree map many times.
-impl<V, S, D: Clone, M: NodesMeta> NodeStorageHandle<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
+impl<V, S, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
 	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<Node<V, S, D, M>> {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.get(&key).cloned()
@@ -96,17 +97,16 @@ pub struct Node<V, S, D, M> {
 	_ph: PhantomData<(V, S, D, M)>,
 }
 
-/// We manipulate Node from head to be able to share max length.
-/// TODO useless? or factor over it??
-pub struct NodeFromHead<V, S, D, M, B>(Head<V, S, D, M, B>, usize);
-
 /// Head is the entry node, it contains fetched nodes and additional
 /// information about this backend state.
 pub struct Head<V, S, D, M, B> {
 	inner: Node<V, S, D, M>,
+	/// end index - 1 at 0
 	fetched: RefCell<Vec<Node<V, S, D, M>>>, // TODO consider smallvec
-	old_start_index: u32,
+	old_start_node_index: u32,
+	// inclusive.
 	start_node_index: u32,
+	// non inclusive (next index to use)
 	end_node_index: u32,
 	start_index: usize,
 	end_index: usize,
@@ -119,23 +119,26 @@ impl<V, S, D: Clone, M, B> Head<V, S, D, M, B>
 		M: NodesMeta,
 		B: NodeStorageMut<V, S, D, M>,
 {
-	pub fn flush(&mut self) {
-		for d in self.old_start_index .. self.start_node_index {
+	pub fn flush_changes(&mut self) {
+		for d in self.old_start_node_index .. self.start_node_index {
 			self.backend.remove_node(&self.reference_key[..], d);
 		}
-		self.old_start_index = self.start_node_index;
+		self.old_start_node_index = self.start_node_index;
 		for (index, mut node) in self.fetched.borrow_mut().iter_mut().enumerate() {
 			if node.changed {
-				self.backend.set_node(&self.reference_key[..], index as u32 + self.start_node_index, node);
+				self.backend.set_node(&self.reference_key[..], self.end_node_index - 1 - index as u32 , node);
 				node.changed = false;
 			}
 		}
 	}
 }
 
+/// Information needed to initialize a new `Head`.
 #[derive(Clone)]
 pub struct InitHead<B> {
+	/// The key of the historical value stored in nodes.
 	pub key: Vec<u8>,
+	/// The nodes backend.
 	pub backend: B,
 }
 
@@ -154,7 +157,7 @@ impl<V, S, D, M, B> InitFrom for Head<V, S, D, M, B>
 				_ph: PhantomData,
 			},
 			fetched: RefCell::new(Vec::new()),
-			old_start_index: 0,
+			old_start_node_index: 0,
 			start_node_index: 0,
 			end_node_index: 0,
 			start_index: 0,
@@ -165,10 +168,59 @@ impl<V, S, D, M, B> InitFrom for Head<V, S, D, M, B>
 	}
 }
 
+impl<V, S, D, M, B> Head<V, S, D, M, B>
+	where
+		D: InitFrom<Init = ()> + LinearStorage<V, S>,
+		B: NodeStorage<V, S, D, M>,
+		M: NodesMeta,
+		S: EstimateSize,
+		V: EstimateSize,
+{
+	// return node index (if node index is end_node_index this is in head),
+	// and index in it.
+	// Fetch is done backward
+	fn fetch_node(&self, index: usize) -> Option<(usize, usize)> {
+		if self.start_index <= index && self.end_index > index {
+			let mut start = self.end_index as usize - self.inner.data.len();
+			if index >= start {
+				return Some((self.end_node_index as usize, index - start));
+			}
+			let mut i = self.end_node_index as usize;
+			while i > 0 {
+				i -= 1;
+				let fetch_index = self.end_node_index as usize - i - 1;
+				if let Some(node) = self.fetched.borrow().get(fetch_index) {
+					start -= node.data.len();
+					if index >= start {
+						return Some((fetch_index, index - start));
+					}
+				} else {
+					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u32) {
+						start -= node.data.len();
+						let r = if index >= start {
+							Some((self.fetched.borrow().len(), index - start))
+						} else {
+							None
+						};
+						self.fetched.borrow_mut().push(node);
+
+						if r.is_some() {
+							return r;
+						}
+					} else {
+						return None;
+					}
+				}
+			}
+		}
+		None
+	}
+}
+
 impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	where
 		D: InitFrom<Init = ()> + LinearStorage<V, S>,
-		B: NodeStorageHandle<V, S, D, M>,
+		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize,
@@ -176,76 +228,40 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	fn len(&self) -> usize {
 		(self.end_node_index - self.start_node_index) as usize
 	}
+	// TODO notice that it sequentially fetch from the end (some variant of S could go the over way).
 	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		if self.start_index <= index && self.end_index > index {
-			let mut start = self.end_index as usize - self.inner.data.len();
-			if index < start {
-				return self.inner.data.st_get(index - start);
-			}
-			let mut i = self.end_node_index as usize;
-			while i > 0 {
-				i -= 1;
-				if let Some(node) = self.fetched.borrow().get(self.end_node_index as usize - i - 1) {
-					start -= node.data.len();
-					if index >= start {
-						return node.data.st_get(index - start);
-					}
+		match self.fetch_node(index) {
+			Some((i, ix)) if i == self.end_node_index as usize =>  {
+				self.inner.data.st_get(ix)
+			},
+			Some((i, ix)) => {
+				if let Some(node) = self.fetched.borrow().get(i) {
+					node.data.st_get(ix)
 				} else {
-					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u32) {
-						start -= node.data.len();
-						let r = if index < start {
-							node.data.st_get(index - start)
-						} else {
-							None
-						};
-						self.fetched.borrow_mut().push(node);
-
-						if r.is_some() {
-							return r;
-						}
-					} else {
-						return None;
-					}
+					unreachable!("fetch node returns existing index");
 				}
-			}
+			},
+			None => {
+				None
+			},
 		}
-		None
 	}
 	fn get_state(&self, index: usize) -> Option<S> {
-		// TODO macroed this rendundant code
-		if self.start_index <= index && self.end_index > index {
-			let mut start = self.end_index as usize - self.inner.data.len();
-			if index >= start {
-				return self.inner.data.get_state(index - start);
-			}
-			let mut i = self.end_node_index as usize;
-			while i > 0 {
-				i -= 1;
-				if let Some(node) = self.fetched.borrow().get(self.end_node_index as usize - i - 1) {
-					start -= node.data.len();
-					if index >= start {
-						return node.data.get_state(index - start);
-					}
+		match self.fetch_node(index) {
+			Some((i, ix)) if i == self.end_node_index as usize =>  {
+				self.inner.data.get_state(ix)
+			},
+			Some((i, ix)) => {
+				if let Some(node) = self.fetched.borrow().get(i) {
+					node.data.get_state(ix)
 				} else {
-					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u32) {
-						start -= node.data.len();
-						let r = if index < start {
-							node.data.get_state(index - start)
-						} else {
-							None
-						};
-						self.fetched.borrow_mut().push(node);
-
-						if r.is_some() {
-							return r;
-						}
-					} else {
-						return None;
-					}
+					unreachable!("fetch node returns existing index");
 				}
-			}
+			},
+			None => {
+				None
+			},
 		}
-		None
 	}
 	fn truncate_until(&mut self, split_off: usize) {
 		unimplemented!()
@@ -345,6 +361,10 @@ impl<D, M, B> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B>
 		D: EncodedArrayValue,
 {
 	fn from_slice(_slice: &[u8]) -> Self {
+		// requires passing around the init item (the key need to be derived): this implementation is needed when we
+		// EncodeArrayValue a head that refers to multiple head (those one needs to be instantiated)
+		// from_slice & backend + base key. TODO start  by changing from_slice to use a init from
+		// param.
 		unimplemented!("Require a backend : similar to switch from default to init from, also required to parse meta: using specific size of version would allow fix length meta encode")
 	}
 }
@@ -378,7 +398,6 @@ impl<V, S, D, M> EstimateSize for Node<V, S, D, M> {
 		self.reference_len
 	}
 }
-
 
 #[cfg(test)]
 pub(crate) mod test {

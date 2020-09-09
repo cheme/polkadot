@@ -55,7 +55,6 @@ impl<'a, V, F> Clone for EncodedArray<'a, V, F> {
 	}
 }
 
-
 pub trait EncodedArrayValue: AsRef<[u8]> + AsMut<[u8]> + Sized {
 	fn from_slice(slice: &[u8]) -> Self;
 }
@@ -596,7 +595,6 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorageRange<V, u32> for EncodedArray<'
 	where V: EncodedArrayValue,
 {
 	fn get_range(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, u32>> {
-
 		let inner = <Self as EncodedArrayValue>::from_slice(slice);
 		let (start, end, state) = inner.get_range(index);
 		Some(HistoriedValue {
