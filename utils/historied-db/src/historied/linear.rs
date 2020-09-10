@@ -24,7 +24,8 @@
 //!
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
-use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef, InMemoryValueSlice, InMemoryValue};
+use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
+	InMemoryValueSlice, InMemoryValue, ConditionalValueMut};
 use crate::{UpdateResult, Latest};
 use crate::rstd::marker::PhantomData;
 use crate::rstd::vec::Vec;
@@ -315,6 +316,25 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 		self.0.push(HistoriedValue {value, state: at.clone()});
 		UpdateResult::Changed(result.map(|r| r.value))
 	}
+
+	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
+		if let Some(last) = self.0.last() {
+			if &last.state > at {
+				return None;
+			} 
+			if at == &last.state {
+				if last.value == value {
+					return Some(UpdateResult::Unchanged);
+				}
+				if !allow_overwrite {
+					return None;
+				}
+				self.0.pop();
+			}
+		}
+		self.0.push(HistoriedValue {value, state: at.clone()});
+		Some(UpdateResult::Changed(()))
+	}
 }
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
@@ -518,6 +538,17 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V, S>> In
 		self.set_inner(value, at)
 	}
 }
+
+impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> ConditionalValueMut<V> for Linear<V, S, D> {
+	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+		self.set_if_inner(value, at, true)
+	}
+
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+		self.set_if_inner(value, at, false)
+	}
+}
+
 
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
