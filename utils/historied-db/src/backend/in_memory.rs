@@ -96,7 +96,7 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 			let new = replace(&mut self.0, Default::default());
 			self.0 = smallvec::SmallVec::from_vec(new.into_vec().split_off(split_off));
 		} else {
-			for i in 0..split_off {
+			for i in 0..crate::rstd::cmp::min(split_off, self.0.len()) {
 				self.0.remove(i);
 			}
 		}
@@ -133,5 +133,17 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	}
 	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
 		self.0[at] = value;
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::backend::test::{Value, State};
+	use super::MemoryOnly;
+
+	#[test]
+	fn test_linear_storage() {
+		let mut storage = MemoryOnly::<Value, State>::default();
+		crate::backend::test::test_linear_storage(&mut storage);
 	}
 }

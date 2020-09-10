@@ -763,6 +763,13 @@ mod test {
 		test_serialized_insert_remove(ser2);
 	}
 
+	#[test]
+	fn test_linear_storage() {
+		let mut ser1: EncodedArray<Vec<u8>, NoVersion> = Default::default();
+		crate::backend::test::test_linear_storage(&mut ser1);
+		let mut ser2: EncodedArray<Vec<u8>, DefaultVersion> = Default::default();
+		crate::backend::test::test_linear_storage(&mut ser2);
+	}
 
 /*
 	// TODO rename to gc and activate when implementation

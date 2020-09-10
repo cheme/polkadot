@@ -36,6 +36,7 @@ pub trait EstimateSize {
 /// TODO use associated constant
 /// TODO make byte size version an associated constant as
 /// it has a tech cost.
+/// TODO this does not support mix of item count and size count
 pub trait NodesMeta: Sized {
 	fn max_head_len() -> usize;
 	/// for imbrincated nodes we can limit
@@ -275,40 +276,45 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		}
 	}
 	fn truncate_until(&mut self, split_off: usize) {
-		let mut fetched_mut;
-		let (node, i, ix) = match self.fetch_node(split_off) {
-			Some((i, ix)) if i == self.end_node_index as usize =>  {
-				(&mut self.inner, i, ix)
-			},
-			Some((i, ix)) => {
-				fetched_mut = self.fetched.borrow_mut();
-				if let Some(node) = fetched_mut.get_mut(i) {
-					(node, i, ix)
-				} else {
-					unreachable!("fetch node returns existing index");
-				}
-			},
-			None => {
-				return;
-			},
-		};
+		let i = {
+			let mut fetched_mut;
+			let (node, i, ix) = match self.fetch_node(split_off) {
+				Some((i, ix)) if i == self.end_node_index as usize =>  {
+					(&mut self.inner, i, ix)
+				},
+				Some((i, ix)) => {
+					fetched_mut = self.fetched.borrow_mut();
+					if let Some(node) = fetched_mut.get_mut(i) {
+						(node, i, ix)
+					} else {
+						unreachable!("fetch node returns existing index");
+					}
+				},
+				None => {
+					return;
+				},
+			};
 
-		if ix > 0 {
-			let mut add_size = 0;
-			for i in 0..ix {
-				node.data.st_get(i)
-					.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+			if ix > 0 {
+				if M::max_head_items().is_none() {
+					let mut add_size = 0;
+					for i in 0..ix {
+						node.data.st_get(i)
+							.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+					}
+					node.reference_len -= add_size;
+				}
+				node.changed = true;
+				node.data.truncate_until(ix)
 			}
-			node.reference_len -= add_size;
-			node.changed = true;
-			node.data.truncate_until(ix)
-		}
-		self.start_node_index = i as u32;
-		if self.len > split_off {
-			self.len -= split_off;
-		} else {
-			self.len = 0;
-		}
+			self.start_node_index += self.end_node_index - i as u32 - 1;
+			if self.len > split_off {
+				self.len -= split_off;
+			} else {
+				self.len = 0;
+			}
+			i
+		};
 		// reversed ordered.
 		self.fetched.borrow_mut().truncate(i + 1);
 	}
@@ -367,7 +373,9 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			},
 		};
 
-		node.reference_len += h.value.estimate_size() + h.state.estimate_size();
+		if M::max_head_items().is_none() {
+			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
+		}
 		node.changed = true;
 		self.len += 1;
 		node.data.insert(ix, h);
@@ -393,8 +401,11 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 
 		node.changed = true;
 		self.len -= 1;
-		node.data.st_get(ix)
-			.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
+
+		if M::max_head_items().is_none() {
+			node.data.st_get(ix)
+				.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
+		}
 		node.data.remove(ix);
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
@@ -405,7 +416,9 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		if let Some(h) = self.inner.data.pop() {
 			self.len -= 1;
 			if self.inner.data.len() > 0 {
-				self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
+				if M::max_head_items().is_none() {
+					self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
+				}
 				self.inner.changed = true;
 			} else {
 				if self.fetched.borrow().len() == 0 {
@@ -445,44 +458,51 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		self.inner.data.clear();
 	}
 	fn truncate(&mut self, at: usize) {
-		let mut fetched_mut;
-		let (node, i, ix, in_head) = match self.fetch_node(at) {
-			Some((i, ix)) if i == self.end_node_index as usize =>  {
-				(&mut self.inner, i, ix, true)
-			},
-			Some((i, ix)) => {
-				fetched_mut = self.fetched.borrow_mut();
-				if let Some(node) = fetched_mut.get_mut(i) {
-					(node, i, ix, false)
-				} else {
-					unreachable!("fetch node returns existing index");
-				}
-			},
-			None => {
-				return;
-			},
-		};
+		let (in_head, i) = {
+			let mut fetched_mut;
+			let (node, i, ix, in_head) = match self.fetch_node(at) {
+				Some((i, ix)) if i == self.end_node_index as usize =>  {
+					(&mut self.inner, i, ix, true)
+				},
+				Some((i, ix)) => {
+					fetched_mut = self.fetched.borrow_mut();
+					if let Some(node) = fetched_mut.get_mut(i) {
+						(node, i, ix, false)
+					} else {
+						unreachable!("fetch node returns existing index");
+					}
+				},
+				None => {
+					return;
+				},
+			};
 
-		if ix < node.data.len() {
-			let mut add_size = 0;
-			for i in ix..node.data.len() {
-				node.data.st_get(i)
-					.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+			if ix < node.data.len() {
+
+				if M::max_head_items().is_none() {
+					let mut add_size = 0;
+					for i in ix..node.data.len() {
+						node.data.st_get(i)
+							.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+					}
+					node.reference_len -= add_size;
+				}
+				node.changed = true;
+				node.data.truncate(ix)
 			}
-			node.reference_len -= add_size;
-			node.changed = true;
-			node.data.truncate(ix)
-		}
+			(in_head, i)
+		};
 		if !in_head {
-			self.end_node_index = i as u32;
+			let fetch_index = i as u32;
+			self.end_node_index -= fetch_index + 1;
 			if self.len > at {
 				self.len = at;
 			}
 			let mut fetched_mut = self.fetched.borrow_mut();
 			// reversed ordered.
-			for i in 0..self.end_node_index + 1 {
+			for i in 0..fetch_index + 1 {
 				let removed = fetched_mut.remove(0);
-				if i == self.end_node_index {
+				if i == fetch_index {
 					self.inner = removed;
 				}
 			}
@@ -509,9 +529,12 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		};
 
 		node.changed = true;
-		node.data.st_get(ix)
-			.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
-		node.reference_len += h.value.estimate_size() + h.state.estimate_size();
+
+		if M::max_head_items().is_none() {
+			node.data.st_get(ix)
+				.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
+			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
+		}
 		node.data.emplace(ix, h);
 	}
 }
@@ -654,5 +677,26 @@ pub(crate) mod test {
 			}
 			assert_eq!(head.get_state(i + 1), None);
 		}
+	}
+
+	#[test]
+	fn test_linear_storage() {
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaSize>();
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaNb>();
+		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
+		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb>();
+	}
+	fn test_linear_storage_inner<D, M>()
+		where
+			D: InitFrom<Init = ()> + LinearStorage<Vec<u8>, u32> + Clone,
+			M: NodesMeta + Clone,
+	{
+		use crate::backend::test::{Value, State};
+		let init_head = InitHead {
+			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u32, D, M>>::new(),
+			key: b"any".to_vec(),
+		};
+		let mut head = Head::<Vec<u8>, u32, D, M, _>::init_from(init_head);
+		crate::backend::test::test_linear_storage(&mut head);
 	}
 }

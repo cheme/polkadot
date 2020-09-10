@@ -105,3 +105,69 @@ pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
 	fn from_slice(slice: &[u8]) -> Option<Self>;
 }
 
+#[cfg(test)]
+mod test {
+	use super::*;
+	pub(crate) type State = u32;
+	pub(crate) type Value = Vec<u8>;
+
+	// basic test for linear storage usage
+	pub(crate) fn test_linear_storage<L: LinearStorage<Value, State>>(storage: &mut L) {
+		// empty storage
+		assert!(storage.pop().is_none());
+		assert!(storage.get_state(0).is_none());
+		assert!(storage.get_state(10).is_none());
+		assert!(storage.st_get(0).is_none());
+		assert!(storage.st_get(10).is_none());
+		assert!(storage.len() == 0);
+		storage.truncate(0);
+		storage.truncate(10);
+		storage.truncate_until(0);
+		storage.truncate_until(10);
+		// single element
+		let h: HistoriedValue<Value, State> = (vec![5], 5).into();
+		storage.push(h.clone());
+		assert_eq!(storage.get_state(0), Some(5));
+		assert_eq!(storage.st_get(0), Some(h.clone()));
+		assert!(storage.st_get(1).is_none());
+		let h: HistoriedValue<Value, State> = (vec![2], 2).into();
+		storage.insert(0, h);
+		assert_eq!(storage.get_state(0), Some(2));
+		assert_eq!(storage.get_state(1), Some(5));
+		storage.remove(0);
+		assert_eq!(storage.get_state(0), Some(5));
+		assert!(storage.st_get(1).is_none());
+		storage.clear();
+		for i in 0usize..30 {
+			let h: HistoriedValue<Value, State> = (vec![i as u8], i as State).into();
+			storage.push(h);
+		}
+		for i in 0usize..30 {
+			assert_eq!(storage.get_state(i), Some(i as State));
+		}
+		storage.truncate_until(5);
+		for i in 0usize..25 {
+			assert_eq!(storage.get_state(i), Some(i as State + 5));
+		}
+		assert!(storage.st_get(25).is_none());
+		storage.truncate(20);
+		for i in 0usize..20 {
+			assert_eq!(storage.get_state(i), Some(i as State + 5));
+		}
+		assert!(storage.st_get(20).is_none());
+		storage.remove(10);
+		for i in 0usize..10 {
+			assert_eq!(storage.get_state(i), Some(i as State + 5));
+		}
+		for i in 10usize..19 {
+			assert_eq!(storage.get_state(i), Some(i as State + 6));
+		}
+		assert!(storage.st_get(19).is_none());
+		storage.emplace(18, (vec![1], 1).into());
+		storage.emplace(17, (vec![2], 2).into());
+		storage.emplace(0, (vec![3], 3).into());
+		assert_eq!(storage.get_state(18), Some(1 as State));
+		assert_eq!(storage.get_state(17), Some(2 as State));
+		assert_eq!(storage.get_state(0), Some(3 as State));
+	}
+}
