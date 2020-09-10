@@ -443,7 +443,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 			let mut index = 0;
 			let mut first = true;
 			loop {
-				if let Some(HistoriedValue{ value, state }) = self.0.st_get(index) {
+				if let Some(HistoriedValue{ value: _, state }) = self.0.st_get(index) {
 					if &state == start_treshold {
 						if first {
 							return end_result;

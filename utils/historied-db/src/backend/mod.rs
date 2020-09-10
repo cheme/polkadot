@@ -65,6 +65,9 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// This can be slow, only define in migrate.
 	/// TODO consider renaming.
 	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>);
+	// TODO implement and replace in set function of linear (avoid some awkward possible
+	// side effect of pop then push)
+	//	fn emplace_last(&mut self, at: usize, value: HistoriedValue<V, S>);
 }
 
 /// Backend for linear storage with inmemory reference.
