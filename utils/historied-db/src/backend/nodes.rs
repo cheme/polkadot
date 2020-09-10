@@ -33,20 +33,18 @@ pub trait EstimateSize {
 }
 
 /// Node storage metadata
-/// TODO use associated constant
-/// TODO make byte size version an associated constant as
-/// it has a tech cost.
-/// TODO this does not support mix of item count and size count
 pub trait NodesMeta: Sized {
-	fn max_head_len() -> usize;
-	/// for imbrincated nodes we can limit
-	/// by number of head items instead of
-	/// max_head_len.
-	fn max_head_items() -> Option<usize>;
-	fn max_node_len() -> usize;
-	fn max_node_items() -> Option<usize>;
-	fn max_index_len() -> usize;
-	fn storage_prefix() -> &'static [u8];
+	/// If true, then we apply a content size limit,
+	/// otherwhise we use the number of node limit.
+	const APPLY_SIZE_LIMIT: bool;
+	/// The size limit to apply.
+	const MAX_NODE_LEN: usize;
+	/// Maximum number of items one.
+	const MAX_NODE_ITEMS: usize;
+	/// Maximum number of index items one.
+	const MAX_INDEX_ITEMS: usize;
+	/// Prefix to isolate nodes.
+	const STORAGE_PREFIX: &'static [u8];
 }
 
 /// Backend storing nodes.
@@ -56,7 +54,7 @@ pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
 	/// a default addressing scheme for storage that natively works
 	/// as a simple key value storage.
 	fn vec_address(reference_key: &[u8], relative_index: u32) -> Vec<u8> {
-		let storage_prefix = M::storage_prefix();
+		let storage_prefix = M::STORAGE_PREFIX;
 		let mut result = Vec::with_capacity(reference_key.len() + storage_prefix.len() + 8);
 		result.extend_from_slice(storage_prefix);
 		result.extend_from_slice(&(reference_key.len() as u32).to_be_bytes());
@@ -296,7 +294,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			};
 
 			if ix > 0 {
-				if M::max_head_items().is_none() {
+				if M::APPLY_SIZE_LIMIT {
 					let mut add_size = 0;
 					for i in 0..ix {
 						node.data.st_get(i)
@@ -322,15 +320,15 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		self.len += 1;
 		let mut additional_size: Option<usize> = None;
 		
-		if let Some(nb) = M::max_head_items() {
-			if self.inner.data.len() < nb {
+		if !M::APPLY_SIZE_LIMIT {
+			if self.inner.data.len() < M::MAX_NODE_ITEMS {
 				self.inner.data.push(value);
 				return;
 			}
 		} else {
 			let add_size = value.value.estimate_size() + value.state.estimate_size(); 
 			additional_size = Some(add_size);
-			if self.inner.reference_len + add_size < M::max_head_len() {
+			if self.inner.reference_len + add_size < M::MAX_NODE_LEN {
 				self.inner.reference_len += add_size;
 				self.inner.data.push(value);
 				return;
@@ -373,7 +371,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			},
 		};
 
-		if M::max_head_items().is_none() {
+		if M::APPLY_SIZE_LIMIT {
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
 		}
 		node.changed = true;
@@ -402,7 +400,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		node.changed = true;
 		self.len -= 1;
 
-		if M::max_head_items().is_none() {
+		if M::APPLY_SIZE_LIMIT {
 			node.data.st_get(ix)
 				.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
 		}
@@ -416,7 +414,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		if let Some(h) = self.inner.data.pop() {
 			self.len -= 1;
 			if self.inner.data.len() > 0 {
-				if M::max_head_items().is_none() {
+				if M::APPLY_SIZE_LIMIT {
 					self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 				}
 				self.inner.changed = true;
@@ -479,7 +477,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 
 			if ix < node.data.len() {
 
-				if M::max_head_items().is_none() {
+				if M::APPLY_SIZE_LIMIT {
 					let mut add_size = 0;
 					for i in ix..node.data.len() {
 						node.data.st_get(i)
@@ -530,7 +528,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 
 		node.changed = true;
 
-		if M::max_head_items().is_none() {
+		if M::APPLY_SIZE_LIMIT {
 			node.data.st_get(ix)
 				.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
@@ -625,26 +623,20 @@ pub(crate) mod test {
 	#[derive(Clone)]
 	pub(crate) struct MetaSize;
 	impl NodesMeta for MetaSize {
-		fn max_head_len() -> usize { 25 }
-		fn max_head_items() -> Option<usize> { None }
-		fn max_node_len() -> usize { 30 }
-		fn max_node_items() -> Option<usize> { None }
-		fn max_index_len() -> usize {
-			unimplemented!("no index");
-		}
-		fn storage_prefix() -> &'static [u8] { b"nodes1" }
+		const APPLY_SIZE_LIMIT: bool = true;
+		const MAX_NODE_LEN: usize = 25;
+		const MAX_NODE_ITEMS: usize = 0;
+		const MAX_INDEX_ITEMS: usize = 5;
+		const STORAGE_PREFIX: &'static [u8] = b"nodes1";
 	}
 	#[derive(Clone)]
 	pub(crate) struct MetaNb;
 	impl NodesMeta for MetaNb {
-		fn max_head_len() -> usize { 25 }
-		fn max_head_items() -> Option<usize> { Some(3) }
-		fn max_node_len() -> usize { 30 }
-		fn max_node_items() -> Option<usize> { Some(3) }
-		fn max_index_len() -> usize {
-			unimplemented!("no index");
-		}
-		fn storage_prefix() -> &'static [u8] { b"nodes2" }
+		const APPLY_SIZE_LIMIT: bool = false;
+		const MAX_NODE_LEN: usize = 0;
+		const MAX_NODE_ITEMS: usize = 3;
+		const MAX_INDEX_ITEMS: usize = 5;
+		const STORAGE_PREFIX: &'static [u8] = b"nodes2";
 	}
 
 	#[test]
