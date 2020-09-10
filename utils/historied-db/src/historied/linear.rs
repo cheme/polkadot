@@ -21,6 +21,8 @@
 //! with modification at the end only.
 //! This is a sequential indexing.
 //! TODO consider renaming to sequential(only if implementation of non sequential).
+//!
+//! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef, InMemoryValueSlice, InMemoryValue};
 use crate::{UpdateResult, Latest};
@@ -297,11 +299,6 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 		let at = at.latest();
 		loop {
 			if let Some(last) = self.0.last() {
-				// TODO this is rather unsafe: we expect that
-				// when changing value we use a state that is
-				// the latest from the state management.
-				// Their could be ways to enforce that, but nothing
-				// good at this point.
 				if &last.state > at {
 					self.0.pop();
 					continue;
@@ -392,7 +389,6 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		UpdateResult::Unchanged
 	}
 
-	// TODO this requires some test cases!! (especially with neutral element)
 	fn gc(&mut self, gc: &Self::GC) -> UpdateResult<()> {
 		if gc.new_start.is_some() && gc.new_start == gc.new_end {
 			self.0.clear();
@@ -425,23 +421,31 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 
 		if let Some(start_treshold) = gc.new_start.as_ref() {
 			let mut index = 0;
+			let mut first = true;
 			loop {
 				if let Some(HistoriedValue{ value, state }) = self.0.st_get(index) {
 					if &state == start_treshold {
-						if Some(&value) != gc.neutral_element.as_ref() {
-							index = index.saturating_sub(1);
-							break;
-						} 
+						if first {
+							return end_result;
+						}
+						break;
 					}
 					if &state > start_treshold {
+						if first {
+							return end_result;
+						}
 						index = index.saturating_sub(1);
 						break;
 					}
 				} else {
+					if first {
+						return end_result;
+					}
 					index = index.saturating_sub(1);
 					break;
 				}
 				index += 1;
+				first = false;
 			}
 			if let Some(neutral) = gc.neutral_element.as_ref() {
 				while let Some(HistoriedValue{ value, state: _ }) = self.0.st_get(index) {
@@ -451,15 +455,16 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 					index += 1;
 				}
 			}
-			if index == 0 {
-				return end_result;
-			}
 			if index == self.0.len() {
 				self.0.clear();
 				return UpdateResult::Cleared(());
 			}
 			self.0.truncate_until(index);
-			UpdateResult::Changed(())
+			if index == 0 {
+				end_result
+			} else {
+				UpdateResult::Changed(())
+			}
 		} else {
 			return end_result;
 		}
@@ -521,7 +526,9 @@ pub struct LinearGC<S, V> {
 	pub(crate) new_start: Option<S>,
 	// exclusive
 	pub(crate) new_end: Option<S>,
-	// TODO use reference??
+	// Element that do not need to be kept
+	// if at start (no value returns is the
+	// same as this value).
 	pub(crate) neutral_element: Option<V>,
 }
 
@@ -540,5 +547,106 @@ impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<V
 }
 
 
-// test for gc: [1, 2, 3, 4] and [1, ~, 2, ~] -> new end at all ix is straight forward and new
-// start ith at 1 for 2 [2, ~] and at 2 for 2 [] and 4 [] for both
+#[cfg(test)]
+mod test {
+	use super::*;
+	use crate::backend::{LinearStorage, in_memory::MemoryOnly};
+
+	#[test]
+	fn test_gc() {
+		// TODO non consecutive state.
+		// [1, 2, 3, 4]
+		let mut first = MemoryOnly::<Vec<u8>, u32>::default();
+		for i in 1..5 {
+			first.push((vec![i as u8], i).into());
+		}
+		// [1, ~, 3, ~]
+		let mut second = MemoryOnly::<Vec<u8>, u32>::default();
+		for i in 1..5 {
+			if i % 2 == 0 {
+				second.push((vec![0u8], i).into());
+			} else {
+				second.push((vec![i as u8], i).into());
+			}
+		}
+		let result_first = [
+			[None, None, None, None],
+			[Some(1), None, None, None],
+			[Some(1), Some(2), None, None],
+			[Some(1), Some(2), Some(3), None],
+			[Some(1), Some(2), Some(3), Some(4)],
+		];
+		for i in 1..5 {
+			let gc1 = LinearGC {
+				new_start: None,
+				new_end: Some(i as u32),
+				neutral_element: None,
+			};
+			let gc2 = LinearGC {
+				new_start: None,
+				new_end: Some(i as u32),
+				neutral_element: Some(vec![0u8]),
+			};
+			let mut first = Linear(first.clone(), Default::default());
+			first.gc(&gc1);
+			let mut second = Linear(second.clone(), Default::default());
+			second.gc(&gc1);
+			for j in 0..4 {
+				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+			}
+			let mut first = Linear(first.clone(), Default::default());
+			first.gc(&gc2);
+			let mut second = Linear(second.clone(), Default::default());
+			second.gc(&gc2);
+			for j in 0..4 {
+				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+			}
+		}
+		let result_first = [
+			[Some(1), Some(2), Some(3), Some(4)],
+			[Some(2), Some(3), Some(4), None],
+			[Some(3), Some(4), None, None],
+			[Some(4), None, None, None],
+			[None, None, None, None],
+		];
+		let result_second = [
+			[Some(1), Some(2), Some(3), Some(4)],
+			[Some(3), Some(4), None, None],
+			[Some(3), Some(4), None, None],
+			[None, None, None, None],
+			[None, None, None, None],
+		];
+		for i in 1..5 {
+			let gc1 = LinearGC {
+				new_start: Some(i as u32),
+				new_end: None,
+				neutral_element: None,
+			};
+			let gc2 = LinearGC {
+				new_start: Some(i as u32),
+				new_end: None,
+				neutral_element: Some(vec![0u8]),
+			};
+			{
+				let mut first = Linear(first.clone(), Default::default());
+				first.gc(&gc1);
+				let mut second = Linear(second.clone(), Default::default());
+				second.gc(&gc1);
+				for j in 0..4 {
+					assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
+					assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+				}
+			}
+			let mut first = Linear(first.clone(), Default::default());
+			first.gc(&gc2);
+			let mut second = Linear(second.clone(), Default::default());
+			second.gc(&gc2);
+			for j in 0..4 {
+				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state(j), result_second[i - 1][j]);
+			}
+		}
+	}
+}

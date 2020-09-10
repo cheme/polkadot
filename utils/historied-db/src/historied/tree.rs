@@ -1029,7 +1029,7 @@ mod test {
 			assert_eq!(gc_item3.get_ref(&fp), None); // neutral element
 			assert_eq!(gc_item4.get_ref(&fp), item4.get_ref(&fp));
 		}
-		assert_eq!(gc_item1.nb_internal_history(), 4);
+		assert_eq!(gc_item1.nb_internal_history(), 3);
 		assert_eq!(gc_item2.nb_internal_history(), 2);
 		assert_eq!(gc_item3.nb_internal_history(), 0);
 		assert_eq!(gc_item4.nb_internal_history(), 2);
