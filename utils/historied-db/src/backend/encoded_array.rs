@@ -412,6 +412,8 @@ impl<'a, F: EncodedArrayConfig, V> InitFrom for EncodedArray<'a, V, F>
 impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
+	type Handle = crate::backend::DummyHandle;
+	type RevIter = crate::backend::DummyRevIter;
 //impl<'a, F: EncodedArrayConfig> LinearStorage<'a, &'a[u8], u32> for EncodedArray<'a, F> {
 	fn truncate_until(&mut self, split_off: usize) {
 		self.remove_range(0, split_off);
