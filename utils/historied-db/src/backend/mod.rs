@@ -36,40 +36,32 @@ pub mod nodes;
 // value) use a associated type handle depending on backend
 // (slice index of encoded array, pointer of in_memory, pointer
 // of node inner value for nodes). Also not puting value in memory.
-// TODO use it, this need to be spawn from historied module implementation
-// through access to index/vaccant first (state as input) and
-// simple impl then.
-pub struct Entry<'a, V, S: Clone, D: LinearStorage<V, S>> {
-	value: Option<V>,
-	state: S,
+pub struct Entry<'a, V, S, D: LinearStorage<V, S>> {
+	value: Option<HistoriedValue<V, S>>,
 	index: usize,
 	storage: &'a mut D,
 	changed: bool,
 	insert: bool,
 }
 
-impl<'a, V, S: Clone, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
+impl<'a, V, S, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
 	/// ~ Vaccant enum of rust std lib.
 	/// Occupied is the negation of this.
 	pub fn is_vaccant(&self) -> bool {
 		self.insert
 	}
 	/// Access current value
-	pub fn value(&self) -> Option<&V> {
+	pub fn value(&self) -> Option<&HistoriedValue<V, S>> {
 		self.value.as_ref()
 	}
-	/// Access state.
-	pub fn state(&self) -> &S {
-		&self.state
-	}
 	/// Change value.
-	pub fn and_modify<F>(mut self, f: impl FnOnce(&mut V)) -> Self {
+	pub fn and_modify<F>(mut self, f: impl FnOnce(&mut HistoriedValue<V, S>)) -> Self {
 		self.value.as_mut().map(f);
 		self.changed |= self.value.is_some();
 		self
 	}
 	/// Init a value for vaccant entry.
-	pub fn or_insert(mut self, default: V) -> Self {
+	pub fn or_insert(mut self, default: HistoriedValue<V, S>) -> Self {
 		if self.value.is_none() {
 			self.changed = true;
 			self.value = Some(default);
@@ -77,7 +69,7 @@ impl<'a, V, S: Clone, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
 		self
 	}
 	/// Lazy `or_insert`.
-	pub fn or_insert_with(mut self, default: impl FnOnce() -> V) -> Self {
+	pub fn or_insert_with(mut self, default: impl FnOnce() -> HistoriedValue<V, S>) -> Self {
 		if self.value.is_none() {
 			self.changed = true;
 			self.value = Some(default());
@@ -94,16 +86,11 @@ impl<'a, V, S: Clone, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
 	}
 }
 
-impl<'a, V, S: Clone, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
+impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
 {
 	fn drop(&mut self) {
 		if self.changed {
 			if let Some(change) = self.value.take() {
-				let change = HistoriedValue {
-					value: change,
-					state: self.state.clone(),
-				};
-
 				if self.insert {
 					self.storage.insert(self.index, change);
 				} else {
@@ -127,6 +114,18 @@ pub trait LinearStorage<V, S>: InitFrom {
 	fn len(&self) -> usize;
 	/// Array like get.
 	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>>;
+	/// Entry.
+	fn entry<'a>(&'a mut self, index: usize) -> Entry<'a, V, S, Self> {
+		let value = self.st_get(index);
+		let insert = value.is_none();
+		Entry {
+			value,
+			index,
+			storage: self,
+			changed: false,
+			insert,
+		}
+	}
 	/// Array like get.
 	fn get_state(&self, index: usize) -> Option<S>;
 	/// Vec like push.
