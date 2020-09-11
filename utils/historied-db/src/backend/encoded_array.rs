@@ -55,7 +55,6 @@ impl<'a, V, F> Clone for EncodedArray<'a, V, F> {
 	}
 }
 
-
 pub trait EncodedArrayValue: AsRef<[u8]> + AsMut<[u8]> + Sized {
 	fn from_slice(slice: &[u8]) -> Self;
 }
@@ -596,7 +595,6 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorageRange<V, u32> for EncodedArray<'
 	where V: EncodedArrayValue,
 {
 	fn get_range(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, u32>> {
-
 		let inner = <Self as EncodedArrayValue>::from_slice(slice);
 		let (start, end, state) = inner.get_range(index);
 		Some(HistoriedValue {
@@ -765,6 +763,13 @@ mod test {
 		test_serialized_insert_remove(ser2);
 	}
 
+	#[test]
+	fn test_linear_storage() {
+		let mut ser1: EncodedArray<Vec<u8>, NoVersion> = Default::default();
+		crate::backend::test::test_linear_storage(&mut ser1);
+		let mut ser2: EncodedArray<Vec<u8>, DefaultVersion> = Default::default();
+		crate::backend::test::test_linear_storage(&mut ser2);
+	}
 
 /*
 	// TODO rename to gc and activate when implementation

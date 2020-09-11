@@ -73,6 +73,7 @@ pub trait Value<V>: ValueRef<V> + InitFrom {
 
 	/// Index a single history item.
 	type Index;
+
 	//type SE = Self::S; TODO next nightly and future stable should accept it
 	/// GC strategy that can be applied.
 	/// GC can be run in parallel, it does not
@@ -102,6 +103,7 @@ pub trait Value<V>: ValueRef<V> + InitFrom {
 	fn migrate(&mut self, mig: &mut Self::Migrate) -> UpdateResult<()>;
 }
 
+/// Returns pointer to in memory value.
 pub trait InMemoryValue<V>: Value<V> {
 	/// Get latest value, can apply updates.
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V>;
@@ -109,6 +111,18 @@ pub trait InMemoryValue<V>: Value<V> {
 	/// Similar to value set but returning a pointer on replaced or deleted value.
 	/// If the value is change but history is kept (new state), no pointer is returned.
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>>;
+}
+
+/// Same as `Value` but allows using unsafe index and failing if incorrect.
+/// This involves some additional computation to check correctness.
+/// It is also usefull when some asumption are not strong enough, for
+/// instance if `Value` is subject to concurrent access.
+pub trait ConditionalValueMut<V>: Value<V> {
+	/// Do update if state allows it, otherwhise return None.
+	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>>;
+
+	/// Do update if state allows it and we are not erasing an existing value, otherwhise return None.
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>>;
 }
 
 /// An entry at a given history index.

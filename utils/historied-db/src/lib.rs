@@ -230,7 +230,6 @@ pub trait Management<H>: ManagementRef<H> + Sized {
 	/// All previously fetch states are unvalid.
 	/// There is no type constraint of this, because migration is a specific
 	/// case the general type should not be complexified.
-	/// TODO see if Pin could do something for us.
 	fn applied_migrate(&mut self);
 }
 

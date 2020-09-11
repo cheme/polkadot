@@ -19,7 +19,8 @@
 
 // TODO remove "previous code" expect.
 
-use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue, InMemoryValueSlice, InMemoryValueRange, UpdateResult};
+use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue,
+	InMemoryValueSlice, InMemoryValueRange, UpdateResult, ConditionalValueMut};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
@@ -135,8 +136,8 @@ impl<
 	BD: LinearStorage<V, BI>,
 > Branch<I, BI, V, BD>
 {
-	pub fn new(value: V, state: &Latest<(I, BI)>, init: BD::Init) -> Self {
-		let (branch_index, index) = state.latest().clone();
+	pub fn new(value: V, state: &(I, BI), init: BD::Init) -> Self {
+		let (branch_index, index) = state.clone();
 		let index = Latest::unchecked_latest(index); // TODO cast ptr?
 		let history = Linear::new(value, &index, init);
 		Branch {
@@ -192,7 +193,7 @@ impl<
 
 	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
 		let mut v = D::init_from(init.0.clone());
-		v.push(Branch::new(value, at, init.1.clone()));
+		v.push(Branch::new(value, at.latest(), init.1.clone()));
 		Tree {
 			branches: v,
 			init: init.0,
@@ -206,7 +207,8 @@ impl<
 		// ref refact will be costless
 		let (branch_index, index) = at.latest();
 		let mut insert_at = self.branches.len();
-		/* TODO write iter_mut that iterate on a HandleMut as in simple_db */
+		/* TODO write iter_mut that iterate on a HandleMut as in simple_db
+		 * in fact an entry iterator would be good (with lazy access loading) */
 /*		for (iter_index, branch) in self.branches.iter_mut().enumerate().rev() {
 			if &branch.branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());// TODO reftransparent &
@@ -250,7 +252,7 @@ impl<
 			}
 		}
 
-		let branch = Branch::new(value, at, self.init_child.clone());
+		let branch = Branch::new(value, at.latest(), self.init_child.clone());
 		if insert_at == self.branches.len() {
 			self.branches.push(branch);
 		} else {
@@ -656,7 +658,6 @@ impl<
 			let iter_index = len - 1 - ix;
 			let branch = self.branches.get_ref_mut(iter_index).expect("previous code");
 	
-//		for (iter_index, branch) in self.branches.iter_mut().enumerate().rev() {
 			if &branch.state == branch_index {
 				let index = Latest::unchecked_latest(index.clone());// TODO reftransparent &
 				return branch.value.set_mut(value, &index);
@@ -668,13 +669,109 @@ impl<
 				insert_at = iter_index;
 			}
 		}
-		let branch = Branch::new(value, at, self.init.clone());
+		let branch = Branch::new(value, at.latest(), self.init.clone());
 		if insert_at == self.branches.len() {
 			self.branches.push(branch);
 		} else {
 			self.branches.insert(insert_at, branch);
 		}
 		UpdateResult::Changed(None)
+	}
+}
+	
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
+	V: Clone + Eq,
+	D: LinearStorage<Linear<V, BI, BD>, I>,
+	BD: LinearStorage<V, BI>,
+> ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
+	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+		// Warn dup code, can be merge if change set to return previ value: with
+		// ref refact will be costless
+		let (branch_index, index) = at;
+		let mut insert_at = self.branches.len();
+		let len = insert_at;
+		for ix in 0..len {
+			let iter_index = len - 1 - ix;
+			let iter_branch_index = self.branches.get_state(iter_index).expect("previous code");
+			if &iter_branch_index == branch_index {
+				let mut branch = self.branches.st_get(iter_index).expect("previous code");
+				return match branch.value.set_if_possible(value, &index) {
+					Some(UpdateResult::Changed(_)) => {
+						self.branches.emplace(iter_index, branch);
+						Some(UpdateResult::Changed(()))
+					},
+					Some(UpdateResult::Cleared(_)) => {
+						self.branches.remove(iter_index);
+						if self.branches.len() == 0 {
+							Some(UpdateResult::Cleared(()))
+						} else {
+							Some(UpdateResult::Changed(()))
+						}
+					},
+					r => r,
+				};
+			}
+			if &iter_branch_index < branch_index {
+				insert_at = iter_index + 1;
+				break;
+			} else {
+				insert_at = iter_index;
+			}
+		}
+
+		let branch = Branch::new(value, at, self.init_child.clone());
+		if insert_at == self.branches.len() {
+			self.branches.push(branch);
+		} else {
+			self.branches.insert(insert_at, branch);
+		}
+		Some(UpdateResult::Changed(()))
+	}
+
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+		// Warn dup code, can be merge if change set to return previ value: with
+		// ref refact will be costless
+		let (branch_index, index) = at;
+		let mut insert_at = self.branches.len();
+		let len = insert_at;
+		for ix in 0..len {
+			let iter_index = len - 1 - ix;
+			let iter_branch_index = self.branches.get_state(iter_index).expect("previous code");
+			if &iter_branch_index == branch_index {
+				let mut branch = self.branches.st_get(iter_index).expect("previous code");
+				return match branch.value.set_if_possible_no_overwrite(value, &index) {
+					Some(UpdateResult::Changed(_)) => {
+						self.branches.emplace(iter_index, branch);
+						Some(UpdateResult::Changed(()))
+					},
+					Some(UpdateResult::Cleared(_)) => {
+						self.branches.remove(iter_index);
+						if self.branches.len() == 0 {
+							Some(UpdateResult::Cleared(()))
+						} else {
+							Some(UpdateResult::Changed(()))
+						}
+					},
+					r => r,
+				};
+			}
+			if &iter_branch_index < branch_index {
+				insert_at = iter_index + 1;
+				break;
+			} else {
+				insert_at = iter_index;
+			}
+		}
+
+		let branch = Branch::new(value, at, self.init_child.clone());
+		if insert_at == self.branches.len() {
+			self.branches.push(branch);
+		} else {
+			self.branches.insert(insert_at, branch);
+		}
+		Some(UpdateResult::Changed(()))
 	}
 }
 
@@ -1029,7 +1126,7 @@ mod test {
 			assert_eq!(gc_item3.get_ref(&fp), None); // neutral element
 			assert_eq!(gc_item4.get_ref(&fp), item4.get_ref(&fp));
 		}
-		assert_eq!(gc_item1.nb_internal_history(), 4);
+		assert_eq!(gc_item1.nb_internal_history(), 3);
 		assert_eq!(gc_item2.nb_internal_history(), 2);
 		assert_eq!(gc_item3.nb_internal_history(), 0);
 		assert_eq!(gc_item4.nb_internal_history(), 2);

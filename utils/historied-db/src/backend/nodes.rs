@@ -19,8 +19,7 @@
 
 use crate::rstd::marker::PhantomData;
 use crate::rstd::btree_map::BTreeMap;
-use crate::rstd::cell::{RefCell, Ref, RefMut};
-use crate::rstd::rc::Rc;
+use crate::rstd::cell::RefCell;
 use crate::rstd::vec::Vec;
 use super::{LinearStorage};
 use crate::historied::HistoriedValue;
@@ -34,24 +33,27 @@ pub trait EstimateSize {
 
 /// Node storage metadata
 pub trait NodesMeta: Sized {
-	fn max_head_len() -> usize;
-	/// for imbrincated nodes we can limit
-	/// by number of head items instead of
-	/// max_head_len.
-	fn max_head_items() -> Option<usize>;
-	fn max_node_len() -> usize;
-	fn max_node_items() -> Option<usize>;
-	fn max_index_len() -> usize;
-	fn storage_prefix() -> &'static [u8];
+	/// If true, then we apply a content size limit,
+	/// otherwhise we use the number of node limit.
+	const APPLY_SIZE_LIMIT: bool;
+	/// The size limit to apply.
+	const MAX_NODE_LEN: usize;
+	/// Maximum number of items one.
+	const MAX_NODE_ITEMS: usize;
+	/// Maximum number of index items one.
+	const MAX_INDEX_ITEMS: usize;
+	/// Prefix to isolate nodes.
+	const STORAGE_PREFIX: &'static [u8];
 }
 
-pub trait NodeStorageHandle<V, S, D, M: NodesMeta>: Clone {
+/// Backend storing nodes.
+pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
 	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<Node<V, S, D, M>>;
 
 	/// a default addressing scheme for storage that natively works
 	/// as a simple key value storage.
 	fn vec_address(reference_key: &[u8], relative_index: u32) -> Vec<u8> {
-		let storage_prefix = M::storage_prefix();
+		let storage_prefix = M::STORAGE_PREFIX;
 		let mut result = Vec::with_capacity(reference_key.len() + storage_prefix.len() + 8);
 		result.extend_from_slice(storage_prefix);
 		result.extend_from_slice(&(reference_key.len() as u32).to_be_bytes());
@@ -59,7 +61,6 @@ pub trait NodeStorageHandle<V, S, D, M: NodesMeta>: Clone {
 		result.extend_from_slice(&relative_index.to_be_bytes());
 		result
 	}
-
 }
 
 pub trait NodeStorageMut<V, S, D, M> {
@@ -68,7 +69,7 @@ pub trait NodeStorageMut<V, S, D, M> {
 }
 
 // Note that this should not be use out of test as it clone the whole btree map many times.
-impl<V, S, D: Clone, M: NodesMeta> NodeStorageHandle<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
+impl<V, S, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
 	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<Node<V, S, D, M>> {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.get(&key).cloned()
@@ -96,20 +97,19 @@ pub struct Node<V, S, D, M> {
 	_ph: PhantomData<(V, S, D, M)>,
 }
 
-/// We manipulate Node from head to be able to share max length.
-/// TODO useless? or factor over it??
-pub struct NodeFromHead<V, S, D, M, B>(Head<V, S, D, M, B>, usize);
-
 /// Head is the entry node, it contains fetched nodes and additional
 /// information about this backend state.
 pub struct Head<V, S, D, M, B> {
 	inner: Node<V, S, D, M>,
+	/// end index - 1 at 0
 	fetched: RefCell<Vec<Node<V, S, D, M>>>, // TODO consider smallvec
-	old_start_index: u32,
+	old_start_node_index: u32,
+	old_end_node_index: u32,
+	// inclusive.
 	start_node_index: u32,
+	// non inclusive (next index to use)
 	end_node_index: u32,
-	start_index: usize,
-	end_index: usize,
+	len: usize,
 	reference_key: Vec<u8>,
 	backend: B,
 }
@@ -119,23 +119,32 @@ impl<V, S, D: Clone, M, B> Head<V, S, D, M, B>
 		M: NodesMeta,
 		B: NodeStorageMut<V, S, D, M>,
 {
-	pub fn flush(&mut self) {
-		for d in self.old_start_index .. self.start_node_index {
+	pub fn flush_changes(&mut self) {
+		for d in self.old_start_node_index .. self.start_node_index {
 			self.backend.remove_node(&self.reference_key[..], d);
 		}
-		self.old_start_index = self.start_node_index;
+		// this comparison is needed for the case we clear to 0 nodes indexes.
+		let start_end = crate::rstd::cmp::max(self.end_node_index, self.old_start_node_index);
+		self.old_start_node_index = self.start_node_index;
+		for d in start_end .. self.old_end_node_index {
+			self.backend.remove_node(&self.reference_key[..], d);
+		}
+		self.old_end_node_index = self.end_node_index;
 		for (index, mut node) in self.fetched.borrow_mut().iter_mut().enumerate() {
 			if node.changed {
-				self.backend.set_node(&self.reference_key[..], index as u32 + self.start_node_index, node);
+				self.backend.set_node(&self.reference_key[..], self.end_node_index - 1 - index as u32 , node);
 				node.changed = false;
 			}
 		}
 	}
 }
 
+/// Information needed to initialize a new `Head`.
 #[derive(Clone)]
 pub struct InitHead<B> {
+	/// The key of the historical value stored in nodes.
 	pub key: Vec<u8>,
+	/// The nodes backend.
 	pub backend: B,
 }
 
@@ -154,118 +163,173 @@ impl<V, S, D, M, B> InitFrom for Head<V, S, D, M, B>
 				_ph: PhantomData,
 			},
 			fetched: RefCell::new(Vec::new()),
-			old_start_index: 0,
+			old_start_node_index: 0,
+			old_end_node_index: 0,
 			start_node_index: 0,
 			end_node_index: 0,
-			start_index: 0,
-			end_index: 0,
+			len: 0,
 			reference_key: init.key,
 			backend: init.backend,
 		}
 	}
 }
 
+impl<V, S, D, M, B> Head<V, S, D, M, B>
+	where
+		D: InitFrom<Init = ()> + LinearStorage<V, S>,
+		B: NodeStorage<V, S, D, M>,
+		M: NodesMeta,
+		S: EstimateSize,
+		V: EstimateSize,
+{
+	// return node index (if node index is end_node_index this is in head),
+	// and index in it.
+	// Fetch is done backward
+	fn fetch_node(&self, index: usize) -> Option<(usize, usize)> {
+		if self.len > index {
+			let mut start = self.len as usize - self.inner.data.len();
+			if index >= start {
+				return Some((self.end_node_index as usize, index - start));
+			}
+			let mut i = self.end_node_index as usize;
+			while i > self.start_node_index as usize {
+				i -= 1;
+				let fetch_index = self.end_node_index as usize - i - 1;
+				if let Some(node) = self.fetched.borrow().get(fetch_index) {
+					start -= node.data.len();
+					if index >= start {
+						return Some((fetch_index, index - start));
+					}
+				} else {
+					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u32) {
+						start -= node.data.len();
+						let r = if index >= start {
+							Some((self.fetched.borrow().len(), index - start))
+						} else {
+							None
+						};
+						self.fetched.borrow_mut().push(node);
+
+						if r.is_some() {
+							return r;
+						}
+					} else {
+						return None;
+					}
+				}
+			}
+		}
+		None
+	}
+}
+
+/// Notice that all max node operation are only for push and pop operation.
+/// 'insert' and 'remove' operation would need to use a call to 'realign'
+/// operation to rewrite correctly the sizes.
 impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	where
 		D: InitFrom<Init = ()> + LinearStorage<V, S>,
-		B: NodeStorageHandle<V, S, D, M>,
+		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize,
 {
 	fn len(&self) -> usize {
-		(self.end_node_index - self.start_node_index) as usize
+		self.len
 	}
+	// TODO notice that it sequentially fetch from the end (some variant of S could go the over way).
 	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		if self.start_index <= index && self.end_index > index {
-			let mut start = self.end_index as usize - self.inner.data.len();
-			if index < start {
-				return self.inner.data.st_get(index - start);
-			}
-			let mut i = self.end_node_index as usize;
-			while i > 0 {
-				i -= 1;
-				if let Some(node) = self.fetched.borrow().get(self.end_node_index as usize - i - 1) {
-					start -= node.data.len();
-					if index >= start {
-						return node.data.st_get(index - start);
-					}
+		match self.fetch_node(index) {
+			Some((i, ix)) if i == self.end_node_index as usize =>  {
+				self.inner.data.st_get(ix)
+			},
+			Some((i, ix)) => {
+				if let Some(node) = self.fetched.borrow().get(i) {
+					node.data.st_get(ix)
 				} else {
-					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u32) {
-						start -= node.data.len();
-						let r = if index < start {
-							node.data.st_get(index - start)
-						} else {
-							None
-						};
-						self.fetched.borrow_mut().push(node);
-
-						if r.is_some() {
-							return r;
-						}
-					} else {
-						return None;
-					}
+					unreachable!("fetch node returns existing index");
 				}
-			}
+			},
+			None => {
+				None
+			},
 		}
-		None
 	}
 	fn get_state(&self, index: usize) -> Option<S> {
-		// TODO macroed this rendundant code
-		if self.start_index <= index && self.end_index > index {
-			let mut start = self.end_index as usize - self.inner.data.len();
-			if index >= start {
-				return self.inner.data.get_state(index - start);
-			}
-			let mut i = self.end_node_index as usize;
-			while i > 0 {
-				i -= 1;
-				if let Some(node) = self.fetched.borrow().get(self.end_node_index as usize - i - 1) {
-					start -= node.data.len();
-					if index >= start {
-						return node.data.get_state(index - start);
-					}
+		match self.fetch_node(index) {
+			Some((i, ix)) if i == self.end_node_index as usize =>  {
+				self.inner.data.get_state(ix)
+			},
+			Some((i, ix)) => {
+				if let Some(node) = self.fetched.borrow().get(i) {
+					node.data.get_state(ix)
 				} else {
-					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u32) {
-						start -= node.data.len();
-						let r = if index < start {
-							node.data.get_state(index - start)
-						} else {
-							None
-						};
-						self.fetched.borrow_mut().push(node);
-
-						if r.is_some() {
-							return r;
-						}
-					} else {
-						return None;
-					}
+					unreachable!("fetch node returns existing index");
 				}
-			}
+			},
+			None => {
+				None
+			},
 		}
-		None
 	}
 	fn truncate_until(&mut self, split_off: usize) {
-		unimplemented!()
+		let i = {
+			let mut fetched_mut;
+			let (node, i, ix) = match self.fetch_node(split_off) {
+				Some((i, ix)) if i == self.end_node_index as usize =>  {
+					(&mut self.inner, i, ix)
+				},
+				Some((i, ix)) => {
+					fetched_mut = self.fetched.borrow_mut();
+					if let Some(node) = fetched_mut.get_mut(i) {
+						(node, i, ix)
+					} else {
+						unreachable!("fetch node returns existing index");
+					}
+				},
+				None => {
+					return;
+				},
+			};
+
+			if ix > 0 {
+				if M::APPLY_SIZE_LIMIT {
+					let mut add_size = 0;
+					for i in 0..ix {
+						node.data.st_get(i)
+							.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+					}
+					node.reference_len -= add_size;
+				}
+				node.changed = true;
+				node.data.truncate_until(ix)
+			}
+			self.start_node_index += self.end_node_index - i as u32 - 1;
+			if self.len > split_off {
+				self.len -= split_off;
+			} else {
+				self.len = 0;
+			}
+			i
+		};
+		// reversed ordered.
+		self.fetched.borrow_mut().truncate(i + 1);
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
+		self.len += 1;
 		let mut additional_size: Option<usize> = None;
 		
-		if let Some(nb) = M::max_head_items() {
-			if self.inner.data.len() < nb {
+		if !M::APPLY_SIZE_LIMIT {
+			if self.inner.data.len() < M::MAX_NODE_ITEMS {
 				self.inner.data.push(value);
-				self.end_index += 1;
 				return;
 			}
 		} else {
 			let add_size = value.value.estimate_size() + value.state.estimate_size(); 
 			additional_size = Some(add_size);
-			if self.inner.reference_len + add_size < M::max_head_len() {
+			if self.inner.reference_len + add_size < M::MAX_NODE_LEN {
 				self.inner.reference_len += add_size;
 				self.inner.data.push(value);
-				self.end_index += 1;
 				return;
 			}
 		}
@@ -274,7 +338,6 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			value.value.estimate_size() + value.state.estimate_size()
 		);
 		self.end_node_index += 1;
-		self.end_index += 1;
 		let mut data = D::init_from(());
 		data.push(value);
 		let new_node = Node::<V, S, D, M> {
@@ -287,23 +350,189 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		let prev = crate::rstd::mem::replace(&mut self.inner, new_node);
 		self.fetched.borrow_mut().insert(0, prev);
 	}
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>) {
-		unimplemented!()
+	fn insert(&mut self, index: usize, h: HistoriedValue<V, S>) {
+		let mut fetched_mut;
+		let (node, ix) = match self.fetch_node(index) {
+			Some((i, ix)) if i == self.end_node_index as usize =>  {
+				(&mut self.inner, ix)
+			},
+			Some((i, ix)) => {
+				fetched_mut = self.fetched.borrow_mut();
+				if let Some(node) = fetched_mut.get_mut(i) {
+					(node, ix)
+				} else {
+					unreachable!("fetch node returns existing index");
+				}
+			},
+			None => {
+				self.push(h);
+				return;
+			},
+		};
+
+		if M::APPLY_SIZE_LIMIT {
+			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
+		}
+		node.changed = true;
+		self.len += 1;
+		node.data.insert(ix, h);
 	}
 	fn remove(&mut self, index: usize) {
-		unimplemented!()
+		let mut fetched_mut;
+		let (node, ix) = match self.fetch_node(index) {
+			Some((i, ix)) if i == self.end_node_index as usize =>  {
+				(&mut self.inner, ix)
+			},
+			Some((i, ix)) => {
+				fetched_mut = self.fetched.borrow_mut();
+				if let Some(node) = fetched_mut.get_mut(i) {
+					(node, ix)
+				} else {
+					unreachable!("fetch node returns existing index");
+				}
+			},
+			None => {
+				return;
+			},
+		};
+
+		node.changed = true;
+		self.len -= 1;
+
+		if M::APPLY_SIZE_LIMIT {
+			node.data.st_get(ix)
+				.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
+		}
+		node.data.remove(ix);
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
-		unimplemented!()
+		if self.len == 0 {
+			return None;
+		}
+
+		if let Some(h) = self.inner.data.pop() {
+			self.len -= 1;
+			if self.inner.data.len() > 0 {
+				if M::APPLY_SIZE_LIMIT {
+					self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
+				}
+				self.inner.changed = true;
+			} else {
+				if self.fetched.borrow().len() == 0 {
+					if self.len > self.inner.data.len() + 1 {
+						self.fetch_node(self.len - self.inner.data.len() - 1);
+					}
+				}
+				if self.fetched.borrow().len() > 0 {
+					let removed = self.fetched.borrow_mut().remove(0);
+					self.inner = removed;
+				}
+			}
+
+			Some(h)
+		} else {
+			if self.fetched.borrow().len() == 0 {
+				if self.len > self.inner.data.len() + 1 {
+					self.fetch_node(self.len - self.inner.data.len() - 1);
+				}
+			}
+			if self.fetched.borrow().len() > 0 {
+				let removed = self.fetched.borrow_mut().remove(0);
+				self.inner = removed;
+				self.pop()
+			} else {
+				None
+			}
+		}
 	}
 	fn clear(&mut self) {
-		unimplemented!()
+		self.start_node_index = 0;
+		self.end_node_index = 0;
+		self.len = 0;
+		self.fetched.borrow_mut().clear();
+		self.inner.reference_len = 0;
+		self.inner.changed = true;
+		self.inner.data.clear();
 	}
 	fn truncate(&mut self, at: usize) {
-		unimplemented!()
+		let (in_head, i) = {
+			let mut fetched_mut;
+			let (node, i, ix, in_head) = match self.fetch_node(at) {
+				Some((i, ix)) if i == self.end_node_index as usize =>  {
+					(&mut self.inner, i, ix, true)
+				},
+				Some((i, ix)) => {
+					fetched_mut = self.fetched.borrow_mut();
+					if let Some(node) = fetched_mut.get_mut(i) {
+						(node, i, ix, false)
+					} else {
+						unreachable!("fetch node returns existing index");
+					}
+				},
+				None => {
+					return;
+				},
+			};
+
+			if ix < node.data.len() {
+
+				if M::APPLY_SIZE_LIMIT {
+					let mut add_size = 0;
+					for i in ix..node.data.len() {
+						node.data.st_get(i)
+							.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+					}
+					node.reference_len -= add_size;
+				}
+				node.changed = true;
+				node.data.truncate(ix)
+			}
+			(in_head, i)
+		};
+		if !in_head {
+			let fetch_index = i as u32;
+			self.end_node_index -= fetch_index + 1;
+			if self.len > at {
+				self.len = at;
+			}
+			let mut fetched_mut = self.fetched.borrow_mut();
+			// reversed ordered.
+			for i in 0..fetch_index + 1 {
+				let removed = fetched_mut.remove(0);
+				if i == fetch_index {
+					self.inner = removed;
+				}
+			}
+			self.inner.changed = true;
+		}
 	}
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
-		unimplemented!()
+	fn emplace(&mut self, at: usize, h: HistoriedValue<V, S>) {
+		let mut fetched_mut;
+		let (node, ix) = match self.fetch_node(at) {
+			Some((i, ix)) if i == self.end_node_index as usize =>  {
+				(&mut self.inner, ix)
+			},
+			Some((i, ix)) => {
+				fetched_mut = self.fetched.borrow_mut();
+				if let Some(node) = fetched_mut.get_mut(i) {
+					(node, ix)
+				} else {
+					unreachable!("fetch node returns existing index");
+				}
+			},
+			None => {
+				return;
+			},
+		};
+
+		node.changed = true;
+
+		if M::APPLY_SIZE_LIMIT {
+			node.data.st_get(ix)
+				.map(|h| node.reference_len -= h.value.estimate_size() + h.state.estimate_size());
+			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
+		}
+		node.data.emplace(ix, h);
 	}
 }
 
@@ -345,6 +574,10 @@ impl<D, M, B> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B>
 		D: EncodedArrayValue,
 {
 	fn from_slice(_slice: &[u8]) -> Self {
+		// requires passing around the init item (the key need to be derived): this implementation is needed when we
+		// EncodeArrayValue a head that refers to multiple head (those one needs to be instantiated)
+		// from_slice & backend + base key. TODO start  by changing from_slice to use a init from
+		// param.
 		unimplemented!("Require a backend : similar to switch from default to init from, also required to parse meta: using specific size of version would allow fix length meta encode")
 	}
 }
@@ -379,7 +612,6 @@ impl<V, S, D, M> EstimateSize for Node<V, S, D, M> {
 	}
 }
 
-
 #[cfg(test)]
 pub(crate) mod test {
 	use super::*;
@@ -390,26 +622,20 @@ pub(crate) mod test {
 	#[derive(Clone)]
 	pub(crate) struct MetaSize;
 	impl NodesMeta for MetaSize {
-		fn max_head_len() -> usize { 25 }
-		fn max_head_items() -> Option<usize> { None }
-		fn max_node_len() -> usize { 30 }
-		fn max_node_items() -> Option<usize> { None }
-		fn max_index_len() -> usize {
-			unimplemented!("no index");
-		}
-		fn storage_prefix() -> &'static [u8] { b"nodes1" }
+		const APPLY_SIZE_LIMIT: bool = true;
+		const MAX_NODE_LEN: usize = 25;
+		const MAX_NODE_ITEMS: usize = 0;
+		const MAX_INDEX_ITEMS: usize = 5;
+		const STORAGE_PREFIX: &'static [u8] = b"nodes1";
 	}
 	#[derive(Clone)]
 	pub(crate) struct MetaNb;
 	impl NodesMeta for MetaNb {
-		fn max_head_len() -> usize { 25 }
-		fn max_head_items() -> Option<usize> { Some(3) }
-		fn max_node_len() -> usize { 30 }
-		fn max_node_items() -> Option<usize> { Some(3) }
-		fn max_index_len() -> usize {
-			unimplemented!("no index");
-		}
-		fn storage_prefix() -> &'static [u8] { b"nodes2" }
+		const APPLY_SIZE_LIMIT: bool = false;
+		const MAX_NODE_LEN: usize = 0;
+		const MAX_NODE_ITEMS: usize = 3;
+		const MAX_INDEX_ITEMS: usize = 5;
+		const STORAGE_PREFIX: &'static [u8] = b"nodes2";
 	}
 
 	#[test]
@@ -442,5 +668,26 @@ pub(crate) mod test {
 			}
 			assert_eq!(head.get_state(i + 1), None);
 		}
+	}
+
+	#[test]
+	fn test_linear_storage() {
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaSize>();
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaNb>();
+		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
+		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb>();
+	}
+	fn test_linear_storage_inner<D, M>()
+		where
+			D: InitFrom<Init = ()> + LinearStorage<Vec<u8>, u32> + Clone,
+			M: NodesMeta + Clone,
+	{
+		use crate::backend::test::{Value, State};
+		let init_head = InitHead {
+			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u32, D, M>>::new(),
+			key: b"any".to_vec(),
+		};
+		let mut head = Head::<Vec<u8>, u32, D, M, _>::init_from(init_head);
+		crate::backend::test::test_linear_storage(&mut head);
 	}
 }

@@ -15,14 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Linear historied data historied db implementations.
-//!
-//! Current implementation is limited to a simple array indexing
-//! with modification at the end only.
-//! This is a sequential indexing.
-//! TODO consider renaming to sequential(only if implementation of non sequential).
-//!
-//! All api are assuming that the state used when modifying is indeed the latest state.
+//! Parallel historied data historied db implementations.
+//! Values can be modified in parallel (change at any state).
+//! State keeps an ordering, allowing to use sequential backend and organize sequentially.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
 	InMemoryValueSlice, InMemoryValue, ConditionalValueMut};
@@ -549,6 +544,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Condi
 	}
 }
 
+
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct LinearGC<S, V> {
@@ -575,6 +571,7 @@ impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<V
 		size
 	}
 }
+
 
 #[cfg(test)]
 mod test {
