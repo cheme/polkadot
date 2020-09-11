@@ -207,7 +207,8 @@ impl<
 		// ref refact will be costless
 		let (branch_index, index) = at.latest();
 		let mut insert_at = self.branches.len();
-		/* TODO write iter_mut that iterate on a HandleMut as in simple_db */
+		/* TODO write iter_mut that iterate on a HandleMut as in simple_db
+		 * in fact an entry iterator would be good (with lazy access loading) */
 /*		for (iter_index, branch) in self.branches.iter_mut().enumerate().rev() {
 			if &branch.branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());// TODO reftransparent &
@@ -677,13 +678,13 @@ impl<
 		UpdateResult::Changed(None)
 	}
 }
-
+	
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
 	V: Clone + Eq,
-	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V, BI, Init = D::Init>,
+	D: LinearStorage<Linear<V, BI, BD>, I>,
+	BD: LinearStorage<V, BI>,
 > ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
 	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
 		// Warn dup code, can be merge if change set to return previ value: with
@@ -693,19 +694,34 @@ impl<
 		let len = insert_at;
 		for ix in 0..len {
 			let iter_index = len - 1 - ix;
-			let branch = self.branches.get_ref_mut(iter_index).expect("previous code");
-	
-			if &branch.state == branch_index {
-				return branch.value.set_if_possible(value, &index);
+			let iter_branch_index = self.branches.get_state(iter_index).expect("previous code");
+			if &iter_branch_index == branch_index {
+				let mut branch = self.branches.st_get(iter_index).expect("previous code");
+				return match branch.value.set_if_possible(value, &index) {
+					Some(UpdateResult::Changed(_)) => {
+						self.branches.emplace(iter_index, branch);
+						Some(UpdateResult::Changed(()))
+					},
+					Some(UpdateResult::Cleared(_)) => {
+						self.branches.remove(iter_index);
+						if self.branches.len() == 0 {
+							Some(UpdateResult::Cleared(()))
+						} else {
+							Some(UpdateResult::Changed(()))
+						}
+					},
+					r => r,
+				};
 			}
-			if &branch.state < branch_index {
+			if &iter_branch_index < branch_index {
 				insert_at = iter_index + 1;
 				break;
 			} else {
 				insert_at = iter_index;
 			}
 		}
-		let branch = Branch::new(value, at, self.init.clone());
+
+		let branch = Branch::new(value, at, self.init_child.clone());
 		if insert_at == self.branches.len() {
 			self.branches.push(branch);
 		} else {
@@ -722,19 +738,34 @@ impl<
 		let len = insert_at;
 		for ix in 0..len {
 			let iter_index = len - 1 - ix;
-			let branch = self.branches.get_ref_mut(iter_index).expect("previous code");
-	
-			if &branch.state == branch_index {
-				return branch.value.set_if_possible_no_overwrite(value, &index);
+			let iter_branch_index = self.branches.get_state(iter_index).expect("previous code");
+			if &iter_branch_index == branch_index {
+				let mut branch = self.branches.st_get(iter_index).expect("previous code");
+				return match branch.value.set_if_possible_no_overwrite(value, &index) {
+					Some(UpdateResult::Changed(_)) => {
+						self.branches.emplace(iter_index, branch);
+						Some(UpdateResult::Changed(()))
+					},
+					Some(UpdateResult::Cleared(_)) => {
+						self.branches.remove(iter_index);
+						if self.branches.len() == 0 {
+							Some(UpdateResult::Cleared(()))
+						} else {
+							Some(UpdateResult::Changed(()))
+						}
+					},
+					r => r,
+				};
 			}
-			if &branch.state < branch_index {
+			if &iter_branch_index < branch_index {
 				insert_at = iter_index + 1;
 				break;
 			} else {
 				insert_at = iter_index;
 			}
 		}
-		let branch = Branch::new(value, at, self.init.clone());
+
+		let branch = Branch::new(value, at, self.init_child.clone());
 		if insert_at == self.branches.len() {
 			self.branches.push(branch);
 		} else {
