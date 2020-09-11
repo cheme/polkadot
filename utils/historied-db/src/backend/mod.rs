@@ -31,6 +31,93 @@ pub mod encoded_array;
 /// Content can be split between multiple nodes.
 pub mod nodes;
 
+// TODO this implementation uses a index and does not allow
+// performant implementation, it should (at least when existing
+// value) use a associated type handle depending on backend
+// (slice index of encoded array, pointer of in_memory, pointer
+// of node inner value for nodes). Also not puting value in memory.
+// TODO use it, this need to be spawn from historied module implementation
+// through access to index/vaccant first (state as input) and
+// simple impl then.
+pub struct Entry<'a, V, S: Clone, D: LinearStorage<V, S>> {
+	value: Option<V>,
+	state: S,
+	index: usize,
+	storage: &'a mut D,
+	changed: bool,
+	insert: bool,
+}
+
+impl<'a, V, S: Clone, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
+	/// ~ Vaccant enum of rust std lib.
+	/// Occupied is the negation of this.
+	pub fn is_vaccant(&self) -> bool {
+		self.insert
+	}
+	/// Access current value
+	pub fn value(&self) -> Option<&V> {
+		self.value.as_ref()
+	}
+	/// Access state.
+	pub fn state(&self) -> &S {
+		&self.state
+	}
+	/// Change value.
+	pub fn and_modify<F>(mut self, f: impl FnOnce(&mut V)) -> Self {
+		self.value.as_mut().map(f);
+		self.changed |= self.value.is_some();
+		self
+	}
+	/// Init a value for vaccant entry.
+	pub fn or_insert(mut self, default: V) -> Self {
+		if self.value.is_none() {
+			self.changed = true;
+			self.value = Some(default);
+		}
+		self
+	}
+	/// Lazy `or_insert`.
+	pub fn or_insert_with(mut self, default: impl FnOnce() -> V) -> Self {
+		if self.value.is_none() {
+			self.changed = true;
+			self.value = Some(default());
+		}
+		self
+	}
+	/// Remove entry.
+	pub fn and_delete(mut self) -> Self {
+		if self.value.is_some() {
+			self.changed = true;
+			self.value = None;
+		}
+		self
+	}
+}
+
+impl<'a, V, S: Clone, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
+{
+	fn drop(&mut self) {
+		if self.changed {
+			if let Some(change) = self.value.take() {
+				let change = HistoriedValue {
+					value: change,
+					state: self.state.clone(),
+				};
+
+				if self.insert {
+					self.storage.insert(self.index, change);
+				} else {
+					self.storage.emplace(self.index, change);
+				}
+			} else {
+				if self.changed && !self.insert {
+					self.storage.remove(self.index);
+				}
+			}
+		}
+	}
+}
+
 /// Backend for linear storage.
 pub trait LinearStorage<V, S>: InitFrom {
 	/// This does not need to be very efficient as it is mainly for
@@ -49,6 +136,7 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// shall be use.
 	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>);
 	/// Vec like remove, this is mainly use in tree branch implementation.
+	/// TODO ensure remove last is using pop implementation.
 	fn remove(&mut self, index: usize);
 	/// TODO put 'a and return read type that can be &'a S and where S is AsRef<S>.
 	/// TODO put 'a and return read type that can be &'a [u8] and where Vec<u8> is AsRef<[u8]>.
@@ -63,7 +151,8 @@ pub trait LinearStorage<V, S>: InitFrom {
 	fn clear(&mut self);
 	fn truncate(&mut self, at: usize);
 	/// This can be slow, only define in migrate.
-	/// TODO consider renaming.
+	/// TODO consider renaming. TODO optimize the implementations to ensure emplace latest is
+	/// as/more efficient than pop and push.
 	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>);
 	// TODO implement and replace in set function of linear (avoid some awkward possible
 	// side effect of pop then push)
