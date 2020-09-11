@@ -124,7 +124,6 @@ impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
 
 impl<V, S, D: LinearStorage<V, S>> LinearStorage<V, S> for Linear<V, S, D> {
 	type Handle = crate::backend::DummyHandle;
-	type RevIter = crate::backend::DummyRevIter;
 	fn truncate_until(&mut self, split_off: usize) {
 		self.0.truncate_until(split_off)
 	}
