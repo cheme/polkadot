@@ -605,7 +605,6 @@ impl<
 		result
 	}
 
-
 	#[cfg(test)]
 	fn nb_internal_history(&self) -> usize {
 		let mut nb = 0;
