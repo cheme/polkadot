@@ -153,11 +153,11 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// Number of element for different S.
 	fn len(&self) -> usize;
 	/// Array like get.
-	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>>;
-	/// Array like get.
-	fn st_get_handle(&self, handle: Self::Handle) -> Option<HistoriedValue<V, S>> {
-		unreachable!("TODO remove default")
+	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
+		self.handle(index).map(|handle| self.st_get_handle(handle))
 	}
+	/// Array like get.
+	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S>;
 	/// Entry.
 	fn entry<'a>(&'a mut self, index: usize) -> Entry<'a, V, S, Self> {
 		let value = self.st_get(index);
@@ -171,33 +171,37 @@ pub trait LinearStorage<V, S>: InitFrom {
 		}
 	}
 	/// Array like get.
-	fn get_state(&self, index: usize) -> Option<S>;
+	fn get_state(&self, index: usize) -> Option<S> {
+		self.handle(index).map(|handle| self.get_state_handle(handle))
+	}
+	/// Array like get.
+	fn get_state_handle(&self, handle: Self::Handle) -> S;
 	/// Vec like push.
 	fn push(&mut self, value: HistoriedValue<V, S>);
 	/// Vec like insert, this is mainly use in tree implementation.
 	/// So when used as tree branch container, a efficient implementation
 	/// shall be use.
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>);
+	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>) {
+		if let Some(handle) = self.handle(index) {
+			self.insert_handle(handle, value)
+		} else {
+			self.push(value)
+		}
+	}
 	/// Insert a value at a handle. (Can act as emplace or insert depending
 	/// on the handle).
-	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
-		unreachable!("TODO remove default")
-	}
+	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>);
 	/// Vec like remove, this is mainly use in tree branch implementation.
 	/// TODO ensure remove last is using pop implementation.
-	fn remove(&mut self, index: usize);
-	/// Remove value at a handle if there is one.
-	fn remove_handle(&mut self, handle: Self::Handle) {
-		unreachable!("TODO remove default")
+	fn remove(&mut self, index: usize) {
+		self.handle(index).map(|handle| self.remove_handle(handle));
 	}
+	/// Remove value at a handle if there is one.
+	fn remove_handle(&mut self, handle: Self::Handle);
 	/// TODO put 'a and return read type that can be &'a S and where S is AsRef<S>.
 	/// TODO put 'a and return read type that can be &'a [u8] and where Vec<u8> is AsRef<[u8]>.
 	fn last(&self) -> Option<HistoriedValue<V, S>> {
-		if self.len() > 0 {
-			self.st_get(self.len() - 1)
-		} else {
-			None
-		}
+		self.handle_last().map(|handle| self.st_get_handle(handle))
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>>;
 	fn clear(&mut self);
@@ -205,7 +209,10 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// This can be slow, only define in migrate.
 	/// TODO consider renaming. TODO optimize the implementations to ensure emplace latest is
 	/// as/more efficient than pop and push.
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>);
+	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
+		self.handle(at).map(|handle| self.emplace_handle(handle, value));
+	}
+	fn emplace_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>);
 	// TODO implement and replace in set function of linear (avoid some awkward possible
 	// side effect of pop then push)
 	//	fn emplace_last(&mut self, at: usize, value: HistoriedValue<V, S>);

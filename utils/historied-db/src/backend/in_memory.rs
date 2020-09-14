@@ -128,20 +128,23 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	fn len(&self) -> usize {
 		self.0.len()
 	}
-	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		self.0.get(index).cloned()
+	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
+		self.0[handle].clone()
 	}
 	fn get_state(&self, index: usize) -> Option<S> {
 		self.0.get(index).map(|h| h.state.clone())
 	}
+	fn get_state_handle(&self, handle: Self::Handle) -> S {
+		self.0[handle].state.clone()
+	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
 		self.0.push(value)
 	}
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>) {
-		self.0.insert(index, value)
+	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+		self.0.insert(handle, value)
 	}
-	fn remove(&mut self, index: usize) {
-		self.0.remove(index);
+	fn remove_handle(&mut self, handle: Self::Handle) {
+		self.0.remove(handle);
 	}
 	fn last(&self) -> Option<HistoriedValue<V, S>> {
 		self.0.last().cloned()
@@ -155,8 +158,8 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	fn truncate(&mut self, at: usize) {
 		self.0.truncate(at)
 	}
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
-		self.0[at] = value;
+	fn emplace_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+		self.0[handle] = value;
 	}
 }
 

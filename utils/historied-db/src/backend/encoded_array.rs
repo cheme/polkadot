@@ -413,31 +413,27 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 	where V: EncodedArrayValue,
 {
 	// Node index.
-	// Node encoding start.
-	type Handle = (usize, usize);
+	type Handle = usize;
 //impl<'a, F: EncodedArrayConfig> LinearStorage<'a, &'a[u8], u32> for EncodedArray<'a, F> {
 	fn handle_last(&self) -> Option<Self::Handle> {
 		let len = self.len();
 		if len == 0 {
 			return None;
 		}
-		let start_ix = self.index_element(len - 1);
-		Some((len - 1, start_ix))
+		Some(len - 1)
 	}
 	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle> {
-		if handle.0 == 0 {
+		if handle == 0 {
 			return None;
 		}
-		let start_ix = self.index_element(handle.0 - 1);
-		Some((handle.0 - 1, start_ix))
+		Some(handle)
 	}
 	fn handle(&self, index: usize) -> Option<Self::Handle> {
 		let len = self.len();
 		if index >= len {
 			return None;
 		}
-		let start_ix = self.index_element(index);
-		Some((index, start_ix))
+		Some(index)
 	}
 	fn truncate_until(&mut self, split_off: usize) {
 		self.remove_range(0, split_off);
@@ -448,25 +444,12 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		self.read_le_usize(len - SIZE_BYTE_LEN) as usize
 	}
 
-	// TODO lifetime in Linear storage refacto
-	// fn get(&self, index: usize) -> Option<HistoriedValue<&'a[u8], u32>> {
-	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, u32>> {
-		if index < self.len() {
-			Some(self.get_state(index).map(|v| V::from_slice(v.as_ref())))
-			//Some(self.get_state(index))
-		} else {
-			None
-		}
+	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, u32> {
+		self.get_state(handle).map(|v| V::from_slice(v.as_ref()))
 	}
-
-	fn get_state(&self, index: usize) -> Option<u32> {
-		if index < self.len() {
-			Some(self.get_state_only(index))
-		} else {
-			None
-		}
+	fn get_state_handle(&self, handle: Self::Handle) -> u32 {
+		self.get_state_only(handle)
 	}
-
 	//fn push(&mut self, value: HistoriedValue<&'a[u8], u32>) {
 	fn push(&mut self, value: HistoriedValue<V, u32>) {
 		let val = value.map_ref(|v| v.as_ref());
@@ -517,18 +500,15 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		self.0.to_mut().truncate(new_start + len_ix);
 	}
 
-	//fn emplace(&mut self, at: usize, value: HistoriedValue<&'a[u8], u32>) {
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, u32>) {
+	fn emplace_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, u32>) {
 		let len = self.len();
-		if len <= at {
-			panic!("out of range emplace");
-		}
-		let elt_start = self.index_element(at);
+		debug_assert!(len > handle);
+		let elt_start = self.index_element(handle);
 		let start_ix = self.index_start();
-		let elt_end = if len == at + 1{
+		let elt_end = if len == handle + 1{
 			start_ix
 		} else {
-			self.index_element(at + 1) 
+			self.index_element(handle + 1) 
 		};
 		let previous_size = elt_end - elt_start - SIZE_BYTE_LEN;
 		if previous_size == value.value.as_ref().len() {
@@ -547,7 +527,7 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 				let _ = self.0.to_mut().remove(new_elt_end);
 			}
 			let start_ix = start_ix - delete_size;
-			for pos in at..len - 1 {
+			for pos in handle..len - 1 {
 				let old_value = self.read_le_usize(start_ix + pos * SIZE_BYTE_LEN);
 				self.write_le_usize(start_ix + pos * SIZE_BYTE_LEN, old_value - delete_size);
 			}
@@ -560,21 +540,19 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 			self.write_le_u32(elt_start, value.state);
 			self.0[elt_start + SIZE_BYTE_LEN..new_elt_end].copy_from_slice(value.value.as_ref());
 			let start_ix = start_ix + additional_size;
-			for pos in at..len - 1 {
+			for pos in handle..len - 1 {
 				let old_value = self.read_le_usize(start_ix + pos * SIZE_BYTE_LEN);
 				self.write_le_usize(start_ix + pos * SIZE_BYTE_LEN, old_value + additional_size);
 			}
 		}
 	}
 
-	fn insert(&mut self, at: usize, value: HistoriedValue<V, u32>) {
+	fn insert_handle(&mut self, handle: usize, value: HistoriedValue<V, u32>) {
 		let len = self.len();
-		if len < at {
-			panic!("out of rane insert");
-		}
+		debug_assert!(len >= handle);
 		let end_ix = self.0.len();
 		let start_ix = self.index_start();
-		let elt_start = self.index_element(at);
+		let elt_start = self.index_element(handle);
 		let additional_size = value.value.as_ref().len() + SIZE_BYTE_LEN;
 		let elt_end = elt_start + additional_size;
 
@@ -585,16 +563,15 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		self.0[elt_start + SIZE_BYTE_LEN..elt_end].copy_from_slice(value.value.as_ref());
 		let start_ix = start_ix + additional_size;
 		let mut old_value = elt_end;
-		for pos in at..len {
+		for pos in handle..len {
 			let tmp = self.read_le_usize(start_ix + pos * SIZE_BYTE_LEN);
 			self.write_le_usize(start_ix + pos * SIZE_BYTE_LEN, old_value);
 			old_value = tmp + additional_size;
 		}
 		self.write_le_usize(self.0.len() - SIZE_BYTE_LEN, len + 1);
 	}
-
-	fn remove(&mut self, index: usize) {
-		self.remove_range(index, index + 1);
+	fn remove_handle(&mut self, handle: Self::Handle) {
+		self.remove_range(handle, handle + 1);
 	}
 }
 

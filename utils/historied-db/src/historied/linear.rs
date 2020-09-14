@@ -29,7 +29,7 @@ use crate::{UpdateResult, Latest};
 use crate::rstd::marker::PhantomData;
 use crate::rstd::vec::Vec;
 use crate::rstd::convert::TryFrom;
-use crate::rstd::ops::{AddAssign, SubAssign, Range};
+use crate::rstd::ops::{SubAssign, Range};
 use codec::{Encode, Decode};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
 use crate::backend::encoded_array::EncodedArrayValue;
@@ -139,8 +139,14 @@ impl<V, S, D: LinearStorage<V, S>> LinearStorage<V, S> for Linear<V, S, D> {
 	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
 		self.0.st_get(index)
 	}
+	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
+		self.0.st_get_handle(handle)
+	}
 	fn get_state(&self, index: usize) -> Option<S> {
 		self.0.get_state(index)
+	}
+	fn get_state_handle(&self, handle: Self::Handle) -> S {
+		self.0.get_state_handle(handle)
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
 		self.0.push(value)
@@ -148,8 +154,14 @@ impl<V, S, D: LinearStorage<V, S>> LinearStorage<V, S> for Linear<V, S, D> {
 	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>) {
 		self.0.insert(index, value)
 	}
+	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+		self.0.insert_handle(handle, value)
+	}
 	fn remove(&mut self, index: usize) {
 		self.0.remove(index)
+	}
+	fn remove_handle(&mut self, handle: Self::Handle) {
+		self.0.remove_handle(handle)
 	}
 	fn last(&self) -> Option<HistoriedValue<V, S>> {
 		self.0.last()
@@ -165,6 +177,9 @@ impl<V, S, D: LinearStorage<V, S>> LinearStorage<V, S> for Linear<V, S, D> {
 	}
 	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
 		self.0.emplace(at, value)
+	}
+	fn emplace_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+		self.0.emplace_handle(handle, value)
 	}
 }
 
