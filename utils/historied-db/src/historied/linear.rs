@@ -20,7 +20,6 @@
 //! Current implementation is limited to a simple array indexing
 //! with modification at the end only.
 //! This is a sequential indexing.
-//! TODO consider renaming to sequential(only if implementation of non sequential).
 //!
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
@@ -48,7 +47,6 @@ pub trait LinearState:
 	+ Ord
 	+ PartialOrd
 	+ TryFrom<u32>
-	+ AddAssign<u32> // TODO can remove ??
 	+ PartialEq<u32>
 {
 	// stored state and query state are
@@ -68,7 +66,6 @@ impl<S> LinearState for S where S:
 	+ Ord
 	+ PartialOrd
 	+ TryFrom<u32>
-	+ AddAssign<u32>
 	+ PartialEq<u32>
 { }
 
@@ -377,9 +374,9 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 	type Index = S;
 	type GC = LinearGC<S, V>;
 	/// Migrate will act as GC but also align state to 0.
-	/// First index being the number for start state that
-	/// will be removed after migration.
-	type Migrate = (S, Self::GC);
+	/// The index index in second position is the old start state
+	/// number that is now 0 (usually the state as gc new_start).
+	type Migrate = (Self::GC, Self::S);
 
 	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
 		let mut v = D::init_from(init);
@@ -490,7 +487,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		}
 	}
 
-	fn migrate(&mut self, (mig, gc): &mut Self::Migrate) -> UpdateResult<()> {
+	fn migrate(&mut self, (gc, mig): &mut Self::Migrate) -> UpdateResult<()> {
 		let res = self.gc(gc);
 		let len = self.0.len();
 		if len > 0 {
@@ -503,15 +500,16 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 				}
 			}
 			*/
-		
-			for i in 0..len {
-				if let Some(mut h) = self.0.st_get(i) {
+			let mut index = len;
+			while index > 0 {
+				index -= 1;
+				if let Some(mut h) = self.0.st_get(index) {
 					if &h.state > mig {
 						h.state -= mig.clone();
 					} else {
 						h.state = Default::default();
 					}
-					self.0.emplace(i, h);
+					self.0.emplace(index, h);
 				} else {
 					unreachable!("len checked")
 				}
@@ -523,8 +521,9 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 	}
 
 	fn is_in_migrate(index: &Self::Index, gc: &Self::Migrate) -> bool {
-		gc.1.new_start.as_ref().map(|s| index < s).unwrap_or(false)
-			|| gc.1.new_end.as_ref().map(|s| index >= s).unwrap_or(false)
+		gc.1 > Self::Index::default()
+			|| gc.0.new_start.as_ref().map(|s| index < s).unwrap_or(false)
+			|| gc.0.new_end.as_ref().map(|s| index >= s).unwrap_or(false)
 	}
 }
 
