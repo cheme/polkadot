@@ -120,7 +120,16 @@ impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
 }
 
 impl<V, S, D: LinearStorage<V, S>> LinearStorage<V, S> for Linear<V, S, D> {
-	type Handle = crate::backend::DummyHandle;
+	type Handle = D::Handle;
+	fn handle_last(&self) -> Option<Self::Handle> {
+		self.0.handle_last()
+	}
+	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle> {
+		self.0.handle_prev(handle)
+	}
+	fn handle(&self, index: usize) -> Option<Self::Handle> {
+		self.0.handle(index)
+	}
 	fn truncate_until(&mut self, split_off: usize) {
 		self.0.truncate_until(split_off)
 	}

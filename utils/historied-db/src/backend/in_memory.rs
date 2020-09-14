@@ -91,7 +91,30 @@ impl<V, S> InitFrom for MemoryOnly<V, S> {
 }
 
 impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
-	type Handle = crate::backend::DummyHandle;
+	// Index position in array.
+	type Handle = usize;
+	fn handle_last(&self) -> Option<Self::Handle> {
+		if self.0.len() == 0 {
+			None
+		} else {
+			Some(self.0.len() - 1)
+		}
+	}
+	fn handle_prev(&self, mut handle: Self::Handle) -> Option<Self::Handle> {
+		if handle == 0 {
+			None
+		} else {
+			handle -= 1;
+			Some(handle)
+		}
+	}
+	fn handle(&self, index: usize) -> Option<Self::Handle> {
+		if index >= self.0.len() {
+			None
+		} else {
+			Some(index)
+		}
+	}
 	fn truncate_until(&mut self, split_off: usize) {
 		if self.0.spilled() {
 			let new = replace(&mut self.0, Default::default());
