@@ -234,7 +234,6 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		S: EstimateSize,
 		V: EstimateSize,
 {
-	type Handle = crate::backend::DummyHandle;
 	fn len(&self) -> usize {
 		self.len
 	}
