@@ -233,8 +233,77 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize,
-{
-	type Handle = crate::backend::DummyHandle;
+{	
+	// Fetched node index (end_node_index is head).
+	// If true the node needs to be inserted.
+	// Inner node linear storage handle.
+	type Handle = (u32, D::Handle);
+	fn handle_last(&self) -> Option<Self::Handle> {
+		if self.len == 0 {
+			return None;
+		}
+		if let Some(inner_handle) = self.inner.data.handle_last() {
+			return Some((self.end_node_index, inner_handle));
+		}
+
+		let mut i = self.end_node_index;
+		while i > self.start_node_index {
+			i -= 1;
+			let fetch_index = self.end_node_index - i - 1;
+			let inner_handle = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
+				node.data.handle_last()
+			} else {
+				if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i) {
+					let inner_handle = node.data.handle_last();
+					self.fetched.borrow_mut().push(node);
+					inner_handle
+				} else {
+					None
+				}
+			};
+			if let Some(inner_handle) = inner_handle {
+				return Some((i, inner_handle));
+			}
+		}
+		None
+	}
+	fn handle_prev(&self, mut handle: Self::Handle) -> Option<Self::Handle> {
+		if handle.0 == self.end_node_index {
+			if let Some(inner_handle) = self.inner.data.handle_last() {
+				handle.1 = inner_handle;
+				return Some(handle);
+			}
+		}
+		while handle.0 > self.start_node_index {
+			handle.0 -= 1;
+			let fetch_index = self.end_node_index - handle.0 - 1;
+			let inner_handle = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
+				node.data.handle_last()
+			} else {
+				if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), handle.0) {
+					let inner_handle = node.data.handle_last();
+					self.fetched.borrow_mut().push(node);
+					inner_handle
+				} else {
+					None
+				}
+			};
+			if let Some(inner_handle) = inner_handle {
+				handle.1 = inner_handle;
+				return Some(handle);
+			}
+		}
+		None
+	}
+	fn handle(&self, index: usize) -> Option<Self::Handle> {
+		// TODO see if could replace all fetch node with handle use and replace this.
+		self.fetch_node(index).and_then(|(node_index, inner_node_index)| {
+			self.fetched.borrow().get(node_index)
+				.and_then(|inner|
+				inner.data.handle(inner_node_index).map(|handle| (node_index as u32, handle))
+			)
+		})
+	}
 	fn len(&self) -> usize {
 		self.len
 	}

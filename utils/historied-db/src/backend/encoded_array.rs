@@ -412,8 +412,33 @@ impl<'a, F: EncodedArrayConfig, V> InitFrom for EncodedArray<'a, V, F>
 impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	type Handle = crate::backend::DummyHandle;
+	// Node index.
+	// Node encoding start.
+	type Handle = (usize, usize);
 //impl<'a, F: EncodedArrayConfig> LinearStorage<'a, &'a[u8], u32> for EncodedArray<'a, F> {
+	fn handle_last(&self) -> Option<Self::Handle> {
+		let len = self.len();
+		if len == 0 {
+			return None;
+		}
+		let start_ix = self.index_element(len - 1);
+		Some((len - 1, start_ix))
+	}
+	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle> {
+		if handle.0 == 0 {
+			return None;
+		}
+		let start_ix = self.index_element(handle.0 - 1);
+		Some((handle.0 - 1, start_ix))
+	}
+	fn handle(&self, index: usize) -> Option<Self::Handle> {
+		let len = self.len();
+		if index >= len {
+			return None;
+		}
+		let start_ix = self.index_element(index);
+		Some((index, start_ix))
+	}
 	fn truncate_until(&mut self, split_off: usize) {
 		self.remove_range(0, split_off);
 	}

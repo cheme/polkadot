@@ -128,22 +128,21 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// Opaque handle over a location in the storage.
 	/// Needs to have direct access, where usize index
 	/// could have costy access.
+	/// TODO switch to handle read and entry (possibly insert)?
 	type Handle: Copy;
-	fn handle_last(&self) -> Option<Self::Handle> {
-		 unreachable!("TODO remove default")
-	}
-	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle> {
-		unreachable!("TODO remove default")
-	}
+	/// Handle here are only existing handle.
+	fn handle_last(&self) -> Option<Self::Handle>;
+	/// Handle here are only existing handle.
+	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle>;
 	// assume handle was obtain from a > index.
+/*	/// Handle here are can be non existing handle.
 	fn handle_from(&self, index: usize, handle: Self::Handle) -> Self::Handle {
 		// TODO impl from prev
 		unreachable!("TODO remove default")
-	}
-	fn handle(&self, index: usize) -> Self::Handle {
-		// TODO impl from prev
-		unreachable!("TODO remove default")
-	}
+	}*/
+	/// Handle here are can be non existing handle.
+	fn handle(&self, index: usize) -> Option<Self::Handle>;
+	/// Handle here are only existing handle.
 	fn backward_handle_iter(&self) -> HandleBackwardIter<V, S, Self> {
 		let first = self.handle_last();
 		HandleBackwardIter(self, first, Default::default())
