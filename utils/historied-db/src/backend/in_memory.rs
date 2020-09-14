@@ -91,6 +91,7 @@ impl<V, S> InitFrom for MemoryOnly<V, S> {
 }
 
 impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
+	type Handle = crate::backend::DummyHandle;
 	fn truncate_until(&mut self, split_off: usize) {
 		if self.0.spilled() {
 			let new = replace(&mut self.0, Default::default());

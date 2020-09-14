@@ -104,9 +104,50 @@ impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
 		}
 	}
 }
+#[derive(Copy, Clone)]
+pub struct DummyHandle;
+pub struct HandleBackwardIter<'a, V, S, D: LinearStorage<V, S>>(
+	&'a D,
+	Option<D::Handle>,
+	crate::rstd::marker::PhantomData<(V, S)>,
+);
+impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for HandleBackwardIter<'a, V, S, D> {
+	type Item = <D as LinearStorage<V, S>>::Handle;
+	fn next(&mut self) -> Option<Self::Item> {
+		if let Some(handle) = self.1.take() {
+			self.1 = self.0.handle_prev(handle);
+			Some(handle)
+		} else {
+			None
+		}
+	}
+}
 
 /// Backend for linear storage.
 pub trait LinearStorage<V, S>: InitFrom {
+	/// Opaque handle over a location in the storage.
+	/// Needs to have direct access, where usize index
+	/// could have costy access.
+	type Handle: Copy;
+	fn handle_last(&self) -> Option<Self::Handle> {
+		 unreachable!("TODO remove default")
+	}
+	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle> {
+		unreachable!("TODO remove default")
+	}
+	// assume handle was obtain from a > index.
+	fn handle_from(&self, index: usize, handle: Self::Handle) -> Self::Handle {
+		// TODO impl from prev
+		unreachable!("TODO remove default")
+	}
+	fn handle(&self, index: usize) -> Self::Handle {
+		// TODO impl from prev
+		unreachable!("TODO remove default")
+	}
+	fn backward_handle_iter(&self) -> HandleBackwardIter<V, S, Self> {
+		let first = self.handle_last();
+		HandleBackwardIter(self, first, Default::default())
+	}
 	/// This does not need to be very efficient as it is mainly for
 	/// garbage collection.
 	fn truncate_until(&mut self, split_off: usize);
@@ -114,6 +155,10 @@ pub trait LinearStorage<V, S>: InitFrom {
 	fn len(&self) -> usize;
 	/// Array like get.
 	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>>;
+	/// Array like get.
+	fn st_get_handle(&self, handle: Self::Handle) -> Option<HistoriedValue<V, S>> {
+		unreachable!("TODO remove default")
+	}
 	/// Entry.
 	fn entry<'a>(&'a mut self, index: usize) -> Entry<'a, V, S, Self> {
 		let value = self.st_get(index);
@@ -134,9 +179,18 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// So when used as tree branch container, a efficient implementation
 	/// shall be use.
 	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>);
+	/// Insert a value at a handle. (Can act as emplace or insert depending
+	/// on the handle).
+	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+		unreachable!("TODO remove default")
+	}
 	/// Vec like remove, this is mainly use in tree branch implementation.
 	/// TODO ensure remove last is using pop implementation.
 	fn remove(&mut self, index: usize);
+	/// Remove value at a handle if there is one.
+	fn remove_handle(&mut self, handle: Self::Handle) {
+		unreachable!("TODO remove default")
+	}
 	/// TODO put 'a and return read type that can be &'a S and where S is AsRef<S>.
 	/// TODO put 'a and return read type that can be &'a [u8] and where Vec<u8> is AsRef<[u8]>.
 	fn last(&self) -> Option<HistoriedValue<V, S>> {
@@ -162,6 +216,9 @@ pub trait LinearStorage<V, S>: InitFrom {
 pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, S> {
 	/// Array like get.
 	fn get_slice(&self, index: usize) -> Option<HistoriedValue<&[u8], S>>;
+	fn get_slice_handle(&self, handle: Self::Handle) -> Option<HistoriedValue<&[u8], S>> {
+		unreachable!("TODO remove default")
+	}
 	fn last_slice(&self) -> Option<HistoriedValue<&[u8], S>> {
 		if self.len() > 0 {
 			self.get_slice(self.len() - 1)
@@ -171,12 +228,18 @@ pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, 
 	}
 	/// Array like get mut.
 	fn get_slice_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut [u8], S>>;
+	fn get_slice_mut_handle(&mut self, handle: Self::Handle) -> Option<HistoriedValue<&mut [u8], S>> {
+		unreachable!("TODO remove default")
+	}
 }
 
 /// Backend for linear storage with inmemory reference.
 pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
 	/// Array like get.
 	fn get_ref(&self, index: usize) -> Option<HistoriedValue<&V, S>>;
+	fn get_ref_handle(&self, handle: Self::Handle) -> Option<HistoriedValue<&V, S>> {
+		unreachable!("TODO remove default")
+	}
 	fn last_ref(&self) -> Option<HistoriedValue<&V, S>> {
 		if self.len() > 0 {
 			self.get_ref(self.len() - 1)
@@ -186,12 +249,18 @@ pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
 	}
 	/// Array like get mut.
 	fn get_ref_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut V, S>>;
+	fn get_ref_mut_handle(&mut self, handle: Self::Handle) -> Option<HistoriedValue<&mut V, S>> {
+		unreachable!("TODO remove default")
+	}
 }
 
 pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
 	/// Array like get. TODO consider not returning option (same for from_slice), inner
 	/// implementation being unsafe.
 	fn get_range(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, S>>;
+	fn get_range_handle(slice: &[u8], handle: Self::Handle) -> Option<HistoriedValue<Range<usize>, S>> {
+		unreachable!("TODO remove default")
+	}
 
 	fn from_slice(slice: &[u8]) -> Option<Self>;
 }
