@@ -547,35 +547,24 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 
 	fn migrate(&mut self, (gc, mig): &mut Self::Migrate) -> UpdateResult<()> {
 		let res = self.gc(gc);
-		let len = self.0.len();
-		if len > 0 {
-			/* TODO write iter_mut that iterate on a HandleMut as in simple_db
-			for h in self.0.iter_mut() {
-				if &h.state > mig {
-					h.state -= mig.clone();
-				} else {
-					h.state = Default::default();
-				}
-			}
-			*/
-			let mut index = len;
-			while index > 0 {
-				index -= 1;
-				if let Some(mut h) = self.0.st_get(index) {
-					if &h.state > mig {
-						h.state -= mig.clone();
-					} else {
-						h.state = Default::default();
-					}
-					self.0.emplace(index, h);
-				} else {
-					unreachable!("len checked")
-				}
-			}
+		let mut next_handle = self.0.handle_last();
+		let result = if next_handle.is_some() {
 			UpdateResult::Changed(())
 		} else {
 			res
+		};
+		while let Some(handle) = next_handle {
+			let mut h = self.0.st_get_handle(handle);
+			if &h.state > mig {
+				h.state -= mig.clone();
+			} else {
+				h.state = Default::default();
+			}
+			self.0.emplace_handle(handle, h);
+
+			next_handle = self.0.handle_prev(handle);
 		}
+		result
 	}
 
 	fn is_in_migrate(index: &Self::Index, gc: &Self::Migrate) -> bool {
