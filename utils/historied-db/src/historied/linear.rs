@@ -274,7 +274,7 @@ impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for L
 			}
 			while index > 0 {
 				index -= 1;
-				if let Some(HistoriedValue { value, state }) = D::get_range(slice, index) {
+				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, index) {
 					if state.exists(at) {
 						return Some(value);
 					}

@@ -578,34 +578,24 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 impl<'a, F: EncodedArrayConfig, V> LinearStorageSlice<V, u32> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	fn get_slice(&self, index: usize) -> Option<HistoriedValue<&[u8], u32>> {
-		if index < self.len() {
-			Some(self.get_state(index))
-		} else {
-			None
-		}
+	fn get_slice_handle(&self, handle: Self::Handle) -> HistoriedValue<&[u8], u32> {
+		self.get_state(handle)
 	}
-	fn get_slice_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut [u8], u32>> {
-		if index < self.len() {
-			Some(self.get_state_mut(index))
-		} else {
-			None
-		}
+	fn get_slice_mut_handle(&mut self, handle: Self::Handle) -> HistoriedValue<&mut [u8], u32> {
+		self.get_state_mut(handle)
 	}
 }
 
 impl<'a, F: EncodedArrayConfig, V> LinearStorageRange<V, u32> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	fn get_range(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, u32>> {
-		let inner = <Self as EncodedArrayValue>::from_slice(slice);
-		let (start, end, state) = inner.get_range(index);
-		Some(HistoriedValue {
+	fn get_range_handle(&self, handle: Self::Handle) -> HistoriedValue<Range<usize>, u32> {
+		let (start, end, state) = self.get_range(handle);
+		HistoriedValue {
 			state,
 			value: start..end,
-		})
+		}
 	}
-
 	fn from_slice(slice: &[u8]) -> Option<Self> {
 		Some(<Self as EncodedArrayValue>::from_slice(slice))
 	}

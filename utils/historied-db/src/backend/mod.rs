@@ -220,54 +220,62 @@ pub trait LinearStorage<V, S>: InitFrom {
 
 /// Backend for linear storage with inmemory reference.
 pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, S> {
+	/// Unchecked access to value slice and state.
+	fn get_slice_handle(&self, handle: Self::Handle) -> HistoriedValue<&[u8], S>;
+	/// Unchecked mutable access to mutable value slice and state.
+	fn get_slice_mut_handle(&mut self, handle: Self::Handle) -> HistoriedValue<&mut [u8], S>;
 	/// Array like get.
-	fn get_slice(&self, index: usize) -> Option<HistoriedValue<&[u8], S>>;
-	fn get_slice_handle(&self, handle: Self::Handle) -> Option<HistoriedValue<&[u8], S>> {
-		unreachable!("TODO remove default")
+	fn get_slice(&self, index: usize) -> Option<HistoriedValue<&[u8], S>> {
+		self.handle(index).map(|handle| self.get_slice_handle(handle))
 	}
 	fn last_slice(&self) -> Option<HistoriedValue<&[u8], S>> {
-		if self.len() > 0 {
-			self.get_slice(self.len() - 1)
+		self.handle_last().map(|handle| self.get_slice_handle(handle))
+	}
+	/// Array like get mut.
+	fn get_slice_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut [u8], S>> {
+		if let Some(handle) = self.handle(index) {
+			Some(self.get_slice_mut_handle(handle))
 		} else {
 			None
 		}
-	}
-	/// Array like get mut.
-	fn get_slice_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut [u8], S>>;
-	fn get_slice_mut_handle(&mut self, handle: Self::Handle) -> Option<HistoriedValue<&mut [u8], S>> {
-		unreachable!("TODO remove default")
 	}
 }
 
 /// Backend for linear storage with inmemory reference.
 pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
+	/// Unchecked access to value pointer and state.
+	fn get_ref_handle(&self, handle: Self::Handle) -> HistoriedValue<&V, S>;
+	/// Unchecked access to value mutable pointer and state.
+	fn get_ref_mut_handle(&mut self, handle: Self::Handle) -> HistoriedValue<&mut V, S>;
 	/// Array like get.
-	fn get_ref(&self, index: usize) -> Option<HistoriedValue<&V, S>>;
-	fn get_ref_handle(&self, handle: Self::Handle) -> Option<HistoriedValue<&V, S>> {
-		unreachable!("TODO remove default")
+	fn get_ref(&self, index: usize) -> Option<HistoriedValue<&V, S>> {
+		self.handle(index).map(|handle| self.get_ref_handle(handle))
 	}
 	fn last_ref(&self) -> Option<HistoriedValue<&V, S>> {
-		if self.len() > 0 {
-			self.get_ref(self.len() - 1)
+		self.handle_last().map(|handle| self.get_ref_handle(handle))
+	}
+	/// Array like get mut.
+	fn get_ref_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut V, S>> {
+		if let Some(handle) = self.handle(index) {
+			Some(self.get_ref_mut_handle(handle))
 		} else {
 			None
 		}
 	}
-	/// Array like get mut.
-	fn get_ref_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut V, S>>;
-	fn get_ref_mut_handle(&mut self, handle: Self::Handle) -> Option<HistoriedValue<&mut V, S>> {
-		unreachable!("TODO remove default")
-	}
 }
 
 pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
-	/// Array like get. TODO consider not returning option (same for from_slice), inner
-	/// implementation being unsafe.
-	fn get_range(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, S>>;
-	fn get_range_handle(slice: &[u8], handle: Self::Handle) -> Option<HistoriedValue<Range<usize>, S>> {
-		unreachable!("TODO remove default")
+	// TODO rename to use get_range as get_range_from_slice also try again pure slice implementation.
+	fn get_range_handle(&self, handle: Self::Handle) -> HistoriedValue<Range<usize>, S>;
+	/// Array like get.
+	fn get_range_from_slice(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, S>> {
+		Self::from_slice(slice).and_then(|inner|
+			inner.handle(index).map(|handle| inner.get_range_handle(handle))
+		)
 	}
-
+	fn get_range_handle_from_slice(slice: &[u8], handle: Self::Handle) -> Option<HistoriedValue<Range<usize>, S>> {
+		Self::from_slice(slice).map(|inner|	inner.get_range_handle(handle))
+	}
 	fn from_slice(slice: &[u8]) -> Option<Self>;
 }
 

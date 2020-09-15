@@ -66,20 +66,13 @@ impl<V, S> Default for MemoryOnly<V, S> {
 }
 
 impl<V: Clone, S: Clone> LinearStorageMem<V, S> for MemoryOnly<V, S> {
-	fn get_ref(&self, index: usize) -> Option<HistoriedValue<&V, S>> {
-		if let Some(HistoriedValue { value, state }) = self.0.get(index) {
-			Some(HistoriedValue { value: &value, state: state.clone() })
-		} else {
-			None
-		}
+	fn get_ref_handle(&self, handle: Self::Handle) -> HistoriedValue<&V, S> {
+		let HistoriedValue { value, state } = &self.0[handle];
+		HistoriedValue { value: &value, state: state.clone() }
 	}
-
-	fn get_ref_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut V, S>> {
-		if let Some(HistoriedValue { value, state }) = self.0.get_mut(index) {
-			Some(HistoriedValue { value, state: state.clone() })
-		} else {
-			None
-		}
+	fn get_ref_mut_handle(&mut self, handle: Self::Handle) -> HistoriedValue<&mut V, S> {
+		let state = self.0[handle].state.clone();
+		HistoriedValue { value: &mut self.0[handle].value, state }
 	}
 }
 
