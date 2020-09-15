@@ -40,46 +40,44 @@ use core::default::Default;
 // strategy such as in linear are getting too complex for tree, just using
 // macros to remove duplicated code.
 
-// get from tree
+// Common code to get from tree.
+// Lookup first linear storage in parallel (until incorrect state ordering).
+// Call second linear historied value afterward.
 macro_rules! tree_get {
 	($fn_name: ident, $return_type: ty, $branch_query: ident, $value_query: expr, $post_process: expr) => {
 	fn $fn_name<'a>(&'a self, at: &<Self as ValueRef<V>>::S) -> Option<$return_type> {
-		let mut index = self.branches.len();
 		// note that we expect branch index to be linearily set
 		// along a branch (no state containing unordered branch_index
 		// and no history containing unorderd branch_index).
-		if index == 0 {
-			return None;
-		}
-
+		let mut next_branch_handle = self.branches.handle_last();
 		for (state_branch_range, state_branch_index) in at.iter() {
-			while index > 0 {
-				let branch_index = &self.branches.get_state(index - 1).expect("previous code");
+			while let Some(branch_handle) = next_branch_handle {
+				let branch_index = &self.branches.get_state_handle(branch_handle);
 				if branch_index < &state_branch_index {
 					break;
 				} else if branch_index == &state_branch_index {
 					// TODO add a lower bound check (maybe debug_assert it only).
 					let mut upper_bound = state_branch_range.end.clone();
 					upper_bound -= 1;
-					let branch = self.branches.$branch_query(index - 1).expect("previous code").value;
+					let branch = self.branches.$branch_query(branch_handle).value;
 					if let Some(result) = $value_query(&branch, &upper_bound) {
 						return Some($post_process(result, branch))
 					}
 				}
-				index -= 1;
+				next_branch_handle = self.branches.handle_prev(branch_handle);
 			}
 		}
 
 		// composite part.
-		while index > 0 {
-			let branch_index = &self.branches.get_state(index - 1).expect("previous code");
+		while let Some(branch_handle) = next_branch_handle {
+			let branch_index = &self.branches.get_state_handle(branch_handle);
 			if branch_index <= &at.composite_treshold.0 {
-				let branch = self.branches.$branch_query(index - 1).expect("previous code").value;
+				let branch = self.branches.$branch_query(branch_handle).value;
 				if let Some(result) = $value_query(&branch, &at.composite_treshold.1) {
 					return Some($post_process(result, branch))
 				}
 			}
-			index -= 1;
+			next_branch_handle = self.branches.handle_prev(branch_handle);
 		}
 	
 		None
@@ -96,16 +94,6 @@ pub struct Tree<I, BI, V, D: InitFrom, BD: InitFrom> {
 	#[derivative(PartialEq="ignore" )]
 	init_child: BD::Init,
 	_ph: PhantomData<(I, BI, V, BD)>,
-	// TODO add optional range indexing.
-	// Indexing is over couple (I, BI), runing on fix size batches (aka max size).
-	// First try latest, then try indexing, (needs 3 methods
-	// get_latest, get_index, iter; currently we use directly iter).
-
-	// TODO add an optional pointer to deeper branch
-	// to avoid iterating to much over latest fork when the
-	// deepest most usefull branch manage to keep a linear history
-	// but a lower branch index.
-	// (conf needed in state also with optional indexing).
 }
 
 impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
@@ -121,12 +109,6 @@ impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
 	}
 }
 
-/*#[derive(Debug, Clone, Encode, Decode)]
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-pub struct Branch<I, BI, V, BD> {
-	branch_index: I,
-	history: Linear<V, BI, BD>,
-}*/
 type Branch<I, BI, V, BD> = HistoriedValue<Linear<V, BI, BD>, I>;
 
 impl<
@@ -156,14 +138,14 @@ impl<
 > ValueRef<V> for Tree<I, BI, V, D, BD> {
 	type S = ForkPlan<I, BI>;
 
-	tree_get!(get, V, st_get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _| r);
+	tree_get!(get, V, st_get_handle, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _| r);
 
 	fn contains(&self, at: &Self::S) -> bool {
 		self.get(at).is_some() // TODO avoid clone??
 	}
 
 	fn is_empty(&self) -> bool {
-		// This implies remove from linear clean directly the parent vec.
+		// This implies empty branch get clean correctly.
 		self.branches.len() == 0
 	}
 }
@@ -175,7 +157,7 @@ impl<
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V, BI>,
 > InMemoryValueRef<V> for Tree<I, BI, V, D, BD> {
-	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _| r );
+	tree_get!(get_ref, &V, get_ref_handle, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _| r );
 }
 
 impl<
@@ -188,7 +170,6 @@ impl<
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
 	type GC = MultipleGc<I, BI, V>;
-	//type Migrate = (BI, TreeMigrate<I, BI, V>);
 	type Migrate = MultipleMigrate<I, BI, V>;
 
 	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
@@ -206,35 +187,19 @@ impl<
 		// Warn dup code, can be merge if change set to return previ value: with
 		// ref refact will be costless
 		let (branch_index, index) = at.latest();
-		let mut insert_at = self.branches.len();
-		/* TODO write iter_mut that iterate on a HandleMut as in simple_db
-		 * in fact an entry iterator would be good (with lazy access loading) */
-/*		for (iter_index, branch) in self.branches.iter_mut().enumerate().rev() {
-			if &branch.branch_index == branch_index {
-				let index = Latest::unchecked_latest(index.clone());// TODO reftransparent &
-				return branch.history.set(value, &index);
-			}
-			if &branch.branch_index < branch_index {
-				insert_at = iter_index + 1;
-				break;
-			} else {
-				insert_at = iter_index;
-			}
-		}*/
-		let len = insert_at;
-		for ix in 0..len {
-			let iter_index = len - 1 - ix;
-			let iter_branch_index = self.branches.get_state(iter_index).expect("previous code");
+		let mut insert_at = None;
+		for branch_handle in self.branches.backward_handle_iter() {
+			let iter_branch_index = self.branches.get_state_handle(branch_handle);
 			if &iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
-				let mut branch = self.branches.st_get(iter_index).expect("previous code");
+				let mut branch = self.branches.st_get_handle(branch_handle);
 				return match branch.value.set(value, &index) {
 					UpdateResult::Changed(_) => {
-						self.branches.emplace(iter_index, branch);
+						self.branches.emplace_handle(branch_handle, branch);
 						UpdateResult::Changed(())
 					},
 					UpdateResult::Cleared(_) => {
-						self.branches.remove(iter_index);
+						self.branches.remove_handle(branch_handle);
 						if self.branches.len() == 0 {
 							UpdateResult::Cleared(())
 						} else {
@@ -245,18 +210,15 @@ impl<
 				};
 			}
 			if &iter_branch_index < branch_index {
-				insert_at = iter_index + 1;
 				break;
-			} else {
-				insert_at = iter_index;
 			}
+			insert_at = Some(branch_handle);
 		}
-
 		let branch = Branch::new(value, at.latest(), self.init_child.clone());
-		if insert_at == self.branches.len() {
-			self.branches.push(branch);
+		if let Some(handle) = insert_at {
+			self.branches.insert_handle(handle, branch);
 		} else {
-			self.branches.insert(insert_at, branch);
+			self.branches.push(branch);
 		}
 		UpdateResult::Changed(())
 	}
@@ -349,7 +311,7 @@ impl<
 		false
 	}
 
-	fn migrate(&mut self, mig: &mut Self::Migrate) -> UpdateResult<()> {
+	fn migrate(&mut self, mig: &Self::Migrate) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
 
 		match mig {
@@ -802,7 +764,7 @@ impl<
 	tree_get!(
 		get_slice,
 		&[u8],
-		get_slice,
+		get_slice_handle,
 		|b: &'a [u8], ix| <Linear<V, BI, BD>>::get_range(b, ix),
 		|result, b: &'a [u8]| &b[result]
 	);

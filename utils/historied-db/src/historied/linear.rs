@@ -220,22 +220,15 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
-			let mut index = inner.len();
-			if index == 0 {
-				return None;
-			}
-			while index > 0 {
-				index -= 1;
-				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, index) {
+			for handle in inner.backward_handle_iter() {
+				if let Some(HistoriedValue { value, state }) = D::get_range_handle_from_slice(slice, handle) {
 					if state.exists(at) {
 						return Some(value);
 					}
 				}
 			}
-			None
-		} else {
-			None
 		}
+		None
 	}
 }
 
@@ -251,8 +244,11 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 
 	// TODO use only once, consider removal
-	fn get_adapt_mut<'a, VR, A: StorageAdapter<'a, S, VR, &'a mut D, D::Handle>>(&'a mut self, at: &S)
-		-> Option<HistoriedValue<VR, S>> {
+	fn get_adapt_mut<
+		'a,
+		VR,
+		A: StorageAdapter<'a, S, VR, &'a mut D, D::Handle>,
+	>(&'a mut self, at: &S)	-> Option<HistoriedValue<VR, S>> {
 		if let Some(handle) = self.pos_handle(at) {
 			Some(A::get_adapt_handle(&mut self.0, handle))
 		} else {
@@ -265,14 +261,13 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
-			if let Some(last) = self.0.last_state() {
+			if let Some(handle) = self.0.handle_last() {
+				let last = self.0.get_state_handle(handle);
 				if &last > at {
 					self.0.pop();
 					continue;
-				} 
+				}
 				if at == &last {
-					let handle = self.0.handle_last()
-						.expect("Existing last state");
 					let mut last = self.0.st_get_handle(handle);
 					if last.value == value {
 						return UpdateResult::Unchanged;
@@ -289,13 +284,12 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 
 	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
-		if let Some(last) = self.0.last_state() {
+		if let Some(handle) = self.0.handle_last() {
+			let last = self.0.get_state_handle(handle);
 			if &last > at {
 				return None;
-			} 
+			}
 			if at == &last {
-				let handle = self.0.handle_last()
-					.expect("Existing last state");
 				let mut last = self.0.st_get_handle(handle);
 				if last.value == value {
 					return Some(UpdateResult::Unchanged);
@@ -439,7 +433,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		end_result
 	}
 
-	fn migrate(&mut self, (gc, mig): &mut Self::Migrate) -> UpdateResult<()> {
+	fn migrate(&mut self, (gc, mig): &Self::Migrate) -> UpdateResult<()> {
 		let res = self.gc(gc);
 		let mut next_handle = self.0.handle_last();
 		let result = if next_handle.is_some() {
