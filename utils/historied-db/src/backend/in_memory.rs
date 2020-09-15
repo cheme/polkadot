@@ -66,11 +66,11 @@ impl<V, S> Default for MemoryOnly<V, S> {
 }
 
 impl<V: Clone, S: Clone> LinearStorageMem<V, S> for MemoryOnly<V, S> {
-	fn get_ref_handle(&self, handle: Self::Handle) -> HistoriedValue<&V, S> {
+	fn get_ref(&self, handle: Self::Index) -> HistoriedValue<&V, S> {
 		let HistoriedValue { value, state } = &self.0[handle];
 		HistoriedValue { value: &value, state: state.clone() }
 	}
-	fn get_ref_mut_handle(&mut self, handle: Self::Handle) -> HistoriedValue<&mut V, S> {
+	fn get_ref_mut(&mut self, handle: Self::Index) -> HistoriedValue<&mut V, S> {
 		let state = self.0[handle].state.clone();
 		HistoriedValue { value: &mut self.0[handle].value, state }
 	}
@@ -85,15 +85,15 @@ impl<V, S> InitFrom for MemoryOnly<V, S> {
 
 impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	// Index position in array.
-	type Handle = usize;
-	fn last(&self) -> Option<Self::Handle> {
+	type Index = usize;
+	fn last(&self) -> Option<Self::Index> {
 		if self.0.len() == 0 {
 			None
 		} else {
 			Some(self.0.len() - 1)
 		}
 	}
-	fn handle_prev(&self, mut handle: Self::Handle) -> Option<Self::Handle> {
+	fn previous_index(&self, mut handle: Self::Index) -> Option<Self::Index> {
 		if handle == 0 {
 			None
 		} else {
@@ -101,7 +101,7 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 			Some(handle)
 		}
 	}
-	fn handle(&self, index: usize) -> Option<Self::Handle> {
+	fn lookup(&self, index: usize) -> Option<Self::Index> {
 		if index >= self.0.len() {
 			None
 		} else {
@@ -121,19 +121,19 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	fn len(&self) -> usize {
 		self.0.len()
 	}
-	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
+	fn get(&self, handle: Self::Index) -> HistoriedValue<V, S> {
 		self.0[handle].clone()
 	}
-	fn get_state(&self, handle: Self::Handle) -> S {
+	fn get_state(&self, handle: Self::Index) -> S {
 		self.0[handle].state.clone()
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
 		self.0.push(value)
 	}
-	fn insert(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+	fn insert(&mut self, handle: Self::Index, value: HistoriedValue<V, S>) {
 		self.0.insert(handle, value)
 	}
-	fn remove_handle(&mut self, handle: Self::Handle) {
+	fn remove(&mut self, handle: Self::Index) {
 		self.0.remove(handle);
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
@@ -145,7 +145,7 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	fn truncate(&mut self, at: usize) {
 		self.0.truncate(at)
 	}
-	fn emplace_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+	fn emplace(&mut self, handle: Self::Index, value: HistoriedValue<V, S>) {
 		self.0[handle] = value;
 	}
 }

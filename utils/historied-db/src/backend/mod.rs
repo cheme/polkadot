@@ -33,7 +33,7 @@ pub mod nodes;
 
 // TODO this implementation uses a index and does not allow
 // performant implementation, it should (at least when existing
-// value) use a associated type handle depending on backend
+// value) use a associated type index depending on backend
 // (slice index of encoded array, pointer of in_memory, pointer
 // of node inner value for nodes). Also not puting value in memory.
 pub struct Entry<'a, V, S, D: LinearStorage<V, S>> {
@@ -94,29 +94,29 @@ impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
 				if self.insert {
 					self.storage.insert_lookup(self.index, change);
 				} else {
-					self.storage.emplace(self.index, change);
+					self.storage.emplace_lookup(self.index, change);
 				}
 			} else {
 				if self.changed && !self.insert {
-					self.storage.remove(self.index);
+					self.storage.remove_lookup(self.index);
 				}
 			}
 		}
 	}
 }
 #[derive(Copy, Clone)]
-pub struct DummyHandle;
-pub struct HandleBackwardIter<'a, V, S, D: LinearStorage<V, S>>(
+pub struct DummyIndex;
+pub struct RevIter<'a, V, S, D: LinearStorage<V, S>>(
 	&'a D,
-	Option<D::Handle>,
+	Option<D::Index>,
 	crate::rstd::marker::PhantomData<(V, S)>,
 );
-impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for HandleBackwardIter<'a, V, S, D> {
-	type Item = <D as LinearStorage<V, S>>::Handle;
+impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for RevIter<'a, V, S, D> {
+	type Item = <D as LinearStorage<V, S>>::Index;
 	fn next(&mut self) -> Option<Self::Item> {
-		if let Some(handle) = self.1.take() {
-			self.1 = self.0.handle_prev(handle);
-			Some(handle)
+		if let Some(index) = self.1.take() {
+			self.1 = self.0.previous_index(index);
+			Some(index)
 		} else {
 			None
 		}
@@ -125,24 +125,20 @@ impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for HandleBackwardIter<'a, V, S
 
 /// Backend for linear storage.
 pub trait LinearStorage<V, S>: InitFrom {
-	/// Opaque handle over a location in the storage.
-	/// Needs to have direct access, where usize index
-	/// could have costy access.
-	/// TODO switch to handle read and entry (possibly insert)?
-	type Handle: Copy;
+	/// Internal index over a location in the storage.
+	/// Implementations need to provide direct to data
+	/// with it.
+	type Index: Copy;
 	/// Get reference to last item.
-	fn last(&self) -> Option<Self::Handle>;
-	/// Handle here are only existing handle.
-	/// TODO rename previous
-	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle>;
-	/// Handle here are can be non existing handle.
-	/// Lookup for handle.
-	/// TODO rename lookup
-	fn handle(&self, index: usize) -> Option<Self::Handle>;
-	/// Handle here are only existing handle.
-	fn backward_handle_iter(&self) -> HandleBackwardIter<V, S, Self> {
+	fn last(&self) -> Option<Self::Index>;
+	/// Index here are only existing index.
+	fn previous_index(&self, index: Self::Index) -> Option<Self::Index>;
+	/// Lookup for internal index, from an integer index.
+	fn lookup(&self, index: usize) -> Option<Self::Index>;
+	/// Reverse iteration on internal indexes.
+	fn rev_index_iter(&self) -> RevIter<V, S, Self> {
 		let first = self.last();
-		HandleBackwardIter(self, first, Default::default())
+		RevIter(self, first, Default::default())
 	}
 	/// This does not need to be very efficient as it is mainly for
 	/// garbage collection.
@@ -150,14 +146,15 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// Number of element for different S.
 	fn len(&self) -> usize;
 	/// Array like get.
-	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, S>;
-	/// Array like get using a handle lookup.
+	fn get(&self, index: Self::Index) -> HistoriedValue<V, S>;
+	/// Array like get using a index lookup.
 	fn get_lookup(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		self.handle(index).map(|handle| self.get(handle))
+		self.lookup(index).map(|index| self.get(index))
 	}
 	/// Entry. TODO Entry on linear is not very interesting (consider removal).
+	/// Aka either delete or use Index internaly.
 	fn entry<'a>(&'a mut self, index: usize) -> Entry<'a, V, S, Self> {
-		let value = self.handle(index).map(|handle| self.get(handle));
+		let value = self.lookup(index).map(|index| self.get(index));
 		let insert = value.is_none();
 		Entry {
 			value,
@@ -168,104 +165,64 @@ pub trait LinearStorage<V, S>: InitFrom {
 		}
 	}
 	/// Array like get.
-	fn get_state(&self, handle: Self::Handle) -> S;
+	fn get_state(&self, index: Self::Index) -> S;
 	/// Array like get.
 	fn get_state_lookup(&self, index: usize) -> Option<S> {
-		self.handle(index).map(|handle| self.get_state(handle))
+		self.lookup(index).map(|index| self.get_state(index))
 	}
 	/// Vec like push.
 	fn push(&mut self, value: HistoriedValue<V, S>);
 	/// Vec like insert, this is mainly use in tree implementation.
 	/// So when used as tree branch container, a efficient implementation
 	/// shall be use.
-	fn insert(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>);
+	fn insert(&mut self, index: Self::Index, value: HistoriedValue<V, S>);
 	/// Insert with a lookup.
 	fn insert_lookup(&mut self, index: usize, value: HistoriedValue<V, S>) {
-		if let Some(handle) = self.handle(index) {
-			self.insert(handle, value)
+		if let Some(index) = self.lookup(index) {
+			self.insert(index, value)
 		} else {
 			self.push(value)
 		}
 	}
 	/// Vec like remove, this is mainly use in tree branch implementation.
-	/// TODO ensure remove last is using pop implementation.
-	fn remove(&mut self, index: usize) {
-		self.handle(index).map(|handle| self.remove_handle(handle));
+	fn remove(&mut self, index: Self::Index);
+	/// Remove value with a lookup.
+	fn remove_lookup(&mut self, index: usize) {
+		self.lookup(index).map(|index| self.remove(index));
 	}
-	/// Remove value at a handle if there is one.
-	fn remove_handle(&mut self, handle: Self::Handle);
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>>;
 	fn clear(&mut self);
 	fn truncate(&mut self, at: usize);
 	/// This can be slow, only define in migrate.
-	/// TODO consider renaming. TODO optimize the implementations to ensure emplace latest is
-	/// as/more efficient than pop and push.
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
-		self.handle(at).map(|handle| self.emplace_handle(handle, value));
+	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, S>);
+	/// Emplace with lookup.
+	fn emplace_lookup(&mut self, at: usize, value: HistoriedValue<V, S>) {
+		self.lookup(at).map(|index| self.emplace(index, value));
 	}
-	fn emplace_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>);
-	// TODO implement and replace in set function of linear (avoid some awkward possible
-	// side effect of pop then push)
-	//	fn emplace_last(&mut self, at: usize, value: HistoriedValue<V, S>);
 }
 
 /// Backend for linear storage with inmemory reference.
 pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, S> {
 	/// Unchecked access to value slice and state.
-	fn get_slice_handle(&self, handle: Self::Handle) -> HistoriedValue<&[u8], S>;
+	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], S>;
 	/// Unchecked mutable access to mutable value slice and state.
-	fn get_slice_mut_handle(&mut self, handle: Self::Handle) -> HistoriedValue<&mut [u8], S>;
-	/// Array like get.
-	fn get_slice(&self, index: usize) -> Option<HistoriedValue<&[u8], S>> {
-		self.handle(index).map(|handle| self.get_slice_handle(handle))
-	}
-	fn last_slice(&self) -> Option<HistoriedValue<&[u8], S>> {
-		self.last().map(|handle| self.get_slice_handle(handle))
-	}
-	/// Array like get mut.
-	fn get_slice_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut [u8], S>> {
-		if let Some(handle) = self.handle(index) {
-			Some(self.get_slice_mut_handle(handle))
-		} else {
-			None
-		}
-	}
+	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], S>;
 }
 
 /// Backend for linear storage with inmemory reference.
 pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
 	/// Unchecked access to value pointer and state.
-	fn get_ref_handle(&self, handle: Self::Handle) -> HistoriedValue<&V, S>;
+	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S>;
 	/// Unchecked access to value mutable pointer and state.
-	fn get_ref_mut_handle(&mut self, handle: Self::Handle) -> HistoriedValue<&mut V, S>;
-	/// Array like get.
-	fn get_ref(&self, index: usize) -> Option<HistoriedValue<&V, S>> {
-		self.handle(index).map(|handle| self.get_ref_handle(handle))
-	}
-	fn last_ref(&self) -> Option<HistoriedValue<&V, S>> {
-		self.last().map(|handle| self.get_ref_handle(handle))
-	}
-	/// Array like get mut.
-	fn get_ref_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut V, S>> {
-		if let Some(handle) = self.handle(index) {
-			Some(self.get_ref_mut_handle(handle))
-		} else {
-			None
-		}
-	}
+	fn get_ref_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut V, S>;
 }
 
 pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
 	// TODO rename to use get_range as get_range_from_slice also try again pure slice implementation.
-	fn get_range_handle(&self, handle: Self::Handle) -> HistoriedValue<Range<usize>, S>;
 	/// Array like get.
-	fn get_range_from_slice(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, S>> {
-		Self::from_slice(slice).and_then(|inner|
-			inner.handle(index).map(|handle| inner.get_range_handle(handle))
-		)
-	}
-	fn get_range_handle_from_slice(slice: &[u8], handle: Self::Handle) -> Option<HistoriedValue<Range<usize>, S>> {
-		Self::from_slice(slice).map(|inner|	inner.get_range_handle(handle))
+	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, S>;
+	fn get_range_from_slice(slice: &[u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, S>> {
+		Self::from_slice(slice).map(|inner|	inner.get_range(index))
 	}
 	fn from_slice(slice: &[u8]) -> Option<Self>;
 }
@@ -299,7 +256,7 @@ mod test {
 		storage.insert_lookup(0, h);
 		assert_eq!(storage.get_state_lookup(0), Some(2));
 		assert_eq!(storage.get_state_lookup(1), Some(5));
-		storage.remove(0);
+		storage.remove_lookup(0);
 		assert_eq!(storage.get_state_lookup(0), Some(5));
 		assert!(storage.get_lookup(1).is_none());
 		storage.clear();
@@ -320,7 +277,7 @@ mod test {
 			assert_eq!(storage.get_state_lookup(i), Some(i as State + 5));
 		}
 		assert!(storage.get_lookup(20).is_none());
-		storage.remove(10);
+		storage.remove_lookup(10);
 		for i in 0usize..10 {
 			assert_eq!(storage.get_state_lookup(i), Some(i as State + 5));
 		}
@@ -328,9 +285,9 @@ mod test {
 			assert_eq!(storage.get_state_lookup(i), Some(i as State + 6));
 		}
 		assert!(storage.get_lookup(19).is_none());
-		storage.emplace(18, (vec![1], 1).into());
-		storage.emplace(17, (vec![2], 2).into());
-		storage.emplace(0, (vec![3], 3).into());
+		storage.emplace_lookup(18, (vec![1], 1).into());
+		storage.emplace_lookup(17, (vec![2], 2).into());
+		storage.emplace_lookup(0, (vec![3], 3).into());
 		assert_eq!(storage.get_state_lookup(18), Some(1 as State));
 		assert_eq!(storage.get_state_lookup(17), Some(2 as State));
 		assert_eq!(storage.get_state_lookup(0), Some(3 as State));
