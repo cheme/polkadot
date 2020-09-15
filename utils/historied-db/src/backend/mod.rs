@@ -203,6 +203,9 @@ pub trait LinearStorage<V, S>: InitFrom {
 	fn last(&self) -> Option<HistoriedValue<V, S>> {
 		self.handle_last().map(|handle| self.st_get_handle(handle))
 	}
+	fn last_state(&self) -> Option<S> {
+		self.handle_last().map(|handle| self.get_state_handle(handle))
+	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>>;
 	fn clear(&mut self);
 	fn truncate(&mut self, at: usize);
