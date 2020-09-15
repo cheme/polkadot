@@ -474,12 +474,9 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		if let Some(new_end) = gc.new_end.as_ref() {
 
 			let mut index = self.0.len();
-			while index > 0 {
-				if let Some(HistoriedValue{ value: _, state }) = self.0.st_get(index - 1) {
-					if &state < new_end {
-						break;
-					}
-				} else {
+			for handle in self.0.backward_handle_iter() { 
+				let state = self.0.get_state_handle(handle);
+				if &state < new_end {
 					break;
 				}
 				index -= 1;
@@ -489,60 +486,45 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 				self.0.clear();
 				return UpdateResult::Cleared(());
 			} else if index != self.0.len() {
+				// TODO could use handle here
 				self.0.truncate(index);
 				end_result = UpdateResult::Changed(());
 			}
 		}
 
 		if let Some(start_treshold) = gc.new_start.as_ref() {
-			let mut index = 0;
-			let mut first = true;
-			loop {
-				if let Some(HistoriedValue{ value: _, state }) = self.0.st_get(index) {
-					if &state == start_treshold {
-						if first {
-							return end_result;
+			let mut index = self.0.len();
+			if index == 0 {
+				return end_result;
+			}
+			for handle in self.0.backward_handle_iter() { 
+				let state = self.0.get_state_handle(handle);
+				index -= 1;
+				if state.exists(start_treshold) {
+					// This does not handle consecutive neutral element, but
+					// it is considered marginal and bad usage (in theory one
+					// should not push two consecutive identical values).
+					if let Some(neutral) = gc.neutral_element.as_ref() {
+						if neutral == &self.0.st_get_handle(handle).value {
+							index += 1;
 						}
-						break;
 					}
-					if &state > start_treshold {
-						if first {
-							return end_result;
-						}
-						index = index.saturating_sub(1);
-						break;
-					}
-				} else {
-					if first {
-						return end_result;
-					}
-					index = index.saturating_sub(1);
 					break;
 				}
-				index += 1;
-				first = false;
 			}
-			if let Some(neutral) = gc.neutral_element.as_ref() {
-				while let Some(HistoriedValue{ value, state: _ }) = self.0.st_get(index) {
-					if &value != neutral {
-						break;
-					}
-					index += 1;
-				}
+
+			if index == 0 {
+				return end_result;
 			}
 			if index == self.0.len() {
 				self.0.clear();
 				return UpdateResult::Cleared(());
 			}
+			// TODO could use handle here
 			self.0.truncate_until(index);
-			if index == 0 {
-				end_result
-			} else {
-				UpdateResult::Changed(())
-			}
-		} else {
-			return end_result;
+			return UpdateResult::Changed(())
 		}
+		end_result
 	}
 
 	fn migrate(&mut self, (gc, mig): &mut Self::Migrate) -> UpdateResult<()> {
