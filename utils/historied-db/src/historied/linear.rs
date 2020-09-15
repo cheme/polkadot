@@ -262,7 +262,7 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 	}
 
 	fn contains(&self, at: &Self::S) -> bool {
-		self.pos(at).is_some()
+		self.pos_handle(at).is_some()
 	}
 
 	fn is_empty(&self) -> bool {
@@ -368,46 +368,12 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 }
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
-	fn pos(&self, at: &S) -> Option<usize> {
-		let mut index = self.0.len();
-		if index == 0 {
-			return None;
-		}
-		let mut pos = None;
-		while index > 0 {
-			index -= 1;
-			if let Some(vr) = self.0.get_state(index) {
-				if at == &vr {
-					pos = Some(index);
-					break
-				}
-				if at < &vr {
-					break;
-				}
-			}
-		}
-		pos
-	}
 	fn pos_handle(&self, at: &S) -> Option<D::Handle> {
 		let mut pos = None;
 		for handle in self.backward_handle_iter() {
 			let vr = self.0.get_state_handle(handle);
 			if vr.exists(at) {
 				pos = Some(handle);
-				break;
-			}
-		}
-		pos
-	}
-	fn exact_pos_handle(&self, at: &S) -> Option<D::Handle> {
-		let mut pos = None;
-		for handle in self.backward_handle_iter() {
-			let vr = self.0.get_state_handle(handle);
-			if at == &vr {
-				pos = Some(handle);
-				break;
-			}
-			if at < &vr {
 				break;
 			}
 		}
