@@ -298,11 +298,13 @@ impl<
 				let mut i = 0;
 				// merge all less than composite treshold in composite treshold index branch.
 				loop {
-					if let Some(mut branch) = self.branches.st_get(i) {
+					if let Some(handle) = self.branches.handle(i) {
+						let mut branch = self.branches.st_get_handle(handle);
 						if branch.state <= gc.composite_treshold.0 {
 							if let Some(new_branch) = new_branch.as_mut() {
 								for i in 0.. {
-									if let Some(h) = branch.value.storage().st_get(i) {
+									if let Some(h) = branch.value.storage().handle(i) {
+										let h = branch.value.storage().st_get_handle(h);
 										new_branch.value.storage_mut().push(h);
 									} else {
 										break;
@@ -429,7 +431,8 @@ impl<
 							next_branch_handle = self.branches.handle_prev(branch_handle);
 							continue;
 						} else {
-							if let Some(b) = branch.value.storage().st_get(0) {
+							if let Some(b) = branch.value.storage().handle(0) {
+								let b = branch.value.storage().st_get_handle(b);
 								if &b.state < n_start {
 									first_new_start = true;
 								}
@@ -492,8 +495,8 @@ impl<
 	#[cfg(test)]
 	fn nb_internal_history(&self) -> usize {
 		let mut nb = 0;
-		for i in 0..self.branches.len() {
-			let branch = self.branches.st_get(i).unwrap();
+		for handle in self.branches.backward_handle_iter() {
+			let branch = self.branches.st_get_handle(handle);
 			nb += branch.value.storage().len();
 		}
 		nb
@@ -692,7 +695,7 @@ mod test {
 //		let bd = BD::from_slice(slice);
 		let bd = D::default();
 		use crate::backend::LinearStorage;
-		bd.st_get(1usize);
+		bd.get_lookup(1usize);
 	}
 
 	#[test]
@@ -738,7 +741,7 @@ mod test {
 //		let bd = BD::from_slice(slice);
 		let bd = D::init_from(init_head);
 		use crate::backend::LinearStorage;
-		let _a: Option<HistoriedValue<V2, u32>> = bd.st_get(1usize);
+		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
 	}
 
 

@@ -178,7 +178,7 @@ impl<'a, S, V, D: LinearStorage<V, S>> StorageAdapter<
 	D::Handle,
 > for ValueVecAdapter {
 	fn get_adapt(inner: &'a D, index: usize) -> Option<HistoriedValue<V, S>> {
-		inner.st_get(index)
+		inner.handle(index).map(|handle| inner.st_get_handle(handle))
 	}
 	fn get_adapt_handle(inner: &'a D, handle: D::Handle) -> HistoriedValue<V, S> {
 		inner.st_get_handle(handle)

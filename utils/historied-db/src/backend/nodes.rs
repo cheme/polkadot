@@ -311,24 +311,6 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	fn len(&self) -> usize {
 		self.len
 	}
-	// TODO notice that it sequentially fetch from the end (some variant of S could go the over way).
-	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		match self.fetch_node(index) {
-			Some((i, ix)) if i == self.end_node_index as usize =>  {
-				self.inner.data.st_get(ix)
-			},
-			Some((i, ix)) => {
-				if let Some(node) = self.fetched.borrow().get(i) {
-					node.data.st_get(ix)
-				} else {
-					unreachable!("fetch node returns existing index");
-				}
-			},
-			None => {
-				None
-			},
-		}
-	}
 	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
 		if handle.0 == self.end_node_index {
 			return self.inner.data.st_get_handle(handle.1)
@@ -365,8 +347,10 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 				if M::APPLY_SIZE_LIMIT {
 					let mut add_size = 0;
 					for i in 0..ix {
-						node.data.st_get(i)
-							.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+						node.data.handle(i).map(|h| {
+							let h = node.data.st_get_handle(h);
+							add_size += h.value.estimate_size() + h.state.estimate_size()
+						});
 					}
 					node.reference_len -= add_size;
 				}
@@ -527,8 +511,10 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 				if M::APPLY_SIZE_LIMIT {
 					let mut add_size = 0;
 					for i in ix..node.data.len() {
-						node.data.st_get(i)
-							.map(|h| add_size += h.value.estimate_size() + h.state.estimate_size());
+						node.data.handle(i).map(|h| {
+							let h = node.data.st_get_handle(h);
+							add_size += h.value.estimate_size() + h.state.estimate_size()
+						});
 					}
 					node.reference_len -= add_size;
 				}
