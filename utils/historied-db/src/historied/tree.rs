@@ -51,33 +51,33 @@ macro_rules! tree_get {
 		// and no history containing unorderd branch_index).
 		let mut next_branch_index = self.branches.last();
 		for (state_branch_range, state_branch_index) in at.iter() {
-			while let Some(branch_handle) = next_branch_index {
-				let branch_index = &self.branches.get_state(branch_handle);
+			while let Some(branch_ix) = next_branch_index {
+				let branch_index = &self.branches.get_state(branch_ix);
 				if branch_index < &state_branch_index {
 					break;
 				} else if branch_index == &state_branch_index {
 					// TODO add a lower bound check (maybe debug_assert it only).
 					let mut upper_bound = state_branch_range.end.clone();
 					upper_bound -= 1;
-					let branch = self.branches.$branch_query(branch_handle).value;
+					let branch = self.branches.$branch_query(branch_ix).value;
 					if let Some(result) = $value_query(&branch, &upper_bound) {
 						return Some($post_process(result, branch))
 					}
 				}
-				next_branch_index = self.branches.previous_index(branch_handle);
+				next_branch_index = self.branches.previous_index(branch_ix);
 			}
 		}
 
 		// composite part.
-		while let Some(branch_handle) = next_branch_index {
-			let branch_index = &self.branches.get_state(branch_handle);
+		while let Some(branch_ix) = next_branch_index {
+			let branch_index = &self.branches.get_state(branch_ix);
 			if branch_index <= &at.composite_treshold.0 {
-				let branch = self.branches.$branch_query(branch_handle).value;
+				let branch = self.branches.$branch_query(branch_ix).value;
 				if let Some(result) = $value_query(&branch, &at.composite_treshold.1) {
 					return Some($post_process(result, branch))
 				}
 			}
-			next_branch_index = self.branches.previous_index(branch_handle);
+			next_branch_index = self.branches.previous_index(branch_ix);
 		}
 	
 		None
@@ -188,18 +188,18 @@ impl<
 		// ref refact will be costless
 		let (branch_index, index) = at.latest();
 		let mut insert_at = None;
-		for branch_handle in self.branches.rev_index_iter() {
-			let iter_branch_index = self.branches.get_state(branch_handle);
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
 			if &iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
-				let mut branch = self.branches.get(branch_handle);
+				let mut branch = self.branches.get(branch_ix);
 				return match branch.value.set(value, &index) {
 					UpdateResult::Changed(_) => {
-						self.branches.emplace(branch_handle, branch);
+						self.branches.emplace(branch_ix, branch);
 						UpdateResult::Changed(())
 					},
 					UpdateResult::Cleared(_) => {
-						self.branches.remove(branch_handle);
+						self.branches.remove(branch_ix);
 						if self.branches.len() == 0 {
 							UpdateResult::Cleared(())
 						} else {
@@ -212,7 +212,7 @@ impl<
 			if &iter_branch_index < branch_index {
 				break;
 			}
-			insert_at = Some(branch_handle);
+			insert_at = Some(branch_ix);
 		}
 		let branch = Branch::new(value, at.latest(), self.init_child.clone());
 		if let Some(handle) = insert_at {
@@ -225,18 +225,18 @@ impl<
 
 	fn discard(&mut self, at: &Self::SE) -> UpdateResult<Option<V>> {
 		let (branch_index, index) = at.latest();
-		for branch_handle in self.branches.rev_index_iter() {
-			let iter_branch_index = self.branches.get_state(branch_handle);
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
 			if &iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
-				let mut branch = self.branches.get(branch_handle);
+				let mut branch = self.branches.get(branch_ix);
 				return match branch.value.discard(&index) {
 					UpdateResult::Changed(v) => {
-						self.branches.emplace(branch_handle, branch);
+						self.branches.emplace(branch_ix, branch);
 						UpdateResult::Changed(v)
 					},
 					UpdateResult::Cleared(v) => {
-						self.branches.remove(branch_handle);
+						self.branches.remove(branch_ix);
 						if self.branches.len() == 0 {
 							UpdateResult::Cleared(v)
 						} else {
@@ -419,16 +419,16 @@ impl<
 		let start_composite = gc.composite_treshold_new_start.as_ref();
 		let mut first_new_start = false;
 		let mut next_branch_index = self.branches.last();
-		while let Some(branch_handle) = next_branch_index {
-			let mut branch = self.branches.get(branch_handle);
+		while let Some(branch_ix) = next_branch_index {
+			let mut branch = self.branches.get(branch_ix);
 			let new_start = if branch.state <= gc.composite_treshold.0 {
 				match start_composite.as_ref() {
 					None => None,
 					Some(n_start) => {
 						if first_new_start {
-							self.branches.remove(branch_handle);
+							self.branches.remove(branch_ix);
 							result = UpdateResult::Changed(());
-							next_branch_index = self.branches.previous_index(branch_handle);
+							next_branch_index = self.branches.previous_index(branch_ix);
 							continue;
 						} else {
 							if let Some(b) = branch.value.storage().lookup(0) {
@@ -447,7 +447,7 @@ impl<
 
 			if let Some(mut gc) = if let Some(change) = gc.storage.get(&branch.state) {
 				if change.is_none() {
-					self.branches.remove(branch_handle);
+					self.branches.remove(branch_ix);
 					result = UpdateResult::Changed(());
 					None
 				} else {
@@ -471,16 +471,16 @@ impl<
 				match branch.value.gc(&mut gc) {
 					UpdateResult::Unchanged => (),
 						UpdateResult::Changed(_) => { 
-						self.branches.emplace(branch_handle, branch);
+						self.branches.emplace(branch_ix, branch);
 						result = UpdateResult::Changed(());
 					},
 					UpdateResult::Cleared(_) => {
-						self.branches.remove(branch_handle);
+						self.branches.remove(branch_ix);
 						result = UpdateResult::Changed(());
 					}
 				}
 			}
-			next_branch_index = self.branches.previous_index(branch_handle);
+			next_branch_index = self.branches.previous_index(branch_ix);
 		}
 
 		if let UpdateResult::Changed(()) = result {
@@ -517,10 +517,10 @@ impl<
 > InMemoryValue<V> for Tree<I, BI, V, D, BD> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
-		for branch_handle in self.branches.rev_index_iter() {
-			let iter_branch_index = self.branches.get_state(branch_handle);
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
 			if &iter_branch_index == branch_index {
-				let branch = self.branches.get_ref_mut(branch_handle);
+				let branch = self.branches.get_ref_mut(branch_ix);
 				let index = Latest::unchecked_latest(index.clone());
 				return branch.value.get_mut(&index);
 			}
@@ -537,8 +537,8 @@ impl<
 		let (branch_index, index) = at.latest();
 		let mut insert_at = None;
 		let mut next_branch_index = self.branches.last();
-		while let Some(branch_handle) = next_branch_index {
-			let branch = self.branches.get_ref_mut(branch_handle);
+		while let Some(branch_ix) = next_branch_index {
+			let branch = self.branches.get_ref_mut(branch_ix);
 			let iter_branch_index = &branch.state;
 			if iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
@@ -547,8 +547,8 @@ impl<
 			if iter_branch_index < branch_index {
 				break;
 			}
-			insert_at = Some(branch_handle);
-			next_branch_index = self.branches.previous_index(branch_handle);
+			insert_at = Some(branch_ix);
+			next_branch_index = self.branches.previous_index(branch_ix);
 		}
 		let branch = Branch::new(value, at.latest(), self.init_child.clone());
 		if let Some(handle) = insert_at {
@@ -575,21 +575,21 @@ impl<
 	) -> Option<UpdateResult<()>> {
 		let (branch_index, index) = at;
 		let mut insert_at = None;
-		for branch_handle in self.branches.rev_index_iter() {
-			let iter_branch_index = self.branches.get_state(branch_handle);
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
 			if &iter_branch_index == branch_index {
-				let mut branch = self.branches.get(branch_handle);
+				let mut branch = self.branches.get(branch_ix);
 				return match if no_overwrite {
 					branch.value.set_if_possible_no_overwrite(value, &index)
 				} else {
 					branch.value.set_if_possible(value, &index)
 				} {
 					Some(UpdateResult::Changed(_)) => {
-						self.branches.emplace(branch_handle, branch);
+						self.branches.emplace(branch_ix, branch);
 						Some(UpdateResult::Changed(()))
 					},
 					Some(UpdateResult::Cleared(_)) => {
-						self.branches.remove(branch_handle);
+						self.branches.remove(branch_ix);
 						if self.branches.len() == 0 {
 							Some(UpdateResult::Cleared(()))
 						} else {
@@ -602,7 +602,7 @@ impl<
 			if &iter_branch_index < branch_index {
 				break;
 			}
-			insert_at = Some(branch_handle);
+			insert_at = Some(branch_ix);
 		}
 		let branch = Branch::new(value, at, self.init_child.clone());
 		if let Some(handle) = insert_at {
