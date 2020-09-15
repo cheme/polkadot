@@ -133,7 +133,7 @@ impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
 /// Adapter for storage (allows to factor code while keeping simple types).
 /// VR is the reference to value that is used, and I the initial state.
 pub trait StorageAdapter<'a, S, V, D, H> {
-	fn get_adapt_handle(inner: D, handle: H) -> HistoriedValue<V, S>;
+	fn get_adapt(inner: D, index: H) -> HistoriedValue<V, S>;
 }
 
 struct RefVecAdapter;
@@ -144,8 +144,8 @@ impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
 	&'a D,
 	D::Index,
 > for RefVecAdapter {
-	fn get_adapt_handle(inner: &'a D, handle: D::Index) -> HistoriedValue<&'a V, S> {
-		inner.get_ref(handle)
+	fn get_adapt(inner: &'a D, index: D::Index) -> HistoriedValue<&'a V, S> {
+		inner.get_ref(index)
 	}
 }
 
@@ -157,8 +157,8 @@ impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
 	&'a mut D,
 	D::Index,
 > for RefVecAdapterMut {
-	fn get_adapt_handle(inner: &'a mut D, handle: D::Index) -> HistoriedValue<&'a mut V, S> {
-		inner.get_ref_mut(handle)
+	fn get_adapt(inner: &'a mut D, index: D::Index) -> HistoriedValue<&'a mut V, S> {
+		inner.get_ref_mut(index)
 	}
 }
 
@@ -170,8 +170,8 @@ impl<'a, S, V, D: LinearStorage<V, S>> StorageAdapter<
 	&'a D,
 	D::Index,
 > for ValueVecAdapter {
-	fn get_adapt_handle(inner: &'a D, handle: D::Index) -> HistoriedValue<V, S> {
-		inner.get(handle)
+	fn get_adapt(inner: &'a D, index: D::Index) -> HistoriedValue<V, S> {
+		inner.get(index)
 	}
 }
 
@@ -183,8 +183,8 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	&'a D,
 	D::Index,
 > for SliceAdapter {
-	fn get_adapt_handle(inner: &'a D, handle: D::Index) -> HistoriedValue<&'a [u8], S> {
-		inner.get_slice(handle)
+	fn get_adapt(inner: &'a D, index: D::Index) -> HistoriedValue<&'a [u8], S> {
+		inner.get_slice(index)
 	}
 }
 
@@ -192,11 +192,11 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 	type S = S;
 
 	fn get(&self, at: &Self::S) -> Option<V> {
-		self.get_adapt_handle::<_, ValueVecAdapter>(at)
+		self.get_adapt::<_, ValueVecAdapter>(at)
 	}
 
 	fn contains(&self, at: &Self::S) -> bool {
-		self.pos_handle(at).is_some()
+		self.pos_index(at).is_some()
 	}
 
 	fn is_empty(&self) -> bool {
@@ -207,8 +207,8 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
-			for handle in inner.rev_index_iter() {
-				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, handle) {
+			for index in inner.rev_index_iter() {
+				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, index) {
 					if state.exists(at) {
 						return Some(value);
 					}
@@ -220,9 +220,9 @@ impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for L
 }
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
-	fn get_adapt_handle<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
-		for handle in self.0.rev_index_iter() {
-			let HistoriedValue { value, state } = A::get_adapt_handle(&self.0, handle);
+	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
+		for index in self.0.rev_index_iter() {
+			let HistoriedValue { value, state } = A::get_adapt(&self.0, index);
 			if state.exists(at) {
 				return Some(value);
 			}
@@ -231,13 +231,13 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 
 	// TODO use only once, consider removal
-	fn get_adapt_handle_mut<
+	fn get_adapt_mut<
 		'a,
 		VR,
 		A: StorageAdapter<'a, S, VR, &'a mut D, D::Index>,
 	>(&'a mut self, at: &S)	-> Option<HistoriedValue<VR, S>> {
-		if let Some(handle) = self.pos_handle(at) {
-			Some(A::get_adapt_handle(&mut self.0, handle))
+		if let Some(index) = self.pos_index(at) {
+			Some(A::get_adapt(&mut self.0, index))
 		} else {
 			None
 		}
@@ -248,19 +248,19 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
-			if let Some(handle) = self.0.last() {
-				let last = self.0.get_state(handle);
+			if let Some(index) = self.0.last() {
+				let last = self.0.get_state(index);
 				if &last > at {
 					self.0.pop();
 					continue;
 				}
 				if at == &last {
-					let mut last = self.0.get(handle);
+					let mut last = self.0.get(index);
 					if last.value == value {
 						return UpdateResult::Unchanged;
 					}
 					let result = crate::rstd::mem::replace(&mut last.value, value);
-					self.0.emplace(handle, last);
+					self.0.emplace(index, last);
 					return UpdateResult::Changed(Some(result));
 				}
 			}
@@ -271,13 +271,13 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 
 	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
-		if let Some(handle) = self.0.last() {
-			let last = self.0.get_state(handle);
+		if let Some(index) = self.0.last() {
+			let last = self.0.get_state(index);
 			if &last > at {
 				return None;
 			}
 			if at == &last {
-				let mut last = self.0.get(handle);
+				let mut last = self.0.get(index);
 				if last.value == value {
 					return Some(UpdateResult::Unchanged);
 				}
@@ -285,7 +285,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 					return None;
 				}
 				last.value = value;
-				self.0.emplace(handle, last);
+				self.0.emplace(index, last);
 				return Some(UpdateResult::Changed(()));
 			}
 		}
@@ -295,12 +295,12 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 }
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
-	fn pos_handle(&self, at: &S) -> Option<D::Index> {
+	fn pos_index(&self, at: &S) -> Option<D::Index> {
 		let mut pos = None;
-		for handle in self.0.rev_index_iter() {
-			let vr = self.0.get_state(handle);
+		for index in self.0.rev_index_iter() {
+			let vr = self.0.get_state(index);
 			if vr.exists(at) {
-				pos = Some(handle);
+				pos = Some(index);
 				break;
 			}
 		}
@@ -310,13 +310,13 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 
 impl<V: Clone, S: LinearState, D: LinearStorageMem<V, S>> InMemoryValueRef<V> for Linear<V, S, D> {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
-		self.get_adapt_handle::<_, RefVecAdapter>(at)
+		self.get_adapt::<_, RefVecAdapter>(at)
 	}
 }
 
 impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> InMemoryValueSlice<Vec<u8>> for Linear<Vec<u8>, S, D> {
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]> {
-		self.get_adapt_handle::<_, SliceAdapter>(at)
+		self.get_adapt::<_, SliceAdapter>(at)
 	}
 }
 
@@ -423,22 +423,22 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 
 	fn migrate(&mut self, (gc, mig): &Self::Migrate) -> UpdateResult<()> {
 		let res = self.gc(gc);
-		let mut next_handle = self.0.last();
-		let result = if next_handle.is_some() {
+		let mut next_index = self.0.last();
+		let result = if next_index.is_some() {
 			UpdateResult::Changed(())
 		} else {
 			res
 		};
-		while let Some(handle) = next_handle {
-			let mut h = self.0.get(handle);
+		while let Some(index) = next_index {
+			let mut h = self.0.get(index);
 			if &h.state > mig {
 				h.state -= mig.clone();
 			} else {
 				h.state = Default::default();
 			}
-			self.0.emplace(handle, h);
+			self.0.emplace(index, h);
 
-			next_handle = self.0.previous_index(handle);
+			next_index = self.0.previous_index(index);
 		}
 		result
 	}
@@ -453,7 +453,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V, S>> InMemoryValue<V> for Linear<V, S, D> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
-		self.get_adapt_handle_mut::<_, RefVecAdapterMut>(at).map(|h| h.value)
+		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| h.value)
 	}
 
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>> {
