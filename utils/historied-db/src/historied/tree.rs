@@ -366,8 +366,8 @@ impl<
 						if branch.state <= gc.composite_treshold.0 {
 								if let Some(new_branch) = new_branch.as_mut() {
 								for i in 0.. {
-									if let Some(h) = branch.value.st_get(i) {
-										new_branch.value.push(h);
+									if let Some(h) = branch.value.storage().st_get(i) {
+										new_branch.value.storage_mut().push(h);
 									} else {
 										break;
 									}
@@ -547,7 +547,7 @@ impl<
 							result = UpdateResult::Changed(());
 							continue;
 						} else {
-							if let Some(b) = branch.value.st_get(0) {
+							if let Some(b) = branch.value.storage().st_get(0) {
 								if &b.state < n_start {
 									first_new_start = true;
 								}
@@ -610,7 +610,7 @@ impl<
 		let mut nb = 0;
 		for i in 0..self.branches.len() {
 			let branch = self.branches.st_get(i).unwrap();
-			nb += branch.value.len();
+			nb += branch.value.storage().len();
 		}
 		nb
 	}

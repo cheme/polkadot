@@ -74,6 +74,17 @@ impl<S> LinearState for S where S:
 #[derivative(PartialEq(bound="D: PartialEq"))]
 pub struct Linear<V, S, D>(D, PhantomData<(V, S)>);
 
+impl<V, S, D> Linear<V, S, D> {
+	/// Access inner `LinearStorage`.
+	pub fn storage(&self) -> &D {
+		&self.0
+	}
+	/// Mutable access inner `LinearStorage`.
+	pub fn storage_mut(&mut self) -> &mut D {
+		&mut self.0
+	}
+}
+
 impl<V, S, D: EstimateSize> EstimateSize for Linear<V, S, D> {
 	fn estimate_size(&self) -> usize {
 		self.0.estimate_size()
@@ -116,70 +127,6 @@ impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
 	type Init = <D as InitFrom>::Init;
 	fn init_from(init: Self::Init) -> Self {
 		Linear(<D as InitFrom>::init_from(init), PhantomData)
-	}
-}
-
-impl<V, S, D: LinearStorage<V, S>> LinearStorage<V, S> for Linear<V, S, D> {
-	type Handle = D::Handle;
-	fn handle_last(&self) -> Option<Self::Handle> {
-		self.0.handle_last()
-	}
-	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle> {
-		self.0.handle_prev(handle)
-	}
-	fn handle(&self, index: usize) -> Option<Self::Handle> {
-		self.0.handle(index)
-	}
-	fn truncate_until(&mut self, split_off: usize) {
-		self.0.truncate_until(split_off)
-	}
-	fn len(&self) -> usize {
-		self.0.len()
-	}
-	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		self.0.st_get(index)
-	}
-	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
-		self.0.st_get_handle(handle)
-	}
-	fn get_state(&self, index: usize) -> Option<S> {
-		self.0.get_state(index)
-	}
-	fn get_state_handle(&self, handle: Self::Handle) -> S {
-		self.0.get_state_handle(handle)
-	}
-	fn push(&mut self, value: HistoriedValue<V, S>) {
-		self.0.push(value)
-	}
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>) {
-		self.0.insert(index, value)
-	}
-	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
-		self.0.insert_handle(handle, value)
-	}
-	fn remove(&mut self, index: usize) {
-		self.0.remove(index)
-	}
-	fn remove_handle(&mut self, handle: Self::Handle) {
-		self.0.remove_handle(handle)
-	}
-	fn last(&self) -> Option<HistoriedValue<V, S>> {
-		self.0.last()
-	}
-	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
-		self.0.pop()
-	}
-	fn clear(&mut self) {
-		self.0.clear()
-	}
-	fn truncate(&mut self, at: usize) {
-		self.0.truncate(at)
-	}
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
-		self.0.emplace(at, value)
-	}
-	fn emplace_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
-		self.0.emplace_handle(handle, value)
 	}
 }
 
@@ -273,7 +220,6 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
-			let inner = Linear(inner, PhantomData);
 			let mut index = inner.len();
 			if index == 0 {
 				return None;
@@ -295,7 +241,7 @@ impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for L
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Handle>>(&'a self, at: &S) -> Option<VR> {
-		for handle in self.backward_handle_iter() {
+		for handle in self.0.backward_handle_iter() {
 			let HistoriedValue { value, state } = A::get_adapt_handle(&self.0, handle);
 			if state.exists(at) {
 				return Some(value);
@@ -370,7 +316,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	fn pos_handle(&self, at: &S) -> Option<D::Handle> {
 		let mut pos = None;
-		for handle in self.backward_handle_iter() {
+		for handle in self.0.backward_handle_iter() {
 			let vr = self.0.get_state_handle(handle);
 			if vr.exists(at) {
 				pos = Some(handle);
@@ -581,17 +527,17 @@ mod test {
 	fn test_gc() {
 		// TODO non consecutive state.
 		// [1, 2, 3, 4]
-		let mut first = MemoryOnly::<Vec<u8>, u32>::default();
+		let mut first_storage = MemoryOnly::<Vec<u8>, u32>::default();
 		for i in 1..5 {
-			first.push((vec![i as u8], i).into());
+			first_storage.push((vec![i as u8], i).into());
 		}
 		// [1, ~, 3, ~]
-		let mut second = MemoryOnly::<Vec<u8>, u32>::default();
+		let mut second_storage = MemoryOnly::<Vec<u8>, u32>::default();
 		for i in 1..5 {
 			if i % 2 == 0 {
-				second.push((vec![0u8], i).into());
+				second_storage.push((vec![0u8], i).into());
 			} else {
-				second.push((vec![i as u8], i).into());
+				second_storage.push((vec![i as u8], i).into());
 			}
 		}
 		let result_first = [
@@ -612,17 +558,17 @@ mod test {
 				new_end: Some(i as u32),
 				neutral_element: Some(vec![0u8]),
 			};
-			let mut first = Linear(first.clone(), Default::default());
+			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc1);
-			let mut second = Linear(second.clone(), Default::default());
+			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc1);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first.clone(), Default::default());
+			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc2);
-			let mut second = Linear(second.clone(), Default::default());
+			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
@@ -654,19 +600,17 @@ mod test {
 				new_end: None,
 				neutral_element: Some(vec![0u8]),
 			};
-			{
-				let mut first = Linear(first.clone(), Default::default());
-				first.gc(&gc1);
-				let mut second = Linear(second.clone(), Default::default());
-				second.gc(&gc1);
-				for j in 0..4 {
-					assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-					assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
-				}
+			let mut first = Linear(first_storage.clone(), Default::default());
+			first.gc(&gc1);
+			let mut second = Linear(second_storage.clone(), Default::default());
+			second.gc(&gc1);
+			for j in 0..4 {
+				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first.clone(), Default::default());
+			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc2);
-			let mut second = Linear(second.clone(), Default::default());
+			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
