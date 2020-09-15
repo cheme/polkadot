@@ -215,8 +215,8 @@ impl<
 			insert_at = Some(branch_ix);
 		}
 		let branch = Branch::new(value, at.latest(), self.init_child.clone());
-		if let Some(handle) = insert_at {
-			self.branches.insert(handle, branch);
+		if let Some(index) = insert_at {
+			self.branches.insert(index, branch);
 		} else {
 			self.branches.push(branch);
 		}
@@ -298,8 +298,8 @@ impl<
 				let mut i = 0;
 				// merge all less than composite treshold in composite treshold index branch.
 				loop {
-					if let Some(handle) = self.branches.lookup(i) {
-						let mut branch = self.branches.get(handle);
+					if let Some(index) = self.branches.lookup(i) {
+						let mut branch = self.branches.get(index);
 						if branch.state <= gc.composite_treshold.0 {
 							if let Some(new_branch) = new_branch.as_mut() {
 								for i in 0.. {
@@ -495,8 +495,8 @@ impl<
 	#[cfg(test)]
 	fn nb_internal_history(&self) -> usize {
 		let mut nb = 0;
-		for handle in self.branches.rev_index_iter() {
-			let branch = self.branches.get(handle);
+		for index in self.branches.rev_index_iter() {
+			let branch = self.branches.get(index);
 			nb += branch.value.storage().len();
 		}
 		nb
@@ -551,8 +551,8 @@ impl<
 			next_branch_index = self.branches.previous_index(branch_ix);
 		}
 		let branch = Branch::new(value, at.latest(), self.init_child.clone());
-		if let Some(handle) = insert_at {
-			self.branches.insert(handle, branch);
+		if let Some(index) = insert_at {
+			self.branches.insert(index, branch);
 		} else {
 			self.branches.push(branch);
 		}
@@ -605,8 +605,8 @@ impl<
 			insert_at = Some(branch_ix);
 		}
 		let branch = Branch::new(value, at, self.init_child.clone());
-		if let Some(handle) = insert_at {
-			self.branches.insert(handle, branch);
+		if let Some(index) = insert_at {
+			self.branches.insert(index, branch);
 		} else {
 			self.branches.push(branch);
 		}
