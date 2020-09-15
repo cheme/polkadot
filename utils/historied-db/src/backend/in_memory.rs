@@ -86,7 +86,7 @@ impl<V, S> InitFrom for MemoryOnly<V, S> {
 impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	// Index position in array.
 	type Handle = usize;
-	fn handle_last(&self) -> Option<Self::Handle> {
+	fn last(&self) -> Option<Self::Handle> {
 		if self.0.len() == 0 {
 			None
 		} else {
@@ -124,23 +124,17 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
 		self.0[handle].clone()
 	}
-	fn get_state(&self, index: usize) -> Option<S> {
-		self.0.get(index).map(|h| h.state.clone())
-	}
-	fn get_state_handle(&self, handle: Self::Handle) -> S {
+	fn get_state(&self, handle: Self::Handle) -> S {
 		self.0[handle].state.clone()
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
 		self.0.push(value)
 	}
-	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
+	fn insert(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>) {
 		self.0.insert(handle, value)
 	}
 	fn remove_handle(&mut self, handle: Self::Handle) {
 		self.0.remove(handle);
-	}
-	fn last(&self) -> Option<HistoriedValue<V, S>> {
-		self.0.last().cloned()
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
 		self.0.pop()

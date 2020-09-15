@@ -92,7 +92,7 @@ impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
 		if self.changed {
 			if let Some(change) = self.value.take() {
 				if self.insert {
-					self.storage.insert(self.index, change);
+					self.storage.insert_lookup(self.index, change);
 				} else {
 					self.storage.emplace(self.index, change);
 				}
@@ -130,16 +130,18 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// could have costy access.
 	/// TODO switch to handle read and entry (possibly insert)?
 	type Handle: Copy;
+	/// Get reference to last item.
+	fn last(&self) -> Option<Self::Handle>;
 	/// Handle here are only existing handle.
-	fn handle_last(&self) -> Option<Self::Handle>;
-	/// Handle here are only existing handle.
+	/// TODO rename previous
 	fn handle_prev(&self, handle: Self::Handle) -> Option<Self::Handle>;
 	/// Handle here are can be non existing handle.
 	/// Lookup for handle.
+	/// TODO rename lookup
 	fn handle(&self, index: usize) -> Option<Self::Handle>;
 	/// Handle here are only existing handle.
 	fn backward_handle_iter(&self) -> HandleBackwardIter<V, S, Self> {
-		let first = self.handle_last();
+		let first = self.last();
 		HandleBackwardIter(self, first, Default::default())
 	}
 	/// This does not need to be very efficient as it is mainly for
@@ -166,26 +168,25 @@ pub trait LinearStorage<V, S>: InitFrom {
 		}
 	}
 	/// Array like get.
-	fn get_state(&self, index: usize) -> Option<S> {
-		self.handle(index).map(|handle| self.get_state_handle(handle))
-	}
+	fn get_state(&self, handle: Self::Handle) -> S;
 	/// Array like get.
-	fn get_state_handle(&self, handle: Self::Handle) -> S;
+	fn get_state_lookup(&self, index: usize) -> Option<S> {
+		self.handle(index).map(|handle| self.get_state(handle))
+	}
 	/// Vec like push.
 	fn push(&mut self, value: HistoriedValue<V, S>);
 	/// Vec like insert, this is mainly use in tree implementation.
 	/// So when used as tree branch container, a efficient implementation
 	/// shall be use.
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>) {
+	fn insert(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>);
+	/// Insert with a lookup.
+	fn insert_lookup(&mut self, index: usize, value: HistoriedValue<V, S>) {
 		if let Some(handle) = self.handle(index) {
-			self.insert_handle(handle, value)
+			self.insert(handle, value)
 		} else {
 			self.push(value)
 		}
 	}
-	/// Insert a value at a handle. (Can act as emplace or insert depending
-	/// on the handle).
-	fn insert_handle(&mut self, handle: Self::Handle, value: HistoriedValue<V, S>);
 	/// Vec like remove, this is mainly use in tree branch implementation.
 	/// TODO ensure remove last is using pop implementation.
 	fn remove(&mut self, index: usize) {
@@ -193,14 +194,6 @@ pub trait LinearStorage<V, S>: InitFrom {
 	}
 	/// Remove value at a handle if there is one.
 	fn remove_handle(&mut self, handle: Self::Handle);
-	/// TODO put 'a and return read type that can be &'a S and where S is AsRef<S>.
-	/// TODO put 'a and return read type that can be &'a [u8] and where Vec<u8> is AsRef<[u8]>.
-	fn last(&self) -> Option<HistoriedValue<V, S>> {
-		self.handle_last().map(|handle| self.get(handle))
-	}
-	fn last_state(&self) -> Option<S> {
-		self.handle_last().map(|handle| self.get_state_handle(handle))
-	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>>;
 	fn clear(&mut self);
 	fn truncate(&mut self, at: usize);
@@ -227,7 +220,7 @@ pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, 
 		self.handle(index).map(|handle| self.get_slice_handle(handle))
 	}
 	fn last_slice(&self) -> Option<HistoriedValue<&[u8], S>> {
-		self.handle_last().map(|handle| self.get_slice_handle(handle))
+		self.last().map(|handle| self.get_slice_handle(handle))
 	}
 	/// Array like get mut.
 	fn get_slice_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut [u8], S>> {
@@ -250,7 +243,7 @@ pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
 		self.handle(index).map(|handle| self.get_ref_handle(handle))
 	}
 	fn last_ref(&self) -> Option<HistoriedValue<&V, S>> {
-		self.handle_last().map(|handle| self.get_ref_handle(handle))
+		self.last().map(|handle| self.get_ref_handle(handle))
 	}
 	/// Array like get mut.
 	fn get_ref_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut V, S>> {
@@ -287,8 +280,8 @@ mod test {
 	pub(crate) fn test_linear_storage<L: LinearStorage<Value, State>>(storage: &mut L) {
 		// empty storage
 		assert!(storage.pop().is_none());
-		assert!(storage.get_state(0).is_none());
-		assert!(storage.get_state(10).is_none());
+		assert!(storage.get_state_lookup(0).is_none());
+		assert!(storage.get_state_lookup(10).is_none());
 		assert!(storage.get_lookup(0).is_none());
 		assert!(storage.get_lookup(10).is_none());
 		assert!(storage.len() == 0);
@@ -299,15 +292,15 @@ mod test {
 		// single element
 		let h: HistoriedValue<Value, State> = (vec![5], 5).into();
 		storage.push(h.clone());
-		assert_eq!(storage.get_state(0), Some(5));
+		assert_eq!(storage.get_state_lookup(0), Some(5));
 		assert_eq!(storage.get_lookup(0), Some(h.clone()));
 		assert!(storage.get_lookup(1).is_none());
 		let h: HistoriedValue<Value, State> = (vec![2], 2).into();
-		storage.insert(0, h);
-		assert_eq!(storage.get_state(0), Some(2));
-		assert_eq!(storage.get_state(1), Some(5));
+		storage.insert_lookup(0, h);
+		assert_eq!(storage.get_state_lookup(0), Some(2));
+		assert_eq!(storage.get_state_lookup(1), Some(5));
 		storage.remove(0);
-		assert_eq!(storage.get_state(0), Some(5));
+		assert_eq!(storage.get_state_lookup(0), Some(5));
 		assert!(storage.get_lookup(1).is_none());
 		storage.clear();
 		for i in 0usize..30 {
@@ -315,31 +308,31 @@ mod test {
 			storage.push(h);
 		}
 		for i in 0usize..30 {
-			assert_eq!(storage.get_state(i), Some(i as State));
+			assert_eq!(storage.get_state_lookup(i), Some(i as State));
 		}
 		storage.truncate_until(5);
 		for i in 0usize..25 {
-			assert_eq!(storage.get_state(i), Some(i as State + 5));
+			assert_eq!(storage.get_state_lookup(i), Some(i as State + 5));
 		}
 		assert!(storage.get_lookup(25).is_none());
 		storage.truncate(20);
 		for i in 0usize..20 {
-			assert_eq!(storage.get_state(i), Some(i as State + 5));
+			assert_eq!(storage.get_state_lookup(i), Some(i as State + 5));
 		}
 		assert!(storage.get_lookup(20).is_none());
 		storage.remove(10);
 		for i in 0usize..10 {
-			assert_eq!(storage.get_state(i), Some(i as State + 5));
+			assert_eq!(storage.get_state_lookup(i), Some(i as State + 5));
 		}
 		for i in 10usize..19 {
-			assert_eq!(storage.get_state(i), Some(i as State + 6));
+			assert_eq!(storage.get_state_lookup(i), Some(i as State + 6));
 		}
 		assert!(storage.get_lookup(19).is_none());
 		storage.emplace(18, (vec![1], 1).into());
 		storage.emplace(17, (vec![2], 2).into());
 		storage.emplace(0, (vec![3], 3).into());
-		assert_eq!(storage.get_state(18), Some(1 as State));
-		assert_eq!(storage.get_state(17), Some(2 as State));
-		assert_eq!(storage.get_state(0), Some(3 as State));
+		assert_eq!(storage.get_state_lookup(18), Some(1 as State));
+		assert_eq!(storage.get_state_lookup(17), Some(2 as State));
+		assert_eq!(storage.get_state_lookup(0), Some(3 as State));
 	}
 }

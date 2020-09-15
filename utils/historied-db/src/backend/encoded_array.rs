@@ -414,8 +414,8 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 {
 	// Node index.
 	type Handle = usize;
-//impl<'a, F: EncodedArrayConfig> LinearStorage<'a, &'a[u8], u32> for EncodedArray<'a, F> {
-	fn handle_last(&self) -> Option<Self::Handle> {
+
+	fn last(&self) -> Option<Self::Handle> {
 		let len = self.len();
 		if len == 0 {
 			return None;
@@ -447,7 +447,7 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, u32> {
 		self.get_state(handle).map(|v| V::from_slice(v.as_ref()))
 	}
-	fn get_state_handle(&self, handle: Self::Handle) -> u32 {
+	fn get_state(&self, handle: Self::Handle) -> u32 {
 		self.get_state_only(handle)
 	}
 	//fn push(&mut self, value: HistoriedValue<&'a[u8], u32>) {
@@ -547,7 +547,7 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		}
 	}
 
-	fn insert_handle(&mut self, handle: usize, value: HistoriedValue<V, u32>) {
+	fn insert(&mut self, handle: usize, value: HistoriedValue<V, u32>) {
 		let len = self.len();
 		debug_assert!(len >= handle);
 		let end_ix = self.0.len();
@@ -708,15 +708,15 @@ mod test {
 		let v2 = b"value_2".to_vec();
 		let v3 = b"a third value 3".to_vec();
 
-		ser.insert(0, (v1.clone(), 1).into());
-		ser.insert(0, (v2.clone(), 2).into());
-		ser.insert(1, (v3.clone(), 3).into());
+		ser.insert_lookup(0, (v1.clone(), 1).into());
+		ser.insert_lookup(0, (v2.clone(), 2).into());
+		ser.insert_lookup(1, (v3.clone(), 3).into());
 		assert_eq!(ser.get_state(0), (v2ref, 2).into());
 		assert_eq!(ser.get_state(1), (v3ref, 3).into());
 		assert_eq!(ser.get_state(2), (v1ref, 1).into());
 		assert_eq!(ser.len(), 3);
 		ser.remove(1);
-		ser.insert(1, (v2.clone(), 1).into());
+		ser.insert_lookup(1, (v2.clone(), 1).into());
 		assert_eq!(ser.get_state(0), (v2ref, 2).into());
 		assert_eq!(ser.get_state(1), (v2ref, 1).into());
 		assert_eq!(ser.get_state(2), (v1ref, 1).into());

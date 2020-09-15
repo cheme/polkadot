@@ -238,11 +238,11 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	// If true the node needs to be inserted.
 	// Inner node linear storage handle.
 	type Handle = (u32, D::Handle);
-	fn handle_last(&self) -> Option<Self::Handle> {
+	fn last(&self) -> Option<Self::Handle> {
 		if self.len == 0 {
 			return None;
 		}
-		if let Some(inner_handle) = self.inner.data.handle_last() {
+		if let Some(inner_handle) = self.inner.data.last() {
 			return Some((self.end_node_index, inner_handle));
 		}
 
@@ -251,10 +251,10 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			i -= 1;
 			let fetch_index = self.end_node_index - i - 1;
 			let inner_handle = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
-				node.data.handle_last()
+				node.data.last()
 			} else {
 				if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i) {
-					let inner_handle = node.data.handle_last();
+					let inner_handle = node.data.last();
 					self.fetched.borrow_mut().push(node);
 					inner_handle
 				} else {
@@ -269,7 +269,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	}
 	fn handle_prev(&self, mut handle: Self::Handle) -> Option<Self::Handle> {
 		if handle.0 == self.end_node_index {
-			if let Some(inner_handle) = self.inner.data.handle_last() {
+			if let Some(inner_handle) = self.inner.data.last() {
 				handle.1 = inner_handle;
 				return Some(handle);
 			}
@@ -278,10 +278,10 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			handle.0 -= 1;
 			let fetch_index = self.end_node_index - handle.0 - 1;
 			let inner_handle = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
-				node.data.handle_last()
+				node.data.last()
 			} else {
 				if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), handle.0) {
-					let inner_handle = node.data.handle_last();
+					let inner_handle = node.data.last();
 					self.fetched.borrow_mut().push(node);
 					inner_handle
 				} else {
@@ -317,11 +317,11 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		}
 		self.fetched.borrow()[handle.0 as usize].data.get(handle.1)
 	}
-	fn get_state_handle(&self, handle: Self::Handle) -> S {
+	fn get_state(&self, handle: Self::Handle) -> S {
 		if handle.0 == self.end_node_index {
-			return self.inner.data.get_state_handle(handle.1)
+			return self.inner.data.get_state(handle.1)
 		}
-		self.fetched.borrow()[handle.0 as usize].data.get_state_handle(handle.1)
+		self.fetched.borrow()[handle.0 as usize].data.get_state(handle.1)
 	}
 	fn truncate_until(&mut self, split_off: usize) {
 		let i = {
@@ -403,7 +403,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		let prev = crate::rstd::mem::replace(&mut self.inner, new_node);
 		self.fetched.borrow_mut().insert(0, prev);
 	}
-	fn insert_handle(&mut self, handle: Self::Handle, h: HistoriedValue<V, S>) {
+	fn insert(&mut self, handle: Self::Handle, h: HistoriedValue<V, S>) {
 		let mut fetched_mut;
 		let node = if handle.0 == self.end_node_index {
 			&mut self.inner
@@ -417,7 +417,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		}
 		node.changed = true;
 		self.len += 1;
-		node.data.insert_handle(handle.1, h);
+		node.data.insert(handle.1, h);
 	}
 	fn remove_handle(&mut self, handle: Self::Handle) {
 		let mut fetched_mut;
@@ -680,7 +680,7 @@ pub(crate) mod test {
 			key: b"any".to_vec(),
 		};
 		let mut head = Head::<Vec<u8>, u32, D, M, _>::init_from(init_head);
-		assert_eq!(head.get_state(0), None);
+		assert_eq!(head.get_state_lookup(0), None);
 		for i in 0usize..30 {
 			let modu = i % 3;
 			head.push(HistoriedValue {
@@ -688,9 +688,9 @@ pub(crate) mod test {
 				state: i as u32,
 			});
 			for j in 0..i + 1 {
-				assert_eq!(head.get_state(j), Some(j as u32));
+				assert_eq!(head.get_state_lookup(j), Some(j as u32));
 			}
-			assert_eq!(head.get_state(i + 1), None);
+			assert_eq!(head.get_state_lookup(i + 1), None);
 		}
 	}
 

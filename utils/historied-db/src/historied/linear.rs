@@ -261,8 +261,8 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
-			if let Some(handle) = self.0.handle_last() {
-				let last = self.0.get_state_handle(handle);
+			if let Some(handle) = self.0.last() {
+				let last = self.0.get_state(handle);
 				if &last > at {
 					self.0.pop();
 					continue;
@@ -284,8 +284,8 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 
 	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
-		if let Some(handle) = self.0.handle_last() {
-			let last = self.0.get_state_handle(handle);
+		if let Some(handle) = self.0.last() {
+			let last = self.0.get_state(handle);
 			if &last > at {
 				return None;
 			}
@@ -311,7 +311,7 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	fn pos_handle(&self, at: &S) -> Option<D::Handle> {
 		let mut pos = None;
 		for handle in self.0.backward_handle_iter() {
-			let vr = self.0.get_state_handle(handle);
+			let vr = self.0.get_state(handle);
 			if vr.exists(at) {
 				pos = Some(handle);
 				break;
@@ -358,6 +358,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 	fn discard(&mut self, at: &Self::SE) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		if let Some(last) = self.0.last() {
+			let last = self.0.get(last);
 			debug_assert!(&last.state <= at); 
 			if at == &last.state {
 				if self.0.len() == 1 {
@@ -381,7 +382,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 
 			let mut index = self.0.len();
 			for handle in self.0.backward_handle_iter() { 
-				let state = self.0.get_state_handle(handle);
+				let state = self.0.get_state(handle);
 				if &state < new_end {
 					break;
 				}
@@ -404,7 +405,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 				return end_result;
 			}
 			for handle in self.0.backward_handle_iter() { 
-				let state = self.0.get_state_handle(handle);
+				let state = self.0.get_state(handle);
 				index -= 1;
 				if state.exists(start_treshold) {
 					// This does not handle consecutive neutral element, but
@@ -435,7 +436,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 
 	fn migrate(&mut self, (gc, mig): &Self::Migrate) -> UpdateResult<()> {
 		let res = self.gc(gc);
-		let mut next_handle = self.0.handle_last();
+		let mut next_handle = self.0.last();
 		let result = if next_handle.is_some() {
 			UpdateResult::Changed(())
 		} else {
@@ -557,16 +558,16 @@ mod test {
 			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc1);
 			for j in 0..4 {
-				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
 			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc2);
 			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
-				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
 		}
 		let result_first = [
@@ -599,16 +600,16 @@ mod test {
 			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc1);
 			for j in 0..4 {
-				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
 			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc2);
 			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
-				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-				assert_eq!(second.0.get_state(j), result_second[i - 1][j]);
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_second[i - 1][j]);
 			}
 		}
 	}
