@@ -311,11 +311,11 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	fn len(&self) -> usize {
 		self.len
 	}
-	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
+	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
 		if handle.0 == self.end_node_index {
-			return self.inner.data.st_get_handle(handle.1)
+			return self.inner.data.get(handle.1)
 		}
-		self.fetched.borrow()[handle.0 as usize].data.st_get_handle(handle.1)
+		self.fetched.borrow()[handle.0 as usize].data.get(handle.1)
 	}
 	fn get_state_handle(&self, handle: Self::Handle) -> S {
 		if handle.0 == self.end_node_index {
@@ -348,7 +348,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 					let mut add_size = 0;
 					for i in 0..ix {
 						node.data.handle(i).map(|h| {
-							let h = node.data.st_get_handle(h);
+							let h = node.data.get(h);
 							add_size += h.value.estimate_size() + h.state.estimate_size()
 						});
 					}
@@ -432,7 +432,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		self.len -= 1;
 
 		if M::APPLY_SIZE_LIMIT {
-			let h = node.data.st_get_handle(handle.1);
+			let h = node.data.get(handle.1);
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 		}
 		node.data.remove_handle(handle.1);
@@ -512,7 +512,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 					let mut add_size = 0;
 					for i in ix..node.data.len() {
 						node.data.handle(i).map(|h| {
-							let h = node.data.st_get_handle(h);
+							let h = node.data.get(h);
 							add_size += h.value.estimate_size() + h.state.estimate_size()
 						});
 					}
@@ -552,7 +552,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		node.changed = true;
 
 		if M::APPLY_SIZE_LIMIT {
-			let h = node.data.st_get_handle(handle.1);
+			let h = node.data.get(handle.1);
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
 		}

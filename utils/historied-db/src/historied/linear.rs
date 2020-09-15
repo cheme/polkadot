@@ -178,10 +178,10 @@ impl<'a, S, V, D: LinearStorage<V, S>> StorageAdapter<
 	D::Handle,
 > for ValueVecAdapter {
 	fn get_adapt(inner: &'a D, index: usize) -> Option<HistoriedValue<V, S>> {
-		inner.handle(index).map(|handle| inner.st_get_handle(handle))
+		inner.handle(index).map(|handle| inner.get(handle))
 	}
 	fn get_adapt_handle(inner: &'a D, handle: D::Handle) -> HistoriedValue<V, S> {
-		inner.st_get_handle(handle)
+		inner.get(handle)
 	}
 }
 
@@ -268,7 +268,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 					continue;
 				}
 				if at == &last {
-					let mut last = self.0.st_get_handle(handle);
+					let mut last = self.0.get(handle);
 					if last.value == value {
 						return UpdateResult::Unchanged;
 					}
@@ -290,7 +290,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 				return None;
 			}
 			if at == &last {
-				let mut last = self.0.st_get_handle(handle);
+				let mut last = self.0.get(handle);
 				if last.value == value {
 					return Some(UpdateResult::Unchanged);
 				}
@@ -411,7 +411,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 					// it is considered marginal and bad usage (in theory one
 					// should not push two consecutive identical values).
 					if let Some(neutral) = gc.neutral_element.as_ref() {
-						if neutral == &self.0.st_get_handle(handle).value {
+						if neutral == &self.0.get(handle).value {
 							index += 1;
 						}
 					}
@@ -442,7 +442,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 			res
 		};
 		while let Some(handle) = next_handle {
-			let mut h = self.0.st_get_handle(handle);
+			let mut h = self.0.get(handle);
 			if &h.state > mig {
 				h.state -= mig.clone();
 			} else {

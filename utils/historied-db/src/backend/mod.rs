@@ -148,14 +148,14 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// Number of element for different S.
 	fn len(&self) -> usize;
 	/// Array like get.
-	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S>;
+	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, S>;
 	/// Array like get using a handle lookup.
 	fn get_lookup(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		self.handle(index).map(|handle| self.st_get_handle(handle))
+		self.handle(index).map(|handle| self.get(handle))
 	}
 	/// Entry. TODO Entry on linear is not very interesting (consider removal).
 	fn entry<'a>(&'a mut self, index: usize) -> Entry<'a, V, S, Self> {
-		let value = self.handle(index).map(|handle| self.st_get_handle(handle));
+		let value = self.handle(index).map(|handle| self.get(handle));
 		let insert = value.is_none();
 		Entry {
 			value,
@@ -196,7 +196,7 @@ pub trait LinearStorage<V, S>: InitFrom {
 	/// TODO put 'a and return read type that can be &'a S and where S is AsRef<S>.
 	/// TODO put 'a and return read type that can be &'a [u8] and where Vec<u8> is AsRef<[u8]>.
 	fn last(&self) -> Option<HistoriedValue<V, S>> {
-		self.handle_last().map(|handle| self.st_get_handle(handle))
+		self.handle_last().map(|handle| self.get(handle))
 	}
 	fn last_state(&self) -> Option<S> {
 		self.handle_last().map(|handle| self.get_state_handle(handle))

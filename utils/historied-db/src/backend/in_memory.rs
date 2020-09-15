@@ -121,7 +121,7 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	fn len(&self) -> usize {
 		self.0.len()
 	}
-	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
+	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, S> {
 		self.0[handle].clone()
 	}
 	fn get_state(&self, index: usize) -> Option<S> {

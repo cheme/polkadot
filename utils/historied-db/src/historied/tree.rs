@@ -138,7 +138,7 @@ impl<
 > ValueRef<V> for Tree<I, BI, V, D, BD> {
 	type S = ForkPlan<I, BI>;
 
-	tree_get!(get, V, st_get_handle, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _| r);
+	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _| r);
 
 	fn contains(&self, at: &Self::S) -> bool {
 		self.get(at).is_some() // TODO avoid clone??
@@ -192,7 +192,7 @@ impl<
 			let iter_branch_index = self.branches.get_state_handle(branch_handle);
 			if &iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
-				let mut branch = self.branches.st_get_handle(branch_handle);
+				let mut branch = self.branches.get(branch_handle);
 				return match branch.value.set(value, &index) {
 					UpdateResult::Changed(_) => {
 						self.branches.emplace_handle(branch_handle, branch);
@@ -229,7 +229,7 @@ impl<
 			let iter_branch_index = self.branches.get_state_handle(branch_handle);
 			if &iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
-				let mut branch = self.branches.st_get_handle(branch_handle);
+				let mut branch = self.branches.get(branch_handle);
 				return match branch.value.discard(&index) {
 					UpdateResult::Changed(v) => {
 						self.branches.emplace_handle(branch_handle, branch);
@@ -299,12 +299,12 @@ impl<
 				// merge all less than composite treshold in composite treshold index branch.
 				loop {
 					if let Some(handle) = self.branches.handle(i) {
-						let mut branch = self.branches.st_get_handle(handle);
+						let mut branch = self.branches.get(handle);
 						if branch.state <= gc.composite_treshold.0 {
 							if let Some(new_branch) = new_branch.as_mut() {
 								for i in 0.. {
 									if let Some(h) = branch.value.storage().handle(i) {
-										let h = branch.value.storage().st_get_handle(h);
+										let h = branch.value.storage().get(h);
 										new_branch.value.storage_mut().push(h);
 									} else {
 										break;
@@ -377,7 +377,7 @@ impl<
 					neutral_element: neutral.clone(),
 				};
 
-				let mut branch = self.branches.st_get_handle(index);
+				let mut branch = self.branches.get(index);
 				match branch.value.gc(&mut gc) {
 					UpdateResult::Unchanged => (),
 					UpdateResult::Changed(_) => { 
@@ -420,7 +420,7 @@ impl<
 		let mut first_new_start = false;
 		let mut next_branch_handle = self.branches.handle_last();
 		while let Some(branch_handle) = next_branch_handle {
-			let mut branch = self.branches.st_get_handle(branch_handle);
+			let mut branch = self.branches.get(branch_handle);
 			let new_start = if branch.state <= gc.composite_treshold.0 {
 				match start_composite.as_ref() {
 					None => None,
@@ -432,7 +432,7 @@ impl<
 							continue;
 						} else {
 							if let Some(b) = branch.value.storage().handle(0) {
-								let b = branch.value.storage().st_get_handle(b);
+								let b = branch.value.storage().get(b);
 								if &b.state < n_start {
 									first_new_start = true;
 								}
@@ -496,7 +496,7 @@ impl<
 	fn nb_internal_history(&self) -> usize {
 		let mut nb = 0;
 		for handle in self.branches.backward_handle_iter() {
-			let branch = self.branches.st_get_handle(handle);
+			let branch = self.branches.get(handle);
 			nb += branch.value.storage().len();
 		}
 		nb
@@ -578,7 +578,7 @@ impl<
 		for branch_handle in self.branches.backward_handle_iter() {
 			let iter_branch_index = self.branches.get_state_handle(branch_handle);
 			if &iter_branch_index == branch_index {
-				let mut branch = self.branches.st_get_handle(branch_handle);
+				let mut branch = self.branches.get(branch_handle);
 				return match if no_overwrite {
 					branch.value.set_if_possible_no_overwrite(value, &index)
 				} else {

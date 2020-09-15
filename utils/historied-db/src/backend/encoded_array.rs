@@ -444,7 +444,7 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		self.read_le_usize(len - SIZE_BYTE_LEN) as usize
 	}
 
-	fn st_get_handle(&self, handle: Self::Handle) -> HistoriedValue<V, u32> {
+	fn get(&self, handle: Self::Handle) -> HistoriedValue<V, u32> {
 		self.get_state(handle).map(|v| V::from_slice(v.as_ref()))
 	}
 	fn get_state_handle(&self, handle: Self::Handle) -> u32 {
