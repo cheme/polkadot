@@ -52,6 +52,11 @@ pub struct BlockChainInMemOffchainStorageAt {
 	at_write: Option<Latest<(u32, u32)>>,
 }
 
+/// In-memory storage for offchain workers,
+/// and for new state (without concurrency handling).
+#[derive(Debug, Clone, Default)]
+pub struct BlockChainInMemOffchainStorageAtNew (BlockChainInMemOffchainStorageAt);
+
 type LinearBackend = historied_db::backend::in_memory::MemoryOnly<
 	Option<Vec<u8>>,
 	u32
@@ -128,6 +133,7 @@ impl<H> crate::offchain::BlockChainOffchainStorage for BlockChainInMemOffchainSt
 {
 	type BlockId = H;
 	type OffchainStorage = BlockChainInMemOffchainStorageAt;
+	type OffchainStorageNew = BlockChainInMemOffchainStorageAtNew;
 
 	fn at(&self, id: Self::BlockId) -> Option<Self::OffchainStorage> {
 		if let Some(at_read) = self.historied_management.write().get_db_state(&id) {
@@ -141,6 +147,14 @@ impl<H> crate::offchain::BlockChainOffchainStorage for BlockChainInMemOffchainSt
 			None
 		}
 	}
+
+	fn at_new(&self, id: Self::BlockId) -> Option<Self::OffchainStorageNew> {
+		self.at(id).map(|at| BlockChainInMemOffchainStorageAtNew(at))
+	}
+
+	fn latest(&self) -> Option<Self::BlockId> {
+		None // TODO put tree mgmt in its inner struct with cache and reference to latest insert.
+	}
 }
 
 impl OffchainStorage for BlockChainInMemOffchainStorageAt {
@@ -151,6 +165,7 @@ impl OffchainStorage for BlockChainInMemOffchainStorageAt {
 			key,
 			test,
 			Some(value),
+			false,
 		);
 	}
 
@@ -161,6 +176,7 @@ impl OffchainStorage for BlockChainInMemOffchainStorageAt {
 			key,
 			test,
 			None,
+			false,
 		);
 	}
 
@@ -168,7 +184,6 @@ impl OffchainStorage for BlockChainInMemOffchainStorageAt {
 		let key: Vec<u8> = prefix.iter().chain(key).cloned().collect();
 		self.storage.read().get(&key)
 			.and_then(|h| {
-				use historied_db::historied::InMemoryValueRef;
 				h.get_ref(&self.at_read).cloned().flatten()
 			})
 	}
@@ -186,9 +201,56 @@ impl OffchainStorage for BlockChainInMemOffchainStorageAt {
 			item_key,
 			Some(test),
 			Some(new_value),
+			false,
 		)
 	}
 }
+
+impl OffchainStorage for BlockChainInMemOffchainStorageAtNew {
+	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
+		let test: Option<fn(Option<&[u8]>) -> bool> = None;
+		self.0.modify(
+			prefix,
+			key,
+			test,
+			Some(value),
+			true,
+		);
+	}
+
+	fn remove(&mut self, prefix: &[u8], key: &[u8]) {
+		let test: Option<fn(Option<&[u8]>) -> bool> = None;
+		self.0.modify(
+			prefix,
+			key,
+			test,
+			None,
+			true,
+		);
+	}
+
+	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+		self.0.get(prefix, key)
+	}
+
+	fn compare_and_set(
+		&mut self,
+		prefix: &[u8],
+		item_key: &[u8],
+		old_value: Option<&[u8]>,
+		new_value: &[u8],
+	) -> bool {
+		let test = |v: Option<&[u8]>| old_value == v;
+		self.0.modify(
+			prefix,
+			item_key,
+			Some(test),
+			Some(new_value),
+			true,
+		)
+	}
+}
+
 
 impl BlockChainInMemOffchainStorageAt {
 	fn modify(
@@ -197,6 +259,7 @@ impl BlockChainInMemOffchainStorageAt {
 		item_key: &[u8],
 		condition: Option<impl Fn(Option<&[u8]>) -> bool>,
 		new_value: Option<&[u8]>,
+		is_new: bool,
 	) -> bool {
 		if self.at_write.is_none() {
 			panic!("Incoherent state for offchain writing");
@@ -217,7 +280,16 @@ impl BlockChainInMemOffchainStorageAt {
 			let is_insert = new_value.is_some();
 			let new_value = new_value.map(|v| v.to_vec());
 			if let Some(mut histo) = histo {
-				let _update_result = histo.set_mut(new_value, self.at_write.as_ref().expect("Synch at start"));
+				if is_new {
+					let _update_result = histo.set_mut(new_value, self.at_write.as_ref().expect("Synch at start"));
+				} else {
+					use historied_db::historied::ConditionalValueMut;
+					use historied_db::historied::StateIndex;
+					let _update_result = histo.set_if_possible_no_overwrite(
+						new_value,
+						self.at_write.as_ref().expect("Synch at start").index_ref(),
+					).expect("Concurrency failure for sequential write of offchain storage");
+				}
 			} else {
 				if is_insert {
 					let new_histo = HValue::new(new_value, self.at_write.as_ref().expect("Synch at start"), ((), ()));
@@ -230,7 +302,6 @@ impl BlockChainInMemOffchainStorageAt {
 
 		is_set
 	}
-	
 }
 
 /// Change to be applied to the offchain worker db in regards to a key.
@@ -238,8 +309,14 @@ impl BlockChainInMemOffchainStorageAt {
 pub enum OffchainOverlayedChange {
 	/// Remove the data associated with the key
 	Remove,
+	/// Remove the data associated with the key, with
+	/// local blockchain storage.
+	RemoveLocal,
 	/// Overwrite the value of an associated key
 	SetValue(Vec<u8>),
+	/// Overwrite the value of an associated key, with local
+	/// blockchain storage.
+	SetLocalValue(Vec<u8>),
 }
 
 /// In-memory storage for offchain workers recoding changes for the actual offchain storage implementation.
@@ -285,16 +362,24 @@ impl OffchainOverlayedChanges {
 	}
 
 	/// Remove a key and its associated value from the offchain database.
-	pub fn remove(&mut self, prefix: &[u8], key: &[u8]) {
+	pub fn remove(&mut self, prefix: &[u8], key: &[u8], is_local: bool) {
 		if let Self::Enabled(ref mut storage) = self {
-			let _ = storage.insert((prefix.to_vec(), key.to_vec()), OffchainOverlayedChange::Remove);
+			let _ = if is_local {
+				storage.insert((prefix.to_vec(), key.to_vec()), OffchainOverlayedChange::RemoveLocal)
+			} else {
+				storage.insert((prefix.to_vec(), key.to_vec()), OffchainOverlayedChange::Remove)
+			};
 		}
 	}
 
 	/// Set the value associated with a key under a prefix to the value provided.
-	pub fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
+	pub fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8], is_local: bool) {
 		if let Self::Enabled(ref mut storage) = self {
-			let _ = storage.insert((prefix.to_vec(), key.to_vec()), OffchainOverlayedChange::SetValue(value.to_vec()));
+			let _ = if is_local {
+				storage.insert((prefix.to_vec(), key.to_vec()), OffchainOverlayedChange::SetLocalValue(value.to_vec()))
+			} else {
+				storage.insert((prefix.to_vec(), key.to_vec()), OffchainOverlayedChange::SetValue(value.to_vec()))
+			};
 		}
 	}
 
@@ -406,30 +491,30 @@ mod test {
 	#[test]
 	fn test_drain() {
 		let mut ooc = OffchainOverlayedChanges::enabled();
-		ooc.set(STORAGE_PREFIX,b"kkk", b"vvv");
+		ooc.set(STORAGE_PREFIX,b"kkk", b"vvv", false);
 		let drained = ooc.drain().count();
 		assert_eq!(drained, 1);
 		let leftover = ooc.iter().count();
 		assert_eq!(leftover, 0);
 
-		ooc.set(STORAGE_PREFIX, b"a", b"v");
-		ooc.set(STORAGE_PREFIX, b"b", b"v");
-		ooc.set(STORAGE_PREFIX, b"c", b"v");
-		ooc.set(STORAGE_PREFIX, b"d", b"v");
-		ooc.set(STORAGE_PREFIX, b"e", b"v");
+		ooc.set(STORAGE_PREFIX, b"a", b"v", false);
+		ooc.set(STORAGE_PREFIX, b"b", b"v", false);
+		ooc.set(STORAGE_PREFIX, b"c", b"v", false);
+		ooc.set(STORAGE_PREFIX, b"d", b"v", false);
+		ooc.set(STORAGE_PREFIX, b"e", b"v", false);
 		assert_eq!(ooc.iter().count(), 5);
 	}
 
 	#[test]
 	fn test_accumulated_set_remove_set() {
 		let mut ooc = OffchainOverlayedChanges::enabled();
-		ooc.set(STORAGE_PREFIX, b"ppp", b"qqq");
-		ooc.remove(STORAGE_PREFIX, b"ppp");
+		ooc.set(STORAGE_PREFIX, b"ppp", b"qqq", false);
+		ooc.remove(STORAGE_PREFIX, b"ppp", false);
 		// keys are equiv, so it will overwrite the value and the overlay will contain
 		// one item
 		assert_eq!(ooc.iter().count(), 1);
 
-		ooc.set(STORAGE_PREFIX, b"ppp", b"rrr");
+		ooc.set(STORAGE_PREFIX, b"ppp", b"rrr", false);
 		let mut iter = ooc.into_iter();
 		assert_eq!(
 			iter.next(),

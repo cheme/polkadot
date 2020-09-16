@@ -63,10 +63,14 @@ impl<T: OffchainStorage + 'static, LT: BlockChainOffchainStorage + 'static> Offc
 				self.storage.write().set(sp_offchain::STORAGE_PREFIX, &*key, &*value)
 			},
 			StorageKind::LOCAL => {
-				// TODO need to update rpc to pass block hash with storage kind.
-				// Also note that set does not make much sense (we need to modify latest state).
-				//self.local_storage.write().at().set(sp_offchain::LOCAL_STORAGE_PREFIX, &*key, &*value)
-				return Err(Error::UnavailableStorageKind);
+				let local_storage = self.local_storage.write();
+				if let Some(block) = local_storage.latest() {
+					if let Some(mut local_storage) = local_storage.at(block) {
+						local_storage.set(sp_offchain::LOCAL_STORAGE_PREFIX, &*key, &*value);
+						return Ok(())
+					}
+				}
+				return Err(Error::UnavailableStorageState)
 			},
 		};
 		Ok(())
@@ -79,8 +83,14 @@ impl<T: OffchainStorage + 'static, LT: BlockChainOffchainStorage + 'static> Offc
 		Ok(match kind {
 			StorageKind::PERSISTENT => self.storage.read().get(sp_offchain::STORAGE_PREFIX, &*key).map(Into::into),
 			StorageKind::LOCAL => {
-				//self.local_storage.read().get(sp_offchain::LOCAL_STORAGE_PREFIX, &*key).map(Into::into)
-				return Err(Error::UnavailableStorageKind);
+				let local_storage = self.local_storage.read();
+				if let Some(block) = local_storage.latest() {
+					if let Some(local_storage) = local_storage.at(block) {
+						let v = local_storage.get(sp_offchain::LOCAL_STORAGE_PREFIX, &*key).map(Into::into);
+						return Ok(v)
+					}
+				}
+				return Err(Error::UnavailableStorageState)
 			},
 		})
 	}

@@ -56,6 +56,11 @@ pub struct BlockChainLocalAt {
 	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
 }
 
+/// Offchain local storage for a given block,
+/// and for new state (without concurrency handling).
+#[derive(Clone)]
+pub struct BlockChainLocalAtNew(BlockChainLocalAt);
+
 impl std::fmt::Debug for LocalStorage {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
 		fmt.debug_struct("LocalStorage")
@@ -184,6 +189,7 @@ impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStora
 {
 	type BlockId = H;
 	type OffchainStorage = BlockChainLocalAt;
+	type OffchainStorageNew = BlockChainLocalAtNew;
 
 	fn at(&self, id: Self::BlockId) -> Option<Self::OffchainStorage> {
 		if let Some(at_read) = self.historied_management.write().get_db_state(&id) {
@@ -197,6 +203,12 @@ impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStora
 		} else {
 			None
 		}
+	}
+	fn at_new(&self, id: Self::BlockId) -> Option<Self::OffchainStorageNew> {
+		self.at(id).map(|at| BlockChainLocalAtNew(at))
+	}
+	fn latest(&self) -> Option<Self::BlockId> {
+		None // TODO put tree mgmt in its inner struct with cache and reference to latest insert.
 	}
 }
 
@@ -223,6 +235,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 			key,
 			test,
 			Some(value),
+			false,
 		);
 	}
 
@@ -233,6 +246,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 			key,
 			test,
 			None,
+			false,
 		);
 	}
 
@@ -269,6 +283,52 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 			item_key,
 			Some(test),
 			Some(new_value),
+			false,
+		)
+	}
+}
+
+impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
+	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
+		let test: Option<fn(Option<&[u8]>) -> bool> = None;
+		self.0.modify(
+			prefix,
+			key,
+			test,
+			Some(value),
+			true,
+		);
+	}
+
+	fn remove(&mut self, prefix: &[u8], key: &[u8]) {
+		let test: Option<fn(Option<&[u8]>) -> bool> = None;
+		self.0.modify(
+			prefix,
+			key,
+			test,
+			None,
+			true,
+		);
+	}
+
+	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+		self.0.get(prefix, key)
+	}
+
+	fn compare_and_set(
+		&mut self,
+		prefix: &[u8],
+		item_key: &[u8],
+		old_value: Option<&[u8]>,
+		new_value: &[u8],
+	) -> bool {
+		let test = |v: Option<&[u8]>| old_value == v;
+		self.0.modify(
+			prefix,
+			item_key,
+			Some(test),
+			Some(new_value),
+			true,
 		)
 	}
 }
@@ -280,6 +340,7 @@ impl BlockChainLocalAt {
 		item_key: &[u8],
 		condition: Option<impl Fn(Option<&[u8]>) -> bool>,
 		new_value: Option<&[u8]>,
+		is_new: bool,
 	) -> bool {
 		if self.at_write.is_none() {
 			panic!("Incoherent state for offchain writing");
@@ -325,14 +386,27 @@ impl BlockChainLocalAt {
 				};*/
 				let new_value = new_value.map(|v| v.to_vec());
 				let (new_value, update_result) = if let Some(mut histo) = histo {
-					let update_result = histo.set(new_value, self.at_write.as_ref().expect("Synch at start"));
-					(histo.encode(), update_result)
+					let update_result = if is_new {
+						histo.set(new_value, self.at_write.as_ref().expect("Synch at start"))
+					} else {
+						use historied_db::historied::ConditionalValueMut;
+						use historied_db::historied::StateIndex;
+						histo.set_if_possible_no_overwrite(
+							new_value,
+							self.at_write.as_ref().expect("Synch at start").index_ref(),
+						).expect("Concurrency failure for sequential write of offchain storage")
+					};
+					if let &UpdateResult::Unchanged = &update_result {
+						(Vec::new(), update_result)
+					} else {
+						(histo.encode(), update_result)
+					}
 				} else {
 					if is_insert {
 						(HValue::new(new_value, self.at_write.as_ref().expect("Synch at start"), ((), ())).encode(), UpdateResult::Changed(()))
 					} else {
 						// nothing to delete
-						return is_set;
+						(Default::default(), UpdateResult::Unchanged)
 					}
 				};
 				match update_result {

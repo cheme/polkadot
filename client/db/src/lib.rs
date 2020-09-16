@@ -142,7 +142,7 @@ type TreeBackend<'a> = historied_db::backend::in_memory::MemoryOnly<
 
 // Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
 // None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
-/// Historied value with multiple paralell branches.
+/// Historied value with multiple parallel branches.
 pub type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 impl HistoriedDB {
@@ -370,6 +370,35 @@ impl HistoriedDBMut {
 	pub fn update_single_index(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
 		self.update_single_inner(k, change, change_set, crate::columns::StateIndexes)
 	}
+	pub fn update_single_offchain(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
+		// TODO could use update_single_inner if same HValue
+		use sp_core::offchain::storage::HValue;
+		let column = crate::columns::OFFCHAIN;
+		let histo = if let Ok(Some(histo)) = self.db.get(column, k) {
+			Some(HValue::decode(&mut &histo[..]).expect("Bad encoded value in db, closing"))
+		} else {
+			if change.is_none() {
+				return;
+			}
+			None
+		};
+		let mut new_value;
+		match if let Some(histo) = histo {
+			new_value = histo;
+			new_value.set(change, &self.current_state)
+		} else {
+			new_value = HValue::new(change, &self.current_state, ((), ()));
+			historied_db::UpdateResult::Changed(())
+		} {
+			historied_db::UpdateResult::Changed(()) => {
+				change_set.put(column, k, new_value.encode().as_slice());
+			},
+			historied_db::UpdateResult::Cleared(()) => {
+				change_set.delete(column, k);
+			},
+			historied_db::UpdateResult::Unchanged => (), 
+		}
+	}
 	/// write a single value in change set.
 	pub fn update_single_inner(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction, column: u32) {
 		let histo = if let Ok(Some(histo)) = self.db.get(column, k) {
@@ -405,10 +434,10 @@ impl HistoriedDBMut {
 	}
 	/// write a single value, without checking current state,
 	/// please only use on new empty db.
-	pub fn unchecked_new_single(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
+	pub fn unchecked_new_single(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
 		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateValues)
 	}
-	pub fn unchecked_new_single_index(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
+	pub fn unchecked_new_single_index(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
 		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateIndexes)
 	}
 	pub fn unchecked_new_single_inner(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction, column: u32) {
@@ -1061,7 +1090,11 @@ pub struct BlockImportOperation<Block: BlockT> {
 }
 
 impl<Block: BlockT> BlockImportOperation<Block> {
-	fn apply_offchain(&mut self, transaction: &mut Transaction<DbHash>) {
+	fn apply_offchain(
+		&mut self,
+		transaction: &mut Transaction<DbHash>,
+		historied: &mut Option<(&mut HistoriedDBMut, kvdb::DBTransaction)>,
+	) {
 		for ((prefix, key), value_operation) in self.offchain_storage_updates.drain() {
 			let key: Vec<u8> = prefix
 				.into_iter()
@@ -1071,6 +1104,16 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 			match value_operation {
 				OffchainOverlayedChange::SetValue(val) => transaction.set_from_vec(columns::OFFCHAIN, &key, val),
 				OffchainOverlayedChange::Remove => transaction.remove(columns::OFFCHAIN, &key),
+				OffchainOverlayedChange::SetLocalValue(val) => {
+					historied.as_mut().map(|(historied_db, transaction_offchain)|
+						historied_db.update_single_offchain(&key, Some(val), transaction_offchain)
+					);
+				},
+				OffchainOverlayedChange::RemoveLocal => {
+					historied.as_mut().map(|(historied_db, transaction_offchain)|
+						historied_db.update_single_offchain(&key, None, transaction_offchain)
+					);
+				},
 			}
 		}
 	}
@@ -1585,12 +1628,17 @@ impl<Block: BlockT> Backend<Block> {
 	fn try_commit_operation(
 		&self,
 		mut operation: BlockImportOperation<Block>,
+		historied_db: &mut Option<HistoriedDBMut>,
 	) -> ClientResult<()> {
 		let mut transaction = Transaction::new();
 		let mut finalization_displaced_leaves = None;
 
 		operation.apply_aux(&mut transaction);
-		operation.apply_offchain(&mut transaction);
+		let mut historied = historied_db.as_mut().map(|h| {
+			let transaction = h.transaction();
+			(h, transaction)
+		});
+		operation.apply_offchain(&mut transaction, &mut historied);
 
 		let mut meta_updates = Vec::with_capacity(operation.finalized_blocks.len());
 		let mut last_finalized_hash = self.blockchain.meta.read().finalized_hash;
@@ -1812,6 +1860,9 @@ impl<Block: BlockT> Backend<Block> {
 		};
 
 		self.storage.db.commit(transaction)?;
+		if let Some((historied_db, transaction)) = historied {
+			historied_db.write_change_set(transaction)?;
+		}
 
 		if let Some((
 			number,
@@ -1920,6 +1971,7 @@ impl<Block: BlockT> Backend<Block> {
 	}
 }
 
+/// Avoid finalizing at every block.
 const HISTORIED_FINALIZATION_WINDOWS: u8 = 101;
 
 fn apply_state_commit(transaction: &mut Transaction<DbHash>, commit: sc_state_db::CommitSet<Vec<u8>>) {
@@ -2017,50 +2069,56 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			(hash, parent_hash)
 		});
 
+		let mut historied_db = if let Some((hash, parent_hash)) = hashes {
+			if self.historied_next_finalizable.read().is_none() {
+				let parent_block = BlockId::Hash(parent_hash.clone());
+				if let Some(nb) = self.blockchain.block_number_from_id(&parent_block)? {
+					*self.historied_next_finalizable.write() = Some(nb + HISTORIED_FINALIZATION_WINDOWS.into());
+				}
+			}
+			let update_plan = {
+				// lock does notinclude update of value as we do not have concurrent block creation
+				let mut management = self.historied_management.write();
+				if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
+					.unwrap_or_else(|| {
+						// allow this to start from existing state TODO EMCH add a stored boolean to only allow
+						// that once in genesis
+						warn!("state not found for parent hash, THISISABUG, appending to latest");
+						management.latest_state_fork()
+					}))
+				{
+					// TODO this require to support rollback!! actually we could drop a state
+					// without invalidating next value.
+					// (concurrency would fork here).
+					let query_plan = management.append_external_state(hash.clone(), &state)
+						.expect("correct state resolution");
+					warn!("qp for {:?}, {:?}", hash, query_plan);
+					// TODO EMCH this should be return by append operation!!!
+					let update_plan = management.get_db_state_mut(&hash)
+						.expect("correct state resolution");
+					warn!("up for {:?}, {:?}", hash, update_plan);
+					update_plan
+				} else {
+					// TODO EMCH rollback? Not that we could write the change in mgmt first
+					// and includ the later change in rollback 
+					panic!("missing update plan");
+				}
+			};
+			Some(HistoriedDBMut {
+				current_state: update_plan,
+				db: self.historied_state.clone(),
+			})
+		} else {
+			None
+		};
+
 		let historied_update = operation.storage_updates.clone();
-		let index_changeset = operation.db_updates.indexes.clone(); // TODO see how to avoid this clone later
-		match self.try_commit_operation(operation) {
+		let index_changeset = operation.db_updates.indexes.clone(); // TODO see how to avoid this clone later (using a single tx would do the trick)
+		match self.try_commit_operation(operation, &mut historied_db) {
 			Ok(_) => {
 				// TODO avoid failure or manage pending on those historied operation
 				// -> could put in try commit (mgmt change are synch at this point).
-				if let Some((hash, parent_hash)) = hashes {
-					if self.historied_next_finalizable.read().is_none() {
-						let parent_block = BlockId::Hash(parent_hash.clone());
-						if let Some(nb) = self.blockchain.block_number_from_id(&parent_block)? {
-							*self.historied_next_finalizable.write() = Some(nb + HISTORIED_FINALIZATION_WINDOWS.into());
-						}
-					}
-					let update_plan = {
-						// lock does notinclude update of value as we do not have concurrent block creation
-						let mut management = self.historied_management.write();
-						if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
-							.unwrap_or_else(|| {
-								// allow this to start from existing state TODO EMCH add a stored boolean to only allow
-								// that once in genesis
-								warn!("state not found for parent hash, THISISABUG, appending to latest");
-								management.latest_state_fork()
-							}))
-						{
-							let query_plan = management.append_external_state(hash.clone(), &state)
-								.expect("correct state resolution");
-							warn!("qp for {:?}, {:?}", hash, query_plan);
-							// TODO EMCH this should be return by append operation!!!
-							let update_plan = management.get_db_state_mut(&hash)
-								.expect("correct state resolution");
-							warn!("up for {:?}, {:?}", hash, update_plan);
-							update_plan
-						} else {
-							// TODO EMCH rollback? Not that we could write the change in mgmt first
-							// and includ the later change in rollback 
-							panic!("missing update plan");
-						}
-					};
-					// TODO EMCH iterate collecation and update values at update_plan
-				
-					let mut historied_db = HistoriedDBMut {
-						current_state: update_plan,
-						db: self.historied_state.clone(),
-					};
+				if let Some(historied_db) = historied_db.as_mut() {
 					let (tx, nb) = historied_db.process_change_set(historied_update);
 					warn!("committed {:?} change in historied db", nb);
 					historied_db.write_change_set(tx)?;

@@ -170,8 +170,16 @@ where
 	fn set_offchain_storage(&mut self, key: &[u8], value: Option<&[u8]>) {
 		use ::sp_core::offchain::STORAGE_PREFIX;
 		match value {
-			Some(value) => self.offchain_overlay.set(STORAGE_PREFIX, key, value),
-			None => self.offchain_overlay.remove(STORAGE_PREFIX, key),
+			Some(value) => self.offchain_overlay.set(STORAGE_PREFIX, key, value, false),
+			None => self.offchain_overlay.remove(STORAGE_PREFIX, key, false),
+		}
+	}
+
+	fn set_offchain_local_storage(&mut self, key: &[u8], value: Option<&[u8]>) {
+		use ::sp_core::offchain::LOCAL_STORAGE_PREFIX;
+		match value {
+			Some(value) => self.offchain_overlay.set(LOCAL_STORAGE_PREFIX, key, value, true),
+			None => self.offchain_overlay.remove(LOCAL_STORAGE_PREFIX, key, true),
 		}
 	}
 
@@ -731,8 +739,8 @@ mod tests {
 
 	fn prepare_offchain_overlay_with_changes() -> OffchainOverlayedChanges {
 		let mut ooc = OffchainOverlayedChanges::enabled();
-		ooc.set(offchain::STORAGE_PREFIX, b"k1", b"v1");
-		ooc.set(offchain::STORAGE_PREFIX, b"k2", b"v2");
+		ooc.set(offchain::STORAGE_PREFIX, b"k1", b"v1", false);
+		ooc.set(offchain::STORAGE_PREFIX, b"k2", b"v2", false);
 		ooc
 	}
 
