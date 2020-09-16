@@ -631,7 +631,12 @@ impl<
 		true
 	}
 }
-	
+
+// TODO current implementation is incorrect, we need an index that fails at first
+// branch that is parent to the dest (a tree path flattened into a ForkPlan like
+// struct). Element prior (I, BI) are not needed (only children).
+// Then we still apply only at designated (I, BI) but any value in the plan are
+// skipped.
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
