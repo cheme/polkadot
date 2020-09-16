@@ -118,12 +118,17 @@ pub trait InMemoryValue<V>: Value<V> {
 /// This involves some additional computation to check correctness.
 /// It is also usefull when some asumption are not strong enough, for
 /// instance if `Value` is subject to concurrent access.
+/// TODO an entry api would be more proper (returning optional entry).
 pub trait ConditionalValueMut<V>: Value<V> {
+	type IndexConditional;
+	/// Does state allow modifying this value.
+	/// If value is added as parameter, we do not allow overwrite.
+	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool;
 	/// Do update if state allows it, otherwhise return None.
-	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>>;
+	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
 
 	/// Do update if state allows it and we are not erasing an existing value, otherwhise return None.
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>>;
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
 }
 
 /// An entry at a given history index.

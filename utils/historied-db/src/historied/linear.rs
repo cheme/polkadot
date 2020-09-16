@@ -292,6 +292,23 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 		self.0.push(HistoriedValue {value, state: at.clone()});
 		Some(UpdateResult::Changed(()))
 	}
+	fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
+		if let Some(index) = self.0.last() {
+			let last = self.0.get_state(index);
+			if &last > at {
+				return false;
+			}
+			if at == &last {
+				if let Some(overwrite) = value {
+					let last = self.0.get(index);
+					if overwrite != &last.value {
+						return false;
+					}
+				}
+			}
+		}
+		true
+	}
 }
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
@@ -462,11 +479,15 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V, S>> In
 }
 
 impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> ConditionalValueMut<V> for Linear<V, S, D> {
-	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+	type IndexConditional = Self::Index;
+	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
+		self.can_if_inner(no_overwrite, at)
+	}
+	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
 		self.set_if_inner(value, at, true)
 	}
 
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
 		self.set_if_inner(value, at, false)
 	}
 }

@@ -612,6 +612,24 @@ impl<
 		}
 		Some(UpdateResult::Changed(()))
 	}
+	fn can_if_inner(
+		&self,
+		value: Option<&V>,
+		at: &<Self as Value<V>>::Index,
+	) -> bool {
+		let (branch_index, index) = at;
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
+			if &iter_branch_index == branch_index {
+				let branch = self.branches.get(branch_ix);
+				return branch.value.can_set(value, &index);
+			}
+			if &iter_branch_index < branch_index {
+				break;
+			}
+		}
+		true
+	}
 }
 	
 impl<
@@ -621,11 +639,17 @@ impl<
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V, BI>,
 > ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
-	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+	type IndexConditional = Self::Index;
+
+	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
+		self.can_if_inner(no_overwrite, at)
+	}
+	
+	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
 		self.set_if_inner(value, at, false)
 	}
 
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
 		self.set_if_inner(value, at, true)
 	}
 }
