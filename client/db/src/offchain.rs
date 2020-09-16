@@ -208,7 +208,7 @@ impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStora
 		self.at(id).map(|at| BlockChainLocalAtNew(at))
 	}
 	fn latest(&self) -> Option<Self::BlockId> {
-		None // TODO put tree mgmt in its inner struct with cache and reference to latest insert.
+		self.historied_management.write().latest_external_state()
 	}
 }
 
