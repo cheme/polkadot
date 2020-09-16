@@ -52,7 +52,7 @@ use historied_db::{
 	ForkableManagement, Latest, UpdateResult,
 	historied::{InMemoryValue, Value},
 	historied::tree::Tree,
-	management::tree::{Tree as TreeMgmt, ForkPlan, TreeManagementStorage},
+	management::tree::{Tree as TreeMgmt, ForkPlan},
 };
 
 use std::sync::Arc;
@@ -711,7 +711,7 @@ pub struct TreeManagementPersistence;
 /// Database backed tree management for a rocksdb database.
 pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
 
-impl TreeManagementStorage for TreeManagementPersistence {
+impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_DELETE: bool = true;
 	type Storage = RocksdbStorage;
 	type Mapping = historied_tree_bindings::Mapping;
@@ -1333,84 +1333,13 @@ impl<T: Clone> FrozenForDuration<T> {
 /// Holder for state of historied.
 type HistoriedState = ();
 
-type TreeManagementInner<H, S> = historied_db::management::tree::TreeManagement<
+pub type TreeManagement<H, S> = historied_db::management::tree::TreeManagement<
 	H,
 	u32,
 	u32,
 	Vec<u8>,
 	S,
 >;
-
-/// Tree management at client level.
-/// TODO add cache of latest queries.
-pub struct TreeManagement<H: Ord, S: TreeManagementStorage> {
-	inner: TreeManagementInner<H, S>,
-	head: Option<H>,
-}
-
-impl<H: Clone + Ord + codec::Codec, S: TreeManagementStorage> Management<H> for TreeManagement<H, S> {
-	type SE = <TreeManagementInner<H, S> as Management<H>>::SE;
-
-	fn get_db_state_mut(&mut self, state: &H) -> Option<Self::SE> {
-		self.inner.get_db_state_mut(state)
-	}
-
-	fn init() -> (Self, Self::S) {
-		let (inner, state) = <TreeManagementInner<H, S> as Management<H>>::init();
-		(TreeManagement {
-			inner,
-			head: None,
-		}, state)
-	}
-
-	fn init_state(&mut self) -> Self::SE {
-		self.inner.init_state()
-	}
-
-	fn latest_state(&mut self) -> Self::SE {
-		self.inner.latest_state()
-	}
-
-	fn reverse_lookup(&mut self, state: &Self::S) -> Option<H> {
-		self.inner.reverse_lookup(state)
-	}
-
-	fn get_migrate(self) -> (Migrate<H, Self>, Self::Migrate) {
-		unimplemented!()
-	}
-
-	fn applied_migrate(&mut self) {
-		self.applied_migrate()
-	}
-}
-
-impl<H: Clone + Ord + codec::Codec, S: TreeManagementStorage> ForkableManagement<H> for TreeManagement<H, S> {
-	const JOURNAL_DELETE: bool = S::JOURNAL_DELETE;
-
-	type SF = <TreeManagementInner<H, S> as ForkableManagement<H>>::SF;
-
-	fn inner_fork_state(&self, s: Self::SE) -> Self::SF {
-		self.inner.inner_fork_state(s)
-	}
-
-	fn ref_state_fork(&self, s: &Self::S) -> Self::SF {
-		self.inner.ref_state_fork(s)
-	}
-
-	fn get_db_state_for_fork(&mut self, state: &H) -> Option<Self::SF> {
-		self.inner.get_db_state_for_fork(state)
-	}
-
-	fn append_external_state(&mut self, state: H, at: &Self::SF) -> Option<Self::SE> {
-		self.head = state;
-		self.inner.append_external_state(state, at)
-	}
-
-	fn drop_state(&mut self, state: &Self::SF, return_dropped: bool) -> Option<Vec<H>> {
-		self.head = state;
-		self.inner.drop_state(state, return_dropped)
-	}
-}
 
 /// Disk backend.
 ///
@@ -1516,10 +1445,7 @@ impl<Block: BlockT> Backend<Block> {
 		);
 		let historied_state = rocks_histo.clone();
 		let historied_persistence = RocksdbStorage(rocks_histo);
-		let historied_management = Arc::new(RwLock::new(TreeManagement {
-			inner: historied_db::management::tree::TreeManagement::from_ser(historied_persistence),
-			head: meta.read().best_hash.clone(),
-		}));
+		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
 		let offchain_local_storage = offchain::BlockChainLocalStorage::new(db, historied_management.clone());
 		Ok(Backend {
 			storage: Arc::new(storage_db),
