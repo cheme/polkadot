@@ -113,6 +113,13 @@ pub mod linear {
 				.unwrap_or(S::default()))
 		}
 
+		fn latest_external_state(&mut self) -> Option<H> {
+			// Actually unimplemented
+			None
+		}
+
+		fn force_latest_external_state(&mut self, _state: H) { }
+
 		fn reverse_lookup(&mut self, state: &Self::S) -> Option<H> {
 			// TODO could be the closest valid and return non optional!!!! TODO
 			self.mapping.iter()

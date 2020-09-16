@@ -218,6 +218,13 @@ pub trait Management<H>: ManagementRef<H> + Sized {
 	/// Get a cursor over the last change of ref (when adding or removing).
 	fn latest_state(&mut self) -> Self::SE;
 
+	/// Return latest added external index, can return None
+	/// if reverted.
+	fn latest_external_state(&mut self) -> Option<H>;
+
+	/// Force change value of latest external state.
+	fn force_latest_external_state(&mut self, index: H);
+
 	fn reverse_lookup(&mut self, state: &Self::S) -> Option<H>;
 
 	/// see migrate. When running thes making a backup of this management

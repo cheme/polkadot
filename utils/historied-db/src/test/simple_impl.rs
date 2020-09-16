@@ -181,6 +181,13 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 		self.latest_state.clone()
 	}
 
+	fn latest_external_state(&mut self) -> Option<StateInput> {
+		// unimplemented
+		None
+	}
+
+	fn force_latest_external_state(&mut self, _state: StateInput) { }
+
 	fn init_state(&mut self) -> Self::SE {
 		Latest::unchecked_latest(0)
 	}

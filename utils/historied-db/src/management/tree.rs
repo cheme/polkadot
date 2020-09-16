@@ -282,7 +282,7 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
 	mapping: SerializeMap<H, (I, BI), S::Storage, S::Mapping>,
 	touched_gc: SerializeVariable<bool, S::Storage, S::TouchedGC>, // TODO currently damned unused thing??
 	current_gc: SerializeVariable<TreeMigrate<I, BI, V>, S::Storage, S::CurrentGC>, // TODO currently unused??
-	last_in_use_index: SerializeVariable<(I, BI), S::Storage, S::LastIndex>, // TODO rename to last inserted as we do not rebase on query
+	last_in_use_index: SerializeVariable<((I, BI), Option<H>), S::Storage, S::LastIndex>, // TODO rename to last inserted as we do not rebase on query
 	neutral_element: SerializeVariable<Option<V>, S::Storage, S::NeutralElt>,
 }
 
@@ -302,7 +302,7 @@ impl<H: Ord, I: Default + Ord, BI: Default, V, S: TreeManagementStorage> Default
 	}
 }
 
-impl<H: Ord, I: Default + Ord + Codec, BI: Default + Codec, V: Codec + Clone, S: TreeManagementStorage> TreeManagement<H, I, BI, V, S> {
+impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, V: Codec + Clone, S: TreeManagementStorage> TreeManagement<H, I, BI, V, S> {
 	/// Initialize from a default ser
 	pub fn from_ser(mut serialize: S::Storage) -> Self {
 		let mut neutral_element_ser = SerializeVariable::<Option<V>, S::Storage, S::NeutralElt>::from_ser(&serialize);
@@ -393,7 +393,7 @@ impl<
 			// No branch delete (the implementation guaranty branch 0 is a single element)
 			self.state.tree.apply_drop_state_rec_call(&state.0, &state.1, &mut call_back, true);
 			let treshold = tree_meta.composite_treshold.clone();
-			self.last_in_use_index.handle(self.state.ser()).set(treshold);
+			self.last_in_use_index.handle(self.state.ser()).set((treshold, None));
 
 			if tree_meta.composite_latest == false {
 				tree_meta.composite_latest = true;
@@ -417,7 +417,7 @@ impl<
 			}
 			call_back(&state.0, &state.1, self.state.ser());
 			self.state.tree.apply_drop_state(&state.0, &state.1, &mut call_back);
-			self.last_in_use_index.handle(self.state.ser()).set(parent);
+			self.last_in_use_index.handle(self.state.ser()).set((parent, None));
 		}
 	}
 
@@ -425,9 +425,9 @@ impl<
 	// TOdO update last_in_use_index
 	pub fn apply_drop_from_latest(&mut self, back: usize) -> bool {
 		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
-		let mut switch_index = latest.1.clone();
+		let mut switch_index = (latest.0).1.clone();
 		switch_index -= back as u32;
-		let qp = self.state.tree.query_plan_at(latest);
+		let qp = self.state.tree.query_plan_at(latest.0);
 		let mut branch_index = self.state.tree.meta.handle(&mut self.state.tree.serialize).get().composite_treshold.0.clone();
 		for b in qp.iter() {
 			if b.0.end <= switch_index {
@@ -1186,7 +1186,6 @@ impl<
 
 		Some(gc)
 	}
-
 }
 	
 impl<
@@ -1244,7 +1243,18 @@ impl<
 
 	fn latest_state(&mut self) -> Self::SE {
 		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
-		Latest::unchecked_latest(latest)
+		Latest::unchecked_latest(latest.0)
+	}
+
+	fn latest_external_state(&mut self) -> Option<H> {
+		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
+		latest.1
+	}
+
+	fn force_latest_external_state(&mut self, state: H) {
+		let mut latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
+		latest.1 = Some(state);
+		self.last_in_use_index.handle(self.state.ser()).set(latest);
 	}
 
 	// TODO the state parameter may not be the correct one.
@@ -1332,7 +1342,8 @@ impl<
 		index += 1;
 		if let Some(branch_index) = self.state.tree.add_state(branch_index.clone(), index.clone()) {
 			let last_in_use_index = (branch_index.clone(), index);
-			self.last_in_use_index.handle(self.state.ser()).set(last_in_use_index.clone());
+			self.last_in_use_index.handle(self.state.ser())
+				.set((last_in_use_index.clone(), Some(state.clone())));
 			self.mapping.handle(self.state.ser()).insert(state, last_in_use_index.clone());
 			Some(Latest::unchecked_latest(last_in_use_index))
 		} else {
