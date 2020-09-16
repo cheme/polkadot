@@ -412,9 +412,29 @@ impl<'a, F: EncodedArrayConfig, V> InitFrom for EncodedArray<'a, V, F>
 impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	type Handle = crate::backend::DummyHandle;
-	type RevIter = crate::backend::DummyRevIter;
-//impl<'a, F: EncodedArrayConfig> LinearStorage<'a, &'a[u8], u32> for EncodedArray<'a, F> {
+	// Node index.
+	type Index = usize;
+
+	fn last(&self) -> Option<Self::Index> {
+		let len = self.len();
+		if len == 0 {
+			return None;
+		}
+		Some(len - 1)
+	}
+	fn previous_index(&self, index: Self::Index) -> Option<Self::Index> {
+		if index == 0 {
+			return None;
+		}
+		Some(index)
+	}
+	fn lookup(&self, index: usize) -> Option<Self::Index> {
+		let len = self.len();
+		if index >= len {
+			return None;
+		}
+		Some(index)
+	}
 	fn truncate_until(&mut self, split_off: usize) {
 		self.remove_range(0, split_off);
 	}
@@ -424,25 +444,12 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		self.read_le_usize(len - SIZE_BYTE_LEN) as usize
 	}
 
-	// TODO lifetime in Linear storage refacto
-	// fn get(&self, index: usize) -> Option<HistoriedValue<&'a[u8], u32>> {
-	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, u32>> {
-		if index < self.len() {
-			Some(self.get_state(index).map(|v| V::from_slice(v.as_ref())))
-			//Some(self.get_state(index))
-		} else {
-			None
-		}
+	fn get(&self, index: Self::Index) -> HistoriedValue<V, u32> {
+		self.get_state(index).map(|v| V::from_slice(v.as_ref()))
 	}
-
-	fn get_state(&self, index: usize) -> Option<u32> {
-		if index < self.len() {
-			Some(self.get_state_only(index))
-		} else {
-			None
-		}
+	fn get_state(&self, index: Self::Index) -> u32 {
+		self.get_state_only(index)
 	}
-
 	//fn push(&mut self, value: HistoriedValue<&'a[u8], u32>) {
 	fn push(&mut self, value: HistoriedValue<V, u32>) {
 		let val = value.map_ref(|v| v.as_ref());
@@ -493,18 +500,15 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		self.0.to_mut().truncate(new_start + len_ix);
 	}
 
-	//fn emplace(&mut self, at: usize, value: HistoriedValue<&'a[u8], u32>) {
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, u32>) {
+	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, u32>) {
 		let len = self.len();
-		if len <= at {
-			panic!("out of range emplace");
-		}
-		let elt_start = self.index_element(at);
+		debug_assert!(len > index);
+		let elt_start = self.index_element(index);
 		let start_ix = self.index_start();
-		let elt_end = if len == at + 1{
+		let elt_end = if len == index + 1{
 			start_ix
 		} else {
-			self.index_element(at + 1) 
+			self.index_element(index + 1) 
 		};
 		let previous_size = elt_end - elt_start - SIZE_BYTE_LEN;
 		if previous_size == value.value.as_ref().len() {
@@ -523,7 +527,7 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 				let _ = self.0.to_mut().remove(new_elt_end);
 			}
 			let start_ix = start_ix - delete_size;
-			for pos in at..len - 1 {
+			for pos in index..len - 1 {
 				let old_value = self.read_le_usize(start_ix + pos * SIZE_BYTE_LEN);
 				self.write_le_usize(start_ix + pos * SIZE_BYTE_LEN, old_value - delete_size);
 			}
@@ -536,21 +540,19 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 			self.write_le_u32(elt_start, value.state);
 			self.0[elt_start + SIZE_BYTE_LEN..new_elt_end].copy_from_slice(value.value.as_ref());
 			let start_ix = start_ix + additional_size;
-			for pos in at..len - 1 {
+			for pos in index..len - 1 {
 				let old_value = self.read_le_usize(start_ix + pos * SIZE_BYTE_LEN);
 				self.write_le_usize(start_ix + pos * SIZE_BYTE_LEN, old_value + additional_size);
 			}
 		}
 	}
 
-	fn insert(&mut self, at: usize, value: HistoriedValue<V, u32>) {
+	fn insert(&mut self, index: usize, value: HistoriedValue<V, u32>) {
 		let len = self.len();
-		if len < at {
-			panic!("out of rane insert");
-		}
+		debug_assert!(len >= index);
 		let end_ix = self.0.len();
 		let start_ix = self.index_start();
-		let elt_start = self.index_element(at);
+		let elt_start = self.index_element(index);
 		let additional_size = value.value.as_ref().len() + SIZE_BYTE_LEN;
 		let elt_end = elt_start + additional_size;
 
@@ -561,15 +563,14 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 		self.0[elt_start + SIZE_BYTE_LEN..elt_end].copy_from_slice(value.value.as_ref());
 		let start_ix = start_ix + additional_size;
 		let mut old_value = elt_end;
-		for pos in at..len {
+		for pos in index..len {
 			let tmp = self.read_le_usize(start_ix + pos * SIZE_BYTE_LEN);
 			self.write_le_usize(start_ix + pos * SIZE_BYTE_LEN, old_value);
 			old_value = tmp + additional_size;
 		}
 		self.write_le_usize(self.0.len() - SIZE_BYTE_LEN, len + 1);
 	}
-
-	fn remove(&mut self, index: usize) {
+	fn remove(&mut self, index: Self::Index) {
 		self.remove_range(index, index + 1);
 	}
 }
@@ -577,34 +578,24 @@ impl<'a, F: EncodedArrayConfig, V> LinearStorage<V, u32> for EncodedArray<'a, V,
 impl<'a, F: EncodedArrayConfig, V> LinearStorageSlice<V, u32> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	fn get_slice(&self, index: usize) -> Option<HistoriedValue<&[u8], u32>> {
-		if index < self.len() {
-			Some(self.get_state(index))
-		} else {
-			None
-		}
+	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], u32> {
+		self.get_state(index)
 	}
-	fn get_slice_mut(&mut self, index: usize) -> Option<HistoriedValue<&mut [u8], u32>> {
-		if index < self.len() {
-			Some(self.get_state_mut(index))
-		} else {
-			None
-		}
+	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], u32> {
+		self.get_state_mut(index)
 	}
 }
 
 impl<'a, F: EncodedArrayConfig, V> LinearStorageRange<V, u32> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	fn get_range(slice: &[u8], index: usize) -> Option<HistoriedValue<Range<usize>, u32>> {
-		let inner = <Self as EncodedArrayValue>::from_slice(slice);
-		let (start, end, state) = inner.get_range(index);
-		Some(HistoriedValue {
+	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, u32> {
+		let (start, end, state) = self.get_range(index);
+		HistoriedValue {
 			state,
 			value: start..end,
-		})
+		}
 	}
-
 	fn from_slice(slice: &[u8]) -> Option<Self> {
 		Some(<Self as EncodedArrayValue>::from_slice(slice))
 	}
@@ -681,27 +672,27 @@ mod test {
 		ser.push((v2.clone(), 2).into());
 		ser.push((v3.clone(), 3).into());
 		
-		ser.emplace(0, (v3.clone(), 4).into());
+		ser.emplace_lookup(0, (v3.clone(), 4).into());
 		assert_eq!(ser.get_state(0), (v3ref, 4).into());
 		assert_eq!(ser.get_state(1), (v2ref, 2).into());
 		assert_eq!(ser.get_state(2), (v3ref, 3).into());
-		ser.emplace(0, (v2.clone(), 5).into());
+		ser.emplace_lookup(0, (v2.clone(), 5).into());
 		assert_eq!(ser.get_state(0), (v2ref, 5).into());
 		assert_eq!(ser.get_state(1), (v2ref, 2).into());
 		assert_eq!(ser.get_state(2), (v3ref, 3).into());
-		ser.emplace(1, (v3.clone(), 6).into());
+		ser.emplace_lookup(1, (v3.clone(), 6).into());
 		assert_eq!(ser.get_state(0), (v2ref, 5).into());
 		assert_eq!(ser.get_state(1), (v3ref, 6).into());
 		assert_eq!(ser.get_state(2), (v3ref, 3).into());
-		ser.emplace(1, (v1.clone(), 7).into());
+		ser.emplace_lookup(1, (v1.clone(), 7).into());
 		assert_eq!(ser.get_state(0), (v2ref, 5).into());
 		assert_eq!(ser.get_state(1), (v1ref, 7).into());
 		assert_eq!(ser.get_state(2), (v3ref, 3).into());
-		ser.emplace(2, (v1.clone(), 8).into());
+		ser.emplace_lookup(2, (v1.clone(), 8).into());
 		assert_eq!(ser.get_state(0), (v2ref, 5).into());
 		assert_eq!(ser.get_state(1), (v1ref, 7).into());
 		assert_eq!(ser.get_state(2), (v1ref, 8).into());
-		ser.emplace(2, (v2.clone(), 9).into());
+		ser.emplace_lookup(2, (v2.clone(), 9).into());
 		assert_eq!(ser.get_state(0), (v2ref, 5).into());
 		assert_eq!(ser.get_state(1), (v1ref, 7).into());
 		assert_eq!(ser.get_state(2), (v2ref, 9).into());
@@ -717,15 +708,15 @@ mod test {
 		let v2 = b"value_2".to_vec();
 		let v3 = b"a third value 3".to_vec();
 
-		ser.insert(0, (v1.clone(), 1).into());
-		ser.insert(0, (v2.clone(), 2).into());
-		ser.insert(1, (v3.clone(), 3).into());
+		ser.insert_lookup(0, (v1.clone(), 1).into());
+		ser.insert_lookup(0, (v2.clone(), 2).into());
+		ser.insert_lookup(1, (v3.clone(), 3).into());
 		assert_eq!(ser.get_state(0), (v2ref, 2).into());
 		assert_eq!(ser.get_state(1), (v3ref, 3).into());
 		assert_eq!(ser.get_state(2), (v1ref, 1).into());
 		assert_eq!(ser.len(), 3);
 		ser.remove(1);
-		ser.insert(1, (v2.clone(), 1).into());
+		ser.insert_lookup(1, (v2.clone(), 1).into());
 		assert_eq!(ser.get_state(0), (v2ref, 2).into());
 		assert_eq!(ser.get_state(1), (v2ref, 1).into());
 		assert_eq!(ser.get_state(2), (v1ref, 1).into());

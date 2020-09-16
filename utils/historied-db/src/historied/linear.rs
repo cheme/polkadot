@@ -20,7 +20,6 @@
 //! Current implementation is limited to a simple array indexing
 //! with modification at the end only.
 //! This is a sequential indexing.
-//! TODO consider renaming to sequential(only if implementation of non sequential).
 //!
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
@@ -30,7 +29,7 @@ use crate::{UpdateResult, Latest};
 use crate::rstd::marker::PhantomData;
 use crate::rstd::vec::Vec;
 use crate::rstd::convert::TryFrom;
-use crate::rstd::ops::{AddAssign, SubAssign, Range};
+use crate::rstd::ops::{SubAssign, Range};
 use codec::{Encode, Decode};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
 use crate::backend::encoded_array::EncodedArrayValue;
@@ -48,7 +47,6 @@ pub trait LinearState:
 	+ Ord
 	+ PartialOrd
 	+ TryFrom<u32>
-	+ AddAssign<u32> // TODO can remove ??
 	+ PartialEq<u32>
 {
 	// stored state and query state are
@@ -68,7 +66,6 @@ impl<S> LinearState for S where S:
 	+ Ord
 	+ PartialOrd
 	+ TryFrom<u32>
-	+ AddAssign<u32>
 	+ PartialEq<u32>
 { }
 
@@ -76,6 +73,17 @@ impl<S> LinearState for S where S:
 #[derive(Derivative, Debug, Encode, Decode)]
 #[derivative(PartialEq(bound="D: PartialEq"))]
 pub struct Linear<V, S, D>(D, PhantomData<(V, S)>);
+
+impl<V, S, D> Linear<V, S, D> {
+	/// Access inner `LinearStorage`.
+	pub fn storage(&self) -> &D {
+		&self.0
+	}
+	/// Mutable access inner `LinearStorage`.
+	pub fn storage_mut(&mut self) -> &mut D {
+		&mut self.0
+	}
+}
 
 impl<V, S, D: EstimateSize> EstimateSize for Linear<V, S, D> {
 	fn estimate_size(&self) -> usize {
@@ -122,51 +130,10 @@ impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
 	}
 }
 
-impl<V, S, D: LinearStorage<V, S>> LinearStorage<V, S> for Linear<V, S, D> {
-	type Handle = crate::backend::DummyHandle;
-	type RevIter = crate::backend::DummyRevIter;
-	fn truncate_until(&mut self, split_off: usize) {
-		self.0.truncate_until(split_off)
-	}
-	fn len(&self) -> usize {
-		self.0.len()
-	}
-	fn st_get(&self, index: usize) -> Option<HistoriedValue<V, S>> {
-		self.0.st_get(index)
-	}
-	fn get_state(&self, index: usize) -> Option<S> {
-		self.0.get_state(index)
-	}
-	fn push(&mut self, value: HistoriedValue<V, S>) {
-		self.0.push(value)
-	}
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, S>) {
-		self.0.insert(index, value)
-	}
-	fn remove(&mut self, index: usize) {
-		self.0.remove(index)
-	}
-	fn last(&self) -> Option<HistoriedValue<V, S>> {
-		self.0.last()
-	}
-	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
-		self.0.pop()
-	}
-	fn clear(&mut self) {
-		self.0.clear()
-	}
-	fn truncate(&mut self, at: usize) {
-		self.0.truncate(at)
-	}
-	fn emplace(&mut self, at: usize, value: HistoriedValue<V, S>) {
-		self.0.emplace(at, value)
-	}
-}
-
 /// Adapter for storage (allows to factor code while keeping simple types).
 /// VR is the reference to value that is used, and I the initial state.
-pub trait StorageAdapter<'a, S, VR, I> {
-	fn get_adapt(inner: I, index: usize) -> Option<HistoriedValue<VR, S>>;
+pub trait StorageAdapter<'a, S, V, D, H> {
+	fn get_adapt(inner: D, index: H) -> HistoriedValue<V, S>;
 }
 
 struct RefVecAdapter;
@@ -175,8 +142,9 @@ impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
 	S,
 	&'a V,
 	&'a D,
+	D::Index,
 > for RefVecAdapter {
-	fn get_adapt(inner: &'a D, index: usize) -> Option<HistoriedValue<&'a V, S>> {
+	fn get_adapt(inner: &'a D, index: D::Index) -> HistoriedValue<&'a V, S> {
 		inner.get_ref(index)
 	}
 }
@@ -187,8 +155,9 @@ impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
 	S,
 	&'a mut V,
 	&'a mut D,
+	D::Index,
 > for RefVecAdapterMut {
-	fn get_adapt(inner: &'a mut D, index: usize) -> Option<HistoriedValue<&'a mut V, S>> {
+	fn get_adapt(inner: &'a mut D, index: D::Index) -> HistoriedValue<&'a mut V, S> {
 		inner.get_ref_mut(index)
 	}
 }
@@ -199,9 +168,10 @@ impl<'a, S, V, D: LinearStorage<V, S>> StorageAdapter<
 	S,
 	V,
 	&'a D,
+	D::Index,
 > for ValueVecAdapter {
-	fn get_adapt(inner: &'a D, index: usize) -> Option<HistoriedValue<V, S>> {
-		inner.st_get(index)
+	fn get_adapt(inner: &'a D, index: D::Index) -> HistoriedValue<V, S> {
+		inner.get(index)
 	}
 }
 
@@ -211,22 +181,12 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	S,
 	&'a [u8],
 	&'a D,
+	D::Index,
 > for SliceAdapter {
-	fn get_adapt(inner: &'a D, index: usize) -> Option<HistoriedValue<&'a [u8], S>> {
+	fn get_adapt(inner: &'a D, index: D::Index) -> HistoriedValue<&'a [u8], S> {
 		inner.get_slice(index)
 	}
 }
-/*struct SliceAdapterMut;
-impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
-	'a,
-	S,
-	&'a mut [u8],
-	&'a mut D,
-> for SliceAdapter {
-	fn get_adapt(inner: &'a mut D, index: usize) -> Option<HistoriedValue<&'a mut [u8], S>> {
-		inner.get_slice_mut(index)
-	}
-}*/
 
 impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V, S, D> {
 	type S = S;
@@ -236,7 +196,7 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 	}
 
 	fn contains(&self, at: &Self::S) -> bool {
-		self.pos(at).is_some()
+		self.pos_index(at).is_some()
 	}
 
 	fn is_empty(&self) -> bool {
@@ -247,49 +207,37 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
-			let inner = Linear(inner, PhantomData);
-			let mut index = inner.len();
-			if index == 0 {
-				return None;
-			}
-			while index > 0 {
-				index -= 1;
-				if let Some(HistoriedValue { value, state }) = D::get_range(slice, index) {
+			for index in inner.rev_index_iter() {
+				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, index) {
 					if state.exists(at) {
 						return Some(value);
 					}
 				}
 			}
-			None
-		} else {
-			None
 		}
+		None
 	}
 }
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
-	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D>>(&'a self, at: &S) -> Option<VR> {
-		let mut index = self.0.len();
-		if index == 0 {
-			return None;
-		}
-		while index > 0 {
-			index -= 1;
-			if let Some(HistoriedValue { value, state }) = A::get_adapt(&self.0, index) {
-				if state.exists(at) {
-					return Some(value);
-				}
+	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
+		for index in self.0.rev_index_iter() {
+			let HistoriedValue { value, state } = A::get_adapt(&self.0, index);
+			if state.exists(at) {
+				return Some(value);
 			}
 		}
 		None
 	}
 
-	fn get_adapt_mut<'a, VR, A: StorageAdapter<'a, S, VR, &'a mut D>>(&'a mut self, at: &S)
-		-> Option<HistoriedValue<VR, S>> {
-		let pos = self.pos(at);
-		let self_mut: &'a mut D = &mut self.0;
-		if let Some(index) = pos {
-			A::get_adapt(self_mut, index)
+	// TODO use only once, consider removal
+	fn get_adapt_mut<
+		'a,
+		VR,
+		A: StorageAdapter<'a, S, VR, &'a mut D, D::Index>,
+	>(&'a mut self, at: &S)	-> Option<HistoriedValue<VR, S>> {
+		if let Some(index) = self.pos_index(at) {
+			Some(A::get_adapt(&mut self.0, index))
 		} else {
 			None
 		}
@@ -298,64 +246,79 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 
 impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
-		let mut result = None;
 		let at = at.latest();
 		loop {
-			if let Some(last) = self.0.last() {
-				if &last.state > at {
+			if let Some(index) = self.0.last() {
+				let last = self.0.get_state(index);
+				if &last > at {
 					self.0.pop();
 					continue;
-				} 
-				if at == &last.state {
+				}
+				if at == &last {
+					let mut last = self.0.get(index);
 					if last.value == value {
 						return UpdateResult::Unchanged;
 					}
-					result = self.0.pop();
+					let result = crate::rstd::mem::replace(&mut last.value, value);
+					self.0.emplace(index, last);
+					return UpdateResult::Changed(Some(result));
 				}
 			}
 			break;
 		}
 		self.0.push(HistoriedValue {value, state: at.clone()});
-		UpdateResult::Changed(result.map(|r| r.value))
+		UpdateResult::Changed(None)
 	}
 
 	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
-		if let Some(last) = self.0.last() {
-			if &last.state > at {
+		if let Some(index) = self.0.last() {
+			let last = self.0.get_state(index);
+			if &last > at {
 				return None;
-			} 
-			if at == &last.state {
+			}
+			if at == &last {
+				let mut last = self.0.get(index);
 				if last.value == value {
 					return Some(UpdateResult::Unchanged);
 				}
 				if !allow_overwrite {
 					return None;
 				}
-				self.0.pop();
+				last.value = value;
+				self.0.emplace(index, last);
+				return Some(UpdateResult::Changed(()));
 			}
 		}
 		self.0.push(HistoriedValue {value, state: at.clone()});
 		Some(UpdateResult::Changed(()))
 	}
+	fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
+		if let Some(index) = self.0.last() {
+			let last = self.0.get_state(index);
+			if &last > at {
+				return false;
+			}
+			if at == &last {
+				if let Some(overwrite) = value {
+					let last = self.0.get(index);
+					if overwrite != &last.value {
+						return false;
+					}
+				}
+			}
+		}
+		true
+	}
 }
 
 impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
-	fn pos(&self, at: &S) -> Option<usize> {
-		let mut index = self.0.len();
-		if index == 0 {
-			return None;
-		}
+	fn pos_index(&self, at: &S) -> Option<D::Index> {
 		let mut pos = None;
-		while index > 0 {
-			index -= 1;
-			if let Some(vr) = self.0.get_state(index) {
-				if at == &vr {
-					pos = Some(index);
-					break
-				}
-				if at < &vr {
-					break;
-				}
+		for index in self.0.rev_index_iter() {
+			let vr = self.0.get_state(index);
+			if vr.exists(at) {
+				pos = Some(index);
+				break;
 			}
 		}
 		pos
@@ -379,9 +342,9 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 	type Index = S;
 	type GC = LinearGC<S, V>;
 	/// Migrate will act as GC but also align state to 0.
-	/// First index being the number for start state that
-	/// will be removed after migration.
-	type Migrate = (S, Self::GC);
+	/// The index index in second position is the old start state
+	/// number that is now 0 (usually the state as gc new_start).
+	type Migrate = (Self::GC, Self::S);
 
 	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
 		let mut v = D::init_from(init);
@@ -399,6 +362,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 	fn discard(&mut self, at: &Self::SE) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		if let Some(last) = self.0.last() {
+			let last = self.0.get(last);
 			debug_assert!(&last.state <= at); 
 			if at == &last.state {
 				if self.0.len() == 1 {
@@ -421,12 +385,9 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		if let Some(new_end) = gc.new_end.as_ref() {
 
 			let mut index = self.0.len();
-			while index > 0 {
-				if let Some(HistoriedValue{ value: _, state }) = self.0.st_get(index - 1) {
-					if &state < new_end {
-						break;
-					}
-				} else {
+			for handle in self.0.rev_index_iter() { 
+				let state = self.0.get_state(handle);
+				if &state < new_end {
 					break;
 				}
 				index -= 1;
@@ -436,97 +397,73 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 				self.0.clear();
 				return UpdateResult::Cleared(());
 			} else if index != self.0.len() {
+				// TODO could use handle here
 				self.0.truncate(index);
 				end_result = UpdateResult::Changed(());
 			}
 		}
 
 		if let Some(start_treshold) = gc.new_start.as_ref() {
-			let mut index = 0;
-			let mut first = true;
-			loop {
-				if let Some(HistoriedValue{ value: _, state }) = self.0.st_get(index) {
-					if &state == start_treshold {
-						if first {
-							return end_result;
+			let mut index = self.0.len();
+			if index == 0 {
+				return end_result;
+			}
+			for handle in self.0.rev_index_iter() { 
+				let state = self.0.get_state(handle);
+				index -= 1;
+				if state.exists(start_treshold) {
+					// This does not handle consecutive neutral element, but
+					// it is considered marginal and bad usage (in theory one
+					// should not push two consecutive identical values).
+					if let Some(neutral) = gc.neutral_element.as_ref() {
+						if neutral == &self.0.get(handle).value {
+							index += 1;
 						}
-						break;
 					}
-					if &state > start_treshold {
-						if first {
-							return end_result;
-						}
-						index = index.saturating_sub(1);
-						break;
-					}
-				} else {
-					if first {
-						return end_result;
-					}
-					index = index.saturating_sub(1);
 					break;
 				}
-				index += 1;
-				first = false;
 			}
-			if let Some(neutral) = gc.neutral_element.as_ref() {
-				while let Some(HistoriedValue{ value, state: _ }) = self.0.st_get(index) {
-					if &value != neutral {
-						break;
-					}
-					index += 1;
-				}
+
+			if index == 0 {
+				return end_result;
 			}
 			if index == self.0.len() {
 				self.0.clear();
 				return UpdateResult::Cleared(());
 			}
+			// TODO could use handle here
 			self.0.truncate_until(index);
-			if index == 0 {
-				end_result
-			} else {
-				UpdateResult::Changed(())
-			}
-		} else {
-			return end_result;
+			return UpdateResult::Changed(())
 		}
+		end_result
 	}
 
-	fn migrate(&mut self, (mig, gc): &mut Self::Migrate) -> UpdateResult<()> {
+	fn migrate(&mut self, (gc, mig): &Self::Migrate) -> UpdateResult<()> {
 		let res = self.gc(gc);
-		let len = self.0.len();
-		if len > 0 {
-			/* TODO write iter_mut that iterate on a HandleMut as in simple_db
-			for h in self.0.iter_mut() {
-				if &h.state > mig {
-					h.state -= mig.clone();
-				} else {
-					h.state = Default::default();
-				}
-			}
-			*/
-		
-			for i in 0..len {
-				if let Some(mut h) = self.0.st_get(i) {
-					if &h.state > mig {
-						h.state -= mig.clone();
-					} else {
-						h.state = Default::default();
-					}
-					self.0.emplace(i, h);
-				} else {
-					unreachable!("len checked")
-				}
-			}
+		let mut next_index = self.0.last();
+		let result = if next_index.is_some() {
 			UpdateResult::Changed(())
 		} else {
 			res
+		};
+		while let Some(index) = next_index {
+			let mut h = self.0.get(index);
+			if &h.state > mig {
+				h.state -= mig.clone();
+			} else {
+				h.state = Default::default();
+			}
+			self.0.emplace(index, h);
+
+			next_index = self.0.previous_index(index);
 		}
+		result
 	}
 
 	fn is_in_migrate(index: &Self::Index, gc: &Self::Migrate) -> bool {
-		gc.1.new_start.as_ref().map(|s| index < s).unwrap_or(false)
-			|| gc.1.new_end.as_ref().map(|s| index >= s).unwrap_or(false)
+		gc.1 > Self::Index::default()
+			|| gc.0.new_start.as_ref().map(|s| index < s).unwrap_or(false)
+			|| gc.0.new_end.as_ref().map(|s| index >= s).unwrap_or(false)
 	}
 }
 
@@ -542,11 +479,15 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V, S>> In
 }
 
 impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> ConditionalValueMut<V> for Linear<V, S, D> {
-	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+	type IndexConditional = Self::Index;
+	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
+		self.can_if_inner(no_overwrite, at)
+	}
+	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
 		self.set_if_inner(value, at, true)
 	}
 
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>> {
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
 		self.set_if_inner(value, at, false)
 	}
 }
@@ -587,17 +528,17 @@ mod test {
 	fn test_gc() {
 		// TODO non consecutive state.
 		// [1, 2, 3, 4]
-		let mut first = MemoryOnly::<Vec<u8>, u32>::default();
+		let mut first_storage = MemoryOnly::<Vec<u8>, u32>::default();
 		for i in 1..5 {
-			first.push((vec![i as u8], i).into());
+			first_storage.push((vec![i as u8], i).into());
 		}
 		// [1, ~, 3, ~]
-		let mut second = MemoryOnly::<Vec<u8>, u32>::default();
+		let mut second_storage = MemoryOnly::<Vec<u8>, u32>::default();
 		for i in 1..5 {
 			if i % 2 == 0 {
-				second.push((vec![0u8], i).into());
+				second_storage.push((vec![0u8], i).into());
 			} else {
-				second.push((vec![i as u8], i).into());
+				second_storage.push((vec![i as u8], i).into());
 			}
 		}
 		let result_first = [
@@ -618,21 +559,21 @@ mod test {
 				new_end: Some(i as u32),
 				neutral_element: Some(vec![0u8]),
 			};
-			let mut first = Linear(first.clone(), Default::default());
+			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc1);
-			let mut second = Linear(second.clone(), Default::default());
+			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc1);
 			for j in 0..4 {
-				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first.clone(), Default::default());
+			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc2);
-			let mut second = Linear(second.clone(), Default::default());
+			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
-				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-				assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
 		}
 		let result_first = [
@@ -660,23 +601,21 @@ mod test {
 				new_end: None,
 				neutral_element: Some(vec![0u8]),
 			};
-			{
-				let mut first = Linear(first.clone(), Default::default());
-				first.gc(&gc1);
-				let mut second = Linear(second.clone(), Default::default());
-				second.gc(&gc1);
-				for j in 0..4 {
-					assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-					assert_eq!(second.0.get_state(j), result_first[i - 1][j]);
-				}
+			let mut first = Linear(first_storage.clone(), Default::default());
+			first.gc(&gc1);
+			let mut second = Linear(second_storage.clone(), Default::default());
+			second.gc(&gc1);
+			for j in 0..4 {
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first.clone(), Default::default());
+			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc2);
-			let mut second = Linear(second.clone(), Default::default());
+			let mut second = Linear(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
-				assert_eq!(first.0.get_state(j), result_first[i - 1][j]);
-				assert_eq!(second.0.get_state(j), result_second[i - 1][j]);
+				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
+				assert_eq!(second.0.get_state_lookup(j), result_second[i - 1][j]);
 			}
 		}
 	}

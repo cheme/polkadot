@@ -65,16 +65,15 @@ pub trait InMemoryValueRange<S> {
 
 /// Trait for historied value.
 pub trait Value<V>: ValueRef<V> + InitFrom {
-	/// State to use here.
+	/// State to use for changing value.
 	/// We use a different state than
-	/// for the ref as it can use different
+	/// for querying as it can use different
 	/// constraints.
 	type SE: StateIndex<Self::Index>;
 
 	/// Index a single history item.
 	type Index;
 
-	//type SE = Self::S; TODO next nightly and future stable should accept it
 	/// GC strategy that can be applied.
 	/// GC can be run in parallel, it does not
 	/// make query incompatible.
@@ -92,15 +91,17 @@ pub trait Value<V>: ValueRef<V> + InitFrom {
 	/// Discard history at.
 	fn discard(&mut self, at: &Self::SE) -> UpdateResult<Option<V>>;
 
-	// TODO mut on gc is related to cache of serialize, if inner_mut
-	// we can & back.
+	/// Garbage collect value.
 	fn gc(&mut self, gc: &Self::GC) -> UpdateResult<()>;
 
+	/// Check if migrate should be applied if this state index
+	/// got modified.
 	fn is_in_migrate(index: &Self::Index, gc: &Self::Migrate) -> bool;
 
-	// TODO mut on gc is related to cache of serialize, if inner_mut
-	// we can & back.
-	fn migrate(&mut self, mig: &mut Self::Migrate) -> UpdateResult<()>;
+	/// Migrate a value, all value needs to migrate at once, as
+	/// the content will not be valid with post-migration states
+	/// otherwise.
+	fn migrate(&mut self, mig: &Self::Migrate) -> UpdateResult<()>;
 }
 
 /// Returns pointer to in memory value.
@@ -117,12 +118,17 @@ pub trait InMemoryValue<V>: Value<V> {
 /// This involves some additional computation to check correctness.
 /// It is also usefull when some asumption are not strong enough, for
 /// instance if `Value` is subject to concurrent access.
+/// TODO an entry api would be more proper (returning optional entry).
 pub trait ConditionalValueMut<V>: Value<V> {
+	type IndexConditional;
+	/// Does state allow modifying this value.
+	/// If value is added as parameter, we do not allow overwrite.
+	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool;
 	/// Do update if state allows it, otherwhise return None.
-	fn set_if_possible(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>>;
+	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
 
 	/// Do update if state allows it and we are not erasing an existing value, otherwhise return None.
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::Index) -> Option<UpdateResult<()>>;
+	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
 }
 
 /// An entry at a given history index.
@@ -147,6 +153,7 @@ impl<V, S> HistoriedValue<V, S> {
 		HistoriedValue { value: f(value), state }
 	}
 }
+
 impl<'a, V: 'a, S: Clone> HistoriedValue<V, S> {
 	/// Get historied reference to the value.
 	pub fn as_ref(&self) -> HistoriedValue<&V, S> {
@@ -202,11 +209,8 @@ impl<K: Ord, V, H: InMemoryValueRef<V> + InitFrom> InMemoryStateDBRef<K, V> for 
 }
 
 impl<K: Ord + Clone, V: Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeMap<K, V, H> {
-	// see inmemory
 	type SE = H::SE;
-	// see inmemory
 	type GC = H::GC;
-	// see inmemory
 	type Migrate = H::Migrate;
 
 	fn emplace(&mut self, key: K, value: V, at: &Self::SE) {
@@ -287,11 +291,8 @@ impl<
 	where
 			H::Index: Clone + Ord,
 {
-	// see inmemory
 	type SE = H::SE;
-	// see inmemory
 	type GC = H::GC;
-	// see inmemory
 	type Migrate = H::Migrate;
 
 	fn emplace(&mut self, key: K, value: V, at: &Self::SE) {
@@ -367,11 +368,11 @@ impl<
 	}
 }
 
-/// Associate an index for a given state reference
-/// TODO this should be removable or rename (I is
-/// individual item index when state index is larger).
+/// Associate a state index for a given state reference
 pub trait StateIndex<I> {
+	/// Get individal state index.
 	fn index(&self) -> I;
+	/// Get reference to individal state index.
 	fn index_ref(&self) -> &I;
 }
 

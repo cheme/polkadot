@@ -228,7 +228,7 @@ pub struct TreeState<I: Ord, BI, V, S: TreeManagementStorage> {
 }
 
 /// Gc against a current tree state.
-/// This is require going through all of a historied value
+/// This requires going through all of a historied value
 /// branches and should be use when gc happens rarely.
 #[derive(Clone, Debug)]
 pub struct TreeStateGc<I, BI, V> {
