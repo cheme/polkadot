@@ -32,6 +32,11 @@ use sp_runtime_interface::unpack_ptr_and_len;
 use sp_wasm_interface::{Function, Pointer, WordSize, Value};
 use wasmtime::{Config, Engine, Store};
 
+#[cfg(feature = "wasmtime-debug")]
+const CONFIG_DEBUG: bool = true;
+#[cfg(not(feature = "wasmtime-debug"))]
+const CONFIG_DEBUG: bool = false;
+
 /// A `WasmModule` implementation using wasmtime to compile the runtime module to machine code
 /// and execute the compiled code.
 pub struct WasmtimeRuntime {
@@ -127,7 +132,8 @@ pub fn create_runtime(
 ) -> std::result::Result<WasmtimeRuntime, WasmError> {
 	// Create the engine, store and finally the module from the given code.
 	let mut config = Config::new();
-	config.cranelift_opt_level(wasmtime::OptLevel::SpeedAndSize);
+	config.cranelift_opt_level(wasmtime::OptLevel::SpeedAndSize)
+		.debug_info(CONFIG_DEBUG);
 
 	let engine = Engine::new(&config);
 
