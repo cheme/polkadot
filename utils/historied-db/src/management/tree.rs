@@ -326,9 +326,9 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, V: Codec + C
 		self.state.tree.serialize
 	}
 
-/*	pub fn ser(&mut self) -> &mut S::Storage {
+	pub fn ser(&mut self) -> &mut S::Storage {
 		&mut self.state.tree.serialize
-	}*/
+	}
 }
 
 impl<
