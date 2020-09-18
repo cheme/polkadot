@@ -53,6 +53,7 @@ use historied_db::{
 	historied::{InMemoryValue, Value},
 	historied::tree::Tree,
 	management::tree::{Tree as TreeMgmt, ForkPlan},
+	simple_db::TransactionalSerializeDB,
 };
 
 use std::sync::Arc;
@@ -708,10 +709,32 @@ pub(crate) mod columns {
 /// Database backed tree management.
 pub struct TreeManagementPersistence;
 
+#[derive(Clone)]
+/// Database backed tree management, no transaction.
+pub struct TreeManagementPersistenceNoTx;
+
+
 /// Database backed tree management for a rocksdb database.
 pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
+	const JOURNAL_DELETE: bool = true;
+	type Storage = TransactionalSerializeDB<RocksdbStorage>;
+	type Mapping = historied_tree_bindings::Mapping;
+	type JournalDelete = historied_tree_bindings::JournalDelete;
+	type TouchedGC = historied_tree_bindings::TouchedGC;
+	type CurrentGC = historied_tree_bindings::CurrentGC;
+	type LastIndex = historied_tree_bindings::LastIndex;
+	type NeutralElt = historied_tree_bindings::NeutralElt;
+	type TreeMeta = historied_tree_bindings::TreeMeta;
+	type TreeState = historied_tree_bindings::TreeState;
+
+	fn init() -> Self::Storage {
+		unimplemented!("unused")
+	}
+}
+
+impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistenceNoTx {
 	const JOURNAL_DELETE: bool = true;
 	type Storage = RocksdbStorage;
 	type Mapping = historied_tree_bindings::Mapping;
@@ -1444,7 +1467,10 @@ impl<Block: BlockT> Backend<Block> {
 			config.experimental_cache,
 		);
 		let historied_state = rocks_histo.clone();
-		let historied_persistence = RocksdbStorage(rocks_histo);
+		let historied_persistence = TransactionalSerializeDB {
+			db: RocksdbStorage(rocks_histo),
+			pending: Default::default(),
+		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
 		let offchain_local_storage = offchain::BlockChainLocalStorage::new(db, historied_management.clone());
 		Ok(Backend {
@@ -2134,6 +2160,23 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						); 
 					}
 					warn!("committed {:?} index in historied db", nb);
+					// write management state changes
+					let mut pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
+					for (col, (changes, dropped)) in pending {
+						if let Some(col) = RocksdbStorage::resolve_collection(col) {
+							if dropped {
+								tx.delete_prefix(col, &[]);
+							}
+							for (key, change) in changes {
+								match change {
+									Some(value) => tx.put(col, key.as_slice(), value.as_slice()), 
+									None => tx.delete(col, key.as_slice()),
+								}
+							}
+						} else {
+							warn!("Unknown collection for tree management pending transaction {:?}", col);
+						}
+					}
 					historied_db.write_change_set(tx)?;
 				}
 				if let Some(latest_final) = last_final {

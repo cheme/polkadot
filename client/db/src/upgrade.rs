@@ -193,7 +193,7 @@ fn inject_non_canonical<Block: BlockT>(
 		u32,
 		u32,
 		Vec<u8>,
-		crate::TreeManagementPersistence,
+		crate::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence);
 	
 	let mut last_hash = Default::default();
@@ -258,7 +258,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 		u32,
 		u32,
 		Vec<u8>,
-		crate::TreeManagementPersistence,
+		crate::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence);
 
 	if hash_for_root != block_hash {
@@ -397,7 +397,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		u32,
 		u32,
 		Vec<u8>,
-		crate::TreeManagementPersistence,
+		crate::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence);
 	let state = management.latest_state_fork();
 	let test = management.get_db_state_for_fork(&Default::default());
