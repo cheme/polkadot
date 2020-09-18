@@ -46,6 +46,132 @@ pub trait SerializeDB: Sized {
 //	fn write_collection<'a, DB, I>(db: &'a mut DB, collection: &'static[u8]) -> Option<CollectionMut<'a, Self, I>>;
 }
 
+/// `SerializeDB` with transaction layer.
+///
+/// The change are not written into the DB but into `pending` struct.
+/// `pending` content should be written into the db (or transaction)
+/// before commit only.
+/// On revert, pending content should simply be cleared.
+pub struct TransactionalSerializeDB<DB> {
+	/// The pending changes and wether we need to clear collection first.
+	pub pending: BTreeMap<&'static [u8], (BTreeMap<Vec<u8>, Option<Vec<u8>>>, bool)>,
+	/// The inner db implementation to use.
+	pub db: DB,
+}
+
+impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
+	// Using on non active do not make much sense here.
+	const ACTIVE: bool = <DB as SerializeDB>::ACTIVE;
+
+	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
+		self.pending.entry(c)
+			.or_insert_with(Default::default).0
+			.insert(k.to_vec(), Some(v.to_vec()));
+	}
+	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
+		self.pending.entry(c)
+			.or_insert_with(Default::default).0
+			.insert(k.to_vec(), None);
+	}
+	fn clear(&mut self, c: &'static [u8]) {
+		let col = self.pending.entry(c)
+			.or_insert_with(Default::default);
+		col.0.clear();
+		col.1 = true;
+	}
+	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
+		self.pending.get(c)
+			.and_then(|c| c.0.get(k).cloned())
+			.or_else(|| Some(self.db.read(c, k)))
+			.flatten()
+	}
+	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a> {
+		let mut clear = false;
+		let mut cache = self.pending.get(c).map(|c| {
+			clear = c.1;
+			c.0.iter()
+		});
+		let next_cache = cache.as_mut()
+			.and_then(|c| c.next())
+			.map(|(k, v)| (k.clone(), v.clone()));
+		let mut db = if clear {
+			None
+		} else {
+			Some(self.db.iter(c))
+		};
+		let next_db = db.as_mut().and_then(|db| db.next());
+		Box::new(TransactionalIter {
+			cache,
+			next_cache,
+			db,
+			next_db,
+		})
+	}
+	fn contains_collection(collection: &'static [u8]) -> bool {
+		DB::contains_collection(collection)
+	}
+}
+
+pub struct TransactionalIter<'a> {
+	cache: Option<crate::rstd::btree_map::Iter<'a, Vec<u8>, Option<Vec<u8>>>>,
+	next_cache: Option<(Vec<u8>, Option<Vec<u8>>)>,
+	db: Option<SerializeDBIter<'a>>,
+	next_db: Option<(Vec<u8>, Vec<u8>)>,
+}
+
+impl<'a> Iterator for TransactionalIter<'a> {
+	type Item = (Vec<u8>, Vec<u8>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		enum Next {
+			None,
+			Cache,
+			DB,
+		};
+		let next = match (self.next_cache.as_ref(), self.next_db.as_ref()) {
+			(Some((cache_key, _)), Some((db_key, _))) => {
+				match cache_key.cmp(&db_key) {
+					crate::rstd::cmp::Ordering::Equal => {
+						self.next_db = self.db.as_mut().and_then(|db| db.next());
+						Next::Cache
+					},
+					crate::rstd::cmp::Ordering::Greater => {
+						Next::Cache
+					},
+					crate::rstd::cmp::Ordering::Less => {
+						Next::DB
+					},
+				}
+			},
+			(Some(_), None) => Next::Cache,
+			(None, Some(_)) => Next::DB,
+			(None, None) => Next::None,
+		};
+		match next {
+			Next::Cache => {
+				let result = self.next_cache.take();
+				self.next_cache = self.cache.as_mut()
+					.and_then(|c| c.next())
+					.map(|(k, v)| (k.clone(), v.clone()));
+				match result {
+					Some((k, Some(v))) => Some((k, v)),
+					Some((_k, None)) => self.next(),
+					None => None,
+				}
+			},
+			Next::DB => {
+				let result = self.next_db.take();
+				self.next_db = self.db.as_mut().and_then(|db| db.next());
+				result
+			},
+			Next::None => {
+				None
+			},
+		}
+	}
+}
+
+
 pub struct Collection<'a, DB, Instance> {
 	db: &'a DB,
 	instance: &'a Instance,
@@ -215,7 +341,7 @@ use codec::{Codec, Encode};
 #[derivative(Default(bound="I: Default"))]
 #[cfg_attr(test, derivative(PartialEq(bound="K: PartialEq, V: PartialEq")))]
 /// Lazy loading serialized map with cache.
-/// Updates happens immediatelly.
+/// Updates happens without delay.
 pub struct SerializeMap<K: Ord, V, S, I> {
 	inner: BTreeMap<K, Option<V>>,
 	#[derivative(Debug="ignore")]
@@ -244,8 +370,12 @@ impl<'a, K, V, S, I> SerializeMap<K, V, S, I>
 {
 	pub fn iter(&'a self, db: &'a S) -> SerializeMapIter<'a, K, V> {
 		if !S::ACTIVE {
+			// There is no backing db, so all is in cache.
 			SerializeMapIter::Cache(self.inner.iter())
 		} else {
+			// Updates happens instantanously to db, so we iterate on
+			// the db.
+			// We ignore cache: iter is not a fast operation.
 			let collection = Collection { db, instance: &self.instance };
 			SerializeMapIter::Collection(collection.iter())
 		}
