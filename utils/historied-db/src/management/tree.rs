@@ -29,7 +29,7 @@ use crate::println;
 use crate::historied::linear::LinearGC;
 use crate::{Management, ManagementRef, Migrate, ForkableManagement, Latest};
 use codec::{Codec, Encode, Decode};
-use crate::simple_db::{SerializeDB, SerializeMap, SerializeVariable, SerializeInstance, SerializeInstanceVariable};
+use crate::simple_db::{SerializeDB, SerializeMap, SerializeVariable, SerializeInstanceMap, SerializeInstanceVariable};
 use derivative::Derivative;
 
 // TODO try removing Send + Sync here.
@@ -37,14 +37,14 @@ pub trait TreeManagementStorage: Sized {
 	/// Do we keep trace of changes.
 	const JOURNAL_DELETE: bool;
 	type Storage: SerializeDB + Send + Sync;
-	type Mapping: SerializeInstance + Send + Sync;
-	type JournalDelete: SerializeInstance + Send + Sync;
+	type Mapping: SerializeInstanceMap + Send + Sync;
+	type JournalDelete: SerializeInstanceMap + Send + Sync;
 	type TouchedGC: SerializeInstanceVariable + Send + Sync;
 	type CurrentGC: SerializeInstanceVariable + Send + Sync;
 	type LastIndex: SerializeInstanceVariable + Send + Sync;
 	type NeutralElt: SerializeInstanceVariable + Send + Sync;
 	type TreeMeta: SerializeInstanceVariable + Send + Sync;
-	type TreeState: SerializeInstance + Send + Sync;
+	type TreeState: SerializeInstanceMap + Send + Sync;
 
 	// TODO delete this init function (we use from_ser)
 	fn init() -> Self::Storage;

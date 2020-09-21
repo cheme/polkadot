@@ -33,144 +33,13 @@ pub trait SerializeDB: Sized {
 	const ACTIVE: bool = true;
 
 	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]);
-	fn clear(&mut self, c: &'static [u8]);
 	fn remove(&mut self, c: &'static [u8], k: &[u8]);
 	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>>;
+	fn clear(&mut self, c: &'static [u8]);
 	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a>;
 
 	fn contains_collection(collection: &'static [u8]) -> bool;
-
-//	// TODO remove ?
-//	fn read_collection<'a, DB, I>(db: &'a DB, collection: &'static[u8]) -> Option<Collection<'a, Self, I>>;
-//	// TODO remove ?
-//	fn write_collection<'a, DB, I>(db: &'a mut DB, collection: &'static[u8]) -> Option<CollectionMut<'a, Self, I>>;
 }
-
-/// `SerializeDB` with transaction layer.
-///
-/// The change are not written into the DB but into `pending` struct.
-/// `pending` content should be written into the db (or transaction)
-/// before commit only.
-/// On revert, pending content should simply be cleared.
-pub struct TransactionalSerializeDB<DB> {
-	/// The pending changes and wether we need to clear collection first.
-	pub pending: BTreeMap<&'static [u8], (BTreeMap<Vec<u8>, Option<Vec<u8>>>, bool)>,
-	/// The inner db implementation to use.
-	pub db: DB,
-}
-
-impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
-	// Using on non active do not make much sense here.
-	const ACTIVE: bool = <DB as SerializeDB>::ACTIVE;
-
-	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
-		self.pending.entry(c)
-			.or_insert_with(Default::default).0
-			.insert(k.to_vec(), Some(v.to_vec()));
-	}
-	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
-		self.pending.entry(c)
-			.or_insert_with(Default::default).0
-			.insert(k.to_vec(), None);
-	}
-	fn clear(&mut self, c: &'static [u8]) {
-		let col = self.pending.entry(c)
-			.or_insert_with(Default::default);
-		col.0.clear();
-		col.1 = true;
-	}
-	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
-		self.pending.get(c)
-			.and_then(|c| c.0.get(k).cloned())
-			.or_else(|| Some(self.db.read(c, k)))
-			.flatten()
-	}
-	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a> {
-		let mut clear = false;
-		let mut cache = self.pending.get(c).map(|c| {
-			clear = c.1;
-			c.0.iter()
-		});
-		let next_cache = cache.as_mut()
-			.and_then(|c| c.next())
-			.map(|(k, v)| (k.clone(), v.clone()));
-		let mut db = if clear {
-			None
-		} else {
-			Some(self.db.iter(c))
-		};
-		let next_db = db.as_mut().and_then(|db| db.next());
-		Box::new(TransactionalIter {
-			cache,
-			next_cache,
-			db,
-			next_db,
-		})
-	}
-	fn contains_collection(collection: &'static [u8]) -> bool {
-		DB::contains_collection(collection)
-	}
-}
-
-pub struct TransactionalIter<'a> {
-	cache: Option<sp_std::collections::btree_map::Iter<'a, Vec<u8>, Option<Vec<u8>>>>,
-	next_cache: Option<(Vec<u8>, Option<Vec<u8>>)>,
-	db: Option<SerializeDBIter<'a>>,
-	next_db: Option<(Vec<u8>, Vec<u8>)>,
-}
-
-impl<'a> Iterator for TransactionalIter<'a> {
-	type Item = (Vec<u8>, Vec<u8>);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		enum Next {
-			None,
-			Cache,
-			DB,
-		};
-		let next = match (self.next_cache.as_ref(), self.next_db.as_ref()) {
-			(Some((cache_key, _)), Some((db_key, _))) => {
-				match cache_key.cmp(&db_key) {
-					sp_std::cmp::Ordering::Equal => {
-						self.next_db = self.db.as_mut().and_then(|db| db.next());
-						Next::Cache
-					},
-					sp_std::cmp::Ordering::Greater => {
-						Next::Cache
-					},
-					sp_std::cmp::Ordering::Less => {
-						Next::DB
-					},
-				}
-			},
-			(Some(_), None) => Next::Cache,
-			(None, Some(_)) => Next::DB,
-			(None, None) => Next::None,
-		};
-		match next {
-			Next::Cache => {
-				let result = self.next_cache.take();
-				self.next_cache = self.cache.as_mut()
-					.and_then(|c| c.next())
-					.map(|(k, v)| (k.clone(), v.clone()));
-				match result {
-					Some((k, Some(v))) => Some((k, v)),
-					Some((_k, None)) => self.next(),
-					None => None,
-				}
-			},
-			Next::DB => {
-				let result = self.next_db.take();
-				self.next_db = self.db.as_mut().and_then(|db| db.next());
-				result
-			},
-			Next::None => {
-				None
-			},
-		}
-	}
-}
-
 
 pub struct Collection<'a, DB, Instance> {
 	db: &'a DB,
@@ -182,7 +51,7 @@ pub struct CollectionMut<'a, DB, Instance> {
 	instance: &'a Instance,
 }
 
-impl<'a, DB: SerializeDB, Instance: SerializeInstance> Collection<'a, DB, Instance> {
+impl<'a, DB: SerializeDB, Instance: SerializeInstanceMap> Collection<'a, DB, Instance> {
 	pub fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
 		self.db.read(Instance::STATIC_COL, k)
 	}
@@ -191,7 +60,7 @@ impl<'a, DB: SerializeDB, Instance: SerializeInstance> Collection<'a, DB, Instan
 	}
 }
 
-impl<'a, DB: SerializeDB, Instance: SerializeInstance> CollectionMut<'a, DB, Instance> {
+impl<'a, DB: SerializeDB, Instance: SerializeInstanceMap> CollectionMut<'a, DB, Instance> {
 	pub fn write(&mut self, k: &[u8], v: &[u8]) {
 		self.db.write(Instance::STATIC_COL, k, v)
 	}
@@ -226,7 +95,7 @@ pub trait DynSerializeDB: SerializeDB {
 //	fn dyn_write_collection<'a, DB, I>(db: &'a mut DB, collection: &'static[u8]) -> Option<DynCollectionMut<'a, Self, I>>;
 }
 
-impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstance> Collection<'a, DB, Instance> {
+impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> Collection<'a, DB, Instance> {
 	pub fn dyn_read(&self, k: &[u8]) -> Option<Vec<u8>> {
 		if let Some(c) = self.instance.dyn_collection() {
 			self.db.dyn_read(c, k)
@@ -243,7 +112,7 @@ impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstance> Collection<'a, DB, 
 	}
 }
 
-impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstance> CollectionMut<'a, DB, Instance> {
+impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> CollectionMut<'a, DB, Instance> {
 	pub fn dyn_write(&mut self, k: &[u8], v: &[u8]) {
 		if let Some(c) = self.instance.dyn_collection() {
 			self.db.dyn_write(c, k, v)
@@ -277,26 +146,34 @@ impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstance> CollectionMut<'a, D
 /// Info for serialize usage.
 ///
 /// Static collection are using a know identifier that never change.
-pub trait SerializeInstance: Default + Clone {
+pub trait SerializeInstanceMap: Default + Clone {
 	/// If collection is static this contains its
 	/// unique identifier.
 	const STATIC_COL: &'static [u8];
+
+	/// Prefixed collections used an isolated part of a collection
+	/// defined by this prefix.
+	/// When undefined the instance uses the whole collection.
+	/// Note that collection containing such instance should ensure
+	/// that no key collision are possible
+	///
+	const PREFIX: Option<&'static [u8]> = None;
 }
 
-impl SerializeInstance for () {
+impl SerializeInstanceMap for () {
 	const STATIC_COL: &'static [u8] = &[];
 }
 
 /// Dynamic collection can be change.
 /// Static and dynamic collection are mutually exclusive, yet instance using both trait should run
 /// dynamic first.
-pub trait DynSerializeInstance: SerializeInstance {
+pub trait DynSerializeInstanceMap: SerializeInstanceMap {
 	/// If collection is dynamic this returns the
 	/// current collection unique identifier.
 	fn dyn_collection(&self) -> Option<&[u8]>;
 }
 
-pub trait SerializeInstanceVariable: SerializeInstance {
+pub trait SerializeInstanceVariable: SerializeInstanceMap {
 	/// Location of the variable in its collection.
 	const PATH: &'static [u8];
 	/// Indicate if we load lazilly.
@@ -324,14 +201,7 @@ impl SerializeDB for () {
 	fn contains_collection(_collection: &[u8]) -> bool {
 		false
 	}
-//	fn read_collection<'a, DB, I>(_db: &'a DB, _collection: &'static[u8]) -> Option<Collection<'a, Self, I>> {
-//		None
-//	}
-//	fn write_collection<'a, DB, I>(_db: &'a mut DB, _collection: &'static[u8]) -> Option<CollectionMut<'a, Self, I>> {
-//		None
-//	}
 }
-
 
 use codec::{Codec, Encode};
 
@@ -366,7 +236,7 @@ impl<'a, K, V, S, I> SerializeMap<K, V, S, I>
 		K: Codec + Ord + Clone,
 		V: Codec + Clone,
 		S: SerializeDB,
-		I: SerializeInstance,
+		I: SerializeInstanceMap,
 {
 	pub fn iter(&'a self, db: &'a S) -> SerializeMapIter<'a, K, V> {
 		if !S::ACTIVE {
@@ -395,7 +265,7 @@ pub struct EntryMap<'a, K, V, S, I>
 		K: Encode + Ord,
 		V: Codec,
 		S: SerializeDB,
-		I: SerializeInstance,
+		I: SerializeInstanceMap,
 {
 	entry: sp_std::collections::btree_map::OccupiedEntry<'a, K, Option<V>>,
 	collection: CollectionMut<'a, S, I>,
@@ -408,7 +278,7 @@ impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
 		K: Encode + Clone + Ord,
 		V: Codec + Clone,
 		S: SerializeDB,
-		I: SerializeInstance,
+		I: SerializeInstanceMap,
 {
 	pub fn get(&mut self, k: &K) -> Option<&V> {
 		if S::ACTIVE {
@@ -483,7 +353,7 @@ impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
 		K: Codec + Clone + Ord,
 		V: Codec + Clone,
 		S: SerializeDB,
-		I: SerializeInstance,
+		I: SerializeInstanceMap,
 {
 	pub fn iter(&'a self) -> SerializeMapIter<'a, K, V> {
 		if !S::ACTIVE {
@@ -541,7 +411,7 @@ impl<'a, K, V, S, I> EntryMap<'a, K, V, S, I>
 		K: Encode + Clone + Ord,
 		V: Codec + Clone,
 		S: SerializeDB,
-		I: SerializeInstance,
+		I: SerializeInstanceMap,
 {
 	pub fn key(&self) -> &K {
 		self.entry.key()
@@ -591,7 +461,7 @@ impl<'a, K, V, S, I> EntryMap<'a, K, V, S, I>
 		K: Encode + Ord,
 		V: Codec,
 		S: SerializeDB,
-		I: SerializeInstance,
+		I: SerializeInstanceMap,
 {
 	pub fn fetch(&mut self) {
 		if S::ACTIVE && !self.is_fetch {
@@ -631,7 +501,7 @@ impl<'a, K, V, S, I> Drop for EntryMap<'a, K, V, S, I>
 		K: Encode + Ord,
 		V: Codec,
 		S: SerializeDB,
-		I: SerializeInstance,
+		I: SerializeInstanceMap,
 {
 	fn drop(&mut self) {
 		self.flush()
@@ -804,5 +674,130 @@ impl<'a, V, S, I> Drop for SerializeVariableHandleLazy<'a, V, S, I>
 {
 	fn drop(&mut self) {
 		self.flush()
+	}
+}
+
+/// `SerializeDB` with transaction layer.
+///
+/// The change are not written into the DB but into `pending` struct.
+/// `pending` content should be written into the db (or transaction)
+/// before commit only.
+/// On revert, pending content should simply be cleared.
+pub struct TransactionalSerializeDB<DB> {
+	/// The pending changes and wether we need to clear collection first.
+	pub pending: BTreeMap<&'static [u8], (BTreeMap<Vec<u8>, Option<Vec<u8>>>, bool)>,
+	/// The inner db implementation to use.
+	pub db: DB,
+}
+
+impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
+	// Using on non active do not make much sense here.
+	const ACTIVE: bool = <DB as SerializeDB>::ACTIVE;
+
+	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
+		self.pending.entry(c)
+			.or_insert_with(Default::default).0
+			.insert(k.to_vec(), Some(v.to_vec()));
+	}
+	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
+		self.pending.entry(c)
+			.or_insert_with(Default::default).0
+			.insert(k.to_vec(), None);
+	}
+	fn clear(&mut self, c: &'static [u8]) {
+		let col = self.pending.entry(c)
+			.or_insert_with(Default::default);
+		col.0.clear();
+		col.1 = true;
+	}
+	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
+		self.pending.get(c)
+			.and_then(|c| c.0.get(k).cloned())
+			.or_else(|| Some(self.db.read(c, k)))
+			.flatten()
+	}
+	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a> {
+		let mut clear = false;
+		let mut cache = self.pending.get(c).map(|c| {
+			clear = c.1;
+			c.0.iter()
+		});
+		let next_cache = cache.as_mut()
+			.and_then(|c| c.next())
+			.map(|(k, v)| (k.clone(), v.clone()));
+		let mut db = if clear {
+			None
+		} else {
+			Some(self.db.iter(c))
+		};
+		let next_db = db.as_mut().and_then(|db| db.next());
+		Box::new(TransactionalIter {
+			cache,
+			next_cache,
+			db,
+			next_db,
+		})
+	}
+	fn contains_collection(collection: &'static [u8]) -> bool {
+		DB::contains_collection(collection)
+	}
+}
+
+pub struct TransactionalIter<'a> {
+	cache: Option<sp_std::collections::btree_map::Iter<'a, Vec<u8>, Option<Vec<u8>>>>,
+	next_cache: Option<(Vec<u8>, Option<Vec<u8>>)>,
+	db: Option<SerializeDBIter<'a>>,
+	next_db: Option<(Vec<u8>, Vec<u8>)>,
+}
+
+impl<'a> Iterator for TransactionalIter<'a> {
+	type Item = (Vec<u8>, Vec<u8>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		enum Next {
+			None,
+			Cache,
+			DB,
+		};
+		let next = match (self.next_cache.as_ref(), self.next_db.as_ref()) {
+			(Some((cache_key, _)), Some((db_key, _))) => {
+				match cache_key.cmp(&db_key) {
+					sp_std::cmp::Ordering::Equal => {
+						self.next_db = self.db.as_mut().and_then(|db| db.next());
+						Next::Cache
+					},
+					sp_std::cmp::Ordering::Greater => {
+						Next::Cache
+					},
+					sp_std::cmp::Ordering::Less => {
+						Next::DB
+					},
+				}
+			},
+			(Some(_), None) => Next::Cache,
+			(None, Some(_)) => Next::DB,
+			(None, None) => Next::None,
+		};
+		match next {
+			Next::Cache => {
+				let result = self.next_cache.take();
+				self.next_cache = self.cache.as_mut()
+					.and_then(|c| c.next())
+					.map(|(k, v)| (k.clone(), v.clone()));
+				match result {
+					Some((k, Some(v))) => Some((k, v)),
+					Some((_k, None)) => self.next(),
+					None => None,
+				}
+			},
+			Next::DB => {
+				let result = self.next_db.take();
+				self.next_db = self.db.as_mut().and_then(|db| db.next());
+				result
+			},
+			Next::None => {
+				None
+			},
+		}
 	}
 }

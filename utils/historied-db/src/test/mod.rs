@@ -25,10 +25,11 @@ macro_rules! InMemSimpleDB {
 
 
 	pub use $inner_module::InMemory as $name;
-	pub mod $inner_module {
+	mod $inner_module {
 		use crate::simple_db::SerializeDB;
 		use sp_std::collections::btree_map::BTreeMap;
 		const NB_COL: usize = $size;
+
 		#[derive(Clone, Debug, Eq, PartialEq)]
 		pub struct InMemory([BTreeMap<Vec<u8>, Vec<u8>>; NB_COL]);
 

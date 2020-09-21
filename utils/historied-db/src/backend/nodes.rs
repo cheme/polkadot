@@ -40,7 +40,8 @@ pub trait EstimateSize {
 
 /// Node storage metadata
 pub trait NodesMeta: Sized {
-	/// If true, then we apply a content size limit,
+	/// If true, and value got an active `EstimateSize`
+	/// implementation, then we apply a content size limit,
 	/// otherwhise we use the number of node limit.
 	const APPLY_SIZE_LIMIT: bool;
 	/// The size limit to apply.
@@ -98,8 +99,11 @@ impl<V, S, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for BTreeMap<Vec<u
 #[derivative(Clone(bound="D: Clone"))]
 /// A node is a linear backend and some meta information.
 pub struct Node<V, S, D, M> {
+	/// Inner linear backend of historied values.
 	data: D,
+	/// If changed, the node needs to be updated in `Head` backend.
 	changed: bool,
+	/// Keep trace of node byte length for `APPLY_SIZE_LIMIT`.
 	reference_len: usize,
 	_ph: PhantomData<(V, S, D, M)>,
 }
@@ -107,17 +111,26 @@ pub struct Node<V, S, D, M> {
 /// Head is the entry node, it contains fetched nodes and additional
 /// information about this backend state.
 pub struct Head<V, S, D, M, B> {
+	/// Head contains the last `Node` content.
 	inner: Node<V, S, D, M>,
-	/// end index - 1 at 0
+	/// Accessed nodes are kept in memory.
+	/// This is a reversed ordered `Vec`, starting at end 'index - 1' and
+	/// finishing at most at the very first historied node.
 	fetched: RefCell<Vec<Node<V, S, D, M>>>, // TODO consider smallvec
+	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u32,
+	/// Keep trace of initial index end to apply change lazilly.
 	old_end_node_index: u32,
-	// inclusive.
+	/// The index of the first node, inclusive.
 	start_node_index: u32,
-	// non inclusive (next index to use)
+	/// The index of the last node, non inclusive (next index to use)
 	end_node_index: u32,
+	/// Number of historied values stored in head and all past nodes.
 	len: usize,
+	/// Backend key used for this head, or any unique identifying key
+	/// that we can use to calculate location key of `Node`s from  `Head`.
 	reference_key: Vec<u8>,
+	/// All nodes are persisted under this backend storage.
 	backend: B,
 }
 
