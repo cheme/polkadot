@@ -17,10 +17,10 @@
 
 //! Linear backend possibly stored into multiple nodes.
 
-use crate::rstd::marker::PhantomData;
-use crate::rstd::btree_map::BTreeMap;
-use crate::rstd::cell::RefCell;
-use crate::rstd::vec::Vec;
+use sp_std::marker::PhantomData;
+use sp_std::collections::btree_map::BTreeMap;
+use sp_std::cell::RefCell;
+use sp_std::vec::Vec;
 use super::{LinearStorage};
 use crate::historied::HistoriedValue;
 use derivative::Derivative;
@@ -124,7 +124,7 @@ impl<V, S, D: Clone, M, B> Head<V, S, D, M, B>
 			self.backend.remove_node(&self.reference_key[..], d);
 		}
 		// this comparison is needed for the case we clear to 0 nodes indexes.
-		let start_end = crate::rstd::cmp::max(self.end_node_index, self.old_start_node_index);
+		let start_end = sp_std::cmp::max(self.end_node_index, self.old_start_node_index);
 		self.old_start_node_index = self.start_node_index;
 		for d in start_end .. self.old_end_node_index {
 			self.backend.remove_node(&self.reference_key[..], d);
@@ -400,7 +400,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			_ph: PhantomData,
 		};
 		self.inner.changed = true;
-		let prev = crate::rstd::mem::replace(&mut self.inner, new_node);
+		let prev = sp_std::mem::replace(&mut self.inner, new_node);
 		self.fetched.borrow_mut().insert(0, prev);
 	}
 	fn insert(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {

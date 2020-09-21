@@ -18,9 +18,9 @@
 //! Simple db tools to store non historied information.
 
 use derivative::Derivative;
-use crate::rstd::{BTreeMap, btree_map::Entry, marker::PhantomData, vec::Vec};
-use crate::rstd::fmt::Debug;
-use crate::rstd::boxed::Box;
+use sp_std::{collections::btree_map::{BTreeMap, Entry}, marker::PhantomData, vec::Vec};
+use sp_std::fmt::Debug;
+use sp_std::boxed::Box;
 
 /// Iterator could be associated serializeDB type but dynamic type make things simplier.
 pub type SerializeDBIter<'a> = Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
@@ -113,7 +113,7 @@ impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
 }
 
 pub struct TransactionalIter<'a> {
-	cache: Option<crate::rstd::btree_map::Iter<'a, Vec<u8>, Option<Vec<u8>>>>,
+	cache: Option<sp_std::collections::btree_map::Iter<'a, Vec<u8>, Option<Vec<u8>>>>,
 	next_cache: Option<(Vec<u8>, Option<Vec<u8>>)>,
 	db: Option<SerializeDBIter<'a>>,
 	next_db: Option<(Vec<u8>, Vec<u8>)>,
@@ -131,14 +131,14 @@ impl<'a> Iterator for TransactionalIter<'a> {
 		let next = match (self.next_cache.as_ref(), self.next_db.as_ref()) {
 			(Some((cache_key, _)), Some((db_key, _))) => {
 				match cache_key.cmp(&db_key) {
-					crate::rstd::cmp::Ordering::Equal => {
+					sp_std::cmp::Ordering::Equal => {
 						self.next_db = self.db.as_mut().and_then(|db| db.next());
 						Next::Cache
 					},
-					crate::rstd::cmp::Ordering::Greater => {
+					sp_std::cmp::Ordering::Greater => {
 						Next::Cache
 					},
-					crate::rstd::cmp::Ordering::Less => {
+					sp_std::cmp::Ordering::Less => {
 						Next::DB
 					},
 				}
@@ -319,7 +319,7 @@ impl SerializeDB for () {
 		None
 	}
 	fn iter<'a>(&'a self, _collection: &[u8]) -> SerializeDBIter<'a> {
-		Box::new(crate::rstd::iter::empty())
+		Box::new(sp_std::iter::empty())
 	}
 	fn contains_collection(_collection: &[u8]) -> bool {
 		false
@@ -397,7 +397,7 @@ pub struct EntryMap<'a, K, V, S, I>
 		S: SerializeDB,
 		I: SerializeInstance,
 {
-	entry: crate::rstd::btree_map::OccupiedEntry<'a, K, Option<V>>,
+	entry: sp_std::collections::btree_map::OccupiedEntry<'a, K, Option<V>>,
 	collection: CollectionMut<'a, S, I>,
 	need_write: bool,
 	is_fetch: bool,
@@ -499,7 +499,7 @@ pub enum SerializeMapIter<'a, K, V>
 		K: Codec + Ord + Clone,
 		V: Codec + Clone,
 {
-	Cache(crate::rstd::btree_map::Iter<'a, K, Option<V>>),
+	Cache(sp_std::collections::btree_map::Iter<'a, K, Option<V>>),
 	Collection(SerializeDBIter<'a>),
 }
 

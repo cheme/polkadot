@@ -24,12 +24,12 @@ pub mod tree;
 pub mod linear {
 
 	use crate::{Latest, Management, ManagementRef, Migrate, LinearManagement};
-	use crate::rstd::ops::{AddAssign, SubAssign};
+	use sp_std::ops::{AddAssign, SubAssign};
 
 	// This is for small state as there is no double
 	// mapping an some operation goes through full scan.
 	pub struct LinearInMemoryManagement<H, S, V> {
-		mapping: crate::rstd::BTreeMap<H, S>,
+		mapping: sp_std::collections::btree_map::BTreeMap<H, S>,
 		start_treshold: S,
 		next_state: S,
 		neutral_element: Option<V>,

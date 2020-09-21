@@ -26,10 +26,10 @@
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
 	InMemoryValueSlice, InMemoryValue, ConditionalValueMut};
 use crate::{UpdateResult, Latest};
-use crate::rstd::marker::PhantomData;
-use crate::rstd::vec::Vec;
-use crate::rstd::convert::TryFrom;
-use crate::rstd::ops::{SubAssign, Range};
+use sp_std::marker::PhantomData;
+use sp_std::vec::Vec;
+use sp_std::convert::TryFrom;
+use sp_std::ops::{SubAssign, Range};
 use codec::{Encode, Decode};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
 use crate::backend::encoded_array::EncodedArrayValue;
@@ -259,7 +259,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 					if last.value == value {
 						return UpdateResult::Unchanged;
 					}
-					let result = crate::rstd::mem::replace(&mut last.value, value);
+					let result = sp_std::mem::replace(&mut last.value, value);
 					self.0.emplace(index, last);
 					return UpdateResult::Changed(Some(result));
 				}

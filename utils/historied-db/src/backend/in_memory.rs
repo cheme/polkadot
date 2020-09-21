@@ -20,9 +20,9 @@
 use crate::historied::HistoriedValue;
 use codec::{Encode, Decode, Input as CodecInput};
 use super::{LinearStorage, LinearStorageMem};
-use crate::rstd::mem::replace;
+use sp_std::mem::replace;
 use crate::InitFrom;
-use crate::rstd::vec::Vec;
+use sp_std::vec::Vec;
 
 /// Size of preallocated history per element.
 /// Currently at two for committed and prospective only.
@@ -113,7 +113,7 @@ impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 			let new = replace(&mut self.0, Default::default());
 			self.0 = smallvec::SmallVec::from_vec(new.into_vec().split_off(split_off));
 		} else {
-			for i in 0..crate::rstd::cmp::min(split_off, self.0.len()) {
+			for i in 0..sp_std::cmp::min(split_off, self.0.len()) {
 				self.0.remove(i);
 			}
 		}

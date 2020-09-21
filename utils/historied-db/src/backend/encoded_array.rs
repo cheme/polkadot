@@ -24,10 +24,10 @@
 // TODO next split between consecutive indexed values (replace write length by generic write meta)
 // TODO next split consecutive with range indexing
 
-use crate::rstd::marker::PhantomData;
-use crate::rstd::borrow::Cow;
-use crate::rstd::ops::Range;
-use crate::rstd::vec::Vec;
+use sp_std::marker::PhantomData;
+use sp_std::borrow::Cow;
+use sp_std::ops::Range;
+use sp_std::vec::Vec;
 use crate::historied::HistoriedValue;
 use super::{LinearStorage, LinearStorageSlice, LinearStorageRange};
 use codec::{Encode, Decode, Input as CodecInput};
@@ -74,14 +74,14 @@ impl<'a, V, F> EncodedArrayValue for EncodedArray<'a, V, F> {
 
 impl<'a, V, F> AsRef<[u8]> for EncodedArray<'a, V, F> {
 	fn as_ref(&self) -> &[u8] {
-		use crate::rstd::ops::Deref;
+		use sp_std::ops::Deref;
 		self.0.deref()
 	}
 }
 
 impl<'a, V, F> AsMut<[u8]> for EncodedArray<'a, V, F> {
 	fn as_mut(&mut self) -> &mut [u8] {
-		use crate::rstd::ops::DerefMut;
+		use sp_std::ops::DerefMut;
 		self.0.deref_mut()
 	}
 }
@@ -132,7 +132,7 @@ impl<'a> EncodedArrayBuff<'a> {
 	}
 }
 
-impl<'a> crate::rstd::ops::Deref for EncodedArrayBuff<'a> {
+impl<'a> sp_std::ops::Deref for EncodedArrayBuff<'a> {
 	type Target = [u8];
 	fn deref(&self) -> &Self::Target {
 		match self {
@@ -142,7 +142,7 @@ impl<'a> crate::rstd::ops::Deref for EncodedArrayBuff<'a> {
 	}
 }
 
-impl<'a> crate::rstd::ops::DerefMut for EncodedArrayBuff<'a> {
+impl<'a> sp_std::ops::DerefMut for EncodedArrayBuff<'a> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.to_mut()[..]
 	}

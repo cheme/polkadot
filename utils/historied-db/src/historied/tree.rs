@@ -24,9 +24,9 @@ use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue,
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
-use crate::rstd::ops::SubAssign;
-use crate::rstd::vec::Vec;
-use crate::rstd::marker::PhantomData;
+use sp_std::ops::SubAssign;
+use sp_std::vec::Vec;
+use sp_std::marker::PhantomData;
 use crate::Latest;
 use crate::InitFrom;
 use codec::{Encode, Decode};
@@ -732,7 +732,7 @@ mod test {
 		use crate::backend::nodes::{Head, Node, InitHead};
 		use crate::backend::nodes::test::{MetaNb, MetaSize};
 		use crate::historied::ValueRef;
-		use crate::rstd::btree_map::BTreeMap;
+		use sp_std::collections::btree_map::BTreeMap;
 
 		type EncArray<'a> = EncodedArray<'a, Vec<u8>, DefaultVersion>;
 		type Backend<'a> = BTreeMap<Vec<u8>, Node<Vec<u8>, u32, EncArray<'a>, MetaSize>>;

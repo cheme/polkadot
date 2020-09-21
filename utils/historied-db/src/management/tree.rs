@@ -21,10 +21,10 @@
 //! State changes are limited so resulting tree is rather unbalance.
 //! This is best when there is not to many branch (fork)
 
-use crate::rstd::ops::{AddAssign, SubAssign};
-use crate::rstd::BTreeMap;
-use crate::rstd::vec::Vec;
-use crate::rstd::fmt::Debug;
+use sp_std::ops::{AddAssign, SubAssign};
+use sp_std::collections::btree_map::BTreeMap;
+use sp_std::vec::Vec;
+use sp_std::fmt::Debug;
 use crate::println;
 use crate::historied::linear::LinearGC;
 use crate::{Management, ManagementRef, Migrate, ForkableManagement, Latest};
