@@ -31,14 +31,14 @@ pub mod linear {
 	pub struct LinearInMemoryManagement<H, S, V> {
 		mapping: sp_std::collections::btree_map::BTreeMap<H, S>,
 		start_treshold: S,
-		next_state: S,
+		current_state: S,
 		neutral_element: Option<V>,
 		changed_treshold: bool,
 		can_append: bool,
 	}
 
 	impl<H, S, V> LinearInMemoryManagement<H, S, V> {
-		// TODO should use a builder but then we neend
+		// TODO should use a builder but then we need
 		// to change Management trait
 		pub fn define_neutral_element(mut self, n: V) -> Self {
 			self.neutral_element = Some(n);
@@ -77,13 +77,12 @@ pub mod linear {
 		type SE = Latest<S>;
 		fn init() -> (Self, Self::S) {
 			let state = S::default();
-			let mut next_state = S::default();
-			next_state += 1;
+			let mut current_state = S::default();
 			let mapping = Default::default();
 			(LinearInMemoryManagement {
 				mapping,
 				start_treshold: state.clone(),
-				next_state,
+				current_state,
 				neutral_element: None,
 				changed_treshold: false,
 				can_append: true,
@@ -107,10 +106,7 @@ pub mod linear {
 		}
 
 		fn latest_state(&mut self) -> Self::SE {
-			// TODO can use next_state - 1 to avoid this search
-			Latest::unchecked_latest(self.mapping.values().max()
-				.map(Clone::clone)
-				.unwrap_or(S::default()))
+			Latest::unchecked_latest(self.current_state.clone())
 		}
 
 		fn latest_external_state(&mut self) -> Option<H> {
@@ -148,20 +144,19 @@ pub mod linear {
 			if !self.can_append {
 				return None;
 			}
-			self.mapping.insert(state, self.next_state.clone());
-			let result = self.next_state.clone();
-			self.next_state += 1;
-			Some(result)
+			self.current_state += 1;
+			self.mapping.insert(state, self.current_state.clone());
+			Some(self.current_state.clone())
 		}
 
 		fn drop_last_state(&mut self) -> Self::S {
-			if self.next_state != S::default() {
-				let mut dec = S::default();
-				dec += 1;
-				self.next_state -= dec;
+			let mut v = S::default();
+			if self.current_state != v {
+				v += 1;
+				self.current_state -= v;
 			}
 			self.can_append = true;
-			self.next_state.clone()
+			self.current_state.clone()
 		}
 	}
 }

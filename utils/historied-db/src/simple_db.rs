@@ -91,8 +91,6 @@ pub trait DynSerializeDB: SerializeDB {
 	fn dyn_iter<'a>(&'a self, c: &[u8]) -> SerializeDBIter<'a>;
 
 	fn dyn_contains_collection(collection: &[u8]) -> bool;
-//	fn dyn_read_collection<'a, DB, I>(db: &'a DB, collection: &'static[u8]) -> Option<DynCollection<'a, Self, I>>;
-//	fn dyn_write_collection<'a, DB, I>(db: &'a mut DB, collection: &'static[u8]) -> Option<DynCollectionMut<'a, Self, I>>;
 }
 
 impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> Collection<'a, DB, Instance> {
