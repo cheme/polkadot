@@ -751,18 +751,43 @@ impl historied_db::management::tree::TreeManagementStorage for TreeManagementPer
 	}
 }
 
+macro_rules! subcollection_prefixed_key {
+	($prefix: ident, $key: ident) => {
+		let mut prefixed_key;
+		let $key = if let Some(k) = $prefix {
+			prefixed_key = Vec::with_capacity(k.len() + $key.len());
+			prefixed_key.extend_from_slice(&k[..]);
+			prefixed_key.extend_from_slice(&$key[..]);
+			&prefixed_key[..]
+		} else {
+			&$key[..]
+		};
+	}
+}
+
 impl RocksdbStorage {
-	pub fn resolve_collection(c: &'static [u8]) -> Option<u32> {
-		if c.len() != 4 {
+	/// We resolve rocksdb collection or subcollection.
+	/// Collections are defined by four byte encoding of their index.
+	/// Subcollection are located into the collection defined by four first byte,
+	/// and behind a prefixed location (remaining bytes).
+	/// Note that subcollection should define their prefix in a way that no key
+	/// collision happen.
+	pub fn resolve_collection<'a>(c: &'a [u8]) -> Option<(u32, Option<&'a [u8]>)> {
+		if c.len() < 4 {
 			return None;
 		}
-		let index = Self::resolve_collection_inner(c);
+		let index = Self::resolve_collection_inner(&c[..4]);
+		let prefix = if c.len() == 4 {
+			None
+		} else {
+			Some(&c[4..])
+		};
 		if index < crate::utils::NUM_COLUMNS {
-			return Some(index);
+			return Some((index, prefix));
 		}
 		None
 	}
-	const fn resolve_collection_inner(c: &'static [u8]) -> u32 {
+	const fn resolve_collection_inner<'a>(c: &'a [u8]) -> u32 {
 		let mut buf = [0u8; 4];
 		buf[0] = c[0];
 		buf[1] = c[1];
@@ -775,7 +800,8 @@ impl RocksdbStorage {
 impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 
 	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
-		Self::resolve_collection(c).map(|c| {
+		Self::resolve_collection(c).map(|(c, p)| {
+			subcollection_prefixed_key!(p, k);
 			let mut tx = self.0.transaction();
 			tx.put(c, k, v);
 			self.0.write(tx)
@@ -784,7 +810,8 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 	}
 
 	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
-		Self::resolve_collection(c).map(|c| {
+		Self::resolve_collection(c).map(|(c, p)| {
+			subcollection_prefixed_key!(p, k);
 			let mut tx = self.0.transaction();
 			tx.delete(c, k);
 			self.0.write(tx)
@@ -793,24 +820,30 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 	}
 
 	fn clear(&mut self, c: &'static [u8]) {
-		Self::resolve_collection(c).map(|c| {
+		Self::resolve_collection(c).map(|(c, p)| {
 			let mut tx = self.0.transaction();
-			tx.delete_prefix(c, &[]);
+			tx.delete_prefix(c, p.unwrap_or(&[]));
 			self.0.write(tx)
 				.expect("Unsupported serialize error")
 		});
 	}
 
 	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
-		Self::resolve_collection(c).and_then(|c| {
+		Self::resolve_collection(c).and_then(|(c, p)| {
+			subcollection_prefixed_key!(p, k);
 			self.0.get(c, k)
 				.expect("Unsupported readdb error")
 		})
 	}
 
 	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::simple_db::SerializeDBIter<'a> {
-		let iter = Self::resolve_collection(c).map(|c| {
-			self.0.iter(c).map(|(k, v)| (Vec::<u8>::from(k), Vec::<u8>::from(v)))
+		let iter = Self::resolve_collection(c).map(|(c, p)| {
+			use kvdb::KeyValueDB;
+			if let Some(p) = p {
+				self.0.iter_with_prefix(c, p)
+			} else {
+				<kvdb_rocksdb::Database as KeyValueDB>::iter(&*self.0, c)
+			}.map(|(k, v)| (Vec::<u8>::from(k), Vec::<u8>::from(v)))
 		}).into_iter().flat_map(|i| i);
 
 		Box::new(iter)
@@ -2161,16 +2194,17 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					}
 					warn!("committed {:?} index in historied db", nb);
 					// write management state changes
-					let mut pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
+					let pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
 					for (col, (changes, dropped)) in pending {
-						if let Some(col) = RocksdbStorage::resolve_collection(col) {
+						if let Some((col, p)) = RocksdbStorage::resolve_collection(col) {
 							if dropped {
-								tx.delete_prefix(col, &[]);
+								tx.delete_prefix(col, p.unwrap_or(&[]));
 							}
 							for (key, change) in changes {
+								subcollection_prefixed_key!(p, key);
 								match change {
-									Some(value) => tx.put(col, key.as_slice(), value.as_slice()), 
-									None => tx.delete(col, key.as_slice()),
+									Some(value) => tx.put(col, key, value.as_slice()), 
+									None => tx.delete(col, key),
 								}
 							}
 						} else {
