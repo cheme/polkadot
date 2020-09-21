@@ -150,14 +150,6 @@ pub trait SerializeInstanceMap: Default + Clone {
 	/// If collection is static this contains its
 	/// unique identifier.
 	const STATIC_COL: &'static [u8];
-
-	/// Prefixed collections used an isolated part of a collection
-	/// defined by this prefix.
-	/// When undefined the instance uses the whole collection.
-	/// Note that collection containing such instance should ensure
-	/// that no key collision are possible
-	///
-	const PREFIX: Option<&'static [u8]> = None;
 }
 
 impl SerializeInstanceMap for () {
