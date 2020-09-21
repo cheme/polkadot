@@ -77,7 +77,7 @@ pub mod linear {
 		type SE = Latest<S>;
 		fn init() -> (Self, Self::S) {
 			let state = S::default();
-			let mut current_state = S::default();
+			let current_state = S::default();
 			let mapping = Default::default();
 			(LinearInMemoryManagement {
 				mapping,
