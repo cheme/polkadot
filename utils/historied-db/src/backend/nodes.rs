@@ -27,7 +27,14 @@ use derivative::Derivative;
 use crate::InitFrom;
 use crate::backend::encoded_array::EncodedArrayValue;
 
+/// Rough size estimate to manage node size.
 pub trait EstimateSize {
+	/// For content in Nodes that don't use
+	/// `APPLY_SIZE_LIMIT`, set to false.
+	const ACTIVE: bool = true;
+	/// Return the size estimation.
+	/// If `ACTIVE` is set to false this
+	/// method can return anything.
 	fn estimate_size(&self) -> usize;
 }
 
@@ -344,7 +351,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			};
 
 			if ix > 0 {
-				if M::APPLY_SIZE_LIMIT {
+				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					let mut add_size = 0;
 					for i in 0..ix {
 						node.data.lookup(i).map(|h| {
@@ -372,7 +379,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		self.len += 1;
 		let mut additional_size: Option<usize> = None;
 		
-		if !M::APPLY_SIZE_LIMIT {
+		if !M::APPLY_SIZE_LIMIT || !V::ACTIVE {
 			if self.inner.data.len() < M::MAX_NODE_ITEMS {
 				self.inner.data.push(value);
 				return;
@@ -412,7 +419,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			&mut fetched_mut[index.0 as usize]
 		};
 
-		if M::APPLY_SIZE_LIMIT {
+		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
 		}
 		node.changed = true;
@@ -431,7 +438,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		node.changed = true;
 		self.len -= 1;
 
-		if M::APPLY_SIZE_LIMIT {
+		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			let h = node.data.get(index.1);
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 		}
@@ -445,7 +452,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		if let Some(h) = self.inner.data.pop() {
 			self.len -= 1;
 			if self.inner.data.len() > 0 {
-				if M::APPLY_SIZE_LIMIT {
+				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 				}
 				self.inner.changed = true;
@@ -508,7 +515,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 
 			if ix < node.data.len() {
 
-				if M::APPLY_SIZE_LIMIT {
+				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					let mut add_size = 0;
 					for i in ix..node.data.len() {
 						node.data.lookup(i).map(|h| {
@@ -551,7 +558,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 
 		node.changed = true;
 
-		if M::APPLY_SIZE_LIMIT {
+		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			let h = node.data.get(index.1);
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
@@ -560,7 +567,6 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	}
 }
 
-// TODO use size of instead of u8
 impl EstimateSize for Vec<u8> {
 	fn estimate_size(&self) -> usize {
 		self.len()
@@ -648,7 +654,7 @@ pub(crate) mod test {
 	impl NodesMeta for MetaSize {
 		const APPLY_SIZE_LIMIT: bool = true;
 		const MAX_NODE_LEN: usize = 25;
-		const MAX_NODE_ITEMS: usize = 0;
+		const MAX_NODE_ITEMS: usize = 8;
 		const MAX_INDEX_ITEMS: usize = 5;
 		const STORAGE_PREFIX: &'static [u8] = b"nodes1";
 	}
