@@ -1015,7 +1015,7 @@ impl<P, C> Node for NodeOld<P, C>
 #[derivative(Clone(bound=""))]
 #[derivative(Debug(bound=""))]
 #[derivative(PartialEq(bound=""))]
-pub struct Trie<N>
+pub struct Tree<N>
 	where
 		N: Node,
 {
@@ -1028,12 +1028,12 @@ pub struct Trie<N>
 	init: N::InitFrom,
 }
 
-impl<N> Trie<N>
+impl<N> Tree<N>
 	where
 		N: Node,
 {
 	pub fn new(init: N::InitFrom) -> Self {
-		Trie {
+		Tree {
 			tree: None,
 			init,
 		}
@@ -1168,7 +1168,7 @@ struct Children256<N> (
 );
 
 const fn empty_256_children<N>() -> [Option<N>; 256] {
-	// TODO copy trie crate macro
+	// TODO copy tree crate macro
 	[
 		None, None, None, None, None, None, None, None,
 		None, None, None, None, None, None, None, None,
@@ -1411,7 +1411,7 @@ impl<N: Node> NodeStackMut<N> {
 }
 
 pub struct SeekIter<'a, N: Node> {
-	trie: &'a Trie<N>,
+	tree: &'a Tree<N>,
 	dest: &'a [u8],
 	dest_position: PositionFor<N>,
 	// TODO seekiter could be lighter and not stack, 
@@ -1422,7 +1422,7 @@ pub struct SeekIter<'a, N: Node> {
 }
 pub struct SeekValueIter<'a, N: Node>(SeekIter<'a, N>);
 
-impl<N: Node> Trie<N> {
+impl<N: Node> Tree<N> {
 	pub fn seek_iter<'a>(&'a self, key: &'a [u8]) -> SeekIter<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
@@ -1436,7 +1436,7 @@ impl<N: Node> Trie<N> {
 		let reach_dest = false;
 		let next = stack.descend(key, dest_position);
 		SeekIter {
-			trie: self,
+			tree: self,
 			dest: key,
 			dest_position,
 			stack,
@@ -1456,7 +1456,7 @@ impl<'a, N: Node> SeekIter<'a, N> {
 			(pos, node, key)
 		}).collect();
 		Iter {
-			trie: self.trie,
+			tree: self.tree,
 			stack: IterStack {
 				stack,
 				key: self.dest.to_vec(),
@@ -1472,7 +1472,7 @@ impl<'a, N: Node> SeekIter<'a, N> {
 			(pos, node, key)
 		}).into_iter().collect();
 		Iter {
-			trie: self.trie,
+			tree: self.tree,
 			stack: IterStack {
 				stack,
 				key: self.dest.to_vec(),
@@ -1499,9 +1499,9 @@ impl<'a, N: Node> SeekIter<'a, N> {
 						return None;
 					}
 				} else {
-					// empty trie
+					// empty tree
 					//		// TODO put ref in stack.
-					if let Some(node) = self.trie.tree.as_ref() {
+					if let Some(node) = self.tree.tree.as_ref() {
 						let zero = PositionFor::<N>::zero();
 						self.stack.stack.push((zero, node));
 					} else {
@@ -1546,19 +1546,19 @@ impl<'a, N: Node> Iterator for SeekValueIter<'a, N> {
 	}
 }
 pub struct SeekIterMut<'a, N: Node> {
-	trie: &'a mut Trie<N>,
+	tree: &'a mut Tree<N>,
 	dest: &'a [u8],
 	dest_position: PositionFor<N>,
 	// Here NodeStackMut will be used through unsafe
 	// calls, so it should always be 'a with
-	// content comming only form trie field.
+	// content comming only form tree field.
 	stack: NodeStackMut<N>,
 	reach_dest: bool,
 	next: Descent<N::Radix>,
 }
 pub struct SeekValueIterMut<'a, N: Node>(SeekIterMut<'a, N>);
 	
-impl<N: Node> Trie<N> {
+impl<N: Node> Tree<N> {
 	pub fn seek_iter_mut<'a>(&'a mut self, key: &'a [u8]) -> SeekIterMut<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
@@ -1572,7 +1572,7 @@ impl<N: Node> Trie<N> {
 		let reach_dest = false;
 		let next = stack.descend(key, dest_position);
 		SeekIterMut {
-			trie: self,
+			tree: self,
 			dest: key,
 			dest_position,
 			stack,
@@ -1606,9 +1606,9 @@ impl<'a, N: Node> SeekIterMut<'a, N> {
 						return None;
 					}
 				} else {
-					// empty trie
+					// empty tree
 					//		// TODO put ref in stack.
-					if let Some(node) = self.trie.tree.as_mut() {
+					if let Some(node) = self.tree.tree.as_mut() {
 						let zero = PositionFor::<N>::zero();
 						self.stack.stack.push((zero, node));
 					} else {
@@ -1676,17 +1676,17 @@ impl<'a, N: Node> IterStack<'a, N> {
 }
 
 pub struct Iter<'a, N: Node> {
-	trie: &'a Trie<N>,
+	tree: &'a Tree<N>,
 	stack: IterStack<'a, N>,
 	finished: bool,
 }
 
 pub struct ValueIter<'a, N: Node>(Iter<'a, N>);
 
-impl<N: Node> Trie<N> {
+impl<N: Node> Tree<N> {
 	pub fn iter<'a>(&'a self) -> Iter<'a, N> {
 		Iter {
-			trie: self,
+			tree: self,
 			stack: IterStack::new(),
 			finished: false,
 		}
@@ -1742,7 +1742,7 @@ impl<'a, N: Node> Iter<'a, N> {
 				}
 			} else {
 				// empty, this is start iteration
-				if let Some(node) = self.trie.tree.as_ref() {
+				if let Some(node) = self.tree.tree.as_ref() {
 					let zero = PositionFor::<N>::zero();
 					let first_key = KeyIndexFor::<N>::zero();
 					node.new_end(&mut self.stack.key, zero);
@@ -1786,7 +1786,7 @@ impl<'a, N: Node> Iterator for ValueIter<'a, N> {
 	}
 }
 
-impl<N: Node> Trie<N> {
+impl<N: Node> Tree<N> {
 	pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
 		if let Some(top) = self.tree.as_ref() {
 			let mut current = top;
@@ -1968,15 +1968,15 @@ mod test_256 {
 
 	#[test]
 	fn empty_are_equals() {
-		let t1 = Trie::<Node>::new(());
-		let t2 = Trie::<Node>::new(());
+		let t1 = Tree::<Node>::new(());
+		let t2 = Tree::<Node>::new(());
 		assert_eq!(t1, t2);
 	}
 
 	#[test]
 	fn inserts_are_equals() {
-		let mut t1 = Trie::<Node>::new(());
-		let mut t2 = Trie::<Node>::new(());
+		let mut t1 = Tree::<Node>::new(());
+		let mut t2 = Tree::<Node>::new(());
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
@@ -1992,9 +1992,9 @@ mod test_256 {
 	}
 	#[test]
 	fn compare_btree() {
-		let mut t1 = Trie::<Node>::new(());
+		let mut t1 = Tree::<Node>::new(());
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
-		let compare_iter = |left: &Trie::<Node>, right: &BTreeMap<&'static [u8], Vec<u8>>| -> bool {
+		let compare_iter = |left: &Tree::<Node>, right: &BTreeMap<&'static [u8], Vec<u8>>| -> bool {
 			let left_node = left.iter();
 			let left = left_node.value_iter();
 			let mut right = right.iter();

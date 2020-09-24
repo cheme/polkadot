@@ -1,9 +1,8 @@
 [package]
-name = "prefixtree"
+name = "radix-tree"
 version = "0.8.0-rc3"
 authors = ["Parity Technologies <admin@parity.io>"]
-description = "Radix trie traits and implementations."
-repository = "https://github.com/cheme/prefixtree"
+description = "Radix tree traits and implementations."
 license = "Apache-2.0"
 categories = [ "no-std" ]
 edition = "2018"
