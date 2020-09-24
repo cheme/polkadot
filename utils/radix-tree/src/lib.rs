@@ -1803,8 +1803,8 @@ impl<N: Node> Tree<N> {
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
 						if let Some(child) = current.get_child(index) {
-							//position = child_position.next::<N::Radix>();
-							position = child_position;
+							position = child_position.next::<N::Radix>();
+							//position = child_position;
 							current = child;
 						} else {
 							return None;
@@ -2120,6 +2120,7 @@ pub mod test_256 {
 	#[test]
 	fn replay_insert_remove_fuzzing() {
 		let datas = [
+			vec![0, 0, 5, 75, 9, 1, 48, 58, 17, 9, 17, 9, 0],
 			vec![0, 0, 8, 0, 0, 0, 0, 0],
 			vec![0, 0, 70, 0, 3, 61, 0, 0],
 			vec![0u8, 202, 1, 4, 64, 49, 0, 0],
