@@ -2012,8 +2012,7 @@ impl<N: Node> Tree<N> {
 								empty_tree = Some(result);
 								break;
 							}
-						}
-						if current.number_child() == 1 {
+						} else if current.number_child() == 1 {
 							current.fuse_child(key)
 						}
 
@@ -2196,6 +2195,7 @@ pub mod test_256 {
 	#[test]
 	fn replay_insert_remove_fuzzing() {
 		let datas = [
+			vec![0, 1, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0],
 			vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 96, 0, 16, 96],
 			vec![0, 0, 0, 0, 0, 0, 0, 195, 0, 0, 195, 0, 0, 0],
 			vec![0, 0, 5, 75, 9, 1, 48, 58, 17, 9, 17, 9, 0],
