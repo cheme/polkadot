@@ -1726,8 +1726,9 @@ impl<'a, N: Node> Iter<'a, N> {
 					//let position = last.0.next::<N::Radix>();
 					let position = last.0;
 					position.set_index::<N::Radix>(&mut self.stack.key, last.2);
+					let position = position.next::<N::Radix>();
 					child.new_end(&mut self.stack.key, position);
-					let position = position.next_by::<N::Radix>(child.depth() + 1);
+					let position = position.next_by::<N::Radix>(child.depth());
 					let first_key = KeyIndexFor::<N>::zero();
 					self.stack.stack.push((position, child, first_key));
 					break;
@@ -1852,7 +1853,8 @@ impl<N: Node> Tree<N> {
 					Descent::Middle(middle_position, Some(index)) => {
 						// insert middle node
 						current.split_off(position, middle_position);
-						let new_child = N::new(key, middle_position, dest_position, Some(value), self.init.clone());
+						let child_start = middle_position.next::<N::Radix>();
+						let new_child = N::new(key, child_start, dest_position, Some(value), self.init.clone());
 						//let child_index = middle_position.index::<N::Radix>(key)
 						//	.expect("Middle resolved from key");
 						assert!(current.set_child(index, new_child).is_none());
@@ -1959,8 +1961,8 @@ impl<N: Node> Tree<N> {
 	}
 }
 
-#[cfg(test)]
-mod test_256 {
+#[cfg(any(test, feature = "fuzzer"))]
+pub mod test_256 {
 	use crate::*;
 	use std::collections::btree_map::BTreeMap;
 
@@ -1990,31 +1992,33 @@ mod test_256 {
 		assert_eq!(None, t2.insert(b"key3", value1.clone()));
 		assert_ne!(t1, t2);
 	}
+
+	fn compare_iter<K: Borrow<[u8]>>(left: &Tree::<Node>, right: &BTreeMap<K, Vec<u8>>) -> bool {
+		let left_node = left.iter();
+		let left = left_node.value_iter();
+		let mut right = right.iter();
+		for l in left {
+			if let Some(r) = right.next() {
+				if &l.0[..] != &r.0.borrow()[..] {
+					return false;
+				}
+				if &l.1[..] != &r.1[..] {
+					return false;
+				}
+			} else {
+				return false;
+			}
+		}
+		if right.next().is_some() {
+			return false;
+		}
+		true
+	}
+
 	#[test]
 	fn compare_btree() {
 		let mut t1 = Tree::<Node>::new(());
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
-		let compare_iter = |left: &Tree::<Node>, right: &BTreeMap<&'static [u8], Vec<u8>>| -> bool {
-			let left_node = left.iter();
-			let left = left_node.value_iter();
-			let mut right = right.iter();
-			for l in left {
-				if let Some(r) = right.next() {
-					if &l.0[..] != &r.0[..] {
-						return false;
-					}
-					if &l.1[..] != &r.1[..] {
-						return false;
-					}
-				} else {
-					return false;
-				}
-			}
-			if right.next().is_some() {
-				return false;
-			}
-			true
-		};
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
@@ -2027,5 +2031,98 @@ mod test_256 {
 		assert!(compare_iter(&t1, &t2));
 		assert_eq!(None, t2.insert(b"key3", value1.clone()));
 		assert!(!compare_iter(&t1, &t2));
+	}
+
+	fn fuzz_to_data(input: &[u8]) -> Vec<(Vec<u8>,Vec<u8>)> {
+		let mut result = Vec::new();
+		// enc = (minkeylen, maxkeylen (min max up to 32), datas)
+		// fix data len 2 bytes
+		let mut minkeylen = if let Some(v) = input.get(0) {
+			let mut v = *v & 31u8;
+			v = v + 1;
+			v
+		} else { return result; };
+		let mut maxkeylen = if let Some(v) = input.get(1) {
+			let mut v = *v & 31u8;
+			v = v + 1;
+			v
+		} else { return result; };
+
+		if maxkeylen < minkeylen {
+			let v = minkeylen;
+			minkeylen = maxkeylen;
+			maxkeylen = v;
+		}
+		let mut ix = 2;
+		loop {
+			let keylen = if let Some(v) = input.get(ix) {
+				let mut v = *v & 31u8;
+				v = v + 1;
+				v = std::cmp::max(minkeylen, v);
+				v = std::cmp::min(maxkeylen, v);
+				v as usize
+			} else { break };
+			let key = if input.len() > ix + keylen {
+				input[ix..ix+keylen].to_vec()
+			} else { break };
+			ix += keylen;
+			let val = if input.len() > ix + 2 {
+				input[ix..ix+2].to_vec()
+			} else { break };
+			result.push((key,val));
+		}
+		result
+	}
+
+	fn fuzz_removal(data: Vec<(Vec<u8>,Vec<u8>)>) -> Vec<(bool, Vec<u8>,Vec<u8>)> {
+		let mut res = Vec::new();
+		let mut existing = None;
+		for (a, d) in data.into_iter().enumerate() {
+			if existing == None {
+				existing = Some(a%2);
+			}
+			if existing.unwrap() == 0 {
+				if a % 9 == 6
+				|| a % 9 == 7
+				|| a % 9 == 8 {
+					// a random removal some time
+					res.push((true, d.0, d.1));
+					continue;
+				}
+			}
+			res.push((false, d.0, d.1));
+		}
+		res
+	}
+
+	pub fn fuzz_insert_remove(input: &[u8]) {
+		let data = fuzz_to_data(input);
+		let data = fuzz_removal(data);
+		let mut a = 0;
+		let mut t1 = Tree::<Node>::new(());
+		let mut t2 = BTreeMap::<Vec<u8>, Vec<u8>>::new();
+		while a < data.len() {
+			if data[a].0 {
+				// remove
+				t1.remove(&data[a].1[..]);
+				t2.remove(&data[a].1[..]);
+			} else {
+				// add
+				t1.insert(&data[a].1[..], data[a].2.clone());
+				t2.insert(data[a].1.clone(), data[a].2.clone());
+			}
+			a += 1;
+		}
+		assert!(compare_iter(&mut t1, &mut t2));
+	}
+
+	#[test]
+	fn replay_insert_remove_fuzzing() {
+		let datas = [
+			vec![0u8, 202, 1, 4, 64, 49, 0, 0],
+		];
+		for data in datas.iter() {
+			fuzz_insert_remove(&data[..]);
+		}
 	}
 }

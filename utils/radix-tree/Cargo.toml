@@ -20,3 +20,4 @@ derivative = { version = "2.1", features = ["use_core"] }
 default = ["std"]
 std = [
 ]
+fuzzer = []
