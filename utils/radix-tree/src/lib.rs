@@ -949,7 +949,7 @@ impl<P, C> Node for NodeOld<P, C>
 		&mut self,
 		index: KeyIndexFor<Self>,
 	) {
-		unimplemented!()
+		self.children.remove_child(index)
 	}
 	fn split_off(
 		&mut self,
@@ -1049,6 +1049,10 @@ pub trait Children<N>: Clone + Debug + PartialEq {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 		child: N,
 	) -> Option<N>;
+	fn remove_child(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	);
 	fn number_child(
 		&self,
 	) -> usize;
@@ -1122,6 +1126,18 @@ impl<N: Node> Children<N> for Children2<N> {
 			replace(&mut children.0, Some(child))
 		} else {
 			replace(&mut children.1, Some(child))
+		}
+	}
+	fn remove_child(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) {
+		if let Some(children) = self.0.as_mut() {
+			if index {
+				children.0 = None;
+			} else {
+				children.1 = None;
+			}
 		}
 	}
 	fn number_child(
@@ -1254,6 +1270,17 @@ impl<N: Node> Children<N> for Children256<N> {
 		}
 		result
 	}
+	fn remove_child(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) {
+		if let Some(children) = self.0.as_mut() {
+			let result = replace(&mut children[index as usize], None);
+			if result.is_some() {
+				self.1 -= 1;
+			}
+		}
+	}
 	fn number_child(
 		&self,
 	) -> usize {
@@ -1297,6 +1324,12 @@ macro_rules! flatten_children {
 				child: $inner_children_type,
 			) -> Option<$inner_children_type> {
 				self.0.set_child(index, child)
+			}
+			fn remove_child(
+				&mut self,
+				index: <Self::Radix as RadixConf>::KeyIndex,
+			) {
+				self.0.remove_child(index)
 			}
 			fn number_child(
 				&self,
