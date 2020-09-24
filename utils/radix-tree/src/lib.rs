@@ -189,7 +189,7 @@ pub trait Node: Clone + PartialEq + Debug {
 	fn remove_child(
 		&mut self,
 		index: KeyIndexFor<Self>,
-	);
+	) -> Option<Self>;
 	fn fuse_child(
 		&mut self,
 		key: &[u8],
@@ -948,7 +948,7 @@ impl<P, C> Node for NodeOld<P, C>
 	fn remove_child(
 		&mut self,
 		index: KeyIndexFor<Self>,
-	) {
+	) -> Option<Self> {
 		self.children.remove_child(index)
 	}
 	fn split_off(
@@ -972,7 +972,24 @@ impl<P, C> Node for NodeOld<P, C>
 		&mut self,
 		key: &[u8],
 	) {
-		unimplemented!()
+		if let Some(index) = self.children.first() {
+			if let Some(mut child) = self.children.remove_child(index) {
+				let position = PositionFor::<Self> {
+					index: 0,
+					mask: self.key.start,
+				};
+				let position_start = position.next_by::<P>(self.depth());
+				position_start.set_index::<P>(&mut self.key.data, index);
+				let position_cat = position.next::<P>();
+				child.new_end(&mut self.key.data, position_cat);
+				self.key.end = child.key.end;
+				self.children = child.children;
+			} else {
+				unreachable!("fuse condition checked");
+			}
+		} else {
+			unreachable!("fuse condition checked");
+		}
 	}
 	fn change_start(
 		&mut self,
@@ -1052,7 +1069,7 @@ pub trait Children<N>: Clone + Debug + PartialEq {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	);
+	) -> Option<N>;
 	fn number_child(
 		&self,
 	) -> usize;
@@ -1064,6 +1081,26 @@ pub trait Children<N>: Clone + Debug + PartialEq {
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N>;
+	fn first(
+		&self,
+	) -> Option<<Self::Radix as RadixConf>::KeyIndex> {
+		let mut ix = <Self::Radix as RadixConf>::KeyIndex::zero();
+		loop {
+			// TODO avoid this double query? (need unsafe)
+			// at least make a contains_child fn.
+			let result = self.get_child(ix);
+			if result.is_some() {
+				return Some(ix)
+			}
+
+			ix = if let Some(ix) = ix.next() {
+				ix
+			} else {
+				break;
+			};
+		}
+		None
+	}
 }
 
 pub trait NodeIndex: Clone + Copy + Debug + PartialEq {
@@ -1131,13 +1168,15 @@ impl<N: Node> Children<N> for Children2<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) {
+	) -> Option<N> {
 		if let Some(children) = self.0.as_mut() {
 			if index {
-				children.0 = None;
+				replace(&mut children.0, None)
 			} else {
-				children.1 = None;
+				replace(&mut children.1, None)
 			}
+		} else {
+			None
 		}
 	}
 	fn number_child(
@@ -1273,12 +1312,15 @@ impl<N: Node> Children<N> for Children256<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) {
+	) -> Option<N> {
 		if let Some(children) = self.0.as_mut() {
 			let result = replace(&mut children[index as usize], None);
 			if result.is_some() {
 				self.1 -= 1;
 			}
+			result
+		} else {
+			None
 		}
 	}
 	fn number_child(
@@ -1328,7 +1370,7 @@ macro_rules! flatten_children {
 			fn remove_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) {
+			) -> Option<$inner_children_type> {
 				self.0.remove_child(index)
 			}
 			fn number_child(
@@ -2153,6 +2195,7 @@ pub mod test_256 {
 	#[test]
 	fn replay_insert_remove_fuzzing() {
 		let datas = [
+			vec![0, 0, 0, 0, 0, 0, 0, 195, 0, 0, 195, 0, 0, 0],
 			vec![0, 0, 5, 75, 9, 1, 48, 58, 17, 9, 17, 9, 0],
 			vec![0, 0, 8, 0, 0, 0, 0, 0],
 			vec![0, 0, 70, 0, 3, 61, 0, 0],
