@@ -983,6 +983,7 @@ impl<P, C> Node for NodeOld<P, C>
 				let position_cat = position.next::<P>();
 				child.new_end(&mut self.key.data, position_cat);
 				self.key.end = child.key.end;
+				self.value = child.value;
 				self.children = child.children;
 			} else {
 				unreachable!("fuse condition checked");
@@ -2195,6 +2196,7 @@ pub mod test_256 {
 	#[test]
 	fn replay_insert_remove_fuzzing() {
 		let datas = [
+			vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 96, 0, 16, 96],
 			vec![0, 0, 0, 0, 0, 0, 0, 195, 0, 0, 195, 0, 0, 0],
 			vec![0, 0, 5, 75, 9, 1, 48, 58, 17, 9, 17, 9, 0],
 			vec![0, 0, 8, 0, 0, 0, 0, 0],
