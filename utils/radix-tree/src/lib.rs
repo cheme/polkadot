@@ -1838,8 +1838,8 @@ impl<N: Node> Tree<N> {
 					Descent::Child(child_position, index) => {
 						if current.get_child(index).is_some() {
 							if let Some(child) = current.get_child_mut(index) {
-								//position = child_position.next::<N::Radix>();
-								position = child_position;
+								position = child_position.next::<N::Radix>();
+								//position = child_position;
 								current = child;
 							} else {
 								unreachable!("tested above")
@@ -2120,6 +2120,7 @@ pub mod test_256 {
 	#[test]
 	fn replay_insert_remove_fuzzing() {
 		let datas = [
+			vec![0, 0, 8, 0, 0, 0, 0, 0],
 			vec![0, 0, 70, 0, 3, 61, 0, 0],
 			vec![0u8, 202, 1, 4, 64, 49, 0, 0],
 		];
