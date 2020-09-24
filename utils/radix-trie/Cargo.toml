@@ -1,0 +1,23 @@
+[package]
+name = "prefixtree"
+version = "0.8.0-rc3"
+authors = ["Parity Technologies <admin@parity.io>"]
+description = "Radix trie traits and implementations."
+repository = "https://github.com/cheme/prefixtree"
+license = "Apache-2.0"
+categories = [ "no-std" ]
+edition = "2018"
+
+
+[dependencies]
+derivative = { version = "2.1", features = ["use_core"] }
+#smallvec = "1.0.0"
+
+[dev-dependencies]
+#criterion = "0.2.8"
+
+
+[features]
+default = ["std"]
+std = [
+]
