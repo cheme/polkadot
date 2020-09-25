@@ -145,12 +145,11 @@ type KeyIndexFor<N> = <<N as Node>::Radix as RadixConf>::KeyIndex;
 pub trait Node: Clone + PartialEq + Debug {
 	type Radix: RadixConf;
 	type InitFrom: Clone;
-	fn new<C: Children<Node = NodeOld<Self, C>, Radix = Self::Radix>>(
+	fn new(
 		key: &[u8],
 		start_position: PositionFor<Self>,
 		end_position: PositionFor<Self>,
 		value: Option<Vec<u8>>,
-		children: &mut C,
 		init: Self::InitFrom,
 	) -> Self;
 	fn descend(
@@ -201,6 +200,12 @@ pub trait Node: Clone + PartialEq + Debug {
 		&self,
 		stack: &mut Vec<u8>,
 		node_position: PositionFor<Self>,
+	);
+	fn signal_change(
+		&mut self,
+	);
+	fn signal_delete(
+		self,
 	);
 }
 
@@ -861,7 +866,7 @@ impl<N, C> NodeOld<N, C>
 			start_position,
 			end_position,
 			value,
-			&mut children,
+//			&mut children,
 			init,
 		);
 		NodeOld {
@@ -890,18 +895,24 @@ impl<N, C> NodeOld<N, C>
 	pub fn value_mut(
 		&mut self,
 	) -> Option<&mut Vec<u8>> {
+		self.internal.signal_change();
 		self.internal.value_mut()
 	}
 	pub fn set_value(
 		&mut self,
 		value: Vec<u8>,
 	) -> Option<Vec<u8>> {
+		self.internal.signal_change();
 		self.internal.set_value(value)
 	}
 	pub fn remove_value(
 		&mut self,
 	) -> Option<Vec<u8>> {
-		self.internal.remove_value()
+		let result = self.internal.remove_value();
+		if result.is_some() {
+			self.internal.signal_change();
+		}
+		result
 	}
 	pub fn number_child(
 		&self,
@@ -925,19 +936,27 @@ impl<N, C> NodeOld<N, C>
 		index: KeyIndexFor<N>,
 		child: Self,
 	) -> Option<Self> {
+		self.internal.signal_change();
 		self.children.set_child(index, child)
 	}
 	pub fn remove_child(
 		&mut self,
 		index: KeyIndexFor<N>,
-	) -> Option<Self> {
-		self.children.remove_child(index)
+	) -> bool {
+		let result = self.children.remove_child(index);
+		if result.is_some() {
+			self.internal.signal_change();
+			result.map(|node| node.internal.signal_delete()).is_some()
+		} else {
+			false
+		}
 	}
 	pub fn split_off(
 		&mut self,
 		position: PositionFor<N>,
 		at: PositionFor<N>,
 	) {
+		self.internal.signal_change();
 		self.internal.split_off(
 			position,
 			at,
@@ -947,8 +966,11 @@ impl<N, C> NodeOld<N, C>
 	pub fn fuse_child(
 		&mut self,
 		key: &[u8],
-	) -> Option<Self> {
-		self.internal.fuse_child(key, &mut self.children)
+	) {
+		if let Some(child) = self.internal.fuse_child(key, &mut self.children) {
+			self.internal.signal_change();
+			child.internal.signal_delete();
+		}
 	}
 	pub fn change_start(
 		&mut self,
@@ -962,7 +984,8 @@ impl<N, C> NodeOld<N, C>
 	pub fn new_end(
 		&self,
 		stack: &mut Vec<u8>,
-		node_position: PositionFor<N>) {
+		node_position: PositionFor<N>,
+	) {
 		self.internal.new_end(stack, node_position)
 	}
 }
@@ -974,12 +997,11 @@ impl<P> Node for NodeInternal<P>
 	type Radix = P;
 	type InitFrom = ();
 
-	fn new<C: Children<Node = NodeOld<Self, C>, Radix = P>>(
+	fn new(
 		key: &[u8],
 		start_position: PositionFor<Self>,
 		end_position: PositionFor<Self>,
 		value: Option<Vec<u8>>,
-		_children: &mut C,
 		_init: Self::InitFrom,
 	) -> Self {
 		Self {
@@ -1128,6 +1150,14 @@ impl<P> Node for NodeInternal<P>
 			stack[node_position.index] = start;
 			stack[node_position_end.index] = end;
 		}
+	}
+	fn signal_change(
+		&mut self,
+	) {
+	}
+	fn signal_delete(
+		self,
+	) {
 	}
 }
 

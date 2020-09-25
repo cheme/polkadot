@@ -18,7 +18,7 @@
 //! Use a backend for existing nodes.
 
 use crate::{Node, PositionFor, Descent, KeyIndexFor, MaskFor,
-	Position, MaskKeyByte, NodeIndex};
+	Position, MaskKeyByte, NodeIndex, NodeOld, Children};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use core::marker::PhantomData;
@@ -49,8 +49,8 @@ impl Backend for HashMap<Vec<u8>, Vec<u8>> {
 	}
 }
 
-pub trait NodeBackend<N>: Clone {
-	fn get_node(&self, k: &[u8]) -> Option<N>;
+pub trait NodeBackend<N, C>: Clone {
+	fn get_node(&self, k: &[u8]) -> Option<(N, C)>;
 }
 
 #[derive(Derivative)]
@@ -70,14 +70,15 @@ fn key_from_addressed<N: Node>(
 	unimplemented!();
 }
 
-fn decode_node<N, B: Clone>(
+fn decode_node<N, C, B: Clone>(
 	key: &[u8],
 	mut encoded: &[u8],
 	init: N::InitFrom,
 	backend: &B,
-) -> core::result::Result<N, CodecError>
+) -> core::result::Result<(N, C), CodecError>
 	where
 		N: Node,
+		C: Children<Node = NodeOld<LazyNode<B, N>, C>, Radix = N::Radix>,
 		MaskFor<N::Radix>: Decode,
 {
 	let mut input = &mut encoded;
@@ -101,12 +102,13 @@ fn decode_node<N, B: Clone>(
 	};
 
 	let value: Option<Vec<u8>> = Decode::decode(input)?;
+	let mut children = C::empty();
 	let mut node = N::new(
 		prefix.as_slice(),
 		start,
 		end,
 		value,
-		init,	
+		init,
 	);
 
 	let mut key_index = KeyIndexFor::<N>::zero();
@@ -115,14 +117,17 @@ fn decode_node<N, B: Clone>(
 	let mut child_key = key.to_vec();
 	let child_position = end.next::<N::Radix>();
 	loop {
-		if let Some(children) = input.get(input_index) {
-			if children & 0b1000_0000 >> byte_index != 0 {
+		if let Some(children_mask) = input.get(input_index) {
+			if children_mask & 0b1000_0000 >> byte_index != 0 {
 				child_position.set_index::<N::Radix>(&mut child_key, key_index);
-				let key = key_addressed(&child_key[..], child_position);
-				node.set_child(key_index, LazyNode::Unresolved(UnresolvedBackedNode {
-					key,
-					backend: backend.clone(),
-				}))
+				let key = key_addressed::<N>(&child_key[..], child_position);
+				children.set_child(key_index, NodeOld {
+					internal: LazyNode::Unresolved(UnresolvedBackedNode {
+						key,
+						backend: backend.clone(),
+					}),
+					children: C::empty(),
+				});
 			}
 
 			if byte_index == 8 {
@@ -139,20 +144,37 @@ fn decode_node<N, B: Clone>(
 		}
 	}
 
-	Ok(node)
+	Ok((node, children))
 }
 
-impl<B, N> NodeBackend<N> for SingleThreadBackend<B>
+impl<B, N, C> NodeBackend<N, C> for SingleThreadBackend<B>
 	where
 		B: Backend,
 		N: Node<InitFrom = ()>,
+		C: Children<Node = NodeOld<LazyNode<B, N>, C>, Radix = N::Radix>,
 		MaskFor<N::Radix>: Decode,
 {
-	fn get_node(&self, k: &[u8]) -> Option<N> {
+	fn get_node(&self, k: &[u8]) -> Option<(N, C)> {
 		self.0.borrow().read(k).and_then(|encoded| {
 			decode_node(k, encoded.as_slice(), (), &self).ok()
 		})
 	}
+/*	fn get_node(&self, k: &[u8]) -> Option<N> {
+		self.0.borrow().read(k).and_then(|encoded| {
+			decode_node(k, encoded.as_slice(), (), &self).map(|(node, children)|
+				NodeOld {
+					internal: LazyNode::Resolved(BackedNode {
+						inner: node,
+						key: k.to_vec(),
+						changed: false,
+						backend: self.clone(),
+					}),
+					children,
+				}
+			).ok()
+		})
+	}
+*/
 }
 
 /// The backend to use for a tree.
@@ -445,5 +467,10 @@ impl<B, N> Node for LazyNode<B, N>
 	) {
 		self.set_changed();
 		self.inner().new_end(stack, node_position)
+	}
+	fn signal_change(
+		&mut self,
+	) {
+		self.set_changed()
 	}
 }
