@@ -18,7 +18,7 @@
 //! Use a backend for existing nodes.
 
 use crate::{Node, PositionFor, Descent, KeyIndexFor, MaskFor,
-	Position, MaskKeyByte, NodeIndex, NodeOld, Children};
+	Position, MaskKeyByte, NodeIndex, NodeOld, Children, NodeExt};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use core::marker::PhantomData;
@@ -31,13 +31,20 @@ use derivative::Derivative;
 type Key = Vec<u8>;
 
 /// The backend to use for a tree.
-pub trait Backend {
+pub trait BackendInner {
 	fn write(&mut self, k: Vec<u8>, v: Vec<u8>);
 	fn remove(&mut self, k: &[u8]);
 	fn read(&self, k: &[u8]) -> Option<Vec<u8>>;
 }
 
-impl Backend for HashMap<Vec<u8>, Vec<u8>> {
+/// The backend to use for a tree.
+pub trait Backend: Clone {
+	fn write(&self, k: Vec<u8>, v: Vec<u8>);
+	fn remove(&self, k: &[u8]);
+	fn read(&self, k: &[u8]) -> Option<Vec<u8>>;
+}
+
+impl BackendInner for HashMap<Vec<u8>, Vec<u8>> {
 	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
 		self.insert(k, v);
 	}
@@ -49,8 +56,8 @@ impl Backend for HashMap<Vec<u8>, Vec<u8>> {
 	}
 }
 
-pub trait NodeBackend<N, C>: Clone {
-	fn get_node(&self, k: &[u8]) -> Option<(N, C)>;
+pub trait NodeBackend<N>: Clone {
+	fn get_node(&self, k: &[u8]) -> Option<N>;
 }
 
 #[derive(Derivative)]
@@ -70,18 +77,17 @@ fn key_from_addressed<N: Node>(
 	unimplemented!();
 }
 
-fn decode_node<N, C, B: Clone>(
+fn decode_node<N, B: Backend>(
 	key: &[u8],
 	mut encoded: &[u8],
-	init: N::InitFrom,
+	init: &N::InitFrom,
 	backend: &B,
-) -> core::result::Result<(N, C), CodecError>
+) -> core::result::Result<N, CodecError>
 	where
-		N: Node,
-		C: Children<Node = NodeOld<LazyNode<B, N>, C>, Radix = N::Radix>,
+		N: Node<NodeExt = LazyExt<B>>,
 		MaskFor<N::Radix>: Decode,
 {
-	let mut input = &mut encoded;
+	let input = &mut encoded;
 	let start_mask: MaskFor<N::Radix> = Decode::decode(input)?;
 	let start = PositionFor::<N> {
 		index: 0,
@@ -102,13 +108,14 @@ fn decode_node<N, C, B: Clone>(
 	};
 
 	let value: Option<Vec<u8>> = Decode::decode(input)?;
-	let mut children = C::empty();
+	let node_key = key_addressed::<N>(&key[..], start);
 	let mut node = N::new(
 		prefix.as_slice(),
 		start,
 		end,
 		value,
-		init,
+		init.clone(),
+		LazyExt::Resolved(node_key, backend.clone(), false),
 	);
 
 	let mut key_index = KeyIndexFor::<N>::zero();
@@ -121,13 +128,14 @@ fn decode_node<N, C, B: Clone>(
 			if children_mask & 0b1000_0000 >> byte_index != 0 {
 				child_position.set_index::<N::Radix>(&mut child_key, key_index);
 				let key = key_addressed::<N>(&child_key[..], child_position);
-				children.set_child(key_index, NodeOld {
-					internal: LazyNode::Unresolved(UnresolvedBackedNode {
-						key,
-						backend: backend.clone(),
-					}),
-					children: C::empty(),
-				});
+				node.set_child(key_index, N::new(
+					&[],
+					child_position,
+					child_position,
+					None,
+					init.clone(),
+					LazyExt::Unresolved(key, backend.clone()),
+				));
 			}
 
 			if byte_index == 8 {
@@ -144,26 +152,37 @@ fn decode_node<N, C, B: Clone>(
 		}
 	}
 
-	Ok((node, children))
+	Ok(node)
 }
 
-impl<B, N, C> NodeBackend<N, C> for SingleThreadBackend<B>
+impl<B: BackendInner> Backend for SingleThreadBackend<B> {
+	fn write(&self, k: Vec<u8>, v: Vec<u8>) {
+		self.0.borrow_mut().write(k, v)
+	}
+	fn remove(&self, k: &[u8]) {
+		self.0.borrow_mut().remove(k)
+	}
+	fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
+		self.0.borrow().read(k)
+	}
+}
+
+impl<B, N> NodeBackend<N> for SingleThreadBackend<B>
 	where
-		B: Backend,
-		N: Node<InitFrom = ()>,
-		C: Children<Node = NodeOld<LazyNode<B, N>, C>, Radix = N::Radix>,
+		B: BackendInner,
+		N: Node<InitFrom = (), NodeExt = LazyExt<Self>>,
 		MaskFor<N::Radix>: Decode,
 {
-	fn get_node(&self, k: &[u8]) -> Option<(N, C)> {
+	fn get_node(&self, k: &[u8]) -> Option<N> {
 		self.0.borrow().read(k).and_then(|encoded| {
-			decode_node(k, encoded.as_slice(), (), &self).ok()
+			decode_node(k, encoded.as_slice(), &(), self).ok()
 		})
 	}
 /*	fn get_node(&self, k: &[u8]) -> Option<N> {
 		self.0.borrow().read(k).and_then(|encoded| {
 			decode_node(k, encoded.as_slice(), (), &self).map(|(node, children)|
 				NodeOld {
-					internal: LazyNode::Resolved(BackedNode {
+					internal: LazyExt::Resolved(BackedNode {
 						inner: node,
 						key: k.to_vec(),
 						changed: false,
@@ -191,99 +210,89 @@ pub struct TransactionBackend<B, N> {
 
 #[derive(Derivative)]
 #[derivative(Clone)]
-#[derivative(PartialEq(bound="N: PartialEq"))]
-#[derivative(Debug(bound="N: Debug"))]
-/// Node using a backend
-pub struct BackedNode<B, N> {
-	inner: N,
-	key: Key,
-	changed: bool,
-	#[derivative(Debug="ignore")]
-	#[derivative(PartialEq="ignore")]
-	backend: B,
-}
-
-#[derive(Derivative)]
-#[derivative(Clone)]
-#[derivative(PartialEq(bound=""))]
-#[derivative(Debug(bound=""))]
-/// Unresolved node.
-///
-/// Note  that `Eq` only works when
-/// using the same backend (we do
-/// not do backend equality check).
-/// This is also true for `LazyNode`.
-pub struct UnresolvedBackedNode<B> {
-	key: Key,
-	#[derivative(Debug="ignore")]
-	#[derivative(PartialEq="ignore")]
-	backend: B,
-}
-
-#[derive(Derivative)]
-#[derivative(Clone)]
-#[derivative(PartialEq(bound=""))]
-#[derivative(Debug(bound=""))]
-pub struct DeletedBackedNode<B> {
-	key: Key,
-	#[derivative(Debug="ignore")]
-	#[derivative(PartialEq="ignore")]
-	backend: B,
-}
-
-#[derive(Derivative)]
-#[derivative(Clone)]
-#[derivative(PartialEq(bound="N: PartialEq"))]
-#[derivative(Debug(bound="N: Debug"))]
 /// Resolved from backend on 
-pub enum LazyNode<B, N> {
-	Unresolved(UnresolvedBackedNode<B>),
-	Resolved(BackedNode<B, N>),
-	Deleted(DeletedBackedNode<B>), // TODO variant can be removed as it is not usable
+/// TODO rename
+pub enum LazyExt<B> {
+	Unresolved(Key, B),
+	Resolved(Key, B, bool),
 }
 
-impl<B, N> LazyNode<B, N>
+impl<B: Backend> NodeExt for LazyExt<B> {
+	fn new_node() -> Self {
+		unimplemented!("need to resolve key and from backend");
+		//LazyExt::Resolved(key, )
+	}
+	fn resolve<N: Node<NodeExt = Self>>(node: &N) {
+		match node.ext() {
+			LazyExt::Resolved(..) => (),
+			_ => unimplemented!("Backend must be use as mutable due to lazy nature"),
+		}
+	}
+	fn resolve_mut<N: Node<NodeExt = Self>>(node: &mut N) {
+		match node.ext_mut() {
+			LazyExt::Resolved(..) => (),
+			LazyExt::Unresolved(key, backend) => {
+				unimplemented!("TODO fetch form backend and fresh unchanged resolved");
+			},
+		}
+	}
+	fn set_change(&mut self) {
+		match self {
+			LazyExt::Resolved(_, _, changed) => {
+				*changed = true;
+			},
+			LazyExt::Unresolved(..) => panic!("Node need to be resolved first"),
+		}
+	}
+	fn delete<N: Node<NodeExt = Self>>(node: N) {
+		unimplemented!("Call backend delete for key of ext");
+	}
+	fn commit_change<N: Node<NodeExt = Self>>(node: &mut N) {
+		unimplemented!("Encode and call backend write for key of ext");
+	}
+}
+/*
+impl<B> LazyExt<B>
 	where
 		B: NodeBackend<N>,
 		N: Node<InitFrom = ()>,
-		MaskFor<N::Radix>: Decode,
 {
 	fn resolve(&mut self) {
 		match self {
-			LazyNode::Unresolved(..) => (),
-			LazyNode::Resolved(..) => return,
-			LazyNode::Deleted(..) => panic!("can't resolve a deleted node"),
+			LazyExt::Unresolved(..) => (),
+			LazyExt::Resolved(..) => return,
+			LazyExt::Deleted(..) => panic!("can't resolve a deleted node"),
 		};
 
 		*self = match *self {
-			LazyNode::Unresolved(
+			LazyExt::Unresolved(
 				UnresolvedBackedNode { key, backend }
 			) => {
 				let inner = backend.get_node(key.as_slice())
 					.expect("Backend corrupted, missing tree node");
 
-				LazyNode::Resolved(BackedNode {
+				LazyExt::Resolved(BackedNode {
 					inner,
 					key,
 					changed: false,
 					backend,
 				})
 			},
-			LazyNode::Resolved(..) => return,
-			LazyNode::Deleted(..) => panic!("can't resolve a deleted node"),
+			LazyExt::Resolved(..) => return,
+			LazyExt::Deleted(..) => panic!("can't resolve a deleted node"),
 		};
 	}
 	fn delete(self) {
 		let (key, backend) = match self {
-			LazyNode::Unresolved(
+			LazyExt::Unresolved(
 				UnresolvedBackedNode { key, backend }
 			) => (key, backend),
-			LazyNode::Resolved(
+			LazyExt::Resolved(
 				BackedNode { key, backend, .. }
 			) => (key, backend),
-			LazyNode::Deleted(..) => return,
+			LazyExt::Deleted(..) => return,
 		};
-		self = LazyNode::Deleted(DeletedBackedNode {key, backend});
+		self = LazyExt::Deleted(DeletedBackedNode {key, backend});
 	}
 	fn delete_clone(self) -> Self {
 		let result = self.clone();
@@ -298,179 +307,32 @@ impl<B, N> LazyNode<B, N>
 	}
 	fn inner(&self) -> &N {
 		match self {
-			LazyNode::Resolved(BackedNode { inner, .. }) => &inner,
+			LazyExt::Resolved(BackedNode { inner, .. }) => &inner,
 			_ => unimplemented!("Backend must be use as mutable due to lazy nature"),
 		}
 	}
 	fn inner_mut(&mut self) -> &mut N {
 		match self {
-			LazyNode::Unresolved(..) => self.resolve(),
-			LazyNode::Resolved(..) => (),
-			LazyNode::Deleted(..) => panic!("Trying to access a deleted node"),
+			LazyExt::Unresolved(..) => self.resolve(),
+			LazyExt::Resolved(..) => (),
+			LazyExt::Deleted(..) => panic!("Trying to access a deleted node"),
 		}
 		match self {
-			LazyNode::Resolved(BackedNode { inner, .. }) => &mut inner,
+			LazyExt::Resolved(BackedNode { inner, .. }) => &mut inner,
 			_ => unreachable!(),
 		}
 	}
 	fn set_changed(&mut self) {
 		match self {
-			LazyNode::Unresolved(..) => self.resolve(),
-			LazyNode::Resolved(..) => (),
-			LazyNode::Deleted(..) => panic!("Trying to access a deleted node"),
+			LazyExt::Unresolved(..) => self.resolve(),
+			LazyExt::Resolved(..) => (),
+			LazyExt::Deleted(..) => panic!("Trying to access a deleted node"),
 		}
 		match self {
-			LazyNode::Resolved(BackedNode { changed, .. }) => {
+			LazyExt::Resolved(BackedNode { changed, .. }) => {
 				*changed = true;
 			},
 			_ => unreachable!(),
 		}
 	}
-}
-
-impl<B, N> Node for LazyNode<B, N>
-	where
-		B: NodeBackend<N>,
-		N: Node<InitFrom = ()>,
-		MaskFor<N::Radix>: Decode,
-{
-	type Radix = <N as Node>::Radix;
-	type InitFrom = B;
-
-	fn new(
-		key: &[u8],
-		start_position: PositionFor<Self>,
-		end_position: PositionFor<Self>,
-		value: Option<Vec<u8>>,
-		init: Self::InitFrom,
-	) -> Self {
-		let inner = N::new(key, start_position, end_position, value, ());
-		let key = Self::key_addressed(key, start_position);
-		LazyNode::Resolved(BackedNode {
-			inner,
-			key,
-			changed: true,
-			backend: init,
-		})
-	}
-	fn descend(
-		&self,
-		key: &[u8],
-		node_position: PositionFor<Self>,
-		// exclusive
-		dest_position: PositionFor<Self>,
-	) -> Descent<Self::Radix> {
-		self.inner().descend(key, node_position, dest_position)
-	}
-	fn depth(
-		&self,
-	) -> usize {
-		self.inner().depth()
-	}
-	fn value(
-		&self,
-	) -> Option<&[u8]> {
-		self.inner().value()
-	}
-	fn value_mut(
-		&mut self,
-	) -> Option<&mut Vec<u8>> {
-		self.set_changed();
-		// TODO warn or unimplement, or safer api: this can create bad
-		// overwrites
-		self.inner_mut().value_mut()
-	}
-	fn set_value(
-		&mut self,
-		value: Vec<u8>,
-	) -> Option<Vec<u8>> {
-		self.set_changed();
-		self.inner_mut().set_value(value)
-	}
-	fn remove_value(
-		&mut self,
-	) -> Option<Vec<u8>> {
-		if self.inner().value().is_some() {
-			self.set_changed();
-			self.inner_mut().remove_value()
-		} else {
-			None
-		}
-	}
-	fn number_child(
-		&self,
-	) -> usize {
-		self.inner().number_child()
-	}
-	fn get_child(
-		&self,
-		index: KeyIndexFor<Self>,
-	) -> Option<&Self> {
-		unimplemented!("Backend must be use as mutable due to lazy nature");
-	}
-	fn set_child(
-		&mut self,
-		index: KeyIndexFor<Self>,
-		child: Self,
-	) -> Option<Self> {
-		self.set_changed();
-		self.inner_mut().set_child(index, child)
-	}
-	fn remove_child(
-		&mut self,
-		index: KeyIndexFor<Self>,
-	) -> Option<Self> {
-		if self.inner_mut().get_child(index).is_some() {
-			self.set_changed();
-			let result = self.inner_mut().remove_child();
-			result.map(|node| node.delete_clone())
-		} else {
-			None
-		}
-	}
-	fn fuse_child(
-		&mut self,
-		key: &[u8],
-	) -> Option<Self> {
-		self.set_changed();
-		if let Some(child) = self.inner_mut().fuse_child(key) {
-			child.delete();
-		}
-		None
-	}
-	fn split_off(
-		&mut self,
-		position: PositionFor<Self>,
-		at: PositionFor<Self>,
-	) {
-		self.set_changed();
-		self.inner_mut().split_off(position, at);
-	}
-	fn change_start(
-		&mut self,
-		key: &[u8],
-		new_start: PositionFor<Self>,
-	) {
-		self.set_changed();
-		self.inner_mut().change_start(key, new_start);
-	}
-	fn get_child_mut(
-		&mut self,
-		index: KeyIndexFor<Self>,
-	) -> Option<&mut Self> {
-		self.inner_mut().get_child_mut(index)
-	}
-	fn new_end(
-		&self,
-		stack: &mut Vec<u8>,
-		node_position: PositionFor<Self>,
-	) {
-		self.set_changed();
-		self.inner().new_end(stack, node_position)
-	}
-	fn signal_change(
-		&mut self,
-	) {
-		self.set_changed()
-	}
-}
+}*/

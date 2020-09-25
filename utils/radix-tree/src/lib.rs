@@ -29,7 +29,7 @@
 // mask cannot be 0 !!! TODO move this in key impl documentation
 extern crate alloc;
 
-//pub mod backend;
+pub mod backend;
 
 //use alloc::raw_vec::RawVec;
 use derivative::Derivative;
@@ -39,6 +39,7 @@ use alloc::borrow::Borrow;
 use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::mem::replace;
+use codec::{Codec, Encode, Decode, Error as CodecError};
 
 /*#[cfg(not(feature = "std"))]
 extern crate alloc; // TODO check if needed in 2018 and if needed at all
@@ -142,8 +143,32 @@ pub trait RadixConf {
 type PositionFor<N> = Position<<<N as Node>::Radix as RadixConf>::Alignment>;
 type KeyIndexFor<N> = <<N as Node>::Radix as RadixConf>::KeyIndex;
 
+// TODO rename to backend hook
+pub trait NodeExt: Clone {
+	fn new_node() -> Self;
+	fn resolve<N: Node<NodeExt = Self>>(node: &N);
+	fn resolve_mut<N: Node<NodeExt = Self>>(node: &mut N);
+	fn set_change(&mut self);
+	fn delete<N: Node<NodeExt = Self>>(node: N);
+	fn commit_change<N: Node<NodeExt = Self>>(node: &mut N);
+}
+
+impl NodeExt for () {
+	fn new_node() -> Self {
+		()
+	}
+	fn resolve<N: Node<NodeExt = Self>>(_node: &N) { }
+	fn resolve_mut<N: Node<NodeExt = Self>>(_node: &mut N) { }
+	fn set_change(&mut self) { }
+	fn delete<N: Node<NodeExt = Self>>(_node: N) { }
+	fn commit_change<N: Node<NodeExt = Self>>(_node: &mut N) { }
+}
+
+// TODO this should be only aggregate of inner trait and all
+// impl in NodeOld that become Node.
 pub trait Node: Clone + PartialEq + Debug {
 	type Radix: RadixConf;
+	type NodeExt: NodeExt;
 	type InitFrom: Clone;
 	fn new(
 		key: &[u8],
@@ -151,6 +176,7 @@ pub trait Node: Clone + PartialEq + Debug {
 		end_position: PositionFor<Self>,
 		value: Option<Vec<u8>>,
 		init: Self::InitFrom,
+		ext: Self::NodeExt,
 	) -> Self;
 	fn descend(
 		&self,
@@ -175,25 +201,43 @@ pub trait Node: Clone + PartialEq + Debug {
 	fn remove_value(
 		&mut self,
 	) -> Option<Vec<u8>>; // TODO parameterized with V
-	fn split_off<C: Children<Node = NodeOld<Self, C>, Radix = Self::Radix>>(
+	fn number_child(
+		&self,
+	) -> usize;
+	fn get_child(
+		&self,
+		index: KeyIndexFor<Self>,
+	) -> Option<&Self>;
+	fn set_child(
 		&mut self,
-		position: PositionFor<Self>,
-		at: PositionFor<Self>,
-		children: &mut C,
-	);
+		index: KeyIndexFor<Self>,
+		child: Self,
+	) -> Option<Self>;
+	fn remove_child(
+		&mut self,
+		index: KeyIndexFor<Self>,
+	) -> Option<Self>;
 	/// Return the deleted child
 	/// for technical reason (backend),
 	/// its inner state is empty.
-	fn fuse_child<C: Children<Node = NodeOld<Self, C>, Radix = Self::Radix>>(
+	fn fuse_child(
 		&mut self,
 		key: &[u8],
-		children: &mut C,
-	) -> Option<NodeOld<Self, C>>;
+	);
+	fn split_off(
+		&mut self,
+		position: PositionFor<Self>,
+		at: PositionFor<Self>,
+	);
 	fn change_start(
 		&mut self,
 		key: &[u8],
 		new_start: PositionFor<Self>,
 	);
+	fn get_child_mut(
+		&mut self,
+		index: KeyIndexFor<Self>,
+	) -> Option<&mut Self>;
 	/// utility to stack the prefix of the node.
 	/// It truncate end of stack or can extend with 0.
 	fn new_end(
@@ -201,12 +245,12 @@ pub trait Node: Clone + PartialEq + Debug {
 		stack: &mut Vec<u8>,
 		node_position: PositionFor<Self>,
 	);
-	fn signal_change(
+	fn ext(
+		&self,
+	) -> &Self::NodeExt;
+	fn ext_mut(
 		&mut self,
-	);
-	fn signal_delete(
-		self,
-	);
+	) -> &mut Self::NodeExt;
 }
 
 pub struct Radix256Conf;
@@ -317,7 +361,7 @@ impl RadixConf for Radix2Conf {
 /// in an empty byte. Instead of an empty byte we should use
 /// the full byte configuration (`last`) at the previous index.
 /// TODO consider merging with RadixConf.
-pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
+pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug + Codec {
 	/// Mask left part of a byte.
 	fn mask(&self, byte: u8) -> u8;
 	/// Mask right part of a byte.
@@ -806,31 +850,23 @@ impl<'a, P> PrefixKey<&'a [u8], P>
 #[derivative(Clone)]
 #[derivative(Debug)]
 #[derivative(PartialEq)]
-/// Bind a Node implementation with its children implementation.
-pub struct NodeOld<N, C>
-	where
-//		C: Children<Self, Radix = P>,
-{
-	pub internal: N,
-	//pub left: usize,
-	//pub right: usize,
-	// TODO if backend behind, then Self would neeed to implement a Node trait with lazy loading...
-	pub children: C,
-}
-
-#[derive(Derivative)]
-#[derivative(Clone)]
-#[derivative(Debug)]
-#[derivative(PartialEq)]
-struct NodeInternal<P>
+struct NodeOld<P, C, E>
 	where
 		P: RadixConf,
+//		C: Children<Self, Radix = P>,
 {
 	// TODO this should be able to use &'a[u8] for iteration
 	// and querying.
 	pub key: PrefixKey<Vec<u8>, P::Alignment>,
 	//pub value: usize,
 	pub value: Option<Vec<u8>>,
+	//pub left: usize,
+	//pub right: usize,
+	// TODO if backend behind, then Self would neeed to implement a Node trait with lazy loading...
+	pub children: C,
+	#[derivative(Debug="ignore")]
+	#[derivative(PartialEq="ignore")]
+	pub ext: E,
 }
 
 /*
@@ -848,154 +884,16 @@ impl<P, C> NodeOld<P, C>
 	}
 }
 */
-impl<N, C> NodeOld<N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-	pub fn new(
-		key: &[u8],
-		start_position: PositionFor<N>,
-		end_position: PositionFor<N>,
-		value: Option<Vec<u8>>,
-		init: N::InitFrom,
-	) -> Self {
-		let mut children = C::empty();
-		let internal = N::new(
-			key,
-			start_position,
-			end_position,
-			value,
-//			&mut children,
-			init,
-		);
-		NodeOld {
-			internal,
-			children,
-		}
-	}
-	pub fn descend(
-		&self,
-		key: &[u8],
-		node_position: PositionFor<N>,
-		dest_position: PositionFor<N>,
-	) -> Descent<N::Radix> {
-		self.internal.descend(key, node_position, dest_position)
-	}
-	pub fn depth(
-		&self,
-	) -> usize {
-		self.internal.depth()
-	}
-	pub fn value(
-		&self,
-	) -> Option<&[u8]> {
-		self.internal.value()
-	}
-	pub fn value_mut(
-		&mut self,
-	) -> Option<&mut Vec<u8>> {
-		self.internal.signal_change();
-		self.internal.value_mut()
-	}
-	pub fn set_value(
-		&mut self,
-		value: Vec<u8>,
-	) -> Option<Vec<u8>> {
-		self.internal.signal_change();
-		self.internal.set_value(value)
-	}
-	pub fn remove_value(
-		&mut self,
-	) -> Option<Vec<u8>> {
-		let result = self.internal.remove_value();
-		if result.is_some() {
-			self.internal.signal_change();
-		}
-		result
-	}
-	pub fn number_child(
-		&self,
-	) -> usize {
-		self.children.number_child()
-	}
-	pub fn get_child(
-		&self,
-		index: KeyIndexFor<N>,
-	) -> Option<&Self> {
-		self.children.get_child(index)
-	}
-	pub fn get_child_mut(
-		&mut self,
-		index: KeyIndexFor<N>,
-	) -> Option<&mut Self> {
-		self.children.get_child_mut(index)
-	}
-	pub fn set_child(
-		&mut self,
-		index: KeyIndexFor<N>,
-		child: Self,
-	) -> Option<Self> {
-		self.internal.signal_change();
-		self.children.set_child(index, child)
-	}
-	pub fn remove_child(
-		&mut self,
-		index: KeyIndexFor<N>,
-	) -> bool {
-		let result = self.children.remove_child(index);
-		if result.is_some() {
-			self.internal.signal_change();
-			result.map(|node| node.internal.signal_delete()).is_some()
-		} else {
-			false
-		}
-	}
-	pub fn split_off(
-		&mut self,
-		position: PositionFor<N>,
-		at: PositionFor<N>,
-	) {
-		self.internal.signal_change();
-		self.internal.split_off(
-			position,
-			at,
-			&mut self.children,
-		)
-	}
-	pub fn fuse_child(
-		&mut self,
-		key: &[u8],
-	) {
-		if let Some(child) = self.internal.fuse_child(key, &mut self.children) {
-			self.internal.signal_change();
-			child.internal.signal_delete();
-		}
-	}
-	pub fn change_start(
-		&mut self,
-		key: &[u8],
-		new_start: PositionFor<N>,
-	) {
-		unimplemented!()
-	}
 
-	// TODO make it a trait function?
-	pub fn new_end(
-		&self,
-		stack: &mut Vec<u8>,
-		node_position: PositionFor<N>,
-	) {
-		self.internal.new_end(stack, node_position)
-	}
-}
-
-impl<P> Node for NodeInternal<P>
+impl<P, C, E> Node for NodeOld<P, C, E>
 	where
 		P: RadixConf,
+		E: NodeExt,
+		C: Children<Node = Self, Radix = P>,
 {
 	type Radix = P;
-	type InitFrom = ();
+	type InitFrom = (); // TODO delete InitFrom?
+	type NodeExt = E;
 
 	fn new(
 		key: &[u8],
@@ -1003,10 +901,13 @@ impl<P> Node for NodeInternal<P>
 		end_position: PositionFor<Self>,
 		value: Option<Vec<u8>>,
 		_init: Self::InitFrom,
+		ext: Self::NodeExt,
 	) -> Self {
-		Self {
+		NodeOld {
 			key: PrefixKey::new_offset(key, start_position, end_position),
 			value,
+			children: C::empty(),
+			ext,
 		}
 	}
 	fn descend(
@@ -1069,33 +970,69 @@ impl<P> Node for NodeInternal<P>
 	) -> Option<Vec<u8>> {
 		replace(&mut self.value, None)
 	}
-	fn split_off<C: Children<Node = NodeOld<Self, C>, Radix = P>>(
+	fn number_child(
+		&self,
+	) -> usize {
+		self.children.number_child()
+	}
+	fn get_child(
+		&self,
+		index: KeyIndexFor<Self>,
+	) -> Option<&Self> {
+		E::resolve(self);
+		self.children.get_child(index)
+	}
+	fn get_child_mut(
+		&mut self,
+		index: KeyIndexFor<Self>,
+	) -> Option<&mut Self> {
+		E::resolve_mut(self);
+		self.children.get_child_mut(index)
+	}
+	fn set_child(
+		&mut self,
+		index: KeyIndexFor<Self>,
+		child: Self,
+	) -> Option<Self> {
+		self.ext.set_change();
+		self.children.set_child(index, child)
+	}
+	fn remove_child(
+		&mut self,
+		index: KeyIndexFor<Self>,
+	) -> Option<Self> {
+		let result = self.children.remove_child(index);
+		if result.is_some() {
+			self.ext.set_change();
+		}
+		result
+	}
+	fn split_off(
 		&mut self,
 		position: PositionFor<Self>,
 		mut at: PositionFor<Self>,
-		children: &mut C,
 	) {
 		at.index -= position.index;
 		let index = self.key.index::<P>(at);
 		let child_prefix = self.key.split_off::<P>(at);
 		let child_value = self.value.take();
-		let child_children = replace(children, C::empty());
+		let child_children = replace(&mut self.children, C::empty());
 		let child = NodeOld {
-			internal: Self {
-				key: child_prefix,
-				value: child_value,
-			},
+			key: child_prefix,
+			value: child_value,
 			children: child_children,
+			ext: E::new_node(), 
 		};
-		children.set_child(index, child);
+		self.children.set_child(index, child);
+		self.ext.set_change();
 	}
-	fn fuse_child<C: Children<Node = NodeOld<Self, C>, Radix = P>>(
+	fn fuse_child(
 		&mut self,
 		key: &[u8],
-		children: &mut C,
-	) -> Option<NodeOld<Self, C>> {
-		if let Some(index) = children.first() {
-			if let Some(mut child) = children.remove_child(index) {
+	) {
+		if let Some(index) = self.children.first() {
+			if let Some(mut child) = self.children.remove_child(index) {
+				E::resolve_mut(&mut child);
 				let position = PositionFor::<Self> {
 					index: 0,
 					mask: self.key.start,
@@ -1104,17 +1041,16 @@ impl<P> Node for NodeInternal<P>
 				position_start.set_index::<P>(&mut self.key.data, index);
 				let position_cat = position.next::<P>();
 				child.new_end(&mut self.key.data, position_cat);
-				self.key.end = child.internal.key.end;
-				self.value = child.internal.value.take();
-				*children = replace(&mut child.children, C::empty());
-				return Some(child);
+				self.key.end = child.key.end;
+				self.value = child.value.take();
+				self.children = replace(&mut child.children, C::empty());
+				E::delete(child);
 			} else {
 				unreachable!("fuse condition checked");
 			}
 		} else {
 			unreachable!("fuse condition checked");
 		}
-		None
 	}
 	fn change_start(
 		&mut self,
@@ -1151,31 +1087,33 @@ impl<P> Node for NodeInternal<P>
 			stack[node_position_end.index] = end;
 		}
 	}
-	fn signal_change(
-		&mut self,
-	) {
+	fn ext(
+		&self,
+	) -> &Self::NodeExt {
+		&self.ext
 	}
-	fn signal_delete(
-		self,
-	) {
+	fn ext_mut(
+		&mut self,
+	) -> &mut Self::NodeExt {
+		&mut self.ext
 	}
 }
 
 #[derive(Derivative)]
-#[derivative(Clone)]
-#[derivative(Debug)]
-#[derivative(PartialEq)]
-pub struct Tree<N, C>
+#[derivative(Clone(bound=""))]
+#[derivative(Debug(bound=""))]
+#[derivative(PartialEq(bound=""))]
+pub struct Tree<N>
 	where
 		N: Node,
 {
-	tree: Option<NodeOld<N, C>>,
+	tree: Option<N>,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
 	init: N::InitFrom,
 }
 
-impl<N, C> Tree<N, C>
+impl<N> Tree<N>
 	where
 		N: Node,
 {
@@ -1189,7 +1127,7 @@ impl<N, C> Tree<N, C>
 
 pub trait Children: Clone + Debug + PartialEq {
 	type Radix: RadixConf;
-	type Node;
+	type Node: Node;
 
 	fn empty() -> Self;
 	fn set_child(
@@ -1274,7 +1212,7 @@ struct Children2<N> (
 	Option<Box<(Option<N>, Option<N>)>>
 );
 
-impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
+impl<N: Node> Children for Children2<N> {
 	type Radix = Radix2Conf;
 	type Node = N;
 
@@ -1419,7 +1357,7 @@ impl<N: Debug> Debug for Children256<N> {
 	}
 }
 
-impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
+impl<N: Node> Children for Children256<N> {
 	type Radix = Radix256Conf;
 	type Node = N;
 
@@ -1480,7 +1418,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 /// and a `RadixConf` type.
 macro_rules! flatten_children {
 	($type_alias: ident, $inner_children_type: ident, $inner_node_type: ident, $inner_type: ident, $inner_radix: ident) => {
-		type $inner_children_type = NodeOld<$inner_node_type<$inner_radix>, $type_alias>;
+		type $inner_children_type = $inner_node_type<$inner_radix, $type_alias, ()>;
 		#[derive(Derivative)]
 		#[derivative(Clone)]
 		#[derivative(PartialEq)]
@@ -1527,7 +1465,7 @@ macro_rules! flatten_children {
 		}
 	}
 }
-flatten_children!(Children256Flatten, Node256Flatten, NodeInternal, Children256, Radix256Conf);
+flatten_children!(Children256Flatten, Node256Flatten, NodeOld, Children256, Radix256Conf);
 
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -1565,26 +1503,22 @@ impl<P, C> NodeOld<P, C>
 }
 */
 /// Stack of Node to reach a position.
-struct NodeStack<'a, N: Node, C> {
+struct NodeStack<'a, N: Node> {
 	// TODO use smallvec instead
-	stack: Vec<(PositionFor<N>, &'a NodeOld<N, C>)>,
+	stack: Vec<(PositionFor<N>, &'a N)>,
 	// The key used with the stack.
 	// key: Vec<u8>,
 }
 
 // TODO put pointers in node stack.
-impl<'a, N: Node, C> NodeStack<'a, N, C> {
+impl<'a, N: Node> NodeStack<'a, N> {
 	fn new() -> Self {
 		NodeStack {
 			stack: Vec::new(),
 		}
 	}
 }
-impl<'a, N, C> NodeStack<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
+impl<'a, N: Node> NodeStack<'a, N> {
 	fn descend(&self, key: &[u8], dest_position: PositionFor<N>) -> Descent<N::Radix> {
 		if let Some(top) = self.stack.last() {
 			top.1.descend(key, top.0, dest_position)
@@ -1595,27 +1529,22 @@ impl<'a, N, C> NodeStack<'a, N, C>
 	}
 }
 /// Stack of Node to reach a position.
-struct NodeStackMut<N: Node, C> {
+struct NodeStackMut<N: Node> {
 	// TODO use smallvec instead
-	stack: Vec<(PositionFor<N>, *mut NodeOld<N, C>)>,
+	stack: Vec<(PositionFor<N>, *mut N)>,
 	// The key used with the stack.
 	// key: Vec<u8>,
 }
 
 // TODO put pointers in node stack.
-impl<N: Node, C> NodeStackMut<N, C> {
+impl<N: Node> NodeStackMut<N> {
 	fn new() -> Self {
 		NodeStackMut {
 			stack: Vec::new(),
 		}
 	}
 }
-impl<N, C> NodeStackMut<N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-
+impl<N: Node> NodeStackMut<N> {
 	fn descend(&self, key: &[u8], dest_position: PositionFor<N>) -> Descent<N::Radix> {
 		if let Some(top) = self.stack.last() {
 			unsafe {
@@ -1628,25 +1557,20 @@ impl<N, C> NodeStackMut<N, C>
 	}
 }
 
-pub struct SeekIter<'a, N: Node, C> {
-	tree: &'a Tree<N, C>,
+pub struct SeekIter<'a, N: Node> {
+	tree: &'a Tree<N>,
 	dest: &'a [u8],
 	dest_position: PositionFor<N>,
 	// TODO seekiter could be lighter and not stack, 
 	// just keep latest: a stack trait could be use.
-	stack: NodeStack<'a, N, C>,
+	stack: NodeStack<'a, N>,
 	reach_dest: bool,
 	next: Descent<N::Radix>,
 }
-pub struct SeekValueIter<'a, N: Node, C>(SeekIter<'a, N, C>);
+pub struct SeekValueIter<'a, N: Node>(SeekIter<'a, N>);
 
-impl<N, C> Tree<N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-
-	pub fn seek_iter<'a>(&'a self, key: &'a [u8]) -> SeekIter<'a, N, C> {
+impl<N: Node> Tree<N> {
+	pub fn seek_iter<'a>(&'a self, key: &'a [u8]) -> SeekIter<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
 			mask: MaskFor::<N::Radix>::last(),
@@ -1654,7 +1578,7 @@ impl<N, C> Tree<N, C>
 		self.seek_iter_at(key, dest_position)
 	}
 	/// Seek non byte aligned nodes.
-	pub fn seek_iter_at<'a>(&'a self, key: &'a [u8], dest_position: PositionFor<N>) -> SeekIter<'a, N, C> {
+	pub fn seek_iter_at<'a>(&'a self, key: &'a [u8], dest_position: PositionFor<N>) -> SeekIter<'a, N> {
 		let stack = NodeStack::new();
 		let reach_dest = false;
 		let next = stack.descend(key, dest_position);
@@ -1670,13 +1594,8 @@ impl<N, C> Tree<N, C>
 }
 
 
-impl<'a, N, C> SeekIter<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-
-	pub fn iter(self) -> Iter<'a, N, C> {
+impl<'a, N: Node> SeekIter<'a, N> {
+	pub fn iter(self) -> Iter<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
 			let key = pos.index::<N::Radix>(dest)
@@ -1692,7 +1611,7 @@ impl<'a, N, C> SeekIter<'a, N, C>
 			finished: false,
 		}
 	}
-	pub fn iter_prefix(mut self) -> Iter<'a, N, C> {
+	pub fn iter_prefix(mut self) -> Iter<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
 			let key = pos.index::<N::Radix>(dest)
@@ -1708,10 +1627,10 @@ impl<'a, N, C> SeekIter<'a, N, C>
 			finished: false,
 		}
 	}
-	pub fn value_iter(self) -> SeekValueIter<'a, N, C> {
+	pub fn value_iter(self) -> SeekValueIter<'a, N> {
 		SeekValueIter(self)
 	}
-	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a NodeOld<N, C>)> {
+	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a N)> {
 		if self.reach_dest {
 			return None;
 		}
@@ -1752,23 +1671,14 @@ impl<'a, N, C> SeekIter<'a, N, C>
 	}
 }
 
-impl<'a, N, C> Iterator for SeekIter<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-	type Item = (&'a [u8], PositionFor<N>, &'a NodeOld<N, C>);
+impl<'a, N: Node> Iterator for SeekIter<'a, N> {
+	type Item = (&'a [u8], PositionFor<N>, &'a N);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(pos, node)| (self.dest, pos, node))
 	}
 }
 
-impl<'a, N, C> Iterator for SeekValueIter<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-
+impl<'a, N: Node> Iterator for SeekValueIter<'a, N> {
 	type Item = (&'a [u8], &'a [u8]);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
@@ -1782,26 +1692,21 @@ impl<'a, N, C> Iterator for SeekValueIter<'a, N, C>
 		}
 	}
 }
-pub struct SeekIterMut<'a, N: Node, C> {
-	tree: &'a mut Tree<N, C>,
+pub struct SeekIterMut<'a, N: Node> {
+	tree: &'a mut Tree<N>,
 	dest: &'a [u8],
 	dest_position: PositionFor<N>,
 	// Here NodeStackMut will be used through unsafe
 	// calls, so it should always be 'a with
 	// content comming only form tree field.
-	stack: NodeStackMut<N, C>,
+	stack: NodeStackMut<N>,
 	reach_dest: bool,
 	next: Descent<N::Radix>,
 }
-pub struct SeekValueIterMut<'a, N: Node, C>(SeekIterMut<'a, N, C>);
+pub struct SeekValueIterMut<'a, N: Node>(SeekIterMut<'a, N>);
 	
-impl<N, C> Tree<N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-
-	pub fn seek_iter_mut<'a>(&'a mut self, key: &'a [u8]) -> SeekIterMut<'a, N, C> {
+impl<N: Node> Tree<N> {
+	pub fn seek_iter_mut<'a>(&'a mut self, key: &'a [u8]) -> SeekIterMut<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
 			mask: MaskFor::<N::Radix>::last(),
@@ -1809,7 +1714,7 @@ impl<N, C> Tree<N, C>
 		self.seek_iter_at_mut(key, dest_position)
 	}
 	/// Seek non byte aligned nodes.
-	pub fn seek_iter_at_mut<'a>(&'a mut self, key: &'a [u8], dest_position: PositionFor<N>) -> SeekIterMut<'a, N, C> {
+	pub fn seek_iter_at_mut<'a>(&'a mut self, key: &'a [u8], dest_position: PositionFor<N>) -> SeekIterMut<'a, N> {
 		let stack = NodeStackMut::new();
 		let reach_dest = false;
 		let next = stack.descend(key, dest_position);
@@ -1825,15 +1730,11 @@ impl<N, C> Tree<N, C>
 }
 
 
-impl<'a, N, C> SeekIterMut<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-	pub fn value_iter(self) -> SeekValueIterMut<'a, N, C> {
+impl<'a, N: Node> SeekIterMut<'a, N> {
+	pub fn value_iter(self) -> SeekValueIterMut<'a, N> {
 		SeekValueIterMut(self)
 	}
-	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a mut NodeOld<N, C>)> {
+	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a mut N)> {
 		if self.reach_dest {
 			return None;
 		}
@@ -1879,24 +1780,14 @@ impl<'a, N, C> SeekIterMut<'a, N, C>
 		))
 	}
 }
-impl<'a, N, C> Iterator for SeekIterMut<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-
-	type Item = (&'a [u8], PositionFor<N>, &'a mut NodeOld<N, C>);
+impl<'a, N: Node> Iterator for SeekIterMut<'a, N> {
+	type Item = (&'a [u8], PositionFor<N>, &'a mut N);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(pos, node)| (self.dest, pos, node))
 	}
 }
 
-impl<'a, N, C> Iterator for SeekValueIterMut<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-
+impl<'a, N: Node> Iterator for SeekValueIterMut<'a, N> {
 	type Item = (&'a [u8], &'a [u8]);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
@@ -1912,17 +1803,17 @@ impl<'a, N, C> Iterator for SeekValueIterMut<'a, N, C>
 }
 
 /// Stack of Node to reach a position.
-struct IterStack<'a, N: Node, C> {
+struct IterStack<'a, N: Node> {
 	// TODO use smallvec instead
 	// The index is the current index where to descend into if going
 	// downward, or where we descend from if going upward.
-	stack: Vec<(PositionFor<N>, &'a NodeOld<N, C>, KeyIndexFor<N>)>,
+	stack: Vec<(PositionFor<N>, &'a N, KeyIndexFor<N>)>,
 	// The key used with the stack.
 	key: Vec<u8>,
 }
 
 // TODO put pointers in node stack.
-impl<'a, N: Node, C> IterStack<'a, N, C> {
+impl<'a, N: Node> IterStack<'a, N> {
 	fn new() -> Self {
 		IterStack {
 			stack: Vec::new(),
@@ -1931,16 +1822,16 @@ impl<'a, N: Node, C> IterStack<'a, N, C> {
 	}
 }
 
-pub struct Iter<'a, N: Node, C> {
-	tree: &'a Tree<N, C>,
-	stack: IterStack<'a, N, C>,
+pub struct Iter<'a, N: Node> {
+	tree: &'a Tree<N>,
+	stack: IterStack<'a, N>,
 	finished: bool,
 }
 
-pub struct ValueIter<'a, N: Node, C>(Iter<'a, N, C>);
+pub struct ValueIter<'a, N: Node>(Iter<'a, N>);
 
-impl<N: Node, C> Tree<N, C> {
-	pub fn iter<'a>(&'a self) -> Iter<'a, N, C> {
+impl<N: Node> Tree<N> {
+	pub fn iter<'a>(&'a self) -> Iter<'a, N> {
 		Iter {
 			tree: self,
 			stack: IterStack::new(),
@@ -1949,15 +1840,11 @@ impl<N: Node, C> Tree<N, C> {
 	}
 }
 
-impl<'a, N, C> Iter<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
-	fn value_iter(self) -> ValueIter<'a, N, C> {
+impl<'a, N: Node> Iter<'a, N> {
+	fn value_iter(self) -> ValueIter<'a, N> {
 		ValueIter(self)
 	}
-	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a NodeOld<N, C>)> {
+	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a N)> {
 		if self.finished {
 			return None;
 		}
@@ -2020,24 +1907,16 @@ impl<'a, N, C> Iter<'a, N, C>
 	}
 }
 
-impl<'a, N, C> Iterator for Iter<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
+impl<'a, N: Node> Iterator for Iter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Vec<u8>, PositionFor<N>, &'a NodeOld<N, C>);
+	type Item = (Vec<u8>, PositionFor<N>, &'a N);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(p, n)| (self.stack.key.clone(), p, n))
 	}
 }
 
-impl<'a, N, C> Iterator for ValueIter<'a, N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
+impl<'a, N: Node> Iterator for ValueIter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
 	type Item = (Vec<u8>, &'a [u8]);
@@ -2055,11 +1934,7 @@ impl<'a, N, C> Iterator for ValueIter<'a, N, C>
 	}
 }
 
-impl<N, C> Tree<N, C>
-	where
-		N: Node,
-		C: Children<Node = NodeOld<N, C>, Radix = N::Radix>,
-{
+impl<N: Node> Tree<N> {
 	pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
 		if let Some(top) = self.tree.as_ref() {
 			let mut current = top;
@@ -2118,7 +1993,14 @@ impl<N, C> Tree<N, C>
 							}
 						} else {
 							let child_position = child_position.next::<N::Radix>();
-							let new_child = NodeOld::new(key, child_position, dest_position, Some(value), self.init.clone());
+							let new_child = N::new(
+								key,
+								child_position,
+								dest_position,
+								Some(value),
+								self.init.clone(),
+								N::NodeExt::new_node(),
+							);
 							assert!(current.set_child(index, new_child).is_none());
 							return None;
 						}
@@ -2127,7 +2009,14 @@ impl<N, C> Tree<N, C>
 						// insert middle node
 						current.split_off(position, middle_position);
 						let child_start = middle_position.next::<N::Radix>();
-						let new_child = NodeOld::new(key, child_start, dest_position, Some(value), self.init.clone());
+						let new_child = N::new(
+							key,
+							child_start,
+							dest_position,
+							Some(value),
+							self.init.clone(),
+							N::NodeExt::new_node(),
+						);
 						//let child_index = middle_position.index::<N::Radix>(key)
 						//	.expect("Middle resolved from key");
 						assert!(current.set_child(index, new_child).is_none());
@@ -2145,7 +2034,14 @@ impl<N, C> Tree<N, C>
 				}
 			}
 		} else {
-			self.tree = Some(NodeOld::new(key, position, dest_position, Some(value), self.init.clone()));
+			self.tree = Some(N::new(
+				key,
+				position,
+				dest_position,
+				Some(value),
+				self.init.clone(),
+				N::NodeExt::new_node(),
+			));
 			None
 		}
 	}
@@ -2153,7 +2049,7 @@ impl<N, C> Tree<N, C>
 		let mut position = PositionFor::<N>::zero();
 		let mut empty_tree = None;
 		if let Some(top) = self.tree.as_mut() {
-			let mut current: &mut NodeOld<N, C> = top;
+			let mut current: &mut N = top;
 			if key.len() == 0 && current.depth() == 0 {
 				let result = current.remove_value();
 				if current.number_child() == 0 {
@@ -2175,7 +2071,7 @@ impl<N, C> Tree<N, C>
 				return result;
 			}
 			let mut parent = None;
-			let mut current_ptr: *mut NodeOld<N, C> = current;
+			let mut current_ptr: *mut N = current;
 			loop {
 				let current = unsafe { current_ptr.as_mut().unwrap() };
 				match current.descend(key, position, dest_position) {
@@ -2183,7 +2079,7 @@ impl<N, C> Tree<N, C>
 						if let Some(child) = current.get_child_mut(index) {
 							let old_position = child_position; // TODO probably incorrect
 							position = child_position.next::<N::Radix>();
-							current_ptr = child as *mut NodeOld<N, C>;
+							current_ptr = child as *mut N;
 							parent = Some((current, old_position));
 						} else {
 							return None;
@@ -2239,21 +2135,19 @@ pub mod test_256 {
 	use alloc::collections::btree_map::BTreeMap;
 	use alloc::vec;
 
-	type Node = NodeInternal<Radix256Conf>;
-	type Children = Children256Flatten;
-	type Tree = super::Tree<Node, Children>;
+	type Node = NodeOld<Radix256Conf, Children256Flatten, ()>;
 
 	#[test]
 	fn empty_are_equals() {
-		let t1 = Tree::new(());
-		let t2 = Tree::new(());
+		let t1 = Tree::<Node>::new(());
+		let t2 = Tree::<Node>::new(());
 		assert_eq!(t1, t2);
 	}
 
 	#[test]
 	fn inserts_are_equals() {
-		let mut t1 = Tree::new(());
-		let mut t2 = Tree::new(());
+		let mut t1 = Tree::<Node>::new(());
+		let mut t2 = Tree::<Node>::new(());
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
@@ -2268,7 +2162,7 @@ pub mod test_256 {
 		assert_ne!(t1, t2);
 	}
 
-	fn compare_iter<K: Borrow<[u8]>>(left: &Tree, right: &BTreeMap<K, Vec<u8>>) -> bool {
+	fn compare_iter<K: Borrow<[u8]>>(left: &Tree::<Node>, right: &BTreeMap<K, Vec<u8>>) -> bool {
 		let left_node = left.iter();
 		let left = left_node.value_iter();
 		let mut right = right.iter();
@@ -2292,7 +2186,7 @@ pub mod test_256 {
 
 	#[test]
 	fn compare_btree() {
-		let mut t1 = Tree::new(());
+		let mut t1 = Tree::<Node>::new(());
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
@@ -2374,7 +2268,7 @@ pub mod test_256 {
 		let data = fuzz_to_data(input);
 		let data = fuzz_removal(data);
 		let mut a = 0;
-		let mut t1 = Tree::new(());
+		let mut t1 = Tree::<Node>::new(());
 		let mut t2 = BTreeMap::<Vec<u8>, Vec<u8>>::new();
 		while a < data.len() {
 			if data[a].0 {
