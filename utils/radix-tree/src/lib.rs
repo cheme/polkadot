@@ -171,7 +171,7 @@ impl<N> AsNode<N> for AsNodeImpl<N> {
 pub trait Node: Clone + PartialEq + Debug {
 	type Radix: RadixConf;
 	type InitFrom: Clone;
-	type Inner: AsNode<Self>;
+//	type Inner: AsNode<Self>;
 
 	fn new(
 		key: &[u8],
@@ -880,11 +880,11 @@ impl<P, C> NodeOld<P, C>
 impl<P, C> Node for NodeOld<P, C>
 	where
 		P: RadixConf,
-		C: Children<Self, Radix = P>,
+		C: Children<Inner = AsNodeImpl<Self>, Node = Self, Radix = P>,
 {
 	type Radix = P;
 	type InitFrom = ();
-	type Inner = C::Inner;
+//	type Inner = C::Inner;
 	fn new(
 		key: &[u8],
 		start_position: PositionFor<Self>,
@@ -1094,31 +1094,32 @@ impl<N> Tree<N>
 	}
 }
 
-pub trait Children<N>: Clone + Debug + PartialEq {
+pub trait Children: Clone + Debug + PartialEq {
 	type Radix: RadixConf;
-	type Inner: AsNode<N>;
+	type Node: Node;
+	type Inner: AsNode<Self::Node>;
 
 	fn empty() -> Self;
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: N,
-	) -> Option<N>;
+		child: Self::Node,
+	) -> Option<Self::Node>;
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<N>;
+	) -> Option<Self::Node>;
 	fn number_child(
 		&self,
 	) -> usize;
 	fn get_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<&N>;
+	) -> Option<&Self::Node>;
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<&mut N>;
+	) -> Option<&mut Self::Node>;
 	fn first(
 		&self,
 	) -> Option<<Self::Radix as RadixConf>::KeyIndex> {
@@ -1181,8 +1182,9 @@ struct Children2<N> (
 	Option<Box<(Option<N>, Option<N>)>>
 );
 
-impl<N: Node> Children<N> for Children2<N> {
+impl<N: Node> Children for Children2<N> {
 	type Radix = Radix2Conf;
+	type Node = N;
 	type Inner = AsNodeImpl<N>;
 
 	fn empty() -> Self {
@@ -1326,8 +1328,9 @@ impl<N: Debug> Debug for Children256<N> {
 	}
 }
 
-impl<N: Node> Children<N> for Children256<N> {
+impl<N: Node> Children for Children256<N> {
 	type Radix = Radix256Conf;
+	type Node = N;
 	type Inner = AsNodeImpl<N>;
 
 	fn empty() -> Self {
@@ -1394,8 +1397,9 @@ macro_rules! flatten_children {
 		#[derivative(Debug)]
 		struct $type_alias($inner_type<$inner_children_type>);
 
-		impl Children<$inner_children_type> for $type_alias {
+		impl Children for $type_alias {
 			type Radix = $inner_radix;
+			type Node = $inner_children_type;
 			type Inner = AsNodeImpl<$inner_children_type>;
 
 			fn empty() -> Self {
@@ -1461,7 +1465,7 @@ pub enum Descent<P>
 impl<P, C> NodeOld<P, C>
 	where
 		P: RadixConf,
-		C: Children<Self, Radix = P>,
+		C: Children<Inner = AsNodeImpl<Self>, Node = Self, Radix = P>,
 {
 	fn prefix_node(&self, key: &[u8]) -> (&Self, Descent<P>) {
 		unimplemented!()
