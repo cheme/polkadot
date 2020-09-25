@@ -32,6 +32,7 @@ extern crate alloc;
 //use alloc::raw_vec::RawVec;
 use derivative::Derivative;
 use alloc::vec::Vec;
+use alloc::vec;
 use alloc::boxed::Box;
 use alloc::borrow::Borrow;
 use core::cmp::{min, Ordering};
@@ -2040,7 +2041,7 @@ impl<N: Node> Tree<N> {
 #[cfg(any(test, feature = "fuzzer"))]
 pub mod test_256 {
 	use crate::*;
-	use std::collections::btree_map::BTreeMap;
+	use alloc::collections::btree_map::BTreeMap;
 
 	type Node = NodeOld<Radix256Conf, Children256Flatten>;
 
@@ -2134,8 +2135,8 @@ pub mod test_256 {
 			let keylen = if let Some(v) = input.get(ix) {
 				let mut v = *v & 31u8;
 				v = v + 1;
-				v = std::cmp::max(minkeylen, v);
-				v = std::cmp::min(maxkeylen, v);
+				v = core::cmp::max(minkeylen, v);
+				v = core::cmp::min(maxkeylen, v);
 				v as usize
 			} else { break };
 			let key = if input.len() > ix + keylen {
