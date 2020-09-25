@@ -29,15 +29,17 @@
 // mask cannot be 0 !!! TODO move this in key impl documentation
 extern crate alloc;
 
+//pub mod backend;
+
 //use alloc::raw_vec::RawVec;
 use derivative::Derivative;
 use alloc::vec::Vec;
-use alloc::vec;
 use alloc::boxed::Box;
 use alloc::borrow::Borrow;
 use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::mem::replace;
+use core::marker::PhantomData;
 
 /*#[cfg(not(feature = "std"))]
 extern crate alloc; // TODO check if needed in 2018 and if needed at all
@@ -141,9 +143,35 @@ pub trait RadixConf {
 type PositionFor<N> = Position<<<N as Node>::Radix as RadixConf>::Alignment>;
 type KeyIndexFor<N> = <<N as Node>::Radix as RadixConf>::KeyIndex;
 
+/// Node can contains other kind of node
+/// as long as the compose from this node
+/// type.
+pub trait AsNode<N> {
+	fn inner(&self) -> &N;
+	fn inner_mut(&mut self) -> &mut N;
+	fn into_inner(self) -> N;
+}
+
+#[repr(transparent)]
+/// Noops `AsNode` implementation for
+/// nodes containing themselves directly.
+pub struct AsNodeImpl<N>(pub N);
+impl<N> AsNode<N> for AsNodeImpl<N> {
+	fn inner(&self) -> &N {
+		&self.0
+	}
+	fn inner_mut(&mut self) -> &mut N {
+		&mut self.0
+	}
+	fn into_inner(self) -> N {
+		self.0
+	}
+}
+
 pub trait Node: Clone + PartialEq + Debug {
 	type Radix: RadixConf;
 	type InitFrom: Clone;
+	type Inner: AsNode<Self>;
 
 	fn new(
 		key: &[u8],
@@ -191,10 +219,13 @@ pub trait Node: Clone + PartialEq + Debug {
 		&mut self,
 		index: KeyIndexFor<Self>,
 	) -> Option<Self>;
+	/// Return the deleted child
+	/// for technical reason (backend),
+	/// its inner state is empty.
 	fn fuse_child(
 		&mut self,
 		key: &[u8],
-	);
+	) -> Option<Self>;
 	fn split_off(
 		&mut self,
 		position: PositionFor<Self>,
@@ -211,7 +242,11 @@ pub trait Node: Clone + PartialEq + Debug {
 	) -> Option<&mut Self>;
 	/// utility to stack the prefix of the node.
 	/// It truncate end of stack or can extend with 0.
-	fn new_end(&self, stack: &mut Vec<u8>, node_position: PositionFor<Self>);
+	fn new_end(
+		&self,
+		stack: &mut Vec<u8>,
+		node_position: PositionFor<Self>,
+	);
 }
 
 pub struct Radix256Conf;
@@ -849,6 +884,7 @@ impl<P, C> Node for NodeOld<P, C>
 {
 	type Radix = P;
 	type InitFrom = ();
+	type Inner = C::Inner;
 	fn new(
 		key: &[u8],
 		start_position: PositionFor<Self>,
@@ -972,7 +1008,7 @@ impl<P, C> Node for NodeOld<P, C>
 	fn fuse_child(
 		&mut self,
 		key: &[u8],
-	) {
+	) -> Option<Self> {
 		if let Some(index) = self.children.first() {
 			if let Some(mut child) = self.children.remove_child(index) {
 				let position = PositionFor::<Self> {
@@ -984,14 +1020,16 @@ impl<P, C> Node for NodeOld<P, C>
 				let position_cat = position.next::<P>();
 				child.new_end(&mut self.key.data, position_cat);
 				self.key.end = child.key.end;
-				self.value = child.value;
-				self.children = child.children;
+				self.value = child.value.take();
+				self.children = replace(&mut child.children, C::empty());
+				return Some(child);
 			} else {
 				unreachable!("fuse condition checked");
 			}
 		} else {
 			unreachable!("fuse condition checked");
 		}
+		None
 	}
 	fn change_start(
 		&mut self,
@@ -1038,10 +1076,7 @@ pub struct Tree<N>
 	where
 		N: Node,
 {
-	//tree: Vec<Node>,
 	tree: Option<N>,
-	//values: Vec<Vec<u8>>,
-	//keys: Vec<u8>,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
 	init: N::InitFrom,
@@ -1061,6 +1096,7 @@ impl<N> Tree<N>
 
 pub trait Children<N>: Clone + Debug + PartialEq {
 	type Radix: RadixConf;
+	type Inner: AsNode<N>;
 
 	fn empty() -> Self;
 	fn set_child(
@@ -1147,6 +1183,7 @@ struct Children2<N> (
 
 impl<N: Node> Children<N> for Children2<N> {
 	type Radix = Radix2Conf;
+	type Inner = AsNodeImpl<N>;
 
 	fn empty() -> Self {
 		Children2(None)
@@ -1291,6 +1328,7 @@ impl<N: Debug> Debug for Children256<N> {
 
 impl<N: Node> Children<N> for Children256<N> {
 	type Radix = Radix256Conf;
+	type Inner = AsNodeImpl<N>;
 
 	fn empty() -> Self {
 		Children256(None, 0)
@@ -1358,6 +1396,7 @@ macro_rules! flatten_children {
 
 		impl Children<$inner_children_type> for $type_alias {
 			type Radix = $inner_radix;
+			type Inner = AsNodeImpl<$inner_children_type>;
 
 			fn empty() -> Self {
 				$type_alias($inner_type::empty())
@@ -2014,7 +2053,7 @@ impl<N: Node> Tree<N> {
 								break;
 							}
 						} else if current.number_child() == 1 {
-							current.fuse_child(key)
+							current.fuse_child(key);
 						}
 
 						//return current.set_value(value);
@@ -2042,6 +2081,7 @@ impl<N: Node> Tree<N> {
 pub mod test_256 {
 	use crate::*;
 	use alloc::collections::btree_map::BTreeMap;
+	use alloc::vec;
 
 	type Node = NodeOld<Radix256Conf, Children256Flatten>;
 
