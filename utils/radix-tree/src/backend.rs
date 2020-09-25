@@ -17,8 +17,8 @@
 
 //! Use a backend for existing nodes.
 
-use crate::{Node, PositionFor, Descent, KeyIndexFor, MaskFor,
-	Position, MaskKeyByte, NodeIndex, NodeOld, Children, NodeExt};
+use crate::{NodeConf, PositionFor, Descent, KeyIndexFor, MaskFor,
+	Position, MaskKeyByte, NodeIndex, Node, Children, NodeExt};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use core::marker::PhantomData;
@@ -56,22 +56,22 @@ impl BackendInner for HashMap<Vec<u8>, Vec<u8>> {
 	}
 }
 
-pub trait NodeBackend<N>: Clone {
-	fn get_node(&self, k: &[u8]) -> Option<N>;
+pub trait NodeBackend<N: NodeConf>: Clone {
+	fn get_node(&self, k: &[u8]) -> Option<Node<N>>;
 }
 
 #[derive(Derivative)]
 #[derivative(Clone(bound=""))]
 struct SingleThreadBackend<B>(Rc<RefCell<B>>);
 
-fn key_addressed<N: Node>(
+fn key_addressed<N: NodeConf>(
 	key: &[u8],
 	start_postion: PositionFor<N>,
 ) -> Vec<u8> {
 	unimplemented!();
 }
 
-fn key_from_addressed<N: Node>(
+fn key_from_addressed<N: NodeConf>(
 	key: &[u8],
 ) -> (&[u8], PositionFor<N>) {
 	unimplemented!();
@@ -80,11 +80,10 @@ fn key_from_addressed<N: Node>(
 fn decode_node<N, B: Backend>(
 	key: &[u8],
 	mut encoded: &[u8],
-	init: &N::InitFrom,
 	backend: &B,
-) -> core::result::Result<N, CodecError>
+) -> core::result::Result<Node<N>, CodecError>
 	where
-		N: Node<NodeExt = LazyExt<B>>,
+		N: NodeConf<NodeExt = LazyExt<B>>,
 		MaskFor<N::Radix>: Decode,
 {
 	let input = &mut encoded;
@@ -109,12 +108,12 @@ fn decode_node<N, B: Backend>(
 
 	let value: Option<Vec<u8>> = Decode::decode(input)?;
 	let node_key = key_addressed::<N>(&key[..], start);
-	let mut node = N::new(
+	let mut node = Node::<N>::new(
 		prefix.as_slice(),
 		start,
 		end,
 		value,
-		init.clone(),
+		(),
 		LazyExt::Resolved(node_key, backend.clone(), false),
 	);
 
@@ -128,12 +127,12 @@ fn decode_node<N, B: Backend>(
 			if children_mask & 0b1000_0000 >> byte_index != 0 {
 				child_position.set_index::<N::Radix>(&mut child_key, key_index);
 				let key = key_addressed::<N>(&child_key[..], child_position);
-				node.set_child(key_index, N::new(
+				node.set_child(key_index, Node::<N>::new(
 					&[],
 					child_position,
 					child_position,
 					None,
-					init.clone(),
+					(),
 					LazyExt::Unresolved(key, backend.clone()),
 				));
 			}
@@ -170,18 +169,18 @@ impl<B: BackendInner> Backend for SingleThreadBackend<B> {
 impl<B, N> NodeBackend<N> for SingleThreadBackend<B>
 	where
 		B: BackendInner,
-		N: Node<InitFrom = (), NodeExt = LazyExt<Self>>,
+		N: NodeConf<NodeExt = LazyExt<Self>>,
 		MaskFor<N::Radix>: Decode,
 {
-	fn get_node(&self, k: &[u8]) -> Option<N> {
+	fn get_node(&self, k: &[u8]) -> Option<Node<N>> {
 		self.0.borrow().read(k).and_then(|encoded| {
-			decode_node(k, encoded.as_slice(), &(), self).ok()
+			decode_node(k, encoded.as_slice(), self).ok()
 		})
 	}
 /*	fn get_node(&self, k: &[u8]) -> Option<N> {
 		self.0.borrow().read(k).and_then(|encoded| {
 			decode_node(k, encoded.as_slice(), (), &self).map(|(node, children)|
-				NodeOld {
+				Node {
 					internal: LazyExt::Resolved(BackedNode {
 						inner: node,
 						key: k.to_vec(),
@@ -222,13 +221,13 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 		unimplemented!("need to resolve key and from backend");
 		//LazyExt::Resolved(key, )
 	}
-	fn resolve<N: Node<NodeExt = Self>>(node: &N) {
+	fn resolve<N: NodeConf<NodeExt = Self>>(node: &Node<N>) {
 		match node.ext() {
 			LazyExt::Resolved(..) => (),
 			_ => unimplemented!("Backend must be use as mutable due to lazy nature"),
 		}
 	}
-	fn resolve_mut<N: Node<NodeExt = Self>>(node: &mut N) {
+	fn resolve_mut<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>) {
 		match node.ext_mut() {
 			LazyExt::Resolved(..) => (),
 			LazyExt::Unresolved(key, backend) => {
@@ -244,10 +243,10 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 			LazyExt::Unresolved(..) => panic!("Node need to be resolved first"),
 		}
 	}
-	fn delete<N: Node<NodeExt = Self>>(node: N) {
+	fn delete<N: NodeConf<NodeExt = Self>>(node: Node<N>) {
 		unimplemented!("Call backend delete for key of ext");
 	}
-	fn commit_change<N: Node<NodeExt = Self>>(node: &mut N) {
+	fn commit_change<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>) {
 		unimplemented!("Encode and call backend write for key of ext");
 	}
 }
