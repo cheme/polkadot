@@ -293,7 +293,11 @@ pub enum LazyExt<B> {
 	Unresolved(Key, B),
 	Resolved(Key, B, bool),
 }
-
+impl<B: Default> Default for LazyExt<B> {
+	fn default() -> Self {
+		LazyExt::Unresolved(Default::default(), Default::default())
+	}
+}
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Default)]

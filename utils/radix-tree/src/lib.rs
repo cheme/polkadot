@@ -1866,7 +1866,16 @@ struct IterStack<'a, N: NodeConf> {
 	key: Vec<u8>,
 }
 
-// TODO put pointers in node stack.
+/// Stack of Node to reach a position.
+struct IterStackMut<N: NodeConf> {
+	// TODO use smallvec instead
+	// The index is the current index where to descend into if going
+	// downward, or where we descend from if going upward.
+	stack: Vec<(PositionFor<N>, *mut Node<N>, KeyIndexFor<N>)>,
+	// The key used with the stack.
+	key: Vec<u8>,
+}
+
 impl<'a, N: NodeConf> IterStack<'a, N> {
 	fn new() -> Self {
 		IterStack {
@@ -1876,13 +1885,31 @@ impl<'a, N: NodeConf> IterStack<'a, N> {
 	}
 }
 
+impl<N: NodeConf> IterStackMut<N> {
+	fn new() -> Self {
+		IterStackMut {
+			stack: Vec::new(),
+			key: Vec::new(),
+		}
+	}
+}
+
+
 pub struct Iter<'a, N: NodeConf> {
 	tree: &'a Tree<N>,
 	stack: IterStack<'a, N>,
 	finished: bool,
 }
 
+pub struct IterMut<'a, N: NodeConf> {
+	tree: &'a mut Tree<N>,
+	stack: IterStackMut<N>,
+	finished: bool,
+}
+
 pub struct ValueIter<'a, N: NodeConf>(Iter<'a, N>);
+
+pub struct ValueIterMut<'a, N: NodeConf>(IterMut<'a, N>);
 
 impl<N: NodeConf> Tree<N> {
 	pub fn iter<'a>(&'a self) -> Iter<'a, N> {
@@ -1892,10 +1919,17 @@ impl<N: NodeConf> Tree<N> {
 			finished: false,
 		}
 	}
+	pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, N> {
+		IterMut {
+			tree: self,
+			stack: IterStackMut::new(),
+			finished: false,
+		}
+	}
 }
 
 impl<'a, N: NodeConf> Iter<'a, N> {
-	fn value_iter(self) -> ValueIter<'a, N> {
+	pub fn value_iter(self) -> ValueIter<'a, N> {
 		ValueIter(self)
 	}
 	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a Node<N>)> {
@@ -1961,10 +1995,88 @@ impl<'a, N: NodeConf> Iter<'a, N> {
 	}
 }
 
+impl<'a, N: NodeConf> IterMut<'a, N> {
+	pub fn value_iter_mut(self) -> ValueIterMut<'a, N> {
+		ValueIterMut(self)
+	}
+	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a mut Node<N>)> {
+		if self.finished {
+			return None;
+		}
+		let mut do_pop = false;
+		loop {
+			if do_pop {
+				self.stack.stack.pop();
+				if let Some(last) = self.stack.stack.last_mut() {
+					// move cursor to next
+					if let Some(next) = last.2.next() {
+						last.2 = next;
+					} else {
+						// try descend in next from parent
+						continue;
+					}
+				} else {
+					// last pop
+					self.finished = true;
+					break;
+				}
+				do_pop = false;
+			}
+			if let Some(last) = self.stack.stack.last_mut() {
+				let last_1 = unsafe { last.1.as_mut().unwrap() };
+				// try descend
+				if let Some(child) = last_1.get_child_mut(last.2) {
+					//let position = last.0.next::<N::Radix>();
+					let position = last.0;
+					position.set_index::<N::Radix>(&mut self.stack.key, last.2);
+					let position = position.next::<N::Radix>();
+					child.new_end(&mut self.stack.key, position);
+					let position = position.next_by::<N::Radix>(child.depth());
+					let first_key = KeyIndexFor::<N>::zero();
+					self.stack.stack.push((position, child, first_key));
+					break;
+				}
+	
+				// try descend in next
+				if let Some(next) = last.2.next() {
+					last.2 = next;
+				} else {
+					// try descend in next from parent
+					do_pop = true;
+				}
+			} else {
+				// empty, this is start iteration
+				if let Some(node) = self.tree.tree.as_mut() {
+					let zero = PositionFor::<N>::zero();
+					let first_key = KeyIndexFor::<N>::zero();
+					node.new_end(&mut self.stack.key, zero);
+					let zero = zero.next_by::<N::Radix>(node.depth());
+					self.stack.stack.push((zero, node, first_key));
+				} else {
+					self.finished = true;
+				}
+				break;
+			}
+		}
+
+		self.stack.stack.last_mut().map(|(p, n, _i)| (*p, unsafe { n.as_mut().unwrap() }))
+	}
+}
+
+
 impl<'a, N: NodeConf> Iterator for Iter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
 	type Item = (Vec<u8>, PositionFor<N>, &'a Node<N>);
+	fn next(&mut self) -> Option<Self::Item> {
+		self.next_node().map(|(p, n)| (self.stack.key.clone(), p, n))
+	}
+}
+
+impl<'a, N: NodeConf> Iterator for IterMut<'a, N> {
+	// TODO key as slice, but usual lifetime issue.
+	// TODO at leas use a stack type for key (smallvec).
+	type Item = (Vec<u8>, PositionFor<N>, &'a mut Node<N>);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(p, n)| (self.stack.key.clone(), p, n))
 	}
@@ -1978,6 +2090,24 @@ impl<'a, N: NodeConf> Iterator for ValueIter<'a, N> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
 				if let Some(v) = node.value() {
+					key.truncate(pos.index);
+					return Some((key, v))
+				}
+			} else {
+				return None;
+			}
+		}
+	}
+}
+
+impl<'a, N: NodeConf> Iterator for ValueIterMut<'a, N> {
+	// TODO key as slice, but usual lifetime issue.
+	// TODO at leas use a stack type for key (smallvec).
+	type Item = (Vec<u8>, &'a [u8]);
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			if let Some((mut key, pos, node)) = self.0.next() {
+				if let Some(v) = node.value_mut() {
 					key.truncate(pos.index);
 					return Some((key, v))
 				}
@@ -2023,6 +2153,41 @@ impl<N: NodeConf> Tree<N> {
 			None
 		}
 	}
+	pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut Vec<u8>> {
+		if let Some(top) = self.tree.as_mut() {
+			let mut current = top;
+			if key.len() == 0 {
+				return current.value_mut();
+			}
+			let dest_position = Position {
+				index: key.len(),
+				mask: MaskFor::<N::Radix>::last(),
+			};
+			let mut position = PositionFor::<N>::zero();
+			loop {
+				match current.descend(key, position, dest_position) {
+					Descent::Child(child_position, index) => {
+						if let Some(child) = current.get_child_mut(index) {
+							position = child_position.next::<N::Radix>();
+							//position = child_position;
+							current = child;
+						} else {
+							return None;
+						}
+					},
+					Descent::Middle(_position, _index) => {
+						return None;
+					},
+					Descent::Match(_position) => {
+						return current.value_mut();
+					},
+				}
+			}
+		} else {
+			None
+		}
+	}
+
 	pub fn insert(&mut self, key: &[u8], value: Vec<u8>) -> Option<Vec<u8>> {
 		let dest_position = PositionFor::<N> {
 			index: key.len(),
@@ -2127,6 +2292,8 @@ impl<N: NodeConf> Tree<N> {
 			let mut parent = None;
 			let mut current_ptr: *mut Node<N> = current;
 			loop {
+				// Note that this can produce dangling pointer when removing
+				// node.
 				let current = unsafe { current_ptr.as_mut().unwrap() };
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
@@ -2386,5 +2553,66 @@ pub mod $module_name {
 }
 test_for!(test_256, Node256NoBackend, false);
 test_for!(test_256_hash, Node256HashBackend, true);
-//test_for!(test_256_lazy_hash, Node256LazyHashBackend, true);
+test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);
 
+#[cfg(test)]
+mod lazy_test {
+	use crate::*;
+	use alloc::collections::btree_map::BTreeMap;
+	use alloc::vec;
+
+	type NodeConf = super::Node256LazyHashBackend;
+
+	fn new_backend() -> <Node256LazyHashBackend as super::NodeConf>::NodeExt {
+		<Node256LazyHashBackend as super::NodeConf>::NodeExt::default()
+	}
+
+	fn new_root(init: &<Node256LazyHashBackend as super::NodeConf>::NodeExt) -> <Node256LazyHashBackend as super::NodeConf>::NodeExt {
+		<Node256LazyHashBackend as super::NodeConf>::new_node_root(init)
+	}
+
+	fn compare_iter_mut<K: Borrow<[u8]>>(left: &mut Tree::<NodeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
+		let left_node = left.iter_mut();
+		let left = left_node.value_iter_mut();
+		let mut right = right.iter();
+		for l in left {
+			if let Some(r) = right.next() {
+				if &l.0[..] != &r.0.borrow()[..] {
+					return false;
+				}
+				if &l.1[..] != &r.1[..] {
+					return false;
+				}
+			} else {
+				return false;
+			}
+		}
+		if right.next().is_some() {
+			return false;
+		}
+		true
+	}
+
+	#[test]
+	fn compare_btree() {
+		let backend = new_backend();
+		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
+		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
+		let mut value1 = b"value1".to_vec();
+		assert_eq!(None, t1.insert(b"key1", value1.clone()));
+		assert_eq!(None, t2.insert(b"key1", value1.clone()));
+		assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
+		assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
+		assert_eq!(None, t1.insert(b"key2", value1.clone()));
+		assert_eq!(None, t2.insert(b"key2", value1.clone()));
+		assert_eq!(None, t1.insert(b"key3", value1.clone()));
+		assert_eq!(None, t2.insert(b"key3", value1.clone()));
+		// Shouldn't call get on a lazy tree, but here we got all in memory.
+		assert_eq!(t1.get(&b"key3"[..]), Some(value1.as_slice()));
+		assert_eq!(t1.get_mut(&b"key3"[..]), Some(&mut value1));
+		core::mem::drop(t1);
+		let mut t3 = Tree::<NodeConf>::from_backend(new_root(&backend));
+		assert_eq!(t3.get_mut(&b"key3"[..]), Some(&mut value1));
+		assert!(compare_iter_mut(&mut t3, &mut t2));
+	}
+}
