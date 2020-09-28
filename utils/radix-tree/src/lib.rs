@@ -88,21 +88,46 @@ pub trait PrefixKeyConf {
 	/// Either u8 or () depending on wether
 	/// we use aligned key.
 	type Mask: MaskKeyByte;
+	/// Encode the byte mask, it needs to be ordered when encoded.
+	fn encode_mask(mask: Self::Mask) -> u8;
+	fn decode_mask(mask: u8) -> Self::Mask;
 }
 
 impl PrefixKeyConf for () {
 	const ALIGNED: bool = true;
 	type Mask = ();
+	fn encode_mask(mask: Self::Mask) -> u8 {
+		0
+	}
+	fn decode_mask(mask: u8) -> Self::Mask {
+		()
+	}
 }
 
 impl PrefixKeyConf for bool {
 	const ALIGNED: bool = false;
 	type Mask = bool;
+	fn encode_mask(mask: Self::Mask) -> u8 {
+		if mask {
+			1
+		} else {
+			0
+		}
+	}
+	fn decode_mask(mask: u8) -> Self::Mask {
+		mask == 1
+	}
 }
 
 impl PrefixKeyConf for u8 {
 	const ALIGNED: bool = false;
 	type Mask = u8;
+	fn encode_mask(mask: Self::Mask) -> u8 {
+		mask
+	}
+	fn decode_mask(mask: u8) -> Self::Mask {
+		mask
+	}
 }
 
 type MaskFor<N> = <<N as RadixConf>::Alignment as PrefixKeyConf>::Mask;
@@ -146,7 +171,13 @@ type KeyIndexFor<N> = <<N as NodeConf>::Radix as RadixConf>::KeyIndex;
 
 // TODO rename to backend hook
 pub trait NodeExt: Clone {
-	fn new_node() -> Self;
+	/// Default value for inactive implementation.
+	/// Active implementation needs input parameters and
+	/// default to `None`.
+	const DEFAULT: Option<Self> = None;
+	fn new_node(&self, key: backend::Key) -> Self;
+	fn backend_key<N: NodeConf<NodeExt = Self>>(key: &[u8], position: PositionFor<N>) -> backend::Key;
+	fn from_backend_key<N: NodeConf<NodeExt = Self>>(key: &backend::Key) -> (&[u8], PositionFor<N>);
 	fn resolve<N: NodeConf<NodeExt = Self>>(node: &Node<N>);
 	fn resolve_mut<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>);
 	fn set_change(&mut self);
@@ -155,8 +186,15 @@ pub trait NodeExt: Clone {
 }
 
 impl NodeExt for () {
-	fn new_node() -> Self {
+	const DEFAULT: Option<Self> = Some(());
+	fn new_node(&self, _key: backend::Key) -> Self {
 		()
+	}
+	fn backend_key<N: NodeConf<NodeExt = Self>>(_key: &[u8], _position: PositionFor<N>) -> backend::Key {
+		unreachable!("Inactive implementation");
+	}
+	fn from_backend_key<N: NodeConf<NodeExt = Self>>(key: &backend::Key) -> (&[u8], PositionFor<N>) {
+		unreachable!("Inactive implementation");
 	}
 	fn resolve<N: NodeConf<NodeExt = Self>>(_node: &Node<N>) { }
 	fn resolve_mut<N: NodeConf<NodeExt = Self>>(_node: &mut Node<N>) { }
@@ -433,8 +471,8 @@ pub struct Position<P>
 	where
 		P: PrefixKeyConf,
 {
-	index: usize,
-	mask: P::Mask,
+	pub(crate) index: usize,
+	pub(crate) mask: P::Mask,
 }
 
 impl<P> Position<P>
@@ -761,6 +799,35 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	type Radix: RadixConf;
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
 	type NodeExt: NodeExt;
+
+	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeExt {
+		if let Some(ext) = Self::NodeExt::DEFAULT {
+			ext
+		} else {
+			let mut key = key.to_vec();
+			node.new_end(&mut key, position);
+			// TODO consider owned variant of `backend_key` !!
+			let key = Self::NodeExt::backend_key::<Self>(key.as_slice(), at);
+			Self::NodeExt::new_node(&node.ext, key)
+		}
+	}
+
+	fn new_node_contained(node: &Node<Self>, key: &[u8], position: PositionFor<Self>) -> Self::NodeExt {
+		if let Some(ext) = Self::NodeExt::DEFAULT {
+			ext
+		} else {
+			let key = Self::NodeExt::backend_key::<Self>(key, position);
+			Self::NodeExt::new_node(&node.ext, key)
+		}
+	}
+	fn new_node_root(init: &Self::NodeExt) -> Self::NodeExt {
+		if let Some(ext) = Self::NodeExt::DEFAULT {
+			ext
+		} else {
+			let key = Self::NodeExt::backend_key::<Self>(&[], PositionFor::<Self>::zero());
+			Self::NodeExt::new_node(init, key)
+		}
+	}
 }
 
 #[derive(Derivative)]
@@ -916,11 +983,14 @@ impl<N: NodeConf> Node<N> {
 	}
 	pub fn split_off(
 		&mut self,
+		key: &[u8],
 		position: PositionFor<N>,
 		mut at: PositionFor<N>,
 	) {
 		at.index -= position.index;
 		let index = self.key.index::<N::Radix>(at);
+		let ext = N::new_node_split(self, key, position, at);
+
 		let child_prefix = self.key.split_off::<N::Radix>(at);
 		let child_value = self.value.take();
 		let child_children = replace(&mut self.children, N::Children::empty());
@@ -928,7 +998,7 @@ impl<N: NodeConf> Node<N> {
 			key: child_prefix,
 			value: child_value,
 			children: child_children,
-			ext: N::NodeExt::new_node(), 
+			ext, 
 		};
 		self.children.set_child(index, child);
 		self.ext.set_change();
@@ -1324,7 +1394,14 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 /// `inner_node_type` is expected to be parametered by a `Children` type
 /// and a `RadixConf` type.
 macro_rules! flatten_children {
-	($type_alias: ident, $inner_children_type: ident, $inner_node_type: ident, $inner_type: ident, $inner_radix: ident) => {
+	(
+		$type_alias: ident,
+		$inner_children_type: ident,
+		$inner_node_type: ident,
+		$inner_type: ident,
+		$inner_radix: ident,
+		$backend: ty,
+	) => {
 		#[derive(Clone)]
 		#[derive(Debug)]
 		#[derive(PartialEq)]
@@ -1332,7 +1409,7 @@ macro_rules! flatten_children {
 		impl NodeConf for $inner_node_type {
 			type Radix = $inner_radix;
 			type Children = $type_alias;
-			type NodeExt = ();
+			type NodeExt = $backend;
 		}
 		type $inner_children_type = Node<$inner_node_type>;
 		#[derive(Derivative)]
@@ -1381,7 +1458,31 @@ macro_rules! flatten_children {
 		}
 	}
 }
-flatten_children!(Children256Flatten, Node256Flatten, Node256NoBackend, Children256, Radix256Conf);
+flatten_children!(
+	Children256Flatten,
+	Node256Flatten,
+	Node256NoBackend,
+	Children256,
+	Radix256Conf,
+	(),
+);
+flatten_children!(
+	Children256Flatten2,
+	Node256Flatten2,
+	Node256HashBackend,
+	Children256,
+	Radix256Conf,
+	backend::DirectExt<backend::SingleThreadBackend<backend::MapBackend>>,
+);
+flatten_children!(
+	Children256Flatten3,
+	Node256Flatten3,
+	Node256LazyHashBackend,
+	Children256,
+	Radix256Conf,
+	backend::LazyExt<backend::SingleThreadBackend<backend::MapBackend>>,
+);
+
 
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -1915,7 +2016,7 @@ impl<N: NodeConf> Tree<N> {
 								dest_position,
 								Some(value),
 								(),
-								N::NodeExt::new_node(),
+								N::new_node_contained(current, key, child_position),
 							);
 							assert!(current.set_child(index, new_child).is_none());
 							return None;
@@ -1923,7 +2024,7 @@ impl<N: NodeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, Some(index)) => {
 						// insert middle node
-						current.split_off(position, middle_position);
+						current.split_off(key, position, middle_position);
 						let child_start = middle_position.next::<N::Radix>();
 						let new_child = Node::<N>::new(
 							key,
@@ -1931,7 +2032,7 @@ impl<N: NodeConf> Tree<N> {
 							dest_position,
 							Some(value),
 							(),
-							N::NodeExt::new_node(),
+							N::new_node_contained(current, key, child_start),
 						);
 						//let child_index = middle_position.index::<N::Radix>(key)
 						//	.expect("Middle resolved from key");
@@ -1940,7 +2041,7 @@ impl<N: NodeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, None) => {
 						// insert middle node
-						current.split_off(position, middle_position);
+						current.split_off(key, position, middle_position);
 						current.set_value(value);
 						return None;
 					},
@@ -1956,7 +2057,7 @@ impl<N: NodeConf> Tree<N> {
 				dest_position,
 				Some(value),
 				(),
-				N::NodeExt::new_node(),
+				N::new_node_root(&self.init),
 			));
 			None
 		}
@@ -2045,26 +2146,38 @@ impl<N: NodeConf> Tree<N> {
 	}
 }
 
+macro_rules! test_for {
+	($module_name: ident, $backend_conf: ident) => {
 #[cfg(any(test, feature = "fuzzer"))]
-pub mod test_256 {
+pub mod $module_name {
 	use crate::*;
 	use alloc::collections::btree_map::BTreeMap;
 	use alloc::vec;
 
-	type NodeConf = super::Node256NoBackend;
-	//type NodeConf = Node<Radix256Conf, Children256Flatten, ()>;
+	type NodeConf = super::$backend_conf;
+
+	fn new_backend() -> <$backend_conf as super::NodeConf>::NodeExt {
+		<$backend_conf as super::NodeConf>::NodeExt::default()
+	}
+
+	fn new_root(init: &<$backend_conf as super::NodeConf>::NodeExt) -> <$backend_conf as super::NodeConf>::NodeExt {
+		<$backend_conf as super::NodeConf>::new_node_root(init)
+	}
+
 
 	#[test]
 	fn empty_are_equals() {
-		let t1 = Tree::<NodeConf>::new(());
-		let t2 = Tree::<NodeConf>::new(());
+		let backend = new_backend();
+		let t1 = Tree::<NodeConf>::new(new_root(&backend));
+		let t2 = Tree::<NodeConf>::new(new_root(&backend));
 		assert_eq!(t1, t2);
 	}
 
 	#[test]
 	fn inserts_are_equals() {
-		let mut t1 = Tree::<NodeConf>::new(());
-		let mut t2 = Tree::<NodeConf>::new(());
+		let backend = new_backend();
+		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
+		let mut t2 = Tree::<NodeConf>::new(new_root(&backend));
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
@@ -2103,7 +2216,8 @@ pub mod test_256 {
 
 	#[test]
 	fn compare_btree() {
-		let mut t1 = Tree::<NodeConf>::new(());
+		let backend = new_backend();
+		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
@@ -2184,8 +2298,9 @@ pub mod test_256 {
 	pub fn fuzz_insert_remove(input: &[u8]) {
 		let data = fuzz_to_data(input);
 		let data = fuzz_removal(data);
+		let backend = new_backend();
 		let mut a = 0;
-		let mut t1 = Tree::<NodeConf>::new(());
+		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
 		let mut t2 = BTreeMap::<Vec<u8>, Vec<u8>>::new();
 		while a < data.len() {
 			if data[a].0 {
@@ -2218,3 +2333,9 @@ pub mod test_256 {
 		}
 	}
 }
+}
+}
+test_for!(test_256, Node256NoBackend);
+test_for!(test_256_hash, Node256HashBackend);
+//test_for!(test_256_lazy_hash, Node256LazyHashBackend);
+
