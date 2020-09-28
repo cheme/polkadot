@@ -24,7 +24,7 @@ use alloc::vec::Vec;
 use alloc::rc::Rc;
 use core::marker::PhantomData;
 use hashbrown::HashMap;
-use codec::{Encode, Decode, Error as CodecError};
+use codec::{Encode, Decode, Error as CodecError, Input};
 use core::cell::RefCell;
 use core::fmt::Debug;
 use derivative::Derivative;
@@ -68,10 +68,6 @@ impl BackendInner for MapBackend {
 	fn remove(&mut self, k: &[u8]) {
 		self.remove(k);
 	}
-}
-
-pub trait ReadNodeBackend<N: NodeConf>: Clone {
-	fn get_node(&self, k: &[u8]) -> Option<Node<N>>;
 }
 
 #[derive(Derivative)]
@@ -125,24 +121,40 @@ fn key_from_addressed<N: NodeConf>(
 	}
 }
 
-fn decode_node<N, B: Backend>(
+fn decode_node<N>(
 	key: &[u8],
-	mut encoded: &[u8],
-	backend: &B,
+	start: PositionFor<N>,
+	backend: &<N::NodeExt as NodeExt>::INIT,
 ) -> core::result::Result<Node<N>, CodecError>
 	where
-		N: NodeConf<NodeExt = LazyExt<B>>,
-		MaskFor<N::Radix>: Decode,
+		N: NodeConf,
+		<N::NodeExt as NodeExt>::INIT: Backend,
 {
-	let input = &mut encoded;
-	let start_mask: MaskFor<N::Radix> = Decode::decode(input)?;
+	let node_key = key_addressed::<N>(&key[..], start);
+	let encoded = if let Some(encoded) = backend.read(node_key.as_slice()) {
+		encoded
+	} else {
+		return Err("Missing node from backend".into());
+	};
+	let input = &mut encoded.as_slice();
+	/*let start_mask = if let Some(mask) = <N::Radix as RadixConf>::Alignment::DEFAULT {
+		mask
+	} else {
+		let b = input.read_byte()?;
+		<N::Radix as RadixConf>::Alignment::decode_mask(b)
+	};
 	let start = PositionFor::<N> {
 		index: 0,
 		mask: start_mask,
+	};*/
+	let end_mask = if let Some(mask) = <N::Radix as RadixConf>::Alignment::DEFAULT {
+		mask
+	} else {
+		let b = input.read_byte()?;
+		<N::Radix as RadixConf>::Alignment::decode_mask(b)
 	};
-	let end_mask: MaskFor<N::Radix> = Decode::decode(input)?;
 	let prefix: Vec<u8> = Decode::decode(input)?;
-	let end = if end_mask == MaskFor::<N::Radix>::first() {
+	let mut end = if end_mask == MaskFor::<N::Radix>::first() {
 		PositionFor::<N>  {
 			index: prefix.len(),
 			mask: end_mask,
@@ -155,39 +167,39 @@ fn decode_node<N, B: Backend>(
 	};
 
 	let value: Option<Vec<u8>> = Decode::decode(input)?;
-	let node_key = key_addressed::<N>(&key[..], start);
 	let mut node = Node::<N>::new(
 		prefix.as_slice(),
-		start,
+		PositionFor::<N> {
+			index: 0,
+			mask: start.mask,
+		},
 		end,
 		value,
 		(),
-		LazyExt::Resolved(node_key, backend.clone(), false),
+		N::NodeExt::existing_node(&backend, node_key),
 	);
 
+	end.index += start.index;
 	let mut key_index = KeyIndexFor::<N>::zero();
 	let mut byte_index = 0;
 	let mut input_index = 0;
 	let mut child_key = key.to_vec();
+	node.new_end(&mut child_key, start);
 	let child_position = end.next::<N::Radix>();
 	loop {
 		if let Some(children_mask) = input.get(input_index) {
 			if children_mask & 0b1000_0000 >> byte_index != 0 {
-				child_position.set_index::<N::Radix>(&mut child_key, key_index);
+				end.set_index::<N::Radix>(&mut child_key, key_index);
+				let child = node.ext().fetch_node(&child_key[..], child_position);
 				let key = key_addressed::<N>(&child_key[..], child_position);
-				node.set_child(key_index, Node::<N>::new(
-					&[],
-					child_position,
-					child_position,
-					None,
-					(),
-					LazyExt::Unresolved(key, backend.clone()),
-				));
+				node.set_child(key_index, child);
 			}
 
-			if byte_index == 8 {
+			if byte_index == 7 {
 				byte_index = 0;
 				input_index += 1;
+			} else {
+				byte_index += 1;
 			}
 			if let Some(i) = key_index.next() {
 				key_index = i;
@@ -200,6 +212,46 @@ fn decode_node<N, B: Backend>(
 	}
 
 	Ok(node)
+}
+
+fn encode_node<N: NodeConf>(
+	node: &Node<N>,
+) -> Vec<u8> {
+	let mut result = Vec::new();
+	/*if <N::Radix as RadixConf>::Alignment::DEFAULT.is_none() {
+		let mask = <N::Radix as RadixConf>::Alignment::encode_mask(node.key.start);
+		result.push(mask);
+	}*/
+	if <N::Radix as RadixConf>::Alignment::DEFAULT.is_none() {
+		let mask = <N::Radix as RadixConf>::Alignment::encode_mask(node.key.end);
+		result.push(mask);
+	}
+	node.key.data.as_slice().encode_to(&mut result);
+	node.value.encode_to(&mut result);
+
+	let mut key_index = KeyIndexFor::<N>::zero();
+	let mut byte_index = 0;
+	let mut mask = 0u8;
+	loop {
+		if node.get_child(key_index).is_some() {
+			mask |= 0b1000_0000 >> byte_index;
+		}
+
+		if let Some(i) = key_index.next() {
+			key_index = i;
+		} else {
+			break;
+		}
+		if byte_index == 7 {
+			result.push(mask);
+			mask = 0;
+			byte_index = 0;
+		} else {
+			byte_index += 1;
+		}
+	}
+	result.push(mask);
+	result
 }
 
 impl<B: BackendInner> ReadBackend for SingleThreadBackend<B> {
@@ -216,36 +268,11 @@ impl<B: BackendInner> Backend for SingleThreadBackend<B> {
 		self.0.borrow_mut().remove(k)
 	}
 }
-
-impl<B, N> ReadNodeBackend<N> for SingleThreadBackend<B>
-	where
-		B: BackendInner,
-		N: NodeConf<NodeExt = LazyExt<Self>>,
-		MaskFor<N::Radix>: Decode,
-{
-	fn get_node(&self, k: &[u8]) -> Option<Node<N>> {
+/*
 		self.0.borrow().read(k).and_then(|encoded| {
 			decode_node(k, encoded.as_slice(), self).ok()
 		})
-	}
-/*	fn get_node(&self, k: &[u8]) -> Option<N> {
-		self.0.borrow().read(k).and_then(|encoded| {
-			decode_node(k, encoded.as_slice(), (), &self).map(|(node, children)|
-				Node {
-					internal: LazyExt::Resolved(BackedNode {
-						inner: node,
-						key: k.to_vec(),
-						changed: false,
-						backend: self.clone(),
-					}),
-					children,
-				}
-			).ok()
-		})
-	}
 */
-}
-
 /// The backend to use for a tree.
 pub struct SynchBackend<B, N> {
 	nodes: B,
@@ -277,9 +304,41 @@ pub struct DirectExt<B> {
 }
 
 impl<B: Backend> NodeExt for LazyExt<B> {
+	type INIT = B;
+	fn existing_node(init: &Self::INIT, key: Key) -> Self {
+		LazyExt::Resolved(key, init.clone(), false)
+	}
 	fn new_node(&self, key: Key) -> Self {
-		unimplemented!("need to resolve key and from backend");
-		//LazyExt::Resolved(key, )
+		match self {
+			LazyExt::Unresolved(_, backend)
+				| LazyExt::Resolved(_, backend, ..) => {
+				LazyExt::Resolved(key, backend.clone(), true)
+			},
+		}
+	}
+	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>> {
+		match self {
+			LazyExt::Unresolved(_, backend)
+				| LazyExt::Resolved(_, backend, ..) => {
+				decode_node(&[], PositionFor::<N>::zero(), backend).ok()
+			},
+		}
+	}
+	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
+		match self {
+			LazyExt::Unresolved(_, backend)
+				| LazyExt::Resolved(_, backend, ..) => {
+				let key = key_addressed::<N>(key, position);
+				Node::<N>::new(
+					&[],
+					position,
+					position,
+					None,
+					(),
+					LazyExt::Unresolved(key, backend.clone()),
+				)
+			},
+		}
 	}
 	fn backend_key<N: NodeConf<NodeExt = Self>>(key: &[u8], position: PositionFor<N>) -> Key {
 		key_addressed::<N>(key, position)
@@ -313,11 +372,26 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 		unimplemented!("Call backend delete for key of ext");
 	}
 	fn commit_change<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>) {
-		unimplemented!("Encode and call backend write for key of ext");
+		match node.ext_mut() {
+			LazyExt::Resolved(_, _, false)
+			| LazyExt::Unresolved(..) => (),
+			LazyExt::Resolved(_key, _backend, changed) => {
+				*changed = false;
+				unimplemented!("Encode and call backend write for key of ext");
+			},
+		}
 	}
 }
 
 impl<B: Backend> NodeExt for DirectExt<B> {
+	type INIT = B;
+	fn existing_node(init: &Self::INIT, key: Key) -> Self {
+		DirectExt {
+			inner: init.clone(),
+			key,
+			changed: false,
+		}
+	}
 	fn new_node(&self, key: Key) -> Self {
 		DirectExt {
 			inner: self.inner.clone(),
@@ -325,6 +399,14 @@ impl<B: Backend> NodeExt for DirectExt<B> {
 			changed: true,
 		}
 	}
+	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>> {
+		decode_node(&[], PositionFor::<N>::zero(), &self.inner).ok()
+	}
+	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
+		decode_node(&key, position, &self.inner)
+			.expect("Corrupted backend, missing node")
+	}
+
 	fn backend_key<N: NodeConf<NodeExt = Self>>(key: &[u8], position: PositionFor<N>) -> Key {
 		key_addressed::<N>(key, position)
 	}
@@ -338,13 +420,16 @@ impl<B: Backend> NodeExt for DirectExt<B> {
 	fn set_change(&mut self) {
 		self.changed = true;
 	}
-	fn delete<N: NodeConf<NodeExt = Self>>(node: Node<N>) {
-		unimplemented!("Call backend delete for key of ext");
+	fn delete<N: NodeConf<NodeExt = Self>>(mut node: Node<N>) {
+		let ext = node.ext_mut();
+		ext.inner.remove(ext.key.as_slice());
 	}
 	fn commit_change<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>) {
 		if node.ext().changed == true {
-			node.ext_mut().changed = false;
-			unimplemented!("Encode and call backend write for key of ext");
+			let encoded = encode_node(node);
+			let ext = node.ext_mut();
+			ext.changed = false;
+			ext.inner.write(ext.key.clone(), encoded)
 		}
 	}
 }

@@ -39,7 +39,6 @@ use alloc::borrow::Borrow;
 use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::mem::replace;
-use codec::{Codec, Encode, Decode, Error as CodecError};
 
 /*#[cfg(not(feature = "std"))]
 extern crate alloc; // TODO check if needed in 2018 and if needed at all
@@ -85,6 +84,8 @@ struct PrefixKey<D, P>
 pub trait PrefixKeyConf {
 	/// Is key byte align using this definition.
 	const ALIGNED: bool;
+	/// Default mask value for aligned.
+	const DEFAULT: Option<Self::Mask>;
 	/// Either u8 or () depending on wether
 	/// we use aligned key.
 	type Mask: MaskKeyByte;
@@ -95,6 +96,7 @@ pub trait PrefixKeyConf {
 
 impl PrefixKeyConf for () {
 	const ALIGNED: bool = true;
+	const DEFAULT: Option<Self::Mask> = Some(());
 	type Mask = ();
 	fn encode_mask(mask: Self::Mask) -> u8 {
 		0
@@ -106,6 +108,7 @@ impl PrefixKeyConf for () {
 
 impl PrefixKeyConf for bool {
 	const ALIGNED: bool = false;
+	const DEFAULT: Option<Self::Mask> = None;
 	type Mask = bool;
 	fn encode_mask(mask: Self::Mask) -> u8 {
 		if mask {
@@ -121,6 +124,7 @@ impl PrefixKeyConf for bool {
 
 impl PrefixKeyConf for u8 {
 	const ALIGNED: bool = false;
+	const DEFAULT: Option<Self::Mask> = None;
 	type Mask = u8;
 	fn encode_mask(mask: Self::Mask) -> u8 {
 		mask
@@ -171,11 +175,16 @@ type KeyIndexFor<N> = <<N as NodeConf>::Radix as RadixConf>::KeyIndex;
 
 // TODO rename to backend hook
 pub trait NodeExt: Clone {
+	// TODO rename to backend? and switch some methods
+	type INIT: Clone;
 	/// Default value for inactive implementation.
 	/// Active implementation needs input parameters and
 	/// default to `None`.
 	const DEFAULT: Option<Self> = None;
+	fn existing_node(init: &Self::INIT, key: backend::Key) -> Self;
 	fn new_node(&self, key: backend::Key) -> Self;
+	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>>;
+	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N>;
 	fn backend_key<N: NodeConf<NodeExt = Self>>(key: &[u8], position: PositionFor<N>) -> backend::Key;
 	fn from_backend_key<N: NodeConf<NodeExt = Self>>(key: &backend::Key) -> (&[u8], PositionFor<N>);
 	fn resolve<N: NodeConf<NodeExt = Self>>(node: &Node<N>);
@@ -186,9 +195,19 @@ pub trait NodeExt: Clone {
 }
 
 impl NodeExt for () {
+	type INIT = ();
 	const DEFAULT: Option<Self> = Some(());
+	fn existing_node(init: &Self::INIT, _key: backend::Key) -> Self {
+		()
+	}
 	fn new_node(&self, _key: backend::Key) -> Self {
 		()
+	}
+	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>> {
+		unreachable!("Inactive implementation");
+	}
+	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, _key: &[u8], _position: PositionFor<N>) -> Node<N> {
+		unreachable!("Inactive implementation");
 	}
 	fn backend_key<N: NodeConf<NodeExt = Self>>(_key: &[u8], _position: PositionFor<N>) -> backend::Key {
 		unreachable!("Inactive implementation");
@@ -311,7 +330,7 @@ impl RadixConf for Radix2Conf {
 /// in an empty byte. Instead of an empty byte we should use
 /// the full byte configuration (`last`) at the previous index.
 /// TODO consider merging with RadixConf.
-pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug + Codec {
+pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 	/// Mask left part of a byte.
 	fn mask(&self, byte: u8) -> u8;
 	/// Mask right part of a byte.
@@ -806,6 +825,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 		} else {
 			let mut key = key.to_vec();
 			node.new_end(&mut key, position);
+			let at = at.next::<Self::Radix>();
 			// TODO consider owned variant of `backend_key` !!
 			let key = Self::NodeExt::backend_key::<Self>(key.as_slice(), at);
 			Self::NodeExt::new_node(&node.ext, key)
@@ -850,6 +870,12 @@ pub struct Node<N>
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
 	ext: N::NodeExt,
+}
+
+impl<N: NodeConf> Drop for Node<N> {
+	fn drop(&mut self) {
+		N::NodeExt::commit_change(self);
+	}
 }
 
 /*
@@ -1098,6 +1124,17 @@ impl<N> Tree<N>
 		Tree {
 			tree: None,
 			init,
+		}
+	}
+	pub fn from_backend(init: N::NodeExt) -> Self {
+		if N::NodeExt::DEFAULT.is_some() {
+			Self::new(init)
+		} else {
+			let tree =  N::NodeExt::get_root(&init);
+			Tree {
+				tree,
+				init,
+			}
 		}
 	}
 }
@@ -2147,13 +2184,14 @@ impl<N: NodeConf> Tree<N> {
 }
 
 macro_rules! test_for {
-	($module_name: ident, $backend_conf: ident) => {
+	($module_name: ident, $backend_conf: ident, $check_backend_ser: expr) => {
 #[cfg(any(test, feature = "fuzzer"))]
 pub mod $module_name {
 	use crate::*;
 	use alloc::collections::btree_map::BTreeMap;
 	use alloc::vec;
 
+	const CHECK_BACKEND: bool = $check_backend_ser;
 	type NodeConf = super::$backend_conf;
 
 	fn new_backend() -> <$backend_conf as super::NodeConf>::NodeExt {
@@ -2229,8 +2267,14 @@ pub mod $module_name {
 		assert_eq!(None, t1.insert(b"key2", value1.clone()));
 		assert_eq!(None, t2.insert(b"key2", value1.clone()));
 		assert!(compare_iter(&t1, &t2));
-		assert_eq!(None, t2.insert(b"key3", value1.clone()));
+		assert_eq!(None, t1.insert(b"key3", value1.clone()));
 		assert!(!compare_iter(&t1, &t2));
+		core::mem::drop(t1);
+		if CHECK_BACKEND {
+			assert_eq!(None, t2.insert(b"key3", value1.clone()));
+			let mut t3 = Tree::<NodeConf>::from_backend(new_root(&backend));
+			assert!(compare_iter(&mut t3, &mut t2));
+		}
 	}
 
 	fn fuzz_to_data(input: &[u8]) -> Vec<(Vec<u8>,Vec<u8>)> {
@@ -2295,7 +2339,7 @@ pub mod $module_name {
 		res
 	}
 
-	pub fn fuzz_insert_remove(input: &[u8]) {
+	pub fn fuzz_insert_remove(input: &[u8], check_backend: bool) {
 		let data = fuzz_to_data(input);
 		let data = fuzz_removal(data);
 		let backend = new_backend();
@@ -2315,6 +2359,11 @@ pub mod $module_name {
 			a += 1;
 		}
 		assert!(compare_iter(&mut t1, &mut t2));
+		core::mem::drop(t1);
+		if CHECK_BACKEND {
+			let mut t3 = Tree::<NodeConf>::from_backend(new_root(&backend));
+			assert!(compare_iter(&mut t3, &mut t2));
+		}
 	}
 
 	#[test]
@@ -2329,13 +2378,13 @@ pub mod $module_name {
 			vec![0u8, 202, 1, 4, 64, 49, 0, 0],
 		];
 		for data in datas.iter() {
-			fuzz_insert_remove(&data[..]);
+			fuzz_insert_remove(&data[..], CHECK_BACKEND);
 		}
 	}
 }
 }
 }
-test_for!(test_256, Node256NoBackend);
-test_for!(test_256_hash, Node256HashBackend);
-//test_for!(test_256_lazy_hash, Node256LazyHashBackend);
+test_for!(test_256, Node256NoBackend, false);
+test_for!(test_256_hash, Node256HashBackend, true);
+//test_for!(test_256_lazy_hash, Node256LazyHashBackend, true);
 
