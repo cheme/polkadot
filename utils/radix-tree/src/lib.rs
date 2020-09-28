@@ -1519,6 +1519,14 @@ flatten_children!(
 	Radix256Conf,
 	backend::LazyExt<backend::SingleThreadBackend<backend::MapBackend>>,
 );
+flatten_children!(
+	Children256Flatten4,
+	Node256Flatten4,
+	Node256TxBackend,
+	Children256,
+	Radix256Conf,
+	backend::DirectExt<backend::SingleThreadBackend<backend::MapBackend>>,
+);
 
 
 #[derive(Derivative)]
@@ -2553,6 +2561,7 @@ pub mod $module_name {
 }
 test_for!(test_256, Node256NoBackend, false);
 test_for!(test_256_hash, Node256HashBackend, true);
+test_for!(test_256_hash_tx, Node256TxBackend, true);
 test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);
 
 #[cfg(test)]

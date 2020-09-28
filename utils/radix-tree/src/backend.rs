@@ -273,16 +273,29 @@ impl<B: BackendInner> Backend for SingleThreadBackend<B> {
 			decode_node(k, encoded.as_slice(), self).ok()
 		})
 */
+
+#[derive(Clone)]
 /// The backend to use for a tree.
-pub struct SynchBackend<B, N> {
-	nodes: B,
-	_ph: PhantomData<N>,
+pub struct TransactionBackend<B> {
+	inner: B,
+	changes: HashMap<Vec<u8>, Option<Vec<u8>>>,
 }
 
-/// The backend to use for a tree.
-pub struct TransactionBackend<B, N> {
-	inner: SynchBackend<B, N>,
-	changes: HashMap<Vec<u8>, N>,
+impl<B: ReadBackend> ReadBackend for TransactionBackend<B> {
+	fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
+		self.changes.get(k).cloned()
+			.flatten()
+			.or_else(|| self.inner.read(k))
+	}
+}
+
+impl<B: BackendInner> BackendInner for TransactionBackend<B> {
+	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+		self.changes.insert(k, Some(v));
+	}
+	fn remove(&mut self, k: &[u8]) {
+		self.changes.insert(k.to_vec(), None);
+	}
 }
 
 #[derive(Derivative)]
