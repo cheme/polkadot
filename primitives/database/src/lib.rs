@@ -169,9 +169,18 @@ pub trait Database<H: Clone>: Send + Sync {
 	}
 }
 
+pub trait OrderedDatabase<H: Clone>: Database<H> {
+}
+
 impl<H> std::fmt::Debug for dyn Database<H> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "Database")
+	}
+}
+
+impl<H> std::fmt::Debug for dyn OrderedDatabase<H> {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "OrderedDatabase")
 	}
 }
 
@@ -195,4 +204,113 @@ pub fn with_lookup<R, H: Clone>(db: &dyn Database<H>, hash: &H, mut f: impl FnMu
 	let mut adapter = |k: &_| { result = Some(f(k)); };
 	db.with_lookup(hash, &mut adapter);
 	result
+}
+
+mod ordered {
+	use super::*;
+	use std::sync::Arc;
+	use parking_lot::RwLock;
+	use radix_tree::{Derivative, RadixConf, Children, NodeConf, Node,
+		Children256, Radix256Conf};
+
+	use core::fmt::Debug;
+
+	radix_tree::flatten_children!(
+		Children256Flatten,
+		Node256Flatten,
+		Node256LazyHashBackend,
+		Children256,
+		Radix256Conf,
+		radix_tree::backend::LazyExt<radix_tree::backend::SingleThreadBackend<radix_tree::backend::TransactionBackend<WrapColumnDb<H>>>>,
+		H,
+		{ H: Debug + PartialEq + Clone}
+	);
+
+	struct WrapColumnDb<H> {
+		inner: Arc<dyn Database<H>>,
+		col: ColumnId,
+	}
+
+	impl<H: Clone> radix_tree::backend::ReadBackend for WrapColumnDb<H> {
+		fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
+			self.inner.get(self.col, k)
+		}
+	}
+
+	impl<H: Clone> radix_tree::backend::BackendInner for WrapColumnDb<H> {
+	}
+
+	/// Ordered database implementation through a indexing radix tree overlay.
+	pub struct RadixTreeDatabase<H: Clone + PartialEq + Debug> {
+		inner: Arc<dyn Database<H>>,
+		// Small vec?
+		trees: Arc<RwLock<Vec<radix_tree::Tree<Node256LazyHashBackend<H>>>>>, // TODO not the right type
+	}
+
+	impl<H: Clone + PartialEq + Debug> RadixTreeDatabase<H> {
+		/// Create new radix tree database.
+		pub fn new(inner: Arc<dyn Database<H>>) -> Self {
+			RadixTreeDatabase {
+				inner,
+				trees: Arc::new(RwLock::new(Vec::<radix_tree::Tree<Node256LazyHashBackend<H>>>::new())),
+			}
+		}
+		fn lazy_column_init(&self, col: ColumnId) {
+			let index = col as usize;
+			loop {
+				let len = self.trees.read().len();
+				if len >= index {
+					self.trees.write().push(radix_tree::Tree::from_backend(
+						radix_tree::backend::SingleThreadBackend::new(
+							radix_tree::backend::TransactionBackend::new(
+								WrapColumnDb {
+									inner: self.inner.clone(),
+									col: len as u32,
+								}
+							)
+						)
+					))
+				} else {
+					break;
+				}
+			}
+		}
+	}
+
+	impl<H: Clone + PartialEq + Debug> Database<H> for RadixTreeDatabase<H> {
+		fn get(&self, col: ColumnId, key: &[u8]) -> Option<Vec<u8>> {
+			self.lazy_column_init(col);
+			self.trees.write()[col as usize].get_mut(key).map(|value| value.cloned())
+		}
+		fn lookup(&self, _hash: &H) -> Option<Vec<u8>> {
+			unimplemented!("No hash lookup on radix tree layer");
+		}
+		fn commit(&self, transaction: Transaction<H>) -> error::Result<()> {
+			for change in transaction.0.into_iter() {
+				match change {
+					Change::Set(col, key, value) => {
+						self.trees.write()[col as usize].insert(key, value);
+					},
+					Change::Remove(col, key) => {
+						self.trees.write()[col as usize].remove(key);
+					},
+					Change::Store(hash, preimage) => {
+						unimplemented!("No hash lookup on radix tree layer");
+					},
+					Change::Release(hash) => {
+						unimplemented!("No hash lookup on radix tree layer");
+					},
+				}?;
+			}
+
+			unimplemented!("Commit change by iterating instead of using drop");
+
+			Ok(())
+		}
+
+
+	}
+
+	impl<H: Clone + PartialEq + Debug> OrderedDatabase<H> for RadixTreeDatabase<H> {
+	}
 }

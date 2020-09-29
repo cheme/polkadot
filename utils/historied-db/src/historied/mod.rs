@@ -18,13 +18,13 @@
 //! Linear historied data.
 
 #[cfg(not(feature = "std"))]
-use crate::rstd::{vec::Vec, vec};
-use crate::rstd::marker::PhantomData;
+use sp_std::{vec::Vec, vec};
+use sp_std::marker::PhantomData;
 use crate::{StateDBRef, UpdateResult, InMemoryStateDBRef, StateDB};
 use hash_db::{PlainDB, PlainDBRef};
 use crate::Latest;
 use codec::{Encode, Decode};
-use crate::rstd::ops::Range;
+use sp_std::ops::Range;
 use crate::InitFrom;
 
 pub mod linear;
@@ -175,11 +175,11 @@ impl<V, S> From<(V, S)> for HistoriedValue<V, S> {
 }
 
 /// Implementation for plain db.
-pub struct BTreeMap<K, V, H: InitFrom>(pub(crate) crate::rstd::BTreeMap<K, H>, H::Init, PhantomData<V>);
+pub struct BTreeMap<K, V, H: InitFrom>(pub(crate) sp_std::collections::btree_map::BTreeMap<K, H>, H::Init, PhantomData<V>);
 
 impl<K: Ord, V, H: InitFrom> BTreeMap<K, V, H> {
 	pub fn new(init: H::Init) -> Self {
-		BTreeMap(crate::rstd::BTreeMap::new(), init, PhantomData)
+		BTreeMap(sp_std::collections::btree_map::BTreeMap::new(), init, PhantomData)
 	}
 }
 
@@ -263,7 +263,7 @@ impl<K: Ord + Clone, V: Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeMap<K, V
 /// Implementation for plain db.
 pub struct PlainDBState<K, DB, H, S> {
 	db: DB,
-	touched_keys: crate::rstd::BTreeMap<S, Vec<K>>, // TODO change that by a journal trait!!
+	touched_keys: sp_std::collections::btree_map::BTreeMap<S, Vec<K>>, // TODO change that by a journal trait!!
 	_ph: PhantomData<H>,
 }
 
@@ -320,7 +320,7 @@ impl<
 	}
 
 	fn gc(&mut self, gc: &Self::GC) {
-		let mut keys: crate::rstd::BTreeSet<_> = Default::default();
+		let mut keys: sp_std::collections::btree_set::BTreeSet<_> = Default::default();
 		for touched in self.touched_keys.values() {
 			for key in touched.iter() {
 				keys.insert(key.clone());
@@ -347,7 +347,7 @@ impl<
 				states.push(touched.clone());
 			}
 		}
-		let mut keys: crate::rstd::BTreeSet<_> = Default::default();
+		let mut keys: sp_std::collections::btree_set::BTreeSet<_> = Default::default();
 		for state in states {
 			if let Some(touched) = self.touched_keys.remove(&state) {
 				for k in touched {

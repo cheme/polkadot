@@ -17,23 +17,31 @@
 
 //! Linear backend possibly stored into multiple nodes.
 
-use crate::rstd::marker::PhantomData;
-use crate::rstd::btree_map::BTreeMap;
-use crate::rstd::cell::RefCell;
-use crate::rstd::vec::Vec;
+use sp_std::marker::PhantomData;
+use sp_std::collections::btree_map::BTreeMap;
+use sp_std::cell::RefCell;
+use sp_std::vec::Vec;
 use super::{LinearStorage};
 use crate::historied::HistoriedValue;
 use derivative::Derivative;
 use crate::InitFrom;
 use crate::backend::encoded_array::EncodedArrayValue;
 
+/// Rough size estimate to manage node size.
 pub trait EstimateSize {
+	/// For content in Nodes that don't use
+	/// `APPLY_SIZE_LIMIT`, set to false.
+	const ACTIVE: bool = true;
+	/// Return the size estimation.
+	/// If `ACTIVE` is set to false this
+	/// method can return anything.
 	fn estimate_size(&self) -> usize;
 }
 
 /// Node storage metadata
 pub trait NodesMeta: Sized {
-	/// If true, then we apply a content size limit,
+	/// If true, and value got an active `EstimateSize`
+	/// implementation, then we apply a content size limit,
 	/// otherwhise we use the number of node limit.
 	const APPLY_SIZE_LIMIT: bool;
 	/// The size limit to apply.
@@ -91,8 +99,11 @@ impl<V, S, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for BTreeMap<Vec<u
 #[derivative(Clone(bound="D: Clone"))]
 /// A node is a linear backend and some meta information.
 pub struct Node<V, S, D, M> {
+	/// Inner linear backend of historied values.
 	data: D,
+	/// If changed, the node needs to be updated in `Head` backend.
 	changed: bool,
+	/// Keep trace of node byte length for `APPLY_SIZE_LIMIT`.
 	reference_len: usize,
 	_ph: PhantomData<(V, S, D, M)>,
 }
@@ -100,17 +111,26 @@ pub struct Node<V, S, D, M> {
 /// Head is the entry node, it contains fetched nodes and additional
 /// information about this backend state.
 pub struct Head<V, S, D, M, B> {
+	/// Head contains the last `Node` content.
 	inner: Node<V, S, D, M>,
-	/// end index - 1 at 0
+	/// Accessed nodes are kept in memory.
+	/// This is a reversed ordered `Vec`, starting at end 'index - 1' and
+	/// finishing at most at the very first historied node.
 	fetched: RefCell<Vec<Node<V, S, D, M>>>, // TODO consider smallvec
+	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u32,
+	/// Keep trace of initial index end to apply change lazilly.
 	old_end_node_index: u32,
-	// inclusive.
+	/// The index of the first node, inclusive.
 	start_node_index: u32,
-	// non inclusive (next index to use)
+	/// The index of the last node, non inclusive (next index to use)
 	end_node_index: u32,
+	/// Number of historied values stored in head and all past nodes.
 	len: usize,
+	/// Backend key used for this head, or any unique identifying key
+	/// that we can use to calculate location key of `Node`s from  `Head`.
 	reference_key: Vec<u8>,
+	/// All nodes are persisted under this backend storage.
 	backend: B,
 }
 
@@ -124,7 +144,7 @@ impl<V, S, D: Clone, M, B> Head<V, S, D, M, B>
 			self.backend.remove_node(&self.reference_key[..], d);
 		}
 		// this comparison is needed for the case we clear to 0 nodes indexes.
-		let start_end = crate::rstd::cmp::max(self.end_node_index, self.old_start_node_index);
+		let start_end = sp_std::cmp::max(self.end_node_index, self.old_start_node_index);
 		self.old_start_node_index = self.start_node_index;
 		for d in start_end .. self.old_end_node_index {
 			self.backend.remove_node(&self.reference_key[..], d);
@@ -344,7 +364,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			};
 
 			if ix > 0 {
-				if M::APPLY_SIZE_LIMIT {
+				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					let mut add_size = 0;
 					for i in 0..ix {
 						node.data.lookup(i).map(|h| {
@@ -372,7 +392,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		self.len += 1;
 		let mut additional_size: Option<usize> = None;
 		
-		if !M::APPLY_SIZE_LIMIT {
+		if !M::APPLY_SIZE_LIMIT || !V::ACTIVE {
 			if self.inner.data.len() < M::MAX_NODE_ITEMS {
 				self.inner.data.push(value);
 				return;
@@ -400,7 +420,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			_ph: PhantomData,
 		};
 		self.inner.changed = true;
-		let prev = crate::rstd::mem::replace(&mut self.inner, new_node);
+		let prev = sp_std::mem::replace(&mut self.inner, new_node);
 		self.fetched.borrow_mut().insert(0, prev);
 	}
 	fn insert(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
@@ -412,7 +432,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			&mut fetched_mut[index.0 as usize]
 		};
 
-		if M::APPLY_SIZE_LIMIT {
+		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
 		}
 		node.changed = true;
@@ -431,7 +451,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		node.changed = true;
 		self.len -= 1;
 
-		if M::APPLY_SIZE_LIMIT {
+		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			let h = node.data.get(index.1);
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 		}
@@ -445,7 +465,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		if let Some(h) = self.inner.data.pop() {
 			self.len -= 1;
 			if self.inner.data.len() > 0 {
-				if M::APPLY_SIZE_LIMIT {
+				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 				}
 				self.inner.changed = true;
@@ -508,7 +528,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 
 			if ix < node.data.len() {
 
-				if M::APPLY_SIZE_LIMIT {
+				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					let mut add_size = 0;
 					for i in ix..node.data.len() {
 						node.data.lookup(i).map(|h| {
@@ -551,7 +571,7 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 
 		node.changed = true;
 
-		if M::APPLY_SIZE_LIMIT {
+		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			let h = node.data.get(index.1);
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
@@ -560,7 +580,6 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 	}
 }
 
-// TODO use size of instead of u8
 impl EstimateSize for Vec<u8> {
 	fn estimate_size(&self) -> usize {
 		self.len()
@@ -648,7 +667,7 @@ pub(crate) mod test {
 	impl NodesMeta for MetaSize {
 		const APPLY_SIZE_LIMIT: bool = true;
 		const MAX_NODE_LEN: usize = 25;
-		const MAX_NODE_ITEMS: usize = 0;
+		const MAX_NODE_ITEMS: usize = 8;
 		const MAX_INDEX_ITEMS: usize = 5;
 		const STORAGE_PREFIX: &'static [u8] = b"nodes1";
 	}

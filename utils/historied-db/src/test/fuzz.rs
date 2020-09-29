@@ -37,7 +37,7 @@ mod bindings {
 
 		#[derive(Default, Clone)]
 		pub struct $name;
-		impl crate::simple_db::SerializeInstance for $name {
+		impl crate::simple_db::SerializeInstanceMap for $name {
 			const STATIC_COL: &'static [u8] = $col;
 		}
 		
@@ -45,10 +45,10 @@ mod bindings {
 	macro_rules! static_instance_variable {
 		($name: ident, $col: expr, $path: expr, $lazy: expr) => {
 			static_instance!($name, $col);
-		impl crate::simple_db::SerializeInstanceVariable for $name {
-			const PATH: &'static [u8] = $path;
-			const LAZY: bool = $lazy;
-		}
+			impl crate::simple_db::SerializeInstanceVariable for $name {
+				const PATH: &'static [u8] = $path;
+				const LAZY: bool = $lazy;
+			}
 	}}
 
 	static_instance!(Mapping, &[0u8, 0, 0, 0]);
@@ -77,8 +77,8 @@ impl crate::management::tree::TreeManagementStorage for SerFuzz {
 	fn init() -> Self::Storage {
 		crate::test::InMemorySimpleDB5::new()
 	}
-
 }
+
 type LinearBackend = crate::backend::in_memory::MemoryOnly<u16, u32>;
 type TreeBackend = crate::backend::in_memory::MemoryOnly<
 	crate::historied::linear::Linear<u16, u32, LinearBackend>,

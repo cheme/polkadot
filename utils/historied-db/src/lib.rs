@@ -22,28 +22,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-
-#[cfg(feature = "std")]
-mod rstd {
-	pub use std::{borrow, boxed, cmp, convert, fmt, hash, iter, marker, mem, ops, rc, result, vec, cell};
-	pub use std::collections::VecDeque;
-	pub use std::collections::{BTreeMap, BTreeSet, btree_map};
-	pub use std::error::Error;
-}
 #[cfg(feature = "std")]
 use println;
-
-#[cfg(not(feature = "std"))]
-mod rstd {
-	pub use core::{convert, cmp, iter, fmt, hash, marker, mem, ops, result, cell};
-	pub use alloc::{boxed, rc, vec, borrow};
-	pub use alloc::collections::VecDeque;
-	pub use alloc::collections::{BTreeMap, BTreeSet, btree_map};
-	pub trait Error {}
-	impl<T> Error for T {}
-}
 
 #[cfg(not(feature = "std"))]
 #[macro_export]
@@ -52,7 +32,7 @@ macro_rules! println {
 	($($arg:tt)*) => ({ })
 }
 
-use core::marker::PhantomData;
+use sp_std::marker::PhantomData;
 
 /// Implementation of historied-db traits
 /// using historied values
@@ -77,7 +57,7 @@ pub trait InitFrom: Sized {
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test;
 
-use rstd::vec::Vec;
+use sp_std::vec::Vec;
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
 ///  result to be able to proceed

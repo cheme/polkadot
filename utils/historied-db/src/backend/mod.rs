@@ -18,7 +18,7 @@
 //! Linear backend structures for historied data storage.
 
 use crate::historied::HistoriedValue;
-use crate::rstd::ops::Range;
+use sp_std::ops::Range;
 use crate::InitFrom;
 
 /// Data stored as rust structs in memory.
@@ -109,7 +109,7 @@ pub struct DummyIndex;
 pub struct RevIter<'a, V, S, D: LinearStorage<V, S>>(
 	&'a D,
 	Option<D::Index>,
-	crate::rstd::marker::PhantomData<(V, S)>,
+	sp_std::marker::PhantomData<(V, S)>,
 );
 impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for RevIter<'a, V, S, D> {
 	type Item = <D as LinearStorage<V, S>>::Index;
