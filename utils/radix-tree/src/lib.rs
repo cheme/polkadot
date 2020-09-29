@@ -1054,7 +1054,7 @@ impl<N: NodeConf> Node<N> {
 				};
 				let position_start = position.next_by::<N::Radix>(self.depth());
 				position_start.set_index::<N::Radix>(&mut self.key.data, index);
-				let position_cat = position.next::<N::Radix>();
+				let position_cat = position_start.next::<N::Radix>();
 				child.new_end(&mut self.key.data, position_cat);
 				self.key.end = child.key.end;
 				self.value = child.value.take();
@@ -2375,8 +2375,10 @@ macro_rules! test_for {
 pub mod $module_name {
 	use crate::*;
 	use alloc::collections::btree_map::BTreeMap;
+	#[cfg(test)]
 	use alloc::vec;
 
+	#[cfg(test)]
 	const CHECK_BACKEND: bool = $check_backend_ser;
 	type NodeConf = super::$backend_conf;
 
@@ -2550,6 +2552,7 @@ pub mod $module_name {
 	#[test]
 	fn replay_insert_remove_fuzzing() {
 		let datas = [
+			vec![100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 121, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 0, 0, 0, 0, 0, 251, 0, 0, 0, 4],
 			vec![0, 1, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0],
 			vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 96, 0, 16, 96],
 			vec![0, 0, 0, 0, 0, 0, 0, 195, 0, 0, 195, 0, 0, 0],
