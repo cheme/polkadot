@@ -17,16 +17,14 @@
 
 //! Use a backend for existing nodes.
 
-use crate::{NodeConf, PositionFor, Descent, KeyIndexFor, MaskFor,
-	Position, MaskKeyByte, NodeIndex, Node, Children, NodeBackend, RadixConf,
+use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
+	Position, MaskKeyByte, NodeIndex, Node, NodeBackend, RadixConf,
 	PrefixKeyConf, BackendFor};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
-use core::marker::PhantomData;
 use hashbrown::HashMap;
 use codec::{Encode, Decode, Error as CodecError, Input};
 use core::cell::RefCell;
-use core::fmt::Debug;
 use derivative::Derivative;
 
 pub type Key = Vec<u8>;

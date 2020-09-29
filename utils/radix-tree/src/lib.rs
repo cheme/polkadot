@@ -98,10 +98,10 @@ impl PrefixKeyConf for () {
 	const ALIGNED: bool = true;
 	const DEFAULT: Option<Self::Mask> = Some(());
 	type Mask = ();
-	fn encode_mask(mask: Self::Mask) -> u8 {
+	fn encode_mask(_mask: Self::Mask) -> u8 {
 		0
 	}
-	fn decode_mask(mask: u8) -> Self::Mask {
+	fn decode_mask(_mask: u8) -> Self::Mask {
 		()
 	}
 }
@@ -201,7 +201,7 @@ pub trait NodeBackend: Clone {
 impl NodeBackend for () {
 	type Backend = ();
 	const DEFAULT: Option<Self> = Some(());
-	fn existing_node(init: &Self::Backend, _key: backend::Key) -> Self {
+	fn existing_node(_init: &Self::Backend, _key: backend::Key) -> Self {
 		()
 	}
 	fn new_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Self {
@@ -210,7 +210,7 @@ impl NodeBackend for () {
 	fn new_node(&self, _key: backend::Key) -> Self {
 		()
 	}
-	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<Node<N>> {
+	fn get_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Option<Node<N>> {
 		unreachable!("Inactive implementation");
 	}
 	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, _key: &[u8], _position: PositionFor<N>) -> Node<N> {
@@ -219,7 +219,7 @@ impl NodeBackend for () {
 	fn backend_key<N: NodeConf<NodeBackend = Self>>(_key: &[u8], _position: PositionFor<N>) -> backend::Key {
 		unreachable!("Inactive implementation");
 	}
-	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(key: &backend::Key) -> (&[u8], PositionFor<N>) {
+	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(_key: &backend::Key) -> (&[u8], PositionFor<N>) {
 		unreachable!("Inactive implementation");
 	}
 	fn resolve<N: NodeConf<NodeBackend = Self>>(_node: &Node<N>) { }
@@ -245,7 +245,7 @@ impl RadixConf for Radix16Conf {
 			(true, 0)
 		}
 	}
-	fn advance_by(_previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
+	fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
 		unimplemented!()
 	}
 	fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
@@ -307,7 +307,7 @@ impl RadixConf for Radix2Conf {
 			(0, 1)
 		}
 	}
-	fn advance_by(_previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
+	fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
 		unimplemented!()
 	}
 	fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
@@ -374,10 +374,10 @@ impl MaskKeyByte for () {
 	fn index(&self, byte: u8) -> u8 {
 		byte
 	}
-	fn set_index(&self, byte: u8, index: u8) -> u8 {
+	fn set_index(&self, _byte: u8, index: u8) -> u8 {
 		index
 	}
-	fn cmp(&self, other: Self) -> Ordering {
+	fn cmp(&self, _other: Self) -> Ordering {
 		Ordering::Equal
 	}
 }
@@ -545,20 +545,6 @@ impl<P> Position<P>
 
 impl<D, P> PrefixKey<D, P>
 	where
-		D: Borrow<[u8]> + Default,
-		P: PrefixKeyConf,
-{
-	fn empty() -> Self {
-		PrefixKey {
-			start: P::Mask::first(),
-			end: P::Mask::first(),
-			data: Default::default(),
-		}
-	}
-}
-
-impl<D, P> PrefixKey<D, P>
-	where
 		D: Borrow<[u8]>,
 		P: PrefixKeyConf,
 {
@@ -642,7 +628,6 @@ fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 		N: RadixConf,
 {
 		if N::Alignment::ALIGNED {
-			let mut index = 0;
 			let left = one.data.borrow();
 			let right = other.data.borrow();
 			let upper_bound = min(left.len(), right.len());
@@ -658,8 +643,9 @@ fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 				index: upper_bound,
 				mask: MaskFor::<N>::first(),
 			}
-		}
-		if one.start != other.start {
+		} else {
+			unimplemented!()
+/*		if one.start != other.start {
 			return Position::zero();
 		}
 		let left = one.data.borrow();
@@ -679,7 +665,6 @@ fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 			}
 			if index == 0 {
 				index = upper_bound - 1;
-					/*
 				delta = if left.len() == upper_bound {
 					one.unchecked_last_byte() ^ right[index]
 						& !one.end.mask(255)
@@ -687,7 +672,6 @@ fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 					left[index] ^ other.unchecked_last_byte()
 						& !other.end.mask(255)
 				};
-					i*/
 					unimplemented!("TODO do with a mask_end function.");
 			} else {
 				delta = left[index] ^ right[index];
@@ -710,6 +694,7 @@ fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 				index,
 				mask,
 			}
+		*/
 		}
 	}
 
@@ -1059,7 +1044,6 @@ impl<N: NodeConf> Node<N> {
 	}
 	pub fn fuse_child(
 		&mut self,
-		key: &[u8],
 	) {
 		if let Some(index) = self.children.first() {
 			if let Some(mut child) = self.children.remove_child(index) {
@@ -1082,13 +1066,6 @@ impl<N: NodeConf> Node<N> {
 		} else {
 			unreachable!("fuse condition checked");
 		}
-	}
-	pub fn change_start(
-		&mut self,
-		key: &[u8],
-		new_start: PositionFor<N>,
-	) {
-		unimplemented!()
 	}
 
 	// TODO make it a trait function?
@@ -2310,7 +2287,7 @@ impl<N: NodeConf> Tree<N> {
 		let mut position = PositionFor::<N>::zero();
 		let mut empty_tree = None;
 		if let Some(top) = self.tree.as_mut() {
-			let mut current: &mut Node<N> = top;
+			let current: &mut Node<N> = top;
 			if key.len() == 0 && current.depth() == 0 {
 				let result = current.remove_value();
 				if current.number_child() == 0 {
@@ -2318,7 +2295,7 @@ impl<N: NodeConf> Tree<N> {
 //					self.tree = None;
 				} else {
 					if current.number_child() == 1 {
-						current.fuse_child(key);
+						current.fuse_child();
 					}
 					return result;
 				}
@@ -2359,7 +2336,7 @@ impl<N: NodeConf> Tree<N> {
 									.expect("was resolved from key");
 								parent.remove_child(parent_index);
 								if parent.value().is_none() && parent.number_child() == 1 {
-									parent.fuse_child(key);
+									parent.fuse_child();
 								}
 							} else {
 								// root
@@ -2368,7 +2345,7 @@ impl<N: NodeConf> Tree<N> {
 								break;
 							}
 						} else if current.number_child() == 1 {
-							current.fuse_child(key);
+							current.fuse_child();
 						}
 
 						//return current.set_value(value);
@@ -2564,7 +2541,7 @@ pub mod $module_name {
 		}
 		assert!(compare_iter(&mut t1, &mut t2));
 		core::mem::drop(t1);
-		if CHECK_BACKEND {
+		if check_backend {
 			let mut t3 = Tree::<NodeConf>::from_backend(backend.clone());
 			assert!(compare_iter(&mut t3, &mut t2));
 		}
@@ -2597,7 +2574,6 @@ test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);
 mod lazy_test {
 	use crate::*;
 	use alloc::collections::btree_map::BTreeMap;
-	use alloc::vec;
 
 	type NodeConf = super::Node256LazyHashBackend;
 
