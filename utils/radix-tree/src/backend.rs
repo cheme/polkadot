@@ -233,7 +233,7 @@ fn encode_node<N: NodeConf>(
 	let mut byte_index = 0;
 	let mut mask = 0u8;
 	loop {
-		if node.get_child(key_index).is_some() {
+		if node.has_child(key_index) {
 			mask |= 0b1000_0000 >> byte_index;
 		}
 
@@ -321,6 +321,9 @@ pub struct DirectExt<B> {
 }
 
 impl<B: Backend> NodeExt for LazyExt<B> {
+	/// Debug would trigger non mutable node resolution,
+	/// which is not doable here.
+	const DO_DEBUG: bool = false;
 	type INIT = B;
 	fn existing_node(init: &Self::INIT, key: Key) -> Self {
 		LazyExt::Resolved(key, init.clone(), false)
@@ -345,14 +348,14 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 		match self {
 			LazyExt::Unresolved(_, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
-				let key = key_addressed::<N>(key, position);
+				let key_backend = key_addressed::<N>(key, position);
 				Node::<N>::new(
-					&[],
+					key,
 					position,
 					position,
 					None,
 					(),
-					LazyExt::Unresolved(key, backend.clone()),
+					LazyExt::Unresolved(key_backend, backend.clone()),
 				)
 			},
 		}
@@ -389,12 +392,18 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 		unimplemented!("Call backend delete for key of ext");
 	}
 	fn commit_change<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>) {
-		match node.ext_mut() {
+		match node.ext() {
 			LazyExt::Resolved(_, _, false)
 			| LazyExt::Unresolved(..) => (),
-			LazyExt::Resolved(_key, _backend, changed) => {
-				*changed = false;
-				unimplemented!("Encode and call backend write for key of ext");
+			LazyExt::Resolved(..) => {
+				let encoded = encode_node(node);
+				match node.ext_mut() {
+					LazyExt::Resolved(key, backend, changed) => {
+						*changed = false;
+						backend.write(key.clone(), encoded)
+					},
+					_ => (),
+				}
 			},
 		}
 	}

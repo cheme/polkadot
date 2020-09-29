@@ -181,6 +181,8 @@ pub trait NodeExt: Clone {
 	/// Active implementation needs input parameters and
 	/// default to `None`.
 	const DEFAULT: Option<Self> = None;
+	/// Indicate if we display the whole tree on format.
+	const DO_DEBUG: bool = true;
 	fn existing_node(init: &Self::INIT, key: backend::Key) -> Self;
 	fn new_node(&self, key: backend::Key) -> Self;
 	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>>;
@@ -852,7 +854,6 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 
 #[derive(Derivative)]
 #[derivative(Clone)]
-#[derivative(Debug)]
 #[derivative(PartialEq)]
 pub struct Node<N>
 	where
@@ -867,9 +868,22 @@ pub struct Node<N>
 	//pub right: usize,
 	// TODO if backend behind, then Self would neeed to implement a Node trait with lazy loading...
 	children: N::Children,
-	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
 	ext: N::NodeExt,
+}
+
+impl<N: NodeConf> Debug for Node<N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+		if N::NodeExt::DO_DEBUG {
+			"Node:".fmt(f)?;
+			self.key.fmt(f)?;
+			self.value.fmt(f)?;
+			self.children.fmt(f)?;
+		} else {
+			"Non debuggable node".fmt(f)?;
+		}
+		Ok(())
+	}
 }
 
 impl<N: NodeConf> Drop for Node<N> {
@@ -979,15 +993,25 @@ impl<N: NodeConf> Node<N> {
 		&self,
 		index: KeyIndexFor<N>,
 	) -> Option<&Self> {
-		N::NodeExt::resolve(self);
-		self.children.get_child(index)
+		//N::NodeExt::resolve(self);
+		let result = self.children.get_child(index);
+		result.as_ref().map(|c| N::NodeExt::resolve(c));
+		result
+	}
+	pub fn has_child(
+		&self,
+		index: KeyIndexFor<N>,
+	) -> bool {
+		self.children.has_child(index)
 	}
 	pub fn get_child_mut(
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<&mut Self> {
-		N::NodeExt::resolve_mut(self);
-		self.children.get_child_mut(index)
+		//N::NodeExt::resolve_mut(self);
+		let mut result = self.children.get_child_mut(index);
+		result.as_mut().map(|c| N::NodeExt::resolve_mut(c));
+		result
 	}
 	pub fn set_child(
 		&mut self,
@@ -1156,6 +1180,12 @@ pub trait Children: Clone + Debug + PartialEq {
 	fn number_child(
 		&self,
 	) -> usize;
+	fn has_child(
+		&self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) -> bool {
+		self.get_child(index).is_some()
+	}
 	fn get_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -2210,7 +2240,7 @@ impl<N: NodeConf> Tree<N> {
 			loop {
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
-						if current.get_child(index).is_some() {
+						if current.has_child(index) {
 							if let Some(child) = current.get_child_mut(index) {
 								position = child_position.next::<N::Radix>();
 								//position = child_position;
