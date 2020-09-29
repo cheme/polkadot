@@ -32,7 +32,7 @@ extern crate alloc;
 pub mod backend;
 
 //use alloc::raw_vec::RawVec;
-use derivative::Derivative;
+pub use derivative::Derivative;
 use alloc::vec::Vec;
 use alloc::boxed::Box;
 use alloc::borrow::Borrow;
@@ -1311,7 +1311,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 
 #[derive(Derivative)]
 #[derivative(Clone)]
-struct Children256<N> (
+pub struct Children256<N> (
 	// 256 array is to big but ok for initial implementation
 	Option<Box<[Option<N>; 256]>>,
 	usize,
@@ -1438,6 +1438,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 	}
 }
 
+#[macro_export]
 /// Flatten type for children of a given node type.
 /// `inner_node_type` is expected to be parametered by a `Children` type
 /// and a `RadixConf` type.
@@ -1449,26 +1450,33 @@ macro_rules! flatten_children {
 		$inner_type: ident,
 		$inner_radix: ident,
 		$backend: ty,
+		$($backend_gen: ident, )?
+		$({ $backend_ty: ident: $backend_const: tt $(+ $backend_const2: tt)* })?
 	) => {
 		#[derive(Clone)]
 		#[derive(Debug)]
 		#[derive(PartialEq)]
-		struct $inner_node_type;
-		impl NodeConf for $inner_node_type {
+		struct $inner_node_type<$($backend_gen)?>($(core::marker::PhantomData<$backend_gen>)?);
+		impl<$($backend_gen)?> NodeConf for $inner_node_type<$($backend_gen)?>
+			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
+		{
 			type Radix = $inner_radix;
-			type Children = $type_alias;
+			type Children = $type_alias<$($backend_gen)?>;
 			type NodeBackend = $backend;
 		}
-		type $inner_children_type = Node<$inner_node_type>;
+		type $inner_children_type<$($backend_gen)?> = Node<$inner_node_type<$($backend_gen)?>>;
 		#[derive(Derivative)]
 		#[derivative(Clone)]
 		#[derivative(PartialEq)]
 		#[derivative(Debug)]
-		struct $type_alias($inner_type<$inner_children_type>);
+		struct $type_alias<$($backend_gen)?>($inner_type<$inner_children_type<$($backend_gen)?>>)
+			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?;
 
-		impl Children for $type_alias {
+		impl<$($backend_gen)?> Children for $type_alias<$($backend_gen)?>
+			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
+		{
 			type Radix = $inner_radix;
-			type Node = Node<$inner_node_type>;
+			type Node = Node<$inner_node_type<$($backend_gen)?>>;
 
 			fn empty() -> Self {
 				$type_alias($inner_type::empty())
@@ -1476,14 +1484,14 @@ macro_rules! flatten_children {
 			fn set_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-				child: $inner_children_type,
-			) -> Option<$inner_children_type> {
+				child: $inner_children_type<$($backend_gen)?>,
+			) -> Option<$inner_children_type<$($backend_gen)?>> {
 				self.0.set_child(index, child)
 			}
 			fn remove_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<$inner_children_type> {
+			) -> Option<$inner_children_type<$($backend_gen)?>> {
 				self.0.remove_child(index)
 			}
 			fn number_child(
@@ -1494,13 +1502,13 @@ macro_rules! flatten_children {
 			fn get_child(
 				&self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&$inner_children_type> {
+			) -> Option<&$inner_children_type<$($backend_gen)?>> {
 				self.0.get_child(index)
 			}
 			fn get_child_mut(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&mut $inner_children_type> {
+			) -> Option<&mut $inner_children_type<$($backend_gen)?>> {
 				self.0.get_child_mut(index)
 			}
 		}

@@ -73,6 +73,12 @@ impl BackendInner for MapBackend {
 #[derivative(Default)]
 pub struct SingleThreadBackend<B>(Rc<RefCell<B>>);
 
+impl<B> SingleThreadBackend<B> {
+	pub fn new(inner: B) -> Self {
+		SingleThreadBackend(Rc::new(RefCell::new(inner)))
+	}
+}
+
 fn key_addressed<N: NodeConf>(
 	key: &[u8],
 	start_postion: PositionFor<N>,
@@ -276,6 +282,18 @@ impl<B: BackendInner> Backend for SingleThreadBackend<B> {
 pub struct TransactionBackend<B> {
 	inner: B,
 	changes: HashMap<Vec<u8>, Option<Vec<u8>>>,
+}
+
+impl<B> TransactionBackend<B> {
+	pub fn new(inner: B) -> Self {
+		TransactionBackend {
+			inner,
+			changes: Default::default(),
+		}
+	}
+	pub fn drain_changes(&mut self) -> HashMap<Vec<u8>, Option<Vec<u8>>> {
+		core::mem::replace(&mut self.changes, Default::default())
+	}
 }
 
 impl<B: ReadBackend> ReadBackend for TransactionBackend<B> {
