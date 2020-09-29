@@ -303,12 +303,12 @@ impl<B: BackendInner> BackendInner for TransactionBackend<B> {
 /// Resolved from backend on 
 /// TODO rename
 pub enum LazyExt<B> {
-	Unresolved(Key, B),
+	Unresolved(Vec<u8>, usize, u8, B),
 	Resolved(Key, B, bool),
 }
 impl<B: Default> Default for LazyExt<B> {
 	fn default() -> Self {
-		LazyExt::Unresolved(Default::default(), Default::default())
+		LazyExt::Unresolved(Default::default(), 0, 0, Default::default())
 	}
 }
 #[derive(Derivative)]
@@ -330,7 +330,7 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 	}
 	fn new_node(&self, key: Key) -> Self {
 		match self {
-			LazyExt::Unresolved(_, backend)
+			LazyExt::Unresolved(_, _, _, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
 				LazyExt::Resolved(key, backend.clone(), true)
 			},
@@ -338,7 +338,7 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 	}
 	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>> {
 		match self {
-			LazyExt::Unresolved(_, backend)
+			LazyExt::Unresolved(_, _, _, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
 				decode_node(&[], PositionFor::<N>::zero(), backend).ok()
 			},
@@ -346,16 +346,16 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 	}
 	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
 		match self {
-			LazyExt::Unresolved(_, backend)
+			LazyExt::Unresolved(_, _, _, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
-				let key_backend = key_addressed::<N>(key, position);
+				let mask = <N::Radix as RadixConf>::Alignment::encode_mask(position.mask); 
 				Node::<N>::new(
 					key,
 					position,
 					position,
 					None,
 					(),
-					LazyExt::Unresolved(key_backend, backend.clone()),
+					LazyExt::Unresolved(key.to_vec(), position.index, mask, backend.clone()),
 				)
 			},
 		}
@@ -373,11 +373,18 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 		}
 	}
 	fn resolve_mut<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>) {
-		match node.ext_mut() {
-			LazyExt::Resolved(..) => (),
-			LazyExt::Unresolved(key, backend) => {
-				unimplemented!("TODO fetch form backend and fresh unchanged resolved");
+		if let Some(new_node) = match node.ext_mut() {
+			LazyExt::Resolved(..) => None,
+			LazyExt::Unresolved(key, start_index, start_mask, backend) => {
+				let mask = <N::Radix as RadixConf>::Alignment::decode_mask(*start_mask); 
+				let position = PositionFor::<N> {
+					index: *start_index,
+					mask
+				};
+				decode_node(&key, position, backend).ok()
 			},
+		} {
+			*node = new_node;
 		}
 	}
 	fn set_change(&mut self) {
@@ -388,8 +395,21 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 			LazyExt::Unresolved(..) => panic!("Node need to be resolved first"),
 		}
 	}
-	fn delete<N: NodeConf<NodeExt = Self>>(node: Node<N>) {
-		unimplemented!("Call backend delete for key of ext");
+	fn delete<N: NodeConf<NodeExt = Self>>(mut node: Node<N>) {
+		match node.ext_mut() {
+			LazyExt::Resolved(key, backend, ..) => {
+				backend.remove(key.as_slice());
+			},
+			LazyExt::Unresolved(key, start_index, start_mask, backend) => {
+				let mask = <N::Radix as RadixConf>::Alignment::decode_mask(*start_mask); 
+				let start = PositionFor::<N> {
+					index: *start_index,
+					mask
+				};
+				let key = key_addressed::<N>(&key[..], start);
+				backend.remove(key.as_slice());
+			},
+		}
 	}
 	fn commit_change<N: NodeConf<NodeExt = Self>>(node: &mut Node<N>) {
 		match node.ext() {
