@@ -184,8 +184,9 @@ pub trait NodeExt: Clone {
 	/// Indicate if we display the whole tree on format.
 	const DO_DEBUG: bool = true;
 	fn existing_node(init: &Self::INIT, key: backend::Key) -> Self;
+	fn new_root<N: NodeConf<NodeExt = Self>>(init: &Self::INIT) -> Self;
 	fn new_node(&self, key: backend::Key) -> Self;
-	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>>;
+	fn get_root<N: NodeConf<NodeExt = Self>>(init: &Self::INIT) -> Option<Node<N>>;
 	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N>;
 	fn backend_key<N: NodeConf<NodeExt = Self>>(key: &[u8], position: PositionFor<N>) -> backend::Key;
 	fn from_backend_key<N: NodeConf<NodeExt = Self>>(key: &backend::Key) -> (&[u8], PositionFor<N>);
@@ -202,10 +203,13 @@ impl NodeExt for () {
 	fn existing_node(init: &Self::INIT, _key: backend::Key) -> Self {
 		()
 	}
+	fn new_root<N: NodeConf<NodeExt = Self>>(_init: &Self::INIT) -> Self {
+		()
+	}
 	fn new_node(&self, _key: backend::Key) -> Self {
 		()
 	}
-	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>> {
+	fn get_root<N: NodeConf<NodeExt = Self>>(init: &Self::INIT) -> Option<Node<N>> {
 		unreachable!("Inactive implementation");
 	}
 	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, _key: &[u8], _position: PositionFor<N>) -> Node<N> {
@@ -842,12 +846,11 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 			Self::NodeExt::new_node(&node.ext, key)
 		}
 	}
-	fn new_node_root(init: &Self::NodeExt) -> Self::NodeExt {
+	fn new_node_root(init: &<Self::NodeExt as NodeExt>::INIT) -> Self::NodeExt {
 		if let Some(ext) = Self::NodeExt::DEFAULT {
 			ext
 		} else {
-			let key = Self::NodeExt::backend_key::<Self>(&[], PositionFor::<Self>::zero());
-			Self::NodeExt::new_node(init, key)
+			Self::NodeExt::new_root::<Self>(init)
 		}
 	}
 }
@@ -1137,20 +1140,20 @@ pub struct Tree<N>
 	tree: Option<Node<N>>,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
-	init: N::NodeExt,
+	init: <N::NodeExt as NodeExt>::INIT,
 }
 
 impl<N> Tree<N>
 	where
 		N: NodeConf,
 {
-	pub fn new(init: N::NodeExt) -> Self {
+	pub fn new(init: <N::NodeExt as NodeExt>::INIT) -> Self {
 		Tree {
 			tree: None,
 			init,
 		}
 	}
-	pub fn from_backend(init: N::NodeExt) -> Self {
+	pub fn from_backend(init: <N::NodeExt as NodeExt>::INIT) -> Self {
 		if N::NodeExt::DEFAULT.is_some() {
 			Self::new(init)
 		} else {
@@ -2399,28 +2402,23 @@ pub mod $module_name {
 	const CHECK_BACKEND: bool = $check_backend_ser;
 	type NodeConf = super::$backend_conf;
 
-	fn new_backend() -> <$backend_conf as super::NodeConf>::NodeExt {
-		<$backend_conf as super::NodeConf>::NodeExt::default()
+	fn new_backend() -> <<$backend_conf as super::NodeConf>::NodeExt as NodeExt>::INIT {
+		<<$backend_conf as super::NodeConf>::NodeExt as NodeExt>::INIT::default()
 	}
-
-	fn new_root(init: &<$backend_conf as super::NodeConf>::NodeExt) -> <$backend_conf as super::NodeConf>::NodeExt {
-		<$backend_conf as super::NodeConf>::new_node_root(init)
-	}
-
 
 	#[test]
 	fn empty_are_equals() {
 		let backend = new_backend();
-		let t1 = Tree::<NodeConf>::new(new_root(&backend));
-		let t2 = Tree::<NodeConf>::new(new_root(&backend));
+		let t1 = Tree::<NodeConf>::new(backend.clone());
+		let t2 = Tree::<NodeConf>::new(backend.clone());
 		assert_eq!(t1, t2);
 	}
 
 	#[test]
 	fn inserts_are_equals() {
 		let backend = new_backend();
-		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
-		let mut t2 = Tree::<NodeConf>::new(new_root(&backend));
+		let mut t1 = Tree::<NodeConf>::new(backend.clone());
+		let mut t2 = Tree::<NodeConf>::new(backend.clone());
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
@@ -2460,7 +2458,7 @@ pub mod $module_name {
 	#[test]
 	fn compare_btree() {
 		let backend = new_backend();
-		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
+		let mut t1 = Tree::<NodeConf>::new(backend.clone());
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
@@ -2477,7 +2475,7 @@ pub mod $module_name {
 		core::mem::drop(t1);
 		if CHECK_BACKEND {
 			assert_eq!(None, t2.insert(b"key3", value1.clone()));
-			let mut t3 = Tree::<NodeConf>::from_backend(new_root(&backend));
+			let mut t3 = Tree::<NodeConf>::from_backend(backend.clone());
 			assert!(compare_iter(&mut t3, &mut t2));
 		}
 	}
@@ -2549,7 +2547,7 @@ pub mod $module_name {
 		let data = fuzz_removal(data);
 		let backend = new_backend();
 		let mut a = 0;
-		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
+		let mut t1 = Tree::<NodeConf>::new(backend.clone());
 		let mut t2 = BTreeMap::<Vec<u8>, Vec<u8>>::new();
 		while a < data.len() {
 			if data[a].0 {
@@ -2566,7 +2564,7 @@ pub mod $module_name {
 		assert!(compare_iter(&mut t1, &mut t2));
 		core::mem::drop(t1);
 		if CHECK_BACKEND {
-			let mut t3 = Tree::<NodeConf>::from_backend(new_root(&backend));
+			let mut t3 = Tree::<NodeConf>::from_backend(backend.clone());
 			assert!(compare_iter(&mut t3, &mut t2));
 		}
 	}
@@ -2602,12 +2600,8 @@ mod lazy_test {
 
 	type NodeConf = super::Node256LazyHashBackend;
 
-	fn new_backend() -> <Node256LazyHashBackend as super::NodeConf>::NodeExt {
-		<Node256LazyHashBackend as super::NodeConf>::NodeExt::default()
-	}
-
-	fn new_root(init: &<Node256LazyHashBackend as super::NodeConf>::NodeExt) -> <Node256LazyHashBackend as super::NodeConf>::NodeExt {
-		<Node256LazyHashBackend as super::NodeConf>::new_node_root(init)
+	fn new_backend() -> <<Node256LazyHashBackend as super::NodeConf>::NodeExt as NodeExt>::INIT {
+		<<Node256LazyHashBackend as super::NodeConf>::NodeExt as NodeExt>::INIT::default()
 	}
 
 	fn compare_iter_mut<K: Borrow<[u8]>>(left: &mut Tree::<NodeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
@@ -2635,7 +2629,7 @@ mod lazy_test {
 	#[test]
 	fn compare_btree() {
 		let backend = new_backend();
-		let mut t1 = Tree::<NodeConf>::new(new_root(&backend));
+		let mut t1 = Tree::<NodeConf>::new(backend.clone());
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
 		let mut value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
@@ -2650,7 +2644,7 @@ mod lazy_test {
 		assert_eq!(t1.get(&b"key3"[..]), Some(value1.as_slice()));
 		assert_eq!(t1.get_mut(&b"key3"[..]), Some(&mut value1));
 		core::mem::drop(t1);
-		let mut t3 = Tree::<NodeConf>::from_backend(new_root(&backend));
+		let mut t3 = Tree::<NodeConf>::from_backend(backend.clone());
 		assert_eq!(t3.get_mut(&b"key3"[..]), Some(&mut value1));
 		assert!(compare_iter_mut(&mut t3, &mut t2));
 	}

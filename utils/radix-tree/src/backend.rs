@@ -328,6 +328,10 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 	fn existing_node(init: &Self::INIT, key: Key) -> Self {
 		LazyExt::Resolved(key, init.clone(), false)
 	}
+	fn new_root<N: NodeConf<NodeExt = Self>>(init: &Self::INIT) -> Self {
+		let key = Self::backend_key::<N>(&[], PositionFor::<N>::zero());
+		LazyExt::Resolved(key, init.clone(), true)
+	}
 	fn new_node(&self, key: Key) -> Self {
 		match self {
 			LazyExt::Unresolved(_, _, _, backend)
@@ -336,13 +340,8 @@ impl<B: Backend> NodeExt for LazyExt<B> {
 			},
 		}
 	}
-	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>> {
-		match self {
-			LazyExt::Unresolved(_, _, _, backend)
-				| LazyExt::Resolved(_, backend, ..) => {
-				decode_node(&[], PositionFor::<N>::zero(), backend).ok()
-			},
-		}
+	fn get_root<N: NodeConf<NodeExt = Self>>(init: &Self::INIT) -> Option<Node<N>> {
+		decode_node(&[], PositionFor::<N>::zero(), init).ok()
 	}
 	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
 		match self {
@@ -438,6 +437,14 @@ impl<B: Backend> NodeExt for DirectExt<B> {
 			changed: false,
 		}
 	}
+	fn new_root<N: NodeConf<NodeExt = Self>>(init: &Self::INIT) -> Self {
+		let key = Self::backend_key::<N>(&[], PositionFor::<N>::zero());
+		DirectExt {
+			inner: init.clone(),
+			key,
+			changed: true,
+		}
+	}
 	fn new_node(&self, key: Key) -> Self {
 		DirectExt {
 			inner: self.inner.clone(),
@@ -445,8 +452,8 @@ impl<B: Backend> NodeExt for DirectExt<B> {
 			changed: true,
 		}
 	}
-	fn get_root<N: NodeConf<NodeExt = Self>>(&self) -> Option<Node<N>> {
-		decode_node(&[], PositionFor::<N>::zero(), &self.inner).ok()
+	fn get_root<N: NodeConf<NodeExt = Self>>(init: &Self::INIT) -> Option<Node<N>> {
+		decode_node(&[], PositionFor::<N>::zero(), init).ok()
 	}
 	fn fetch_node<N: NodeConf<NodeExt = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
 		decode_node(&key, position, &self.inner)
