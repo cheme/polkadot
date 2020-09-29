@@ -19,7 +19,7 @@
 
 use crate::{NodeConf, PositionFor, Descent, KeyIndexFor, MaskFor,
 	Position, MaskKeyByte, NodeIndex, Node, Children, NodeBackend, RadixConf,
-	PrefixKeyConf};
+	PrefixKeyConf, BackendFor};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use core::marker::PhantomData;
@@ -124,13 +124,13 @@ fn key_from_addressed<N: NodeConf>(
 fn decode_node<N>(
 	key: &[u8],
 	start: PositionFor<N>,
-	backend: &<N::NodeBackend as NodeBackend>::Backend,
+	backend: &BackendFor<N>,
 ) -> core::result::Result<Node<N>, CodecError>
 	where
 		N: NodeConf,
-		<N::NodeBackend as NodeBackend>::Backend: Backend,
+		BackendFor<N>: Backend,
 {
-	let node_key = key_addressed::<N>(&key[..], start);
+	let node_key = N::NodeBackend::backend_key::<N>(&key[..], start);
 	let encoded = if let Some(encoded) = backend.read(node_key.as_slice()) {
 		encoded
 	} else {
@@ -191,7 +191,6 @@ fn decode_node<N>(
 			if children_mask & 0b1000_0000 >> byte_index != 0 {
 				end.set_index::<N::Radix>(&mut child_key, key_index);
 				let child = node.ext().fetch_node(&child_key[..], child_position);
-				let key = key_addressed::<N>(&child_key[..], child_position);
 				node.set_child(key_index, child);
 			}
 
@@ -405,7 +404,7 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 					index: *start_index,
 					mask
 				};
-				let key = key_addressed::<N>(&key[..], start);
+				let key = Self::backend_key::<N>(&key[..], start);
 				backend.remove(key.as_slice());
 			},
 		}

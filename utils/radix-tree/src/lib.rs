@@ -172,6 +172,7 @@ pub trait RadixConf {
 type PositionFor<N> = Position<<<N as NodeConf>::Radix as RadixConf>::Alignment>;
 type AlignmentFor<N> = <<N as NodeConf>::Radix as RadixConf>::Alignment;
 type KeyIndexFor<N> = <<N as NodeConf>::Radix as RadixConf>::KeyIndex;
+type BackendFor<N> = <<N as NodeConf>::NodeBackend as NodeBackend>::Backend;
 
 /// Node backend management.
 pub trait NodeBackend: Clone {
@@ -846,7 +847,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 			Self::NodeBackend::new_node(&node.ext, key)
 		}
 	}
-	fn new_node_root(init: &<Self::NodeBackend as NodeBackend>::Backend) -> Self::NodeBackend {
+	fn new_node_root(init: &BackendFor<Self>) -> Self::NodeBackend {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
 			ext
 		} else {
@@ -1140,20 +1141,20 @@ pub struct Tree<N>
 	tree: Option<Node<N>>,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
-	init: <N::NodeBackend as NodeBackend>::Backend,
+	init: BackendFor<N>,
 }
 
 impl<N> Tree<N>
 	where
 		N: NodeConf,
 {
-	pub fn new(init: <N::NodeBackend as NodeBackend>::Backend) -> Self {
+	pub fn new(init: BackendFor<N>) -> Self {
 		Tree {
 			tree: None,
 			init,
 		}
 	}
-	pub fn from_backend(init: <N::NodeBackend as NodeBackend>::Backend) -> Self {
+	pub fn from_backend(init: BackendFor<N>) -> Self {
 		if N::NodeBackend::DEFAULT.is_some() {
 			Self::new(init)
 		} else {
@@ -2402,8 +2403,8 @@ pub mod $module_name {
 	const CHECK_BACKEND: bool = $check_backend_ser;
 	type NodeConf = super::$backend_conf;
 
-	fn new_backend() -> <<$backend_conf as super::NodeConf>::NodeBackend as NodeBackend>::Backend {
-		<<$backend_conf as super::NodeConf>::NodeBackend as NodeBackend>::Backend::default()
+	fn new_backend() -> BackendFor<$backend_conf> {
+		BackendFor::<$backend_conf>::default()
 	}
 
 	#[test]
@@ -2600,8 +2601,8 @@ mod lazy_test {
 
 	type NodeConf = super::Node256LazyHashBackend;
 
-	fn new_backend() -> <<Node256LazyHashBackend as super::NodeConf>::NodeBackend as NodeBackend>::Backend {
-		<<Node256LazyHashBackend as super::NodeConf>::NodeBackend as NodeBackend>::Backend::default()
+	fn new_backend() -> BackendFor<Node256LazyHashBackend> {
+		BackendFor::<Node256LazyHashBackend>::default()
 	}
 
 	fn compare_iter_mut<K: Borrow<[u8]>>(left: &mut Tree::<NodeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
