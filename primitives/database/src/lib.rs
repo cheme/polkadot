@@ -24,6 +24,7 @@ mod kvdb;
 pub use mem::MemDb;
 pub use crate::kvdb::as_database;
 pub use crate::kvdb::as_database2;
+pub use ordered::RadixTreeDatabase;
 
 /// An identifier for a column.
 pub type ColumnId = u32;
@@ -300,21 +301,28 @@ mod ordered {
 			for change in transaction.0.into_iter() {
 				match change {
 					Change::Set(col, key, value) => {
+						self.lazy_column_init(col);
 						self.trees.write()[col as usize].insert(key.as_slice(), value);
 					},
 					Change::Remove(col, key) => {
+						self.lazy_column_init(col);
 						self.trees.write()[col as usize].remove(key.as_slice());
 					},
-					Change::Store(hash, preimage) => {
+					Change::Store(_hash, _preimage) => {
 						unimplemented!("No hash lookup on radix tree layer");
 					},
-					Change::Release(hash) => {
+					Change::Release(_hash) => {
 						unimplemented!("No hash lookup on radix tree layer");
 					},
 				};
 			}
 
-			unimplemented!("Commit change by iterating instead of using drop");
+			let len = self.trees.read().len();
+			// Note that this can produce an inconsistent db state, and do not batch.
+			// TODO should use the Transaction Radix Tree backend here.
+			for i in 0..len {
+				self.trees.write()[i].commit();
+			}
 
 			Ok(())
 		}
