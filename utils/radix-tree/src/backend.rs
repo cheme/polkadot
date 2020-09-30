@@ -26,6 +26,8 @@ use hashbrown::HashMap;
 use codec::{Encode, Decode, Error as CodecError, Input};
 use core::cell::RefCell;
 use derivative::Derivative;
+#[cfg(feature = "std")]
+pub use arc_backend::ArcBackend;
 
 pub type Key = Vec<u8>;
 pub type MapBackend = HashMap<Vec<u8>, Vec<u8>>;
@@ -494,4 +496,39 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 			ext.inner.write(ext.key.clone(), encoded)
 		}
 	}
+}
+
+#[cfg(feature = "std")]
+mod arc_backend {
+	use super::*;
+	use std::sync::Arc;
+	use parking_lot::RwLock;
+
+	#[derive(Derivative)]
+	#[derivative(Clone(bound=""))]
+	#[derivative(Default)]
+	pub struct ArcBackend<B>(Arc<RwLock<B>>);
+
+	impl<B> ArcBackend<B> {
+		pub fn new(inner: B) -> Self {
+			ArcBackend(Arc::new(RwLock::new(inner)))
+		}
+	}
+
+	impl<B: BackendInner> ReadBackend for ArcBackend<B> {
+		fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
+			self.0.read().read(k)
+		}
+	}
+
+	impl<B: BackendInner> BackendInner for ArcBackend<B> {
+		fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+			self.0.write().write(k, v)
+		}
+		fn remove(&mut self, k: &[u8]) {
+			self.0.write().remove(k)
+		}
+	}
+
+	impl<B: BackendInner> Backend for ArcBackend<B> { }
 }
