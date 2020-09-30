@@ -328,9 +328,11 @@ mod ordered {
 		}
 	}
 
-	impl<H: Clone + PartialEq + Debug + Default> OrderedDatabase<H> for RadixTreeDatabase<H> {
+	impl<H: Clone + PartialEq + Debug + Default + 'static> OrderedDatabase<H> for RadixTreeDatabase<H> {
 		fn iter(&self, col: ColumnId) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>> {
-			unimplemented!("need owned iter");
+			self.lazy_column_init(col);
+			let tree = self.trees.read()[col as usize].clone();
+			Box::new(tree.owned_iter())
 		}
 	}
 }
