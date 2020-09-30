@@ -26,11 +26,16 @@ use sp_std::boxed::Box;
 pub type SerializeDBIter<'a> = Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
 
 /// simple serialize trait, could be a noop.
-pub trait SerializeDB: Sized {
+pub trait SerializeDB {
+	#[inline(always)]
 	/// When false, the trait implementation
 	/// do not need to actually manage a db
 	/// (see `()` implementation).
-	const ACTIVE: bool = true;
+	/// This could be an associated constant
+	/// if it isn't for the dyn pointer requirement.
+	fn is_active(&self) -> bool {
+		true
+	}
 
 	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]);
 	fn remove(&mut self, c: &'static [u8], k: &[u8]);
@@ -38,7 +43,7 @@ pub trait SerializeDB: Sized {
 	fn clear(&mut self, c: &'static [u8]);
 	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a>;
 
-	fn contains_collection(collection: &'static [u8]) -> bool;
+	fn contains_collection(&self, collection: &'static [u8]) -> bool;
 }
 
 pub struct Collection<'a, DB, Instance> {
@@ -177,8 +182,10 @@ impl SerializeInstanceVariable for () {
 }
 
 impl SerializeDB for () {
-	const ACTIVE: bool = false;
-
+	#[inline(always)]
+	fn is_active(&self) -> bool {
+		false	
+	}
 	fn write(&mut self, _c: &[u8], _k: &[u8], _v: &[u8]) { }
 	fn clear(&mut self, _c: &[u8]) { }
 	fn remove(&mut self, _c: &[u8], _k: &[u8]) { }
@@ -188,8 +195,33 @@ impl SerializeDB for () {
 	fn iter<'a>(&'a self, _collection: &[u8]) -> SerializeDBIter<'a> {
 		Box::new(sp_std::iter::empty())
 	}
-	fn contains_collection(_collection: &[u8]) -> bool {
+	fn contains_collection(&self, _collection: &[u8]) -> bool {
 		false
+	}
+}
+
+impl SerializeDB for Box<dyn SerializeDB> {
+	#[inline(always)]
+	fn is_active(&self) -> bool {
+		self.as_ref().is_active()	
+	}
+	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
+		self.as_mut().write(c, k, v)	
+	}
+	fn clear(&mut self, c: &'static [u8]) {
+		self.as_mut().clear(c)
+	}
+	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
+		self.as_mut().remove(c, k)
+	}
+	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
+		self.as_ref().read(c, k)
+	}
+	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a> {
+		self.as_ref().iter(c)
+	}
+	fn contains_collection(&self, c: &'static [u8]) -> bool {
+		self.as_ref().contains_collection(c)
 	}
 }
 
@@ -198,18 +230,31 @@ use codec::{Codec, Encode};
 #[derive(Derivative)]
 #[derivative(Clone(bound="K: Clone, V: Clone, I: Clone"))]
 #[derivative(Debug(bound="K: Debug, V: Debug"))]
-#[derivative(Default(bound="I: Default"))]
 #[cfg_attr(test, derivative(PartialEq(bound="K: PartialEq, V: PartialEq")))]
 /// Lazy loading serialized map with cache.
 /// Updates happens without delay.
 pub struct SerializeMap<K: Ord, V, S, I> {
 	inner: BTreeMap<K, Option<V>>,
+	is_active: bool,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
 	instance: I,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
 	_ph: PhantomData<S>,
+}
+
+impl<'a, K: Ord, V, S: SerializeDB, I: Default> SerializeMap<K, V, S, I> {
+	/// Default but using a `SerializeDB` as parameter
+	/// to resolve if the db is active.
+	pub fn default_from_db(db: &S) -> Self {
+		SerializeMap {
+			inner: Default::default(),
+			is_active: db.is_active(),
+			instance: I::default(),
+			_ph: PhantomData::default(),
+		}
+	}
 }
 
 impl<'a, K: Ord, V, S, I> SerializeMap<K, V, S, I> {
@@ -229,7 +274,7 @@ impl<'a, K, V, S, I> SerializeMap<K, V, S, I>
 		I: SerializeInstanceMap,
 {
 	pub fn iter(&'a self, db: &'a S) -> SerializeMapIter<'a, K, V> {
-		if !S::ACTIVE {
+		if !self.is_active {
 			// There is no backing db, so all is in cache.
 			SerializeMapIter::Cache(self.inner.iter())
 		} else {
@@ -240,7 +285,6 @@ impl<'a, K, V, S, I> SerializeMap<K, V, S, I>
 			SerializeMapIter::Collection(collection.iter())
 		}
 	}
-
 }
 
 pub struct SerializeMapHandle<'a, K, V, S, I> {
@@ -271,7 +315,7 @@ impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
 		I: SerializeInstanceMap,
 {
 	pub fn get(&mut self, k: &K) -> Option<&V> {
-		if S::ACTIVE {
+		if self.collection.db.is_active() {
 			let collection = &self.collection;
 			self.cache.entry(k.clone())
 				.or_insert_with(|| {
@@ -284,7 +328,7 @@ impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
 	}
 
 	pub fn remove(&mut self, k: &K) -> Option<V> {
-		if !S::ACTIVE {
+		if !self.collection.db.is_active() {
 			return self.cache.remove(k).flatten()
 		}
 		let mut value = match self.cache.get(k) {
@@ -346,7 +390,7 @@ impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
 		I: SerializeInstanceMap,
 {
 	pub fn iter(&'a self) -> SerializeMapIter<'a, K, V> {
-		if !S::ACTIVE {
+		if !self.collection.db.is_active() {
 			SerializeMapIter::Cache(self.cache.iter())
 		} else {
 			SerializeMapIter::Collection(self.collection.iter())
@@ -454,7 +498,7 @@ impl<'a, K, V, S, I> EntryMap<'a, K, V, S, I>
 		I: SerializeInstanceMap,
 {
 	pub fn fetch(&mut self) {
-		if S::ACTIVE && !self.is_fetch {
+		if self.collection.db.is_active() && !self.is_fetch {
 			let k = self.entry.key();
 			let k = k.encode();
 			let v = self.collection.read(k.as_slice())
@@ -466,7 +510,7 @@ impl<'a, K, V, S, I> EntryMap<'a, K, V, S, I>
 	}
 
 	pub fn flush(&mut self) {
-		if S::ACTIVE {
+		if self.collection.db.is_active() {
 			let k = self.entry.key();
 			if self.need_write {
 				match self.entry.get() {
@@ -682,7 +726,10 @@ pub struct TransactionalSerializeDB<DB> {
 
 impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
 	// Using on non active do not make much sense here.
-	const ACTIVE: bool = <DB as SerializeDB>::ACTIVE;
+	#[inline(always)]
+	fn is_active(&self) -> bool {
+		self.db.is_active()	
+	}
 
 	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
 		self.pending.entry(c)
@@ -728,8 +775,8 @@ impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
 			next_db,
 		})
 	}
-	fn contains_collection(collection: &'static [u8]) -> bool {
-		DB::contains_collection(collection)
+	fn contains_collection(&self, collection: &'static [u8]) -> bool {
+		DB::contains_collection(&self.db, collection)
 	}
 }
 

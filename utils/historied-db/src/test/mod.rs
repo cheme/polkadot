@@ -71,7 +71,10 @@ macro_rules! InMemSimpleDB {
 		}
 
 		impl SerializeDB for InMemory {
-			const ACTIVE: bool = true;
+			#[inline(always)]
+			fn is_active(&self) -> bool {
+				true
+			}
 
 			fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
 				Self::resolve_collection(c).map(|ix| {
@@ -102,7 +105,7 @@ macro_rules! InMemSimpleDB {
 				})
 			}
 
-			fn contains_collection(collection: &'static [u8]) -> bool {
+			fn contains_collection(&self, collection: &'static [u8]) -> bool {
 				Self::resolve_collection(collection).is_some()
 			}
 		}

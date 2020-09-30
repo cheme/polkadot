@@ -721,11 +721,11 @@ pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
 
 /// Database backed tree management for an unoredered database.
 /// We set any Hash as inner type,
-pub struct DatabaseStorage<H>(RadixTreeDatabase<H>);
+pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeDatabase<H>);
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_DELETE: bool = true;
-	type Storage = TransactionalSerializeDB<dyn historied_db::simple_db::SerializeDB>;
+	type Storage = TransactionalSerializeDB<Box<dyn historied_db::simple_db::SerializeDB + Send + Sync>>;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type TouchedGC = historied_tree_bindings::TouchedGC;
@@ -917,7 +917,7 @@ pub mod historied_tree_bindings {
 
 		#[derive(Default, Clone)]
 		pub struct $name;
-		impl historied_db::simple_db::SerializeInstance for $name {
+		impl historied_db::simple_db::SerializeInstanceMap for $name {
 			const STATIC_COL: &'static [u8] = $col;
 		}
 		
