@@ -46,7 +46,6 @@ pub trait TreeManagementStorage: Sized {
 	type TreeMeta: SerializeInstanceVariable + Send + Sync;
 	type TreeState: SerializeInstanceMap + Send + Sync;
 
-	// TODO delete this init function (we use from_ser)
 	fn init() -> Self::Storage;
 }
 
@@ -198,20 +197,25 @@ impl<I: Default, BI: Default> Default for TreeMeta<I, BI> {
 
 impl<I: Ord + Default, BI: Default, S: TreeManagementStorage> Default for Tree<I, BI, S> {
 	fn default() -> Self {
+		let serialize = S::init();
+		let storage = SerializeMap::default_from_db(&serialize);
+		let journal_delete = SerializeMap::default_from_db(&serialize);
 		Tree {
-			storage: Default::default(),
-			journal_delete: Default::default(),
+			storage,
+			journal_delete,
 			meta: Default::default(),
-			serialize: S::init(),
+			serialize,
 		}
 	}
 }
 
 impl<I: Ord + Default + Codec, BI: Default + Codec, S: TreeManagementStorage> Tree<I, BI, S> {
 	pub fn from_ser(mut serialize: S::Storage) -> Self {
+		let storage = SerializeMap::default_from_db(&serialize);
+		let journal_delete = SerializeMap::default_from_db(&serialize);
 		Tree {
-			storage: Default::default(),
-			journal_delete: Default::default(),
+			storage,
+			journal_delete,
 			meta: SerializeVariable::from_ser(&mut serialize),
 			serialize,
 		}
@@ -288,12 +292,14 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
 
 impl<H: Ord, I: Default + Ord, BI: Default, V, S: TreeManagementStorage> Default for TreeManagement<H, I, BI, V, S> {
 	fn default() -> Self {
+		let tree = Tree::default();
+		let mapping = SerializeMap::default_from_db(&tree.serialize);
 		TreeManagement {
 			state: TreeState {
-				tree: Tree::default(),
+				tree,
 				neutral_element: Default::default(),
 			},
-			mapping: Default::default(),
+			mapping,
 			touched_gc: Default::default(),
 			current_gc: Default::default(),
 			last_in_use_index: Default::default(),
@@ -307,8 +313,9 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, V: Codec + C
 	pub fn from_ser(mut serialize: S::Storage) -> Self {
 		let mut neutral_element_ser = SerializeVariable::<Option<V>, S::Storage, S::NeutralElt>::from_ser(&serialize);
 		let neutral_element = neutral_element_ser.handle(&mut serialize).get().clone();
+		let mapping = SerializeMap::default_from_db(&serialize);
 		TreeManagement {
-			mapping: Default::default(),
+			mapping,
 			touched_gc: SerializeVariable::from_ser(&serialize),
 			current_gc: SerializeVariable::from_ser(&serialize),
 			last_in_use_index: SerializeVariable::from_ser(&serialize),
