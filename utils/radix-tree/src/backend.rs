@@ -300,7 +300,7 @@ impl<B: ReadBackend> ReadBackend for TransactionBackend<B> {
 	}
 }
 
-impl<B: BackendInner> BackendInner for TransactionBackend<B> {
+impl<B: ReadBackend> BackendInner for TransactionBackend<B> {
 	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
 		self.changes.insert(k, Some(v));
 	}
@@ -535,7 +535,7 @@ mod arc_backend {
 	#[derive(Derivative)]
 	#[derivative(Clone(bound=""))]
 	#[derivative(Default)]
-	pub struct ArcBackend<B>(Arc<RwLock<B>>);
+	pub struct ArcBackend<B>(pub Arc<RwLock<B>>);
 
 	impl<B> ArcBackend<B> {
 		pub fn new(inner: B) -> Self {

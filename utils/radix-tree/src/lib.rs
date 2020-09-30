@@ -1118,7 +1118,7 @@ pub struct Tree<N>
 	tree: Option<Node<N>>,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
-	init: BackendFor<N>,
+	pub init: BackendFor<N>,
 }
 
 impl<N> Tree<N>

@@ -222,7 +222,7 @@ mod ordered {
 		Node256LazyHashBackend,
 		Children256,
 		Radix256Conf,
-		radix_tree::backend::LazyExt<radix_tree::backend::ArcBackend<WrapColumnDb<H>>>,
+		radix_tree::backend::LazyExt<radix_tree::backend::ArcBackend<radix_tree::backend::TransactionBackend<WrapColumnDb<H>>>>,
 		H,
 		{ H: Debug + PartialEq + Clone}
 	);
@@ -238,19 +238,6 @@ mod ordered {
 			self.inner.get(self.col, k)
 		}
 	}
-
-	impl<H: Clone> radix_tree::backend::BackendInner for WrapColumnDb<H> {
-		fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
-			self.inner.set(self.col, k.as_slice(), v.as_slice())
-				.expect("Radix tree need backend error support");
-		}
-		fn remove(&mut self, k: &[u8]) {
-			self.inner.remove(self.col, k)
-				.expect("Radix tree need backend error support");
-		}
-	}
-
-	impl<H: Clone> radix_tree::backend::Backend for WrapColumnDb<H> { }
 
 	/// Ordered database implementation through a indexing radix tree overlay.
 	pub struct RadixTreeDatabase<H: Clone + PartialEq + Debug> {
@@ -274,10 +261,12 @@ mod ordered {
 				if len >= index {
 					self.trees.write().push(radix_tree::Tree::from_backend(
 						radix_tree::backend::ArcBackend::new(
-							WrapColumnDb {
-								inner: self.inner.clone(),
-								col: len as u32,
-							}
+							radix_tree::backend::TransactionBackend::new(
+								WrapColumnDb {
+									inner: self.inner.clone(),
+									col: len as u32,
+								}
+							)
 						)
 					))
 				} else {
@@ -287,7 +276,7 @@ mod ordered {
 		}
 	}
 
-	impl<H: Clone + PartialEq + Debug> Database<H> for RadixTreeDatabase<H> {
+	impl<H: Clone + PartialEq + Debug + Default> Database<H> for RadixTreeDatabase<H> {
 		fn get(&self, col: ColumnId, key: &[u8]) -> Option<Vec<u8>> {
 			self.lazy_column_init(col);
 			self.trees.write()[col as usize].get_mut(key).cloned()
@@ -316,16 +305,28 @@ mod ordered {
 			}
 
 			let len = self.trees.read().len();
-			// Note that this can produce an inconsistent db state, and do not batch.
-			// TODO should use the Transaction Radix Tree backend here.
+			let mut transaction = Transaction::<H>::default();
 			for i in 0..len {
 				self.trees.write()[i].commit();
+			}
+			for i in 0..len {
+				for (key, change) in {
+					let tree = &self.trees.read()[i];
+					let change = tree.init.0.write().drain_changes();
+					change
+				} {
+					if let Some(value) = change {
+						transaction.set(i as u32, key.as_slice(), value.as_slice());
+					} else {
+						transaction.remove(i as u32, key.as_slice());
+					}
+				}
 			}
 
 			Ok(())
 		}
 	}
 
-	impl<H: Clone + PartialEq + Debug> OrderedDatabase<H> for RadixTreeDatabase<H> {
+	impl<H: Clone + PartialEq + Debug + Default> OrderedDatabase<H> for RadixTreeDatabase<H> {
 	}
 }
