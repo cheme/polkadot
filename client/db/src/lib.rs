@@ -1496,8 +1496,11 @@ impl<Block: BlockT> Backend<Block> {
 	///
 	/// The pruning window is how old a block must be before the state is pruned.
 	pub fn new(config: DatabaseSettings, canonicalization_delay: u64) -> ClientResult<Self> {
-		let (db, r) = crate::utils::open_database_and_historied::<Block>(&config, DatabaseType::Full)?;
-		Self::from_database(db as Arc<_>, r, canonicalization_delay, &config)
+		let (db, ordered, r) = crate::utils::open_database_and_historied::<Block>(
+			&config,
+			DatabaseType::Full,
+		)?;
+		Self::from_database(db as Arc<_>, ordered, r, canonicalization_delay, &config)
 	}
 
 	/// Create new memory-backed client backend for tests.
@@ -1522,6 +1525,7 @@ impl<Block: BlockT> Backend<Block> {
 
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
+		ordered_db: historied_db::simple_db::SerializeDBDyn,
 		rocks_histo: Arc<kvdb_rocksdb::Database>,
 		canonicalization_delay: u64,
 		config: &DatabaseSettings,
@@ -1564,10 +1568,9 @@ impl<Block: BlockT> Backend<Block> {
 			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
 			config.experimental_cache,
 		);
-		let historied_state = rocks_histo.clone();
-		let db_histo: historied_db::simple_db::SerializeDBDyn = Box::new(RocksdbStorage(rocks_histo));
+		let historied_state = rocks_histo;
 		let historied_persistence = TransactionalSerializeDB {
-			db: db_histo,
+			db: ordered_db,
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));

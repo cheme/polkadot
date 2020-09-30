@@ -287,7 +287,7 @@ mod ordered {
 			let index = col as usize;
 			loop {
 				let len = self.trees.read().len();
-				if len >= index {
+				if len <= index {
 					self.trees.write().push(radix_tree::Tree::from_backend(
 						radix_tree::backend::ArcBackend::new(
 							radix_tree::backend::TransactionBackend::new(

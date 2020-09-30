@@ -216,7 +216,11 @@ const DEFAULT_CACHE_SIZE: usize = 128;
 pub fn open_database_and_historied<Block: BlockT>(
 	config: &DatabaseSettings,
 	db_type: DatabaseType,
-) -> sp_blockchain::Result<(Arc<dyn Database<DbHash>>, Arc<kvdb_rocksdb::Database>)> {
+) -> sp_blockchain::Result<(
+	Arc<dyn Database<DbHash>>,
+	historied_db::simple_db::SerializeDBDyn,
+	Arc<kvdb_rocksdb::Database>,
+)> {
 	let db_open_error = |feat| Err(
 		sp_blockchain::Error::Backend(
 			format!("`{}` feature not enabled, database can not be opened", feat),
@@ -278,15 +282,18 @@ pub fn open_database_and_historied<Block: BlockT>(
 	let rocks_db = Arc::new(kvdb_rocksdb::Database::open(&db_config, &path)
 		.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
 
-	let db: (Arc<dyn Database<DbHash>>, _) = match &config.source {
+	let db: (Arc<dyn Database<DbHash>>, historied_db::simple_db::SerializeDBDyn, _) = match &config.source {
 		DatabaseSettingsSrc::RocksDb { path, cache_size } => {
-			(sp_database::as_database2(rocks_db.clone()), rocks_db)
+			let ordered = Box::new(crate::RocksdbStorage(rocks_db.clone()));
+			(sp_database::as_database2(rocks_db.clone()), ordered, rocks_db)
 		},
 		#[cfg(feature = "with-subdb")]
 		DatabaseSettingsSrc::SubDb { path } => {
-			(crate::subdb::open(&path, NUM_COLUMNS)
-				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?,
-				rocks_db)
+			let sub_db = crate::subdb::open(&path, NUM_COLUMNS)
+				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
+			let ordered = sp_database::RadixTreeDatabase::new(sub_db.clone());
+			let ordered = Box::new(crate::DatabaseStorage(ordered));
+			(sub_db, ordered, rocks_db)
 		},
 		#[cfg(not(feature = "with-subdb"))]
 		DatabaseSettingsSrc::SubDb { .. } => {
@@ -294,15 +301,21 @@ pub fn open_database_and_historied<Block: BlockT>(
 		},
 		#[cfg(feature = "with-parity-db")]
 		DatabaseSettingsSrc::ParityDb { path } => {
-			(crate::parity_db::open(&path)
-				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?,
-				rocks_db)
+			let parity_db = crate::parity_db::open(&path)
+				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
+			let ordered = sp_database::RadixTreeDatabase::new(parity_db.clone());
+			let ordered = Box::new(crate::DatabaseStorage(ordered));
+			(parity_db, ordered, rocks_db)
 		},
 		#[cfg(not(feature = "with-parity-db"))]
 		DatabaseSettingsSrc::ParityDb { .. } => {
 			return db_open_error("with-parity-db");
 		},
-		DatabaseSettingsSrc::Custom(db) => (db.clone(), rocks_db),
+		DatabaseSettingsSrc::Custom(db) => {
+			let ordered = sp_database::RadixTreeDatabase::new(db.clone());
+			let ordered = Box::new(crate::DatabaseStorage(ordered));
+			(db.clone(), ordered, rocks_db)
+		},
 	};
 
 	check_database_type(&*db.0, db_type)?;
