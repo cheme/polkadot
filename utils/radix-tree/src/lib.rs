@@ -1118,7 +1118,7 @@ pub struct Tree<N>
 	tree: Option<Node<N>>,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
-	init: BackendFor<N>,
+	pub init: BackendFor<N>,
 }
 
 impl<N> Tree<N>
@@ -1943,6 +1943,25 @@ pub struct ValueIter<'a, N: NodeConf>(Iter<'a, N>);
 
 pub struct ValueIterMut<'a, N: NodeConf>(IterMut<'a, N>);
 
+/// Iterator owning tree, this is an unsafe wrapper
+/// over `ValueIterMut` (we use mutable version for backend
+/// supports).
+pub struct OwnedIter<N: NodeConf + 'static> {
+	inner: Tree<N>,
+	iter: ValueIterMut<'static, N>,
+}
+
+impl<N: NodeConf + 'static> OwnedIter<N> {
+	pub fn extract_inner(self) -> Tree<N> {
+		let OwnedIter {
+			inner,
+			iter,
+		} = self;
+		drop(iter);
+		inner
+	}
+}
+
 impl<N: NodeConf> Tree<N> {
 	pub fn iter<'a>(&'a self) -> Iter<'a, N> {
 		Iter {
@@ -1956,6 +1975,20 @@ impl<N: NodeConf> Tree<N> {
 			tree: self,
 			stack: IterStackMut::new(),
 			finished: false,
+		}
+	}
+	pub fn owned_iter(mut self) -> OwnedIter<N> {
+		let self_ptr = &mut self as *mut Self;
+		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
+		OwnedIter {
+			inner: self,
+			iter: ValueIterMut (
+				IterMut {
+					tree: unsafe_ptr,
+					stack: IterStackMut::new(),
+					finished: false,
+				}
+			),
 		}
 	}
 }
@@ -2135,7 +2168,7 @@ impl<'a, N: NodeConf> Iterator for ValueIter<'a, N> {
 impl<'a, N: NodeConf> Iterator for ValueIterMut<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Vec<u8>, &'a [u8]);
+	type Item = (Vec<u8>, &'a mut Vec<u8>);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
@@ -2150,6 +2183,13 @@ impl<'a, N: NodeConf> Iterator for ValueIterMut<'a, N> {
 	}
 }
 
+impl<N: NodeConf + 'static> Iterator for OwnedIter<N> {
+	type Item = (Vec<u8>, Vec<u8>);
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next().map(|(key, value)| (key, value.clone()))
+	}
+}
+	
 impl<N: NodeConf> Tree<N> {
 	pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
 		if let Some(top) = self.tree.as_ref() {
