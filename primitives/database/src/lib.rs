@@ -171,11 +171,16 @@ pub trait Database<H: Clone>: Send + Sync {
 }
 
 pub trait OrderedDatabase<H: Clone>: Database<H> {
+	/// Iterate on value from the database.
 	fn iter(&self, col: ColumnId) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>>;
-	fn original_iter_subcollection(
+
+	/// Iterate on value over a given prefix, the prefix can be removed from
+	/// the resulting keys.
+	fn prefix_iter(
 		&self,
 		col: ColumnId,
-		col: &'static [u8],
+		prefix: &[u8],
+		trim_prefix: bool,
 	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>>;
 }
 
@@ -262,6 +267,7 @@ mod ordered {
 		}
 	}
 
+	#[derive(Clone)]
 	/// Ordered database implementation through a indexing radix tree overlay.
 	pub struct RadixTreeDatabase<H: Clone + PartialEq + Debug> {
 		inner: Arc<dyn Database<H>>,
@@ -357,27 +363,22 @@ mod ordered {
 			let tree = self.trees.read()[col as usize].clone();
 			Box::new(tree.owned_iter())
 		}
-		fn original_iter_subcollection(
-			&self,
-			col: ColumnId,
-			collection: &'static [u8],
+		fn prefix_iter(
+			&self, col: ColumnId,
+			prefix: &[u8],
+			trim_prefix: bool,
 		) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>> {
-			// Note that this will ignore the transactional changes,
-			// which is not an issue with current use case.
-			let tree = radix_tree::Tree::<Node256LazyHashBackend<H>>::from_backend(
-				radix_tree::backend::ArcBackend::new(
-					radix_tree::backend::TransactionBackend::new(
-						WrapColumnDb {
-							inner: self.inner.clone(),
-							col,
-							prefix: Some(collection),
-						}
-					)
-				)
-			);
-
-			Box::new(tree.owned_iter())
+			self.lazy_column_init(col);
+			let tree = self.trees.read()[col as usize].clone();
+			if trim_prefix {
+				let len = prefix.len();
+				Box::new(tree.owned_prefix_iter(prefix).map(move |mut kv| {
+					kv.0 = kv.0.split_off(len);
+					kv
+				}))
+			} else {
+				Box::new(tree.owned_prefix_iter(prefix))
+			}
 		}
-
 	}
 }

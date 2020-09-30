@@ -1820,6 +1820,22 @@ impl<'a, N: NodeConf> SeekIterMut<'a, N> {
 	pub fn value_iter(self) -> SeekValueIterMut<'a, N> {
 		SeekValueIterMut(self)
 	}
+	pub fn iter_prefix(mut self) -> IterMut<'a, N> {
+		let dest = self.dest;
+		let stack = self.stack.stack.pop().map(|(pos, node)| {
+			let key = pos.index::<N::Radix>(dest)
+				.expect("build from existing data struct");
+			(pos, node, key)
+		}).into_iter().collect();
+		IterMut {
+			tree: self.tree,
+			stack: IterStackMut {
+				stack,
+				key: self.dest.to_vec(),
+			},
+			finished: false,
+		}
+	}
 	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a mut Node<N>)> {
 		if self.reach_dest {
 			return None;
@@ -1989,6 +2005,20 @@ impl<N: NodeConf> Tree<N> {
 					finished: false,
 				}
 			),
+		}
+	}
+	// TODO test case/fuzz this.
+	pub fn owned_prefix_iter(mut self, prefix: &[u8]) -> OwnedIter<N> {
+		let self_ptr = &mut self as *mut Self;
+		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
+		let static_prefix = prefix as *const [u8];
+		let static_prefix: &'static [u8] = unsafe { static_prefix.as_ref().unwrap() };
+		let mut seek_iter = unsafe_ptr.seek_iter_mut(static_prefix);
+		while seek_iter.next() != None { }
+		let iter = seek_iter.iter_prefix().value_iter_mut();
+		OwnedIter {
+			inner: self,
+			iter,
 		}
 	}
 }
@@ -2661,10 +2691,10 @@ mod lazy_test {
 
 	#[test]
 	fn compare_btree() {
-		compare_btree_interanal(true);
-		compare_btree_interanal(false);
+		compare_btree_internal(true);
+		compare_btree_internal(false);
 	}
-	fn compare_btree_interanal(drop: bool) {
+	fn compare_btree_internal(drop: bool) {
 		let backend = new_backend();
 		let mut t1 = Tree::<NodeConf>::new(backend.clone());
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();

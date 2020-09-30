@@ -73,7 +73,7 @@ use sp_blockchain::{
 use codec::{Decode, Encode};
 use hash_db::Prefix;
 use sp_trie::{MemoryDB, prefixed_key};
-use sp_database::Transaction;
+use sp_database::{Transaction, RadixTreeDatabase};
 use parking_lot::RwLock;
 use sp_core::{ChangesTrieConfiguration, Hasher};
 use sp_core::offchain::storage::{OffchainOverlayedChange, OffchainOverlayedChanges};
@@ -715,11 +715,17 @@ pub struct TreeManagementPersistenceNoTx;
 
 
 /// Database backed tree management for a rocksdb database.
+/// TODO consider switching to use of kvdb trait instead of
+/// rocksdb database.
 pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
+
+/// Database backed tree management for an unoredered database.
+/// We set any Hash as inner type,
+pub struct DatabaseStorage<H>(RadixTreeDatabase<H>);
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_DELETE: bool = true;
-	type Storage = TransactionalSerializeDB<RocksdbStorage>;
+	type Storage = TransactionalSerializeDB<dyn historied_db::simple_db::SerializeDB>;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type TouchedGC = historied_tree_bindings::TouchedGC;
@@ -765,42 +771,39 @@ macro_rules! subcollection_prefixed_key {
 	}
 }
 
-impl RocksdbStorage {
-	/// We resolve rocksdb collection or subcollection.
-	/// Collections are defined by four byte encoding of their index.
-	/// Subcollection are located into the collection defined by four first byte,
-	/// and behind a prefixed location (remaining bytes).
-	/// Note that subcollection should define their prefix in a way that no key
-	/// collision happen.
-	pub fn resolve_collection<'a>(c: &'a [u8]) -> Option<(u32, Option<&'a [u8]>)> {
-		if c.len() < 4 {
-			return None;
-		}
-		let index = Self::resolve_collection_inner(&c[..4]);
-		let prefix = if c.len() == 4 {
-			None
-		} else {
-			Some(&c[4..])
-		};
-		if index < crate::utils::NUM_COLUMNS {
-			return Some((index, prefix));
-		}
+/// We resolve rocksdb collection or subcollection.
+/// Collections are defined by four byte encoding of their index.
+/// Subcollection are located into the collection defined by four first byte,
+/// and behind a prefixed location (remaining bytes).
+/// Note that subcollection should define their prefix in a way that no key
+/// collision happen.
+pub fn resolve_collection<'a>(c: &'a [u8]) -> Option<(u32, Option<&'a [u8]>)> {
+	if c.len() < 4 {
+		return None;
+	}
+	let index = resolve_collection_inner(&c[..4]);
+	let prefix = if c.len() == 4 {
 		None
+	} else {
+		Some(&c[4..])
+	};
+	if index < crate::utils::NUM_COLUMNS {
+		return Some((index, prefix));
 	}
-	const fn resolve_collection_inner<'a>(c: &'a [u8]) -> u32 {
-		let mut buf = [0u8; 4];
-		buf[0] = c[0];
-		buf[1] = c[1];
-		buf[2] = c[2];
-		buf[3] = c[3];
-		u32::from_le_bytes(buf)
-	}
+	None
+}
+const fn resolve_collection_inner<'a>(c: &'a [u8]) -> u32 {
+	let mut buf = [0u8; 4];
+	buf[0] = c[0];
+	buf[1] = c[1];
+	buf[2] = c[2];
+	buf[3] = c[3];
+	u32::from_le_bytes(buf)
 }
 
 impl historied_db::simple_db::SerializeDB for RocksdbStorage {
-
 	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
-		Self::resolve_collection(c).map(|(c, p)| {
+		resolve_collection(c).map(|(c, p)| {
 			subcollection_prefixed_key!(p, k);
 			let mut tx = self.0.transaction();
 			tx.put(c, k, v);
@@ -810,7 +813,7 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 	}
 
 	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
-		Self::resolve_collection(c).map(|(c, p)| {
+		resolve_collection(c).map(|(c, p)| {
 			subcollection_prefixed_key!(p, k);
 			let mut tx = self.0.transaction();
 			tx.delete(c, k);
@@ -820,7 +823,7 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 	}
 
 	fn clear(&mut self, c: &'static [u8]) {
-		Self::resolve_collection(c).map(|(c, p)| {
+		resolve_collection(c).map(|(c, p)| {
 			let mut tx = self.0.transaction();
 			tx.delete_prefix(c, p.unwrap_or(&[]));
 			self.0.write(tx)
@@ -829,7 +832,7 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 	}
 
 	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
-		Self::resolve_collection(c).and_then(|(c, p)| {
+		resolve_collection(c).and_then(|(c, p)| {
 			subcollection_prefixed_key!(p, k);
 			self.0.get(c, k)
 				.expect("Unsupported readdb error")
@@ -837,7 +840,7 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 	}
 
 	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::simple_db::SerializeDBIter<'a> {
-		let iter = Self::resolve_collection(c).map(|(c, p)| {
+		let iter = resolve_collection(c).map(|(c, p)| {
 			use kvdb::KeyValueDB;
 			if let Some(p) = p {
 				self.0.iter_with_prefix(c, p)
@@ -850,7 +853,59 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 	}
 
 	fn contains_collection(collection: &'static [u8]) -> bool {
-		Self::resolve_collection(collection).is_some()
+		resolve_collection(collection).is_some()
+	}
+}
+
+impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
+	where H: Clone + PartialEq + std::fmt::Debug + Default + 'static,
+{
+	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
+		resolve_collection(c).map(|(c, p)| {
+			subcollection_prefixed_key!(p, k);
+			self.0.set(c, k, v)
+				.expect("Unsupported database error");
+		});
+	}
+
+	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
+		resolve_collection(c).map(|(c, p)| {
+			subcollection_prefixed_key!(p, k);
+			self.0.remove(c, k)
+				.expect("Unsupported database error");
+		});
+	}
+
+	fn clear(&mut self, c: &'static [u8]) {
+		// Inefficient implementation.
+		let mut keys: Vec<Vec<u8>> = self.iter(c).map(|kv| kv.0).collect();
+		for key in keys {
+			self.remove(c, key.as_slice());
+		}
+	}
+
+	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
+		resolve_collection(c).and_then(|(c, p)| {
+			subcollection_prefixed_key!(p, k);
+			self.0.get(c, k)
+				.expect("Unsupported database error");
+		})
+	}
+
+	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::simple_db::SerializeDBIter<'a> {
+		let iter = resolve_collection(c).map(|(c, p)| {
+			if let Some(p) = p {
+				self.0.prefix_iter(c, p, true)
+			} else {
+				self.0.iter(c)
+			}
+		}).into_iter().flat_map(|i| i);
+
+		Box::new(iter)
+	}
+
+	fn contains_collection(collection: &'static [u8]) -> bool {
+		resolve_collection(collection).is_some()
 	}
 }
 
@@ -2196,7 +2251,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					// write management state changes
 					let pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
 					for (col, (changes, dropped)) in pending {
-						if let Some((col, p)) = RocksdbStorage::resolve_collection(col) {
+						if let Some((col, p)) = resolve_collection(col) {
 							if dropped {
 								tx.delete_prefix(col, p.unwrap_or(&[]));
 							}
