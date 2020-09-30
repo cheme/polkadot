@@ -222,7 +222,7 @@ mod ordered {
 		Node256LazyHashBackend,
 		Children256,
 		Radix256Conf,
-		radix_tree::backend::LazyExt<radix_tree::backend::ArcBackend<radix_tree::backend::TransactionBackend<WrapColumnDb<H>>>>,
+		radix_tree::backend::LazyExt<radix_tree::backend::ArcBackend<WrapColumnDb<H>>>,
 		H,
 		{ H: Debug + PartialEq + Clone}
 	);
@@ -274,12 +274,10 @@ mod ordered {
 				if len >= index {
 					self.trees.write().push(radix_tree::Tree::from_backend(
 						radix_tree::backend::ArcBackend::new(
-							radix_tree::backend::TransactionBackend::new(
-								WrapColumnDb {
-									inner: self.inner.clone(),
-									col: len as u32,
-								}
-							)
+							WrapColumnDb {
+								inner: self.inner.clone(),
+								col: len as u32,
+							}
 						)
 					))
 				} else {
