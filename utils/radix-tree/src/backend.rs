@@ -48,10 +48,7 @@ pub trait BackendInner: ReadBackend {
 }
 
 /// The backend to use for a tree.
-pub trait Backend: ReadBackend + Clone {
-	fn write(&self, k: Vec<u8>, v: Vec<u8>);
-	fn remove(&self, k: &[u8]);
-}
+pub trait Backend: BackendInner + Clone { }
 
 impl ReadBackend for MapBackend {
 	fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
@@ -71,11 +68,11 @@ impl BackendInner for MapBackend {
 #[derive(Derivative)]
 #[derivative(Clone(bound=""))]
 #[derivative(Default)]
-pub struct SingleThreadBackend<B>(Rc<RefCell<B>>);
+pub struct RcBackend<B>(Rc<RefCell<B>>);
 
-impl<B> SingleThreadBackend<B> {
+impl<B> RcBackend<B> {
 	pub fn new(inner: B) -> Self {
-		SingleThreadBackend(Rc::new(RefCell::new(inner)))
+		RcBackend(Rc::new(RefCell::new(inner)))
 	}
 }
 
@@ -257,25 +254,22 @@ fn encode_node<N: NodeConf>(
 	result
 }
 
-impl<B: BackendInner> ReadBackend for SingleThreadBackend<B> {
+impl<B: BackendInner> ReadBackend for RcBackend<B> {
 	fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
 		self.0.borrow().read(k)
 	}
 }
 
-impl<B: BackendInner> Backend for SingleThreadBackend<B> {
-	fn write(&self, k: Vec<u8>, v: Vec<u8>) {
+impl<B: BackendInner> BackendInner for RcBackend<B> {
+	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
 		self.0.borrow_mut().write(k, v)
 	}
-	fn remove(&self, k: &[u8]) {
+	fn remove(&mut self, k: &[u8]) {
 		self.0.borrow_mut().remove(k)
 	}
 }
-/*
-		self.0.borrow().read(k).and_then(|encoded| {
-			decode_node(k, encoded.as_slice(), self).ok()
-		})
-*/
+
+impl<B: BackendInner> Backend for RcBackend<B> { }
 
 #[derive(Clone)]
 /// The backend to use for a tree.

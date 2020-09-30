@@ -1528,7 +1528,7 @@ flatten_children!(
 	Node256HashBackend,
 	Children256,
 	Radix256Conf,
-	backend::DirectExt<backend::SingleThreadBackend<backend::MapBackend>>,
+	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
 );
 flatten_children!(
 	Children256Flatten3,
@@ -1536,7 +1536,7 @@ flatten_children!(
 	Node256LazyHashBackend,
 	Children256,
 	Radix256Conf,
-	backend::LazyExt<backend::SingleThreadBackend<backend::MapBackend>>,
+	backend::LazyExt<backend::RcBackend<backend::MapBackend>>,
 );
 flatten_children!(
 	Children256Flatten4,
@@ -1544,7 +1544,7 @@ flatten_children!(
 	Node256TxBackend,
 	Children256,
 	Radix256Conf,
-	backend::DirectExt<backend::SingleThreadBackend<backend::MapBackend>>,
+	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
 );
 
 
