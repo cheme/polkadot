@@ -221,11 +221,12 @@ mod ordered {
 		Node256LazyHashBackend,
 		Children256,
 		Radix256Conf,
-		radix_tree::backend::LazyExt<radix_tree::backend::SingleThreadBackend<radix_tree::backend::TransactionBackend<WrapColumnDb<H>>>>,
+		radix_tree::backend::LazyExt<radix_tree::backend::ArcBackend<radix_tree::backend::TransactionBackend<WrapColumnDb<H>>>>,
 		H,
 		{ H: Debug + PartialEq + Clone}
 	);
 
+	#[derive(Clone)]
 	struct WrapColumnDb<H> {
 		inner: Arc<dyn Database<H>>,
 		col: ColumnId,
@@ -238,7 +239,17 @@ mod ordered {
 	}
 
 	impl<H: Clone> radix_tree::backend::BackendInner for WrapColumnDb<H> {
+		fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+			self.inner.set(self.col, k.as_slice(), v.as_slice())
+				.expect("Radix tree need backend error support");
+		}
+		fn remove(&mut self, k: &[u8]) {
+			self.inner.remove(self.col, k)
+				.expect("Radix tree need backend error support");
+		}
 	}
+
+	impl<H: Clone> radix_tree::backend::Backend for WrapColumnDb<H> { }
 
 	/// Ordered database implementation through a indexing radix tree overlay.
 	pub struct RadixTreeDatabase<H: Clone + PartialEq + Debug> {
@@ -261,7 +272,7 @@ mod ordered {
 				let len = self.trees.read().len();
 				if len >= index {
 					self.trees.write().push(radix_tree::Tree::from_backend(
-						radix_tree::backend::SingleThreadBackend::new(
+						radix_tree::backend::ArcBackend::new(
 							radix_tree::backend::TransactionBackend::new(
 								WrapColumnDb {
 									inner: self.inner.clone(),
@@ -280,7 +291,7 @@ mod ordered {
 	impl<H: Clone + PartialEq + Debug> Database<H> for RadixTreeDatabase<H> {
 		fn get(&self, col: ColumnId, key: &[u8]) -> Option<Vec<u8>> {
 			self.lazy_column_init(col);
-			self.trees.write()[col as usize].get_mut(key).map(|value| value.cloned())
+			self.trees.write()[col as usize].get_mut(key).cloned()
 		}
 		fn lookup(&self, _hash: &H) -> Option<Vec<u8>> {
 			unimplemented!("No hash lookup on radix tree layer");
@@ -289,10 +300,10 @@ mod ordered {
 			for change in transaction.0.into_iter() {
 				match change {
 					Change::Set(col, key, value) => {
-						self.trees.write()[col as usize].insert(key, value);
+						self.trees.write()[col as usize].insert(key.as_slice(), value);
 					},
 					Change::Remove(col, key) => {
-						self.trees.write()[col as usize].remove(key);
+						self.trees.write()[col as usize].remove(key.as_slice());
 					},
 					Change::Store(hash, preimage) => {
 						unimplemented!("No hash lookup on radix tree layer");
@@ -300,15 +311,13 @@ mod ordered {
 					Change::Release(hash) => {
 						unimplemented!("No hash lookup on radix tree layer");
 					},
-				}?;
+				};
 			}
 
 			unimplemented!("Commit change by iterating instead of using drop");
 
 			Ok(())
 		}
-
-
 	}
 
 	impl<H: Clone + PartialEq + Debug> OrderedDatabase<H> for RadixTreeDatabase<H> {

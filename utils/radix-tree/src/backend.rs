@@ -78,12 +78,6 @@ impl<B> RcBackend<B> {
 	}
 }
 
-impl<B> SingleThreadBackend<B> {
-	pub fn new(inner: B) -> Self {
-		SingleThreadBackend(Rc::new(RefCell::new(inner)))
-	}
-}
-
 fn key_addressed<N: NodeConf>(
 	key: &[u8],
 	start_postion: PositionFor<N>,
