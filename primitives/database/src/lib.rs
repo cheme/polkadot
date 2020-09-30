@@ -172,6 +172,11 @@ pub trait Database<H: Clone>: Send + Sync {
 
 pub trait OrderedDatabase<H: Clone>: Database<H> {
 	fn iter(&self, col: ColumnId) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>>;
+	fn original_iter_subcollection(
+		&self,
+		col: ColumnId,
+		col: &'static [u8],
+	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>>;
 }
 
 impl<H> std::fmt::Debug for dyn Database<H> {
@@ -232,10 +237,27 @@ mod ordered {
 	struct WrapColumnDb<H> {
 		inner: Arc<dyn Database<H>>,
 		col: ColumnId,
+		prefix: Option<&'static [u8]>,
+	}
+
+	macro_rules! subcollection_prefixed_key {
+		($prefix: ident, $key: ident) => {
+			let mut prefixed_key;
+			let $key = if let Some(k) = $prefix {
+				prefixed_key = Vec::with_capacity(k.len() + $key.len());
+				prefixed_key.extend_from_slice(&k[..]);
+				prefixed_key.extend_from_slice(&$key[..]);
+				&prefixed_key[..]
+			} else {
+				&$key[..]
+			};
+		}
 	}
 
 	impl<H: Clone> radix_tree::backend::ReadBackend for WrapColumnDb<H> {
 		fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
+			let prefix = &self.prefix;
+			subcollection_prefixed_key!(prefix, k);
 			self.inner.get(self.col, k)
 		}
 	}
@@ -266,6 +288,7 @@ mod ordered {
 								WrapColumnDb {
 									inner: self.inner.clone(),
 									col: len as u32,
+									prefix: None,
 								}
 							)
 						)
@@ -334,5 +357,27 @@ mod ordered {
 			let tree = self.trees.read()[col as usize].clone();
 			Box::new(tree.owned_iter())
 		}
+		fn original_iter_subcollection(
+			&self,
+			col: ColumnId,
+			collection: &'static [u8],
+		) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>> {
+			// Note that this will ignore the transactional changes,
+			// which is not an issue with current use case.
+			let tree = radix_tree::Tree::<Node256LazyHashBackend<H>>::from_backend(
+				radix_tree::backend::ArcBackend::new(
+					radix_tree::backend::TransactionBackend::new(
+						WrapColumnDb {
+							inner: self.inner.clone(),
+							col,
+							prefix: Some(collection),
+						}
+					)
+				)
+			);
+
+			Box::new(tree.owned_iter())
+		}
+
 	}
 }
