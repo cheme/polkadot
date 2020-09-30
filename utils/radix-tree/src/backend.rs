@@ -19,7 +19,7 @@
 
 use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
 	Position, MaskKeyByte, NodeIndex, Node, NodeBackend, RadixConf,
-	PrefixKeyConf, BackendFor};
+	PrefixKeyConf, BackendFor, Children};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use hashbrown::HashMap;
@@ -421,11 +421,25 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			},
 		}
 	}
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>) {
+	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
 		match node.ext() {
 			LazyExt::Resolved(_, _, false)
 			| LazyExt::Unresolved(..) => (),
 			LazyExt::Resolved(..) => {
+				if recursive && node.children.number_child() > 0 {
+					let mut key_index = KeyIndexFor::<N>::zero();
+					loop {
+						// Avoid node resolution by calling children directly.
+						if let Some(child) = node.children.get_child_mut(key_index) {
+							Self::commit_change(child, true);
+						}
+						key_index = if let Some(i) = key_index.next() {
+							i
+						} else {
+							break;
+						}
+					}
+				}
 				let encoded = encode_node(node);
 				match node.ext_mut() {
 					LazyExt::Resolved(key, backend, changed) => {
@@ -488,8 +502,22 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 		let ext = node.ext_mut();
 		ext.inner.remove(ext.key.as_slice());
 	}
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>) {
+	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
 		if node.ext().changed == true {
+			if recursive && node.children.number_child() > 0 {
+				let mut key_index = KeyIndexFor::<N>::zero();
+				loop {
+					// Avoid node resolution by calling children directly.
+					if let Some(child) = node.children.get_child_mut(key_index) {
+						Self::commit_change(child, true);
+					}
+					key_index = if let Some(i) = key_index.next() {
+						i
+					} else {
+						break;
+					}
+				}
+			}
 			let encoded = encode_node(node);
 			let ext = node.ext_mut();
 			ext.changed = false;

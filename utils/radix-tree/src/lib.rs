@@ -195,7 +195,7 @@ pub trait NodeBackend: Clone {
 	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>);
 	fn set_change(&mut self);
 	fn delete<N: NodeConf<NodeBackend = Self>>(node: Node<N>);
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>);
+	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool);
 }
 
 impl NodeBackend for () {
@@ -226,7 +226,7 @@ impl NodeBackend for () {
 	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>) { }
 	fn set_change(&mut self) { }
 	fn delete<N: NodeConf<NodeBackend = Self>>(_node: Node<N>) { }
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>) { }
+	fn commit_change<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>, _recursive: bool) { }
 }
 
 pub struct Radix256Conf;
@@ -877,7 +877,7 @@ impl<N: NodeConf> Debug for Node<N> {
 
 impl<N: NodeConf> Drop for Node<N> {
 	fn drop(&mut self) {
-		N::NodeBackend::commit_change(self);
+		N::NodeBackend::commit_change(self, false);
 	}
 }
 
@@ -1142,6 +1142,11 @@ impl<N> Tree<N>
 			}
 		}
 	}
+	pub fn commit(&mut self) {
+		self.tree.as_mut()
+			.map(|node| N::NodeBackend::commit_change(node, true));
+	}
+
 }
 
 pub trait Children: Clone + Debug + PartialEq {
@@ -2616,6 +2621,10 @@ mod lazy_test {
 
 	#[test]
 	fn compare_btree() {
+		compare_btree_interanal(true);
+		compare_btree_interanal(false);
+	}
+	fn compare_btree_interanal(drop: bool) {
 		let backend = new_backend();
 		let mut t1 = Tree::<NodeConf>::new(backend.clone());
 		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
@@ -2631,7 +2640,11 @@ mod lazy_test {
 		// Shouldn't call get on a lazy tree, but here we got all in memory.
 		assert_eq!(t1.get(&b"key3"[..]), Some(value1.as_slice()));
 		assert_eq!(t1.get_mut(&b"key3"[..]), Some(&mut value1));
-		core::mem::drop(t1);
+		if drop {
+			core::mem::drop(t1);
+		} else {
+			t1.commit();
+		}
 		let mut t3 = Tree::<NodeConf>::from_backend(backend.clone());
 		assert_eq!(t3.get_mut(&b"key3"[..]), Some(&mut value1));
 		assert!(compare_iter_mut(&mut t3, &mut t2));
