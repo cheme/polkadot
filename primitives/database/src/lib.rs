@@ -171,6 +171,7 @@ pub trait Database<H: Clone>: Send + Sync {
 }
 
 pub trait OrderedDatabase<H: Clone>: Database<H> {
+	fn iter(&self, col: ColumnId) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>>;
 }
 
 impl<H> std::fmt::Debug for dyn Database<H> {
@@ -328,5 +329,8 @@ mod ordered {
 	}
 
 	impl<H: Clone + PartialEq + Debug + Default> OrderedDatabase<H> for RadixTreeDatabase<H> {
+		fn iter(&self, col: ColumnId) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>> {
+			unimplemented!("need owned iter");
+		}
 	}
 }
