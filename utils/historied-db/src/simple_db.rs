@@ -200,7 +200,10 @@ impl SerializeDB for () {
 	}
 }
 
-impl SerializeDB for Box<dyn SerializeDB> {
+/// Serialize db as a boxed dynamic pointer.
+pub type SerializeDBDyn = Box<dyn SerializeDB + Send + Sync>;
+
+impl SerializeDB for SerializeDBDyn {
 	#[inline(always)]
 	fn is_active(&self) -> bool {
 		self.as_ref().is_active()	

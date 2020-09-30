@@ -725,7 +725,7 @@ pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeData
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_DELETE: bool = true;
-	type Storage = TransactionalSerializeDB<Box<dyn historied_db::simple_db::SerializeDB + Send + Sync>>;
+	type Storage = TransactionalSerializeDB<historied_db::simple_db::SerializeDBDyn>;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type TouchedGC = historied_tree_bindings::TouchedGC;
@@ -802,6 +802,11 @@ const fn resolve_collection_inner<'a>(c: &'a [u8]) -> u32 {
 }
 
 impl historied_db::simple_db::SerializeDB for RocksdbStorage {
+	#[inline(always)]
+	fn is_active(&self) -> bool {
+		true
+	}
+
 	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
 		resolve_collection(c).map(|(c, p)| {
 			subcollection_prefixed_key!(p, k);
@@ -852,7 +857,7 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 		Box::new(iter)
 	}
 
-	fn contains_collection(collection: &'static [u8]) -> bool {
+	fn contains_collection(&self, collection: &'static [u8]) -> bool {
 		resolve_collection(collection).is_some()
 	}
 }
@@ -860,6 +865,11 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
 	where H: Clone + PartialEq + std::fmt::Debug + Default + 'static,
 {
+	#[inline(always)]
+	fn is_active(&self) -> bool {
+		true
+	}
+
 	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
 		resolve_collection(c).map(|(c, p)| {
 			subcollection_prefixed_key!(p, k);
@@ -888,11 +898,11 @@ impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
 		resolve_collection(c).and_then(|(c, p)| {
 			subcollection_prefixed_key!(p, k);
 			self.0.get(c, k)
-				.expect("Unsupported database error");
 		})
 	}
 
 	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::simple_db::SerializeDBIter<'a> {
+		use sp_database::OrderedDatabase;
 		let iter = resolve_collection(c).map(|(c, p)| {
 			if let Some(p) = p {
 				self.0.prefix_iter(c, p, true)
@@ -904,7 +914,7 @@ impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
 		Box::new(iter)
 	}
 
-	fn contains_collection(collection: &'static [u8]) -> bool {
+	fn contains_collection(&self, collection: &'static [u8]) -> bool {
 		resolve_collection(collection).is_some()
 	}
 }
@@ -1555,8 +1565,9 @@ impl<Block: BlockT> Backend<Block> {
 			config.experimental_cache,
 		);
 		let historied_state = rocks_histo.clone();
+		let db_histo: historied_db::simple_db::SerializeDBDyn = Box::new(RocksdbStorage(rocks_histo));
 		let historied_persistence = TransactionalSerializeDB {
-			db: RocksdbStorage(rocks_histo),
+			db: db_histo,
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
