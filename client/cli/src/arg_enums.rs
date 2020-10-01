@@ -202,8 +202,6 @@ arg_enum! {
 	pub enum Database {
 		// Facebooks RocksDB
 		RocksDb,
-		// Subdb. https://github.com/paritytech/subdb/
-		SubDb,
 		// ParityDb. https://github.com/paritytech/parity-db/
 		ParityDb,
 	}

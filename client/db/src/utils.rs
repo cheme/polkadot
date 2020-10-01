@@ -221,18 +221,18 @@ pub fn open_database_and_historied<Block: BlockT>(
 	historied_db::simple_db::SerializeDBDyn,
 	Arc<kvdb_rocksdb::Database>,
 )> {
-	let db_open_error = |feat| Err(
+	#[allow(unused)]
+	fn db_open_error(feat: &'static str) -> sp_blockchain::Error {
 		sp_blockchain::Error::Backend(
 			format!("`{}` feature not enabled, database can not be opened", feat),
-		),
-	);
+		)
+	}
 	let (path, cache_size) = match &config.source {
 		DatabaseSettingsSrc::RocksDb { path, cache_size } => {
 			println!("rocksdb cache size: {:?}", cache_size);
 			(path.clone(), *cache_size)
 		},
-		DatabaseSettingsSrc::ParityDb { path }
-		| DatabaseSettingsSrc::SubDb { path } => {
+		DatabaseSettingsSrc::ParityDb { path } => {
 			let mut path = path.clone();
 			path.push("historieddb");
 			(path, DEFAULT_CACHE_SIZE)
@@ -253,31 +253,45 @@ pub fn open_database_and_historied<Block: BlockT>(
 	// and now open database assuming that it has the latest version
 	// TODO make a conf for historied db.
 	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(NUM_COLUMNS);
-	let state_col_budget = (cache_size as f64 * 0.9) as usize;
-	let other_col_budget = (cache_size - state_col_budget) / (NUM_COLUMNS as usize - 1);
-	let mut memory_budget = std::collections::HashMap::new();
 	let path = path.to_str()
 		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 
-	for i in 0..NUM_COLUMNS {
-		// TODO special budget for historied db
-		if i == crate::columns::STATE {
-			memory_budget.insert(i, state_col_budget);
-		} else {
-			memory_budget.insert(i, other_col_budget);
+	let mut memory_budget = std::collections::HashMap::new();
+	match db_type {
+		DatabaseType::Full => {
+			let state_col_budget = (cache_size as f64 * 0.9) as usize;
+			let other_col_budget = (cache_size - state_col_budget) / (NUM_COLUMNS as usize - 1);
+
+			for i in 0..NUM_COLUMNS {
+				if i == crate::columns::STATE {
+					memory_budget.insert(i, state_col_budget);
+				} else {
+					memory_budget.insert(i, other_col_budget);
+				}
+			}
+			log::trace!(
+				target: "db",
+				"Open RocksDB database at {}, state column budget: {} MiB, others({}) column cache: {} MiB",
+				path,
+				state_col_budget,
+				NUM_COLUMNS,
+				other_col_budget,
+			);
+		},
+		DatabaseType::Light => {
+			let col_budget = cache_size / (NUM_COLUMNS as usize);
+			for i in 0..NUM_COLUMNS {
+				memory_budget.insert(i, col_budget);
+			}
+			log::trace!(
+				target: "db",
+				"Open RocksDB light database at {}, column cache: {} MiB",
+				path,
+				col_budget,
+			);
 		}
 	}
-
 	db_config.memory_budget = memory_budget;
-
-	log::trace!(
-		target: "db",
-		"Open RocksDB database at {}, state column budget: {} MiB, others({}) column cache: {} MiB",
-		path,
-		state_col_budget,
-		NUM_COLUMNS,
-		other_col_budget,
-	);
 
 	let rocks_db = Arc::new(kvdb_rocksdb::Database::open(&db_config, &path)
 		.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
@@ -287,21 +301,9 @@ pub fn open_database_and_historied<Block: BlockT>(
 			let ordered = Box::new(crate::RocksdbStorage(rocks_db.clone()));
 			(sp_database::as_database2(rocks_db.clone()), ordered, rocks_db)
 		},
-		#[cfg(feature = "with-subdb")]
-		DatabaseSettingsSrc::SubDb { path } => {
-			let sub_db = crate::subdb::open(&path, NUM_COLUMNS)
-				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
-			let ordered = sp_database::RadixTreeDatabase::new(sub_db.clone());
-			let ordered = Box::new(crate::DatabaseStorage(ordered));
-			(sub_db, ordered, rocks_db)
-		},
-		#[cfg(not(feature = "with-subdb"))]
-		DatabaseSettingsSrc::SubDb { .. } => {
-			return db_open_error("with-subdb");
-		},
 		#[cfg(feature = "with-parity-db")]
 		DatabaseSettingsSrc::ParityDb { path } => {
-			let parity_db = crate::parity_db::open(&path)
+			let parity_db = crate::parity_db::open(&path, db_type)
 				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
 			let ordered = sp_database::RadixTreeDatabase::new(parity_db.clone());
 			let ordered = Box::new(crate::DatabaseStorage(ordered));
@@ -309,7 +311,7 @@ pub fn open_database_and_historied<Block: BlockT>(
 		},
 		#[cfg(not(feature = "with-parity-db"))]
 		DatabaseSettingsSrc::ParityDb { .. } => {
-			return db_open_error("with-parity-db");
+			return Err(db_open_error("with-parity-db"))
 		},
 		DatabaseSettingsSrc::Custom(db) => {
 			let ordered = sp_database::RadixTreeDatabase::new(db.clone());

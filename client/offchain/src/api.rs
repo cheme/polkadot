@@ -19,16 +19,18 @@ use std::{
 	sync::Arc,
 	convert::TryFrom,
 	thread::sleep,
+	collections::HashSet,
 };
 
-use sp_core::offchain::OffchainStorage;
+use crate::NetworkProvider;
 use futures::Future;
 use log::error;
-use sc_network::{PeerId, Multiaddr, NetworkStateInfo};
+use sc_network::{PeerId, Multiaddr};
 use codec::{Encode, Decode};
+use sp_core::OpaquePeerId;
 use sp_core::offchain::{
 	Externalities as OffchainExt, HttpRequestId, Timestamp, HttpRequestStatus, HttpError,
-	OpaqueNetworkState, OpaquePeerId, OpaqueMultiaddr, StorageKind,
+	OffchainStorage, OpaqueNetworkState, OpaqueMultiaddr, StorageKind,
 };
 pub use sp_offchain::{STORAGE_PREFIX, LOCAL_STORAGE_PREFIX};
 pub use http::SharedClient;
@@ -51,8 +53,8 @@ pub(crate) struct Api<PersistentStorage, LocalStorage> {
 	db: PersistentStorage,
 	/// Offchain Workers local database.
 	local_db: LocalStorage,
-	/// A NetworkState provider.
-	network_state: Arc<dyn NetworkStateInfo + Send + Sync>,
+	/// A provider for substrate networking.
+	network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 	/// Is this node a potential validator?
 	is_validator: bool,
 	/// Everything HTTP-related is handled by a different struct.
@@ -76,10 +78,10 @@ impl<
 	}
 
 	fn network_state(&self) -> Result<OpaqueNetworkState, ()> {
-		let external_addresses = self.network_state.external_addresses();
+		let external_addresses = self.network_provider.external_addresses();
 
 		let state = NetworkState::new(
-			self.network_state.local_peer_id(),
+			self.network_provider.local_peer_id(),
 			external_addresses,
 		);
 		Ok(OpaqueNetworkState::from(state))
@@ -185,6 +187,15 @@ impl<
 	) -> Result<usize, HttpError> {
 		self.http.response_read_body(request_id, buffer, deadline)
 	}
+
+	fn set_authorized_nodes(&mut self, nodes: Vec<OpaquePeerId>, authorized_only: bool) {
+		let peer_ids: HashSet<PeerId> = nodes.into_iter()
+			.filter_map(|node| PeerId::from_bytes(node.0).ok())
+			.collect();
+		
+		self.network_provider.set_authorized_peers(peer_ids);
+		self.network_provider.set_authorized_only(authorized_only);
+	}
 }
 
 /// Information about the local node's network state.
@@ -265,7 +276,7 @@ impl AsyncApi {
 	pub fn new<PS: OffchainStorage, LS: OffchainStorage>(
 		db: PS,
 		local_db: LS,
-		network_state: Arc<dyn NetworkStateInfo + Send + Sync>,
+		network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 		is_validator: bool,
 		shared_client: SharedClient,
 	) -> (Api<PS, LS>, Self) {
@@ -274,7 +285,7 @@ impl AsyncApi {
 		let api = Api {
 			db,
 			local_db,
-			network_state,
+			network_provider,
 			is_validator,
 			http: http_api,
 		};
@@ -299,11 +310,21 @@ mod tests {
 	use super::*;
 	use std::{convert::{TryFrom, TryInto}, time::SystemTime};
 	use sc_client_db::offchain::LocalStorage;
-	use sc_network::PeerId;
+	use sc_network::{NetworkStateInfo, PeerId};
 
-	struct MockNetworkStateInfo();
+	struct TestNetwork();
 
-	impl NetworkStateInfo for MockNetworkStateInfo {
+	impl NetworkProvider for TestNetwork {
+		fn set_authorized_peers(&self, _peers: HashSet<PeerId>) {
+			unimplemented!()
+		}
+
+		fn set_authorized_only(&self, _reserved_only: bool) {
+			unimplemented!()
+		}
+	}
+
+	impl NetworkStateInfo for TestNetwork {
 		fn external_addresses(&self) -> Vec<Multiaddr> {
 			Vec::new()
 		}
@@ -314,12 +335,11 @@ mod tests {
 	}
 
 	fn offchain_api() -> (Api<LocalStorage, LocalStorage>, AsyncApi) {
-		let _ = env_logger::try_init();
+		sp_tracing::try_init_simple();
 		let db = LocalStorage::new_test();
 		let local_db = LocalStorage::new_test();
-		let mock = Arc::new(MockNetworkStateInfo());
+		let mock = Arc::new(TestNetwork());
 		let shared_client = SharedClient::new();
-
 
 		AsyncApi::new(
 			db,

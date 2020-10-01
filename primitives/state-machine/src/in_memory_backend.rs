@@ -20,15 +20,19 @@ use crate::{
 	StorageKey, StorageValue, StorageCollection,
 	trie_backend::TrieBackend,
 };
-use std::{collections::{BTreeMap, HashMap}};
+use sp_std::collections::btree_map::BTreeMap;
+#[cfg(feature = "std")]
+use std::collections::HashMap;
 use hash_db::Hasher;
 use sp_trie::{
 	MemoryDB, TrieMut,
 	trie_types::TrieDBMut,
 };
 use codec::Codec;
-use sp_core::storage::{ChildInfo, Storage};
-use std::sync::Arc;
+use sp_core::storage::ChildInfo;
+#[cfg(feature = "std")]
+use sp_core::storage::Storage;
+use sp_std::{sync::Arc, vec::Vec};
 
 #[derive(Default, Clone, Debug, Eq, PartialEq)]
 pub struct KVInMem(BTreeMap<Vec<u8>, Vec<u8>>);
@@ -37,7 +41,7 @@ impl crate::kv_backend::KVBackend for KVInMem {
 	fn assert_value(&self) -> bool {
 		false
 	}
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, crate::DefaultError> {
 		Ok(self.0.get(key).cloned())
 	}
 }
@@ -52,7 +56,10 @@ where
 		let mut trie = if root == Default::default() {
 			TrieDBMut::<H>::new(mdb, &mut root)
 		} else {
-			TrieDBMut::<H>::from_existing(mdb, &mut root).unwrap()
+			match TrieDBMut::<H>::from_existing(mdb, &mut root) {
+				Ok(trie) => trie,
+				Err(_) => panic!("Error building trie from values."),
+			}
 		};
 		for (key, value) in input {
 			if let Err(e) = match value {
@@ -63,7 +70,10 @@ where
 					trie.remove(&key)
 				},
 			}  {
+				#[cfg(feature = "std")]
 				panic!("Failed to write to trie: {}", e);
+				#[cfg(not(feature = "std"))]
+				panic!("Failed to write to trie.");
 			}
 		}
 		trie.commit();
@@ -88,7 +98,7 @@ where
 		Arc::new(kv_db_2),
 		Arc::new(indexes),
 	);
-	backend.insert(std::iter::empty());
+	backend.insert(sp_std::iter::empty());
 	backend
 }
 
@@ -186,6 +196,7 @@ where
 	}
 }
 
+#[cfg(feature = "std")]
 impl<H: Hasher> From<HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>>
 	for TrieBackend<MemoryDB<H>, H>
 where
@@ -198,6 +209,7 @@ where
 	}
 }
 
+#[cfg(feature = "std")]
 impl<H: Hasher> From<Storage> for TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
@@ -210,6 +222,7 @@ where
 	}
 }
 
+#[cfg(feature = "std")]
 impl<H: Hasher> From<BTreeMap<StorageKey, StorageValue>> for TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
@@ -221,6 +234,7 @@ where
 	}
 }
 
+#[cfg(feature = "std")]
 impl<H: Hasher> From<Vec<(Option<ChildInfo>, StorageCollection)>>
 	for TrieBackend<MemoryDB<H>, H>
 where

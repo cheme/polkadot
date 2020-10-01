@@ -33,15 +33,19 @@
 
 #![warn(missing_docs)]
 
-use std::{fmt, marker::PhantomData, sync::Arc};
+use std::{
+	fmt, marker::PhantomData, sync::Arc,
+	collections::HashSet,
+};
 
 use parking_lot::Mutex;
 use threadpool::ThreadPool;
 use sp_api::{ApiExt, ProvideRuntimeApi, Hasher};
 use futures::future::Future;
 use log::{debug, warn};
-use sc_network::NetworkStateInfo;
-use sp_core::{offchain::{self, OffchainStorage, BlockChainOffchainStorage}, ExecutionContext, traits::SpawnNamed};
+use sc_network::{ExHashT, NetworkService, NetworkStateInfo, PeerId};
+use sp_core::{offchain::{self, OffchainStorage, BlockChainOffchainStorage},
+	ExecutionContext, traits::SpawnNamed};
 use sp_runtime::{generic::BlockId, traits::{self, Header, HashFor}};
 use futures::{prelude::*, future::ready};
 
@@ -49,6 +53,30 @@ mod api;
 use api::SharedClient;
 
 pub use sp_offchain::{OffchainWorkerApi, STORAGE_PREFIX, LOCAL_STORAGE_PREFIX};
+
+/// NetworkProvider provides [`OffchainWorkers`] with all necessary hooks into the
+/// underlying Substrate networking.
+pub trait NetworkProvider: NetworkStateInfo {
+	/// Set the authorized peers.
+	fn set_authorized_peers(&self, peers: HashSet<PeerId>);
+	
+	/// Set the authorized only flag.
+	fn set_authorized_only(&self, reserved_only: bool);
+}
+
+impl<B, H> NetworkProvider for NetworkService<B, H>
+where
+	B: traits::Block + 'static,
+	H: ExHashT,
+{
+	fn set_authorized_peers(&self, peers: HashSet<PeerId>) {
+		self.set_authorized_peers(peers)
+	}
+
+	fn set_authorized_only(&self, reserved_only: bool) {
+		self.set_authorized_only(reserved_only)
+	}
+}
 
 /// An offchain workers manager.
 pub struct OffchainWorkers<Client, PersistentStorage, LocalStorage, Block: traits::Block> {
@@ -108,7 +136,7 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 	pub fn on_block_imported(
 		&self,
 		header: &Block::Header,
-		network_state: Arc<dyn NetworkStateInfo + Send + Sync>,
+		network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 		is_validator: bool,
 	) -> impl Future<Output = ()> {
 		let runtime = self.client.runtime_api();
@@ -139,7 +167,7 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 			let (api, runner) = api::AsyncApi::new(
 				self.db.clone(),
 				local_db_at.clone(),
-				network_state.clone(),
+				network_provider,
 				is_validator,
 				self.shared_client.clone(),
 			);
@@ -190,7 +218,7 @@ pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block,
 	client: Arc<Client>,
 	offchain: Arc<OffchainWorkers<Client, PersistentStorage, LocalStorage, Block>>,
 	spawner: Spawner,
-	network_state_info: Arc<dyn NetworkStateInfo + Send + Sync>,
+	network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 )
 	where
 		Block: traits::Block,
@@ -206,7 +234,7 @@ pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block,
 				"offchain-on-block",
 				offchain.on_block_imported(
 					&n.header,
-					network_state_info.clone(),
+					network_provider.clone(),
 					is_validator,
 				).boxed(),
 			);
@@ -231,15 +259,25 @@ mod tests {
 	use sc_transaction_pool::{BasicPool, FullChainApi};
 	use sp_transaction_pool::{TransactionPool, InPoolTransaction};
 
-	struct MockNetworkStateInfo();
+	struct TestNetwork();
 
-	impl NetworkStateInfo for MockNetworkStateInfo {
+	impl NetworkStateInfo for TestNetwork {
 		fn external_addresses(&self) -> Vec<Multiaddr> {
 			Vec::new()
 		}
 
 		fn local_peer_id(&self) -> PeerId {
 			PeerId::random()
+		}
+	}
+
+	impl NetworkProvider for TestNetwork {
+		fn set_authorized_peers(&self, _peers: HashSet<PeerId>) {
+			unimplemented!()
+		}
+
+		fn set_authorized_only(&self, _reserved_only: bool) {
+			unimplemented!()
 		}
 	}
 
@@ -262,7 +300,7 @@ mod tests {
 
 	#[test]
 	fn should_call_into_runtime_and_produce_extrinsic() {
-		let _ = env_logger::try_init();
+		sp_tracing::try_init_simple();
 
 		let client = Arc::new(substrate_test_runtime_client::new());
 		let spawner = sp_core::testing::TaskExecutor::new();
@@ -274,12 +312,14 @@ mod tests {
 		));
 		let db = sc_client_db::offchain::LocalStorage::new_test();
 		let local_db = sc_client_db::offchain::BlockChainLocalStorage::new_test();
-		let network_state = Arc::new(MockNetworkStateInfo());
+		let network = Arc::new(TestNetwork());
 		let header = client.header(&BlockId::number(0)).unwrap().unwrap();
 
 		// when
 		let offchain = OffchainWorkers::new(client, db, local_db);
-		futures::executor::block_on(offchain.on_block_imported(&header, network_state, false));
+		futures::executor::block_on(
+			offchain.on_block_imported(&header, network, false)
+		);
 
 		// then
 		assert_eq!(pool.0.status().ready, 1);

@@ -17,7 +17,7 @@
 
 //! Trie-based state machine backend.
 
-use log::{warn, debug};
+use crate::{warn, debug};
 use hash_db::Hasher;
 use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
@@ -28,9 +28,10 @@ use crate::{
 	StorageKey, StorageValue, Backend,
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 };
-use std::sync::Arc;
 use crate::kv_backend::KVBackend;
+#[cfg(feature = "std")]
 use std::time::{Duration, Instant};
+use sp_std::{boxed::Box, vec::Vec, collections::btree_map::BTreeMap, sync::Arc};
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
@@ -83,8 +84,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where H::Out: Codec 
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher> std::fmt::Debug for TrieBackend<S, H> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<S: TrieBackendStorage<H>, H: Hasher> sp_std::fmt::Debug for TrieBackend<S, H> {
+	fn fmt(&self, f: &mut sp_std::fmt::Formatter<'_>) -> sp_std::fmt::Result {
 		write!(f, "TrieBackend")
 	}
 }
@@ -92,7 +93,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> std::fmt::Debug for TrieBackend<S, H> 
 impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	H::Out: Ord + Codec,
 {
-	type Error = String;
+	type Error = crate::DefaultError;
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
 
@@ -219,6 +220,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		};
 
 		if let Some(delta) = delta2 {
+			#[cfg(feature = "std")]
 			let now = Instant::now();
 			{
 				let mut eph = Ephemeral::new(
@@ -235,14 +237,16 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 					Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 				}
 			}
+			#[cfg(feature = "std")]
 			println!("old block root calculation: {:?}", now.elapsed().as_millis());
 
 			use trie_db::partial_db::RootIndexIterator;
 
+			#[cfg(feature = "std")]
 			let now = Instant::now();
 			// TODO put depth indexes in trait: here need copy with upgrade client static def.
 			let indexes = trie_db::partial_db::DepthIndexes::new(&[]);
-			let mut result_indexes = std::collections::BTreeMap::new();
+			let mut result_indexes = BTreeMap::new();
 			let root_new: <H as Hasher>::Out = {
 				let mut cb = trie_db::TrieRootIndexes::<H, _, _>::new(&mut result_indexes, &indexes);
 				let iter = RootIndexIterator::new(
@@ -256,14 +260,16 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				cb.root.unwrap_or(Default::default())
 			};
 
+			#[cfg(feature = "std")]
 			println!("block root calculation no index: {:?}, {:?}", now.elapsed().as_millis(), root == root_new);
 
+			#[cfg(feature = "std")]
 			let now = Instant::now();
 			// TODO put depth indexes in trait: here need copy with upgrade client static def.
 	let every_five = &
 [5u32, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230, 235];
 			let indexes = trie_db::partial_db::DepthIndexes::new(every_five);
-			let mut result_indexes = std::collections::BTreeMap::new();
+			let mut result_indexes = BTreeMap::new();
 			let root_new: <H as Hasher>::Out = {
 				let mut cb = trie_db::TrieRootIndexes::<H, _, _>::new(&mut result_indexes, &indexes);
 				let iter = RootIndexIterator::new(
@@ -277,6 +283,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				cb.root.unwrap_or(Default::default())
 			};
 
+			#[cfg(feature = "std")]
 			println!("block root calculation with index {:?}: {:?}, {:?}", result_indexes.len(), now.elapsed().as_millis(), root == root_new);
 
 			use crate::trie_backend_essence::IndexChanges;
@@ -392,8 +399,8 @@ pub mod tests {
 			mdb,
 			root,
 			Arc::new(crate::in_memory_backend::KVInMem::default()),
-			Arc::new(std::collections::BTreeMap::new()),
-			Arc::new(std::collections::BTreeMap::new()),
+			Arc::new(BTreeMap::new()),
+			Arc::new(BTreeMap::new()),
 		)	
 	}
 
@@ -427,8 +434,8 @@ pub mod tests {
 			OverlayWithIndexes::default(),
 			Default::default(),
 			Arc::new(crate::in_memory_backend::KVInMem::default()),
-			Arc::new(std::collections::BTreeMap::new()),
-			Arc::new(std::collections::BTreeMap::new()),
+			Arc::new(BTreeMap::new()),
+			Arc::new(BTreeMap::new()),
 		).pairs().is_empty());
 	}
 
