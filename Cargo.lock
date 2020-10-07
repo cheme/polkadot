@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "historied-db"
-version = "0.8.0-rc3"
+version = "0.8.0"
 dependencies = [
  "derivative",
  "hash-db",
@@ -198,7 +198,7 @@ checksum = "def50a86306165861203e7f84ecffbbdfdea79f0e51039b33de1e952358c47ac"
 
 [[package]]
 name = "radix-tree"
-version = "0.8.0-rc3"
+version = "0.8.0"
 dependencies = [
  "derivative",
  "hashbrown",
@@ -232,7 +232,7 @@ checksum = "3757cb9d89161a2f24e1cf78efa0c1fcff485d18e3f55e0aa3480824ddaa0f3f"
 
 [[package]]
 name = "sp-std"
-version = "2.0.0-rc6"
+version = "2.0.0"
 
 [[package]]
 name = "syn"
