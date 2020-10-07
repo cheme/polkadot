@@ -28,10 +28,11 @@ use sp_std::ops::SubAssign;
 use sp_std::vec::Vec;
 use sp_std::marker::PhantomData;
 use crate::Latest;
-use crate::InitFrom;
-use codec::{Encode, Decode};
+use crate::{Context, InitFrom, DecodeWithContext, Trigger};
+use codec::{Encode, Input};
 use derivative::Derivative;
 use core::default::Default;
+
 // TODO for not in memory we need some direct or indexed api, returning value
 // and the info if there can be lower value index (not just a direct index).
 // -> then similar to those reverse iteration with possible early exit.
@@ -85,21 +86,53 @@ macro_rules! tree_get {
 	}
 }
 
-#[derive(Derivative, Debug, Clone, Encode, Decode)]
+#[derive(Derivative, Debug, Clone, Encode)]
 #[derivative(PartialEq(bound="D: PartialEq"))]
-pub struct Tree<I, BI, V, D: InitFrom, BD: InitFrom> {
+pub struct Tree<I, BI, V, D: Context, BD: Context> {
 	branches: D,
+	#[codec(skip)]
 	#[derivative(PartialEq="ignore" )]
-	init: D::Init,
+	init: D::Context,
+	#[codec(skip)]
 	#[derivative(PartialEq="ignore" )]
-	init_child: BD::Init,
+	init_child: BD::Context,
+	#[codec(skip)]
 	_ph: PhantomData<(I, BI, V, BD)>,
 }
 
-impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
-	type Init = (D::Init, BD::Init);
+impl<I, BI, V, D, BD> DecodeWithContext for Tree<I, BI, V, D, BD>
+	where
+		D: DecodeWithContext,
+		BD: DecodeWithContext,
+{
+	fn decode_with_context<IN: Input>(input: &mut IN, init: &Self::Context) -> Option<Self> {
+		D::decode_with_context(input, &init.0).map(|branches|
+			Tree {
+				branches,
+				init: init.0.clone(),
+				init_child: init.1.clone(),
+				_ph: PhantomData,
+			}
+		)
+	}
+}
 
-	fn init_from(init: Self::Init) -> Self {
+impl<I, BI, V, D: Context, BD: Context> Context for Tree<I, BI, V, D, BD> {
+	type Context = (D::Context, BD::Context);
+}
+
+impl<I, BI, V, D: Context + Trigger, BD: Context> Trigger for Tree<I, BI, V, D, BD> {
+	const TRIGGER: bool = <D as Trigger>::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if Self::TRIGGER {
+			self.branches.trigger_flush();
+		}
+	}
+}
+
+impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
+	fn init_from(init: Self::Context) -> Self {
 		Tree {
 			branches: D::init_from(init.0.clone()),
 			init: init.0,
@@ -118,7 +151,7 @@ impl<
 	BD: LinearStorage<V, BI>,
 > Branch<I, BI, V, BD>
 {
-	pub fn new(value: V, state: &(I, BI), init: BD::Init) -> Self {
+	pub fn new(value: V, state: &(I, BI), init: BD::Context) -> Self {
 		let (branch_index, index) = state.clone();
 		let index = Latest::unchecked_latest(index); // TODO cast ptr?
 		let history = Linear::new(value, &index, init);
@@ -172,7 +205,7 @@ impl<
 	type GC = MultipleGc<I, BI, V>;
 	type Migrate = MultipleMigrate<I, BI, V>;
 
-	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
+	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init.0.clone());
 		v.push(Branch::new(value, at.latest(), init.1.clone()));
 		Tree {
@@ -513,7 +546,7 @@ impl<
 	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
 	V: Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V, BI, Init = D::Init>,
+	BD: LinearStorageMem<V, BI, Context = D::Context>,
 > InMemoryValue<V> for Tree<I, BI, V, D, BD> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
@@ -729,27 +762,29 @@ mod test {
 	#[test]
 	fn compile_double_encoded_node() {
 		use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
-		use crate::backend::nodes::{Head, Node, InitHead};
+		use crate::backend::nodes::{Head, Node, ContextHead};
 		use crate::backend::nodes::test::{MetaNb, MetaSize};
 		use crate::historied::ValueRef;
 		use sp_std::collections::btree_map::BTreeMap;
 
 		type EncArray<'a> = EncodedArray<'a, Vec<u8>, DefaultVersion>;
 		type Backend<'a> = BTreeMap<Vec<u8>, Node<Vec<u8>, u32, EncArray<'a>, MetaSize>>;
-		type BD<'a> = Head<Vec<u8>, u32, EncArray<'a>, MetaSize, Backend<'a>>;
+		type BD<'a> = Head<Vec<u8>, u32, EncArray<'a>, MetaSize, Backend<'a>, ()>;
 
 		type V2<'a> = crate::historied::linear::Linear<Vec<u8>, u32, BD<'a>>;
 		type EncArray2<'a> = EncodedArray<'a, V2<'a>, DefaultVersion>;
 		type Backend2<'a> = BTreeMap<Vec<u8>, Node<V2<'a>, u32, EncArray2<'a>, MetaSize>>;
 //		type D<'a> = crate::historied::linear::MemoryOnly<
-		type D<'a> = Head<V2<'a>, u32, EncArray2<'a>, MetaSize, Backend2<'a>>;
-		let init_head = InitHead {
-			backend: Backend2::new(),
-			key: b"any".to_vec(),
-		};
-		let init_head_child = InitHead {
+		type D<'a> = Head<V2<'a>, u32, EncArray2<'a>, MetaSize, Backend2<'a>, ContextHead<Backend<'a>, ()>>;
+		let init_head_child = ContextHead {
 			backend: Backend::new(),
 			key: b"any".to_vec(),
+			node_init_from: (),
+		};
+		let init_head = ContextHead {
+			backend: Backend2::new(),
+			key: b"any".to_vec(),
+			node_init_from: init_head_child.clone(),
 		};
 		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
 		let at: ForkPlan<u32, u32> = Default::default();
@@ -772,6 +807,41 @@ mod test {
 		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
 	}
 
+
+	#[test]
+	fn compile_double_encoded_node_2() {
+		use crate::backend::in_memory::MemoryOnly;
+		use crate::backend::nodes::{Head, Node, ContextHead};
+		use crate::backend::nodes::test::{MetaNb, MetaSize};
+		use crate::historied::ValueRef;
+		use sp_std::collections::btree_map::BTreeMap;
+
+		type MemOnly = MemoryOnly<Vec<u8>, u32>;
+		type Backend = BTreeMap<Vec<u8>, Node<Vec<u8>, u32, MemOnly, MetaSize>>;
+		type BD = Head<Vec<u8>, u32, MemOnly, MetaSize, Backend, ()>;
+
+		type V2 = crate::historied::linear::Linear<Vec<u8>, u32, BD>;
+		type MemOnly2 = MemoryOnly<V2, u32>;
+		type Backend2 = BTreeMap<Vec<u8>, Node<V2, u32, MemOnly2, MetaSize>>;
+		type D = Head<V2, u32, MemOnly2, MetaSize, Backend2, ContextHead<Backend, ()>>;
+		let init_head_child = ContextHead {
+			backend: Backend::new(),
+			key: b"any".to_vec(),
+			node_init_from: (),
+		};
+		let init_head = ContextHead {
+			backend: Backend2::new(),
+			key: b"any".to_vec(),
+			node_init_from: init_head_child.clone(),
+		};
+		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
+		let at: ForkPlan<u32, u32> = Default::default();
+		item.get(&at);
+
+		let bd = D::init_from(init_head);
+		use crate::backend::LinearStorage;
+		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
+	}
 
 	#[test]
 	fn test_set_get() {

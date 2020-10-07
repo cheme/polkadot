@@ -23,9 +23,9 @@ use sp_std::marker::PhantomData;
 use crate::{StateDBRef, UpdateResult, InMemoryStateDBRef, StateDB};
 use hash_db::{PlainDB, PlainDBRef};
 use crate::Latest;
-use codec::{Encode, Decode};
+use codec::{Encode, Decode, Input};
 use sp_std::ops::Range;
-use crate::InitFrom;
+use crate::{Context, DecodeWithContext, Trigger};
 
 pub mod linear;
 pub mod tree;
@@ -64,7 +64,7 @@ pub trait InMemoryValueRange<S> {
 }
 
 /// Trait for historied value.
-pub trait Value<V>: ValueRef<V> + InitFrom {
+pub trait Value<V>: ValueRef<V> + Context {
 	/// State to use for changing value.
 	/// We use a different state than
 	/// for querying as it can use different
@@ -72,6 +72,7 @@ pub trait Value<V>: ValueRef<V> + InitFrom {
 	type SE: StateIndex<Self::Index>;
 
 	/// Index a single history item.
+	/// TODO this type and trait StateIndex are not very relevant.
 	type Index;
 
 	/// GC strategy that can be applied.
@@ -82,8 +83,8 @@ pub trait Value<V>: ValueRef<V> + InitFrom {
 	/// and all pending state are invalidated.
 	type Migrate;
 
-	/// Initiate a new value.
-	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self;
+	/// Contextiate a new value.
+	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self;
 
 	/// Insert or update a value.
 	fn set(&mut self, value: V, at: &Self::SE) -> UpdateResult<()>;
@@ -120,10 +121,13 @@ pub trait InMemoryValue<V>: Value<V> {
 /// instance if `Value` is subject to concurrent access.
 /// TODO an entry api would be more proper (returning optional entry).
 pub trait ConditionalValueMut<V>: Value<V> {
+	/// Internal index.
 	type IndexConditional;
+
 	/// Does state allow modifying this value.
 	/// If value is added as parameter, we do not allow overwrite.
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool;
+
 	/// Do update if state allows it, otherwhise return None.
 	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
 
@@ -138,6 +142,42 @@ pub struct HistoriedValue<V, S> {
 	pub value: V,
 	/// The state this value belongs to.
 	pub state: S,
+}
+
+impl<V, S> Trigger for HistoriedValue<V, S>
+	where
+		V: Trigger,
+{
+	const TRIGGER: bool = V::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if V::TRIGGER {
+			self.value.trigger_flush();
+		}
+	}
+}
+
+impl<V, S> Context for HistoriedValue<V, S>
+	where
+		V: Context,
+{
+	type Context = V::Context;
+}
+
+impl<V, S> DecodeWithContext for HistoriedValue<V, S>
+	where
+		V: DecodeWithContext,
+		S: Decode,
+{
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+		V::decode_with_context(input, init)
+			.and_then(|value| S::decode(input).ok()
+				.map(|state| HistoriedValue {
+					value,
+					state,
+				})
+			)
+	}
 }
 
 impl<V, S> HistoriedValue<V, S> {
@@ -175,15 +215,15 @@ impl<V, S> From<(V, S)> for HistoriedValue<V, S> {
 }
 
 /// Implementation for plain db.
-pub struct BTreeMap<K, V, H: InitFrom>(pub(crate) sp_std::collections::btree_map::BTreeMap<K, H>, H::Init, PhantomData<V>);
+pub struct BTreeMap<K, V, H: Context>(pub(crate) sp_std::collections::btree_map::BTreeMap<K, H>, H::Context, PhantomData<V>);
 
-impl<K: Ord, V, H: InitFrom> BTreeMap<K, V, H> {
-	pub fn new(init: H::Init) -> Self {
+impl<K: Ord, V, H: Context> BTreeMap<K, V, H> {
+	pub fn new(init: H::Context) -> Self {
 		BTreeMap(sp_std::collections::btree_map::BTreeMap::new(), init, PhantomData)
 	}
 }
 
-impl<K: Ord, V: Clone, H: ValueRef<V> + InitFrom> StateDBRef<K, V> for BTreeMap<K, V, H> {
+impl<K: Ord, V: Clone, H: ValueRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, H> {
 	type S = H::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -199,7 +239,7 @@ impl<K: Ord, V: Clone, H: ValueRef<V> + InitFrom> StateDBRef<K, V> for BTreeMap<
 }
 
 // note that the constraint on state db ref for the associated type is bad (forces V as clonable).
-impl<K: Ord, V, H: InMemoryValueRef<V> + InitFrom> InMemoryStateDBRef<K, V> for BTreeMap<K, V, H> {
+impl<K: Ord, V, H: InMemoryValueRef<V> + Context> InMemoryStateDBRef<K, V> for BTreeMap<K, V, H> {
 	type S = H::S;
 
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V> {
@@ -285,7 +325,7 @@ impl<K, V: Clone, H: ValueRef<V>, DB: PlainDBRef<K, H>, S> StateDBRef<K, V> for 
 impl<
 	K: Ord + Clone,
 	V: Clone + Eq,
-	H: Value<V, Init = ()>,
+	H: Value<V, Context = ()>,
 	DB: PlainDBRef<K, H> + PlainDB<K, H>,
 > StateDB<K, V> for PlainDBState<K, DB, H, H::Index>
 	where

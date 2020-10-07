@@ -48,9 +48,102 @@ pub mod simple_db;
 /// Management for state of historied data.
 pub mod management;
 
-pub trait InitFrom: Sized {
-	type Init: Clone;
-	fn init_from(init: Self::Init) -> Self;
+/// Context associated with item.
+/// Main use case here is a backend to fetch
+/// additional information.
+pub trait Context: Sized {
+	type Context: Clone;
+}
+
+
+/// Trigger action on changed data.
+pub trait Trigger {
+	/// Define if we can trigger.
+	const TRIGGER: bool;
+
+	/// Run triggered related action on this element and changed children.
+	/// Flush is typically committing to context if needed.
+	fn trigger_flush(&mut self);
+}
+
+
+macro_rules! empty_init {
+	($type: ty) => {
+		impl Context for $type {
+			type Context = ();
+		}
+
+		impl Trigger for $type {
+			const TRIGGER: bool = false;
+			fn trigger_flush(&mut self) { }
+		}
+	}
+}
+empty_init!(u8);
+empty_init!(u16);
+empty_init!(u32);
+empty_init!(u64);
+empty_init!(u128);
+impl<V: Context> Context for Option<V> {
+	type Context = V::Context;
+}
+
+impl<V: Trigger> Trigger for Option<V> {
+	const TRIGGER: bool = V::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if V::TRIGGER {
+			self.as_mut().map(|v| v.trigger_flush());
+		}
+	}
+}
+
+impl<V: Context> Context for Vec<V> {
+	type Context = V::Context;
+}
+
+impl<V: Trigger> Trigger for Vec<V> {
+	const TRIGGER: bool = V::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if V::TRIGGER {
+			self.iter_mut().for_each(|v| v.trigger_flush())
+		}
+	}
+}
+
+pub trait InitFrom: Context {
+	fn init_from(init: Self::Context) -> Self;
+}
+
+pub trait DecodeWithContext: Context {
+	fn decode_with_context<I: codec::Input>(input: &mut I, init: &Self::Context) -> Option<Self>;
+}
+
+impl<V: Context> InitFrom for Option<V> {
+	fn init_from(_init: Self::Context) -> Self {
+		None
+	}
+}
+
+impl<V: Context> InitFrom for Vec<V> {
+	fn init_from(_init: Self::Context) -> Self {
+		Vec::new()
+	}
+}
+
+impl<V: codec::Decode + Context> DecodeWithContext for Option<V> {
+	fn decode_with_context<I: codec::Input>(input: &mut I, _init: &Self::Context) -> Option<Self> {
+		use codec::Decode;
+		Self::decode(input).ok()
+	}
+}
+
+impl<V: codec::Decode + Context> DecodeWithContext for Vec<V> {
+	fn decode_with_context<I: codec::Input>(input: &mut I, _init: &Self::Context) -> Option<Self> {
+		use codec::Decode;
+		Self::decode(input).ok()
+	}
 }
 
 /// Minimal simple implementation.
@@ -184,16 +277,11 @@ pub trait ManagementRef<H> {
 pub trait Management<H>: ManagementRef<H> + Sized {
 	/// attached db state needed for update.
 	type SE; // TODO rename to latest or pending???
-	fn init() -> (Self, Self::S);
 
 	/// Return state mut for state but only if state exists and is
 	/// a terminal writeable leaf (if not you need to create new branch 
 	/// from previous state to write).
 	fn get_db_state_mut(&mut self, tag: &H) -> Option<Self::SE>;
-
-	/// Get a cursor over the initial state, can be use in some specific
-	/// case (replace `default` for SE).
-	fn init_state(&mut self) -> Self::SE;
 
 	/// Get a cursor over the last change of ref (when adding or removing).
 	fn latest_state(&mut self) -> Self::SE;
@@ -235,12 +323,6 @@ pub trait ForkableManagement<H>: Management<H> {
 	fn ref_state_fork(&self, s: &Self::S) -> Self::SF;
 
 	fn get_db_state_for_fork(&mut self, tag: &H) -> Option<Self::SF>;
-
-	/// Useful to fork in a independant branch (eg no parent reference found).
-	fn init_state_fork(&mut self) -> Self::SF {
-		let se = self.init_state();
-		self.inner_fork_state(se)
-	}
 
 	fn latest_state_fork(&mut self) -> Self::SF {
 		let se = self.latest_state();
@@ -360,8 +442,6 @@ pub trait ManagedDB {
 /// Note that it is only informational and does not guaranty the state
 /// is the latest.
 /// TODO repr Transparent and cast ptr for tree?
-/// TODO have index trait and Latest<S: Index> just inherit while
-/// forcing constant NoInsert property (tip insert only).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Latest<S>(S);
 
@@ -369,7 +449,7 @@ impl<S> Latest<S> {
 	/// This is only to be use by a `Management` or
 	/// a context where the state can be proven as
 	/// being the latest.
-	pub(crate) fn unchecked_latest(s: S) -> Self {
+	pub fn unchecked_latest(s: S) -> Self {
 		Latest(s)
 	}
 	/// Reference to inner state.
