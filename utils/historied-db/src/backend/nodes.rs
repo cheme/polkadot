@@ -24,8 +24,9 @@ use sp_std::vec::Vec;
 use super::{LinearStorage};
 use crate::historied::HistoriedValue;
 use derivative::Derivative;
-use crate::InitFrom;
+use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use crate::backend::encoded_array::EncodedArrayValue;
+use codec::{Encode, Decode, Input};
 
 /// Rough size estimate to manage node size.
 pub trait EstimateSize {
@@ -48,8 +49,6 @@ pub trait NodesMeta: Sized {
 	const MAX_NODE_LEN: usize;
 	/// Maximum number of items one.
 	const MAX_NODE_ITEMS: usize;
-	/// Maximum number of index items one.
-	const MAX_INDEX_ITEMS: usize;
 	/// Prefix to isolate nodes.
 	const STORAGE_PREFIX: &'static [u8];
 }
@@ -108,9 +107,40 @@ pub struct Node<V, S, D, M> {
 	_ph: PhantomData<(V, S, D, M)>,
 }
 
+impl<V, S, D, M> Trigger for Node<V, S, D, M>
+	where
+		D: Trigger,
+{
+	const TRIGGER: bool = <D as Trigger>::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if Self::TRIGGER && self.changed {
+			self.data.trigger_flush();
+		}
+	}
+}
+
+impl<V, S, D, M> Node<V, S, D, M> {
+	/// Access to inner linear data.
+	pub fn inner(&self) -> &D {
+		&self.data
+	}
+	/// Instantiate a node from its inner linear data and size.
+	pub fn new(data: D, reference_len: usize) -> Self {
+		Node {
+			data,
+			reference_len,
+			changed: false,
+			_ph: PhantomData::default(),
+		}
+	}
+}
+
+#[derive(Derivative)]
+#[derivative(Clone(bound="D: Clone, B: Clone, NI: Clone"))]
 /// Head is the entry node, it contains fetched nodes and additional
 /// information about this backend state.
-pub struct Head<V, S, D, M, B> {
+pub struct Head<V, S, D, M, B, NI> {
 	/// Head contains the last `Node` content.
 	inner: Node<V, S, D, M>,
 	/// Accessed nodes are kept in memory.
@@ -132,26 +162,138 @@ pub struct Head<V, S, D, M, B> {
 	reference_key: Vec<u8>,
 	/// All nodes are persisted under this backend storage.
 	backend: B,
+	/// New node initializing contant.
+	node_init_from: NI,
 }
 
-impl<V, S, D: Clone, M, B> Head<V, S, D, M, B>
+#[derive(Encode, Decode)]
+/// Codec fragment for node
+pub struct HeadCodec {
+	/// The index of the first node, inclusive.
+	start_node_index: u32,
+	/// The index of the last node, non inclusive (next index to use)
+	end_node_index: u32,
+	/// Number of historied values stored in head and all past nodes.
+	len: u32,
+}
+
+impl<V, S, D, M, B, NI> Encode for Head<V, S, D, M, B, NI>
 	where
-		M: NodesMeta,
-		B: NodeStorageMut<V, S, D, M>,
+		D: Encode,
 {
-	pub fn flush_changes(&mut self) {
+	fn size_hint(&self) -> usize {
+		self.inner.data.size_hint() + 12
+	}
+
+	fn encode_to<T: codec::Output>(&self, dest: &mut T) {
+		self.inner.data.encode_to(dest);
+		HeadCodec {
+			start_node_index: self.start_node_index,
+			end_node_index: self.end_node_index,
+			len: self.len as u32,
+		}.encode_to(dest)
+	}
+}
+
+impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
+	where
+		D: DecodeWithContext<Context = NI> + EstimateSize,
+		B: Clone,
+		NI: Clone,
+{
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+		// This contains len from additionaly struct but it is considered
+		// negligable.
+		let reference_len = match input.remaining_len() {
+			Ok(len) => len,
+			_ => return None,
+		};
+		D::decode_with_context(input, &init.node_init_from).and_then(|data| {
+			let head_decoded = HeadCodec::decode(input).ok();
+			head_decoded.map(|head_decoded| {
+				let reference_len = reference_len.unwrap_or_else(|| data.estimate_size());
+				Head {
+					inner: Node::new(data, reference_len),
+					fetched: RefCell::new(Vec::new()),
+					old_start_node_index: head_decoded.start_node_index,
+					old_end_node_index: head_decoded.end_node_index,
+					start_node_index: head_decoded.start_node_index,
+					end_node_index: head_decoded.end_node_index,
+					len: head_decoded.len as usize,
+					reference_key: init.key.clone(),
+					backend: init.backend.clone(),
+					node_init_from: init.node_init_from.clone(),
+				}
+			})
+		})
+	}
+}
+/*
+impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
+	where
+		D: DecodeWithContext<Context = NI>,
+		B: Clone,
+		NI: Clone,
+{
+	/// Decode with init for this head but also for its inner nodes.
+	/// TODO see if we should no just use tait impl
+	pub fn decode_with_context_2(mut input: &[u8], init: &ContextHead<B, NI>) -> Option<Self> {
+		// This contains len from additionaly struct but it is considered
+		// negligable.
+		let reference_len = input.len();
+		let input = &mut input;
+		D::decode_with_context(input, &init.node_init_from).and_then(|data| {
+			let head_decoded = HeadCodec::decode(input).ok();
+			head_decoded.map(|head_decoded| {
+				Head {
+					inner: Node::new(data, reference_len),
+					fetched: RefCell::new(Vec::new()),
+					old_start_node_index: head_decoded.start_node_index,
+					old_end_node_index: head_decoded.end_node_index,
+					start_node_index: head_decoded.start_node_index,
+					end_node_index: head_decoded.end_node_index,
+					len: head_decoded.len as usize,
+					reference_key: init.key.clone(),
+					backend: init.backend.clone(),
+					node_init_from: init.node_init_from.clone(),
+				}
+			})
+		})
+	}
+}
+*/
+impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
+	where
+		D: Clone + Trigger,
+		M: NodesMeta,
+		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
+{
+	pub fn flush_changes(&mut self, trigger: bool) {
 		for d in self.old_start_node_index .. self.start_node_index {
+			if trigger {
+				if let Some(mut node) = self.backend.get_node(&self.reference_key[..], d) {
+					node.trigger_flush();
+				}
+			}
 			self.backend.remove_node(&self.reference_key[..], d);
 		}
 		// this comparison is needed for the case we clear to 0 nodes indexes.
 		let start_end = sp_std::cmp::max(self.end_node_index, self.old_start_node_index);
 		self.old_start_node_index = self.start_node_index;
 		for d in start_end .. self.old_end_node_index {
+			if trigger {
+				if let Some(mut node) = self.backend.get_node(&self.reference_key[..], d) {
+					node.trigger_flush();
+				}
+			}
 			self.backend.remove_node(&self.reference_key[..], d);
 		}
 		self.old_end_node_index = self.end_node_index;
 		for (index, mut node) in self.fetched.borrow_mut().iter_mut().enumerate() {
 			if node.changed {
+				if trigger {
+					node.trigger_flush();
+				}
 				self.backend.set_node(&self.reference_key[..], self.end_node_index - 1 - index as u32 , node);
 				node.changed = false;
 			}
@@ -161,23 +303,52 @@ impl<V, S, D: Clone, M, B> Head<V, S, D, M, B>
 
 /// Information needed to initialize a new `Head`.
 #[derive(Clone)]
-pub struct InitHead<B> {
+pub struct ContextHead<B, NI> {
 	/// The key of the historical value stored in nodes.
+	/// TODO use Arc<Vec<u8> since this is cloned around a lot
 	pub key: Vec<u8>,
 	/// The nodes backend.
 	pub backend: B,
+	/// Int type for internal node content.
+	pub node_init_from: NI,
 }
 
-impl<V, S, D, M, B> InitFrom for Head<V, S, D, M, B>
+impl<V, S, D, M, B, NI> Trigger for Head<V, S, D, M, B, NI>
 	where
-		D: InitFrom<Init = ()>,
-		B: Clone,
+		D: Clone + Trigger,
+		M: NodesMeta,
+		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
-	type Init = InitHead<B>; // TODO key to clone and backend refcell.
-	fn init_from(init: Self::Init) -> Self {
+	/// Always transmit trigger for fetch nodes and possibly inner data.
+	const TRIGGER: bool = true;
+
+	fn trigger_flush(&mut self) {
+		if D::TRIGGER {
+			self.inner.trigger_flush();
+		}
+		self.flush_changes(D::TRIGGER)
+	}
+}
+
+impl<V, S, D, M, B, NI> Context for Head<V, S, D, M, B, NI>
+	where
+		D: Context<Context = NI>,
+		B: Clone,
+		NI: Clone,
+{
+	type Context = ContextHead<B, NI>; // TODO key to clone and backend refcell.
+}
+
+impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
+	where
+		D: InitFrom<Context = NI>,
+		B: Clone,
+		NI: Clone,
+{
+	fn init_from(init: Self::Context) -> Self {
 		Head {
 			inner: Node {
-				data: D::init_from(()),
+				data: D::init_from(init.node_init_from.clone()),
 				changed: false,
 				reference_len: 0,
 				_ph: PhantomData,
@@ -190,17 +361,19 @@ impl<V, S, D, M, B> InitFrom for Head<V, S, D, M, B>
 			len: 0,
 			reference_key: init.key,
 			backend: init.backend,
+			node_init_from: init.node_init_from,
 		}
 	}
 }
 
-impl<V, S, D, M, B> Head<V, S, D, M, B>
+impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
-		D: InitFrom<Init = ()> + LinearStorage<V, S>,
+		D: LinearStorage<V, S>,
 		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize,
+		NI: Clone,
 {
 	// return node index (if node index is end_node_index this is in head),
 	// and index in it.
@@ -246,14 +419,15 @@ impl<V, S, D, M, B> Head<V, S, D, M, B>
 /// Notice that all max node operation are only for push and pop operation.
 /// 'insert' and 'remove' operation would need to use a call to 'realign'
 /// operation to rewrite correctly the sizes.
-impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
+impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	where
-		D: InitFrom<Init = ()> + LinearStorage<V, S>,
+		D: Context<Context = NI> + LinearStorage<V, S>,
 		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize,
-{	
+		NI: Clone,
+{
 	// Fetched node index (end_node_index is head).
 	// If true the node needs to be inserted.
 	// Inner node linear storage index.
@@ -288,29 +462,54 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		None
 	}
 	fn previous_index(&self, mut index: Self::Index) -> Option<Self::Index> {
+		let mut switched = false;
 		if index.0 == self.end_node_index {
-			if let Some(inner_index) = self.inner.data.last() {
+			if let Some(inner_index) = self.inner.data.previous_index(index.1) {
 				index.1 = inner_index;
 				return Some(index);
+			} else {
+				if index.0 > self.start_node_index {
+					index.0 -= 1;
+					switched = true;
+				} else {
+					return None;
+				}
 			}
 		}
-		while index.0 > self.start_node_index {
-			index.0 -= 1;
+		loop {
 			let fetch_index = self.end_node_index - index.0 - 1;
-			let inner_index = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
-				node.data.last()
+			let (past, inner_index) = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
+				let inner_index = if switched {
+					switched = false;
+					node.data.last()
+				} else {
+					node.data.previous_index(index.1)
+				};
+				(false, inner_index)
 			} else {
+				(true, None)
+			};
+			let inner_index = if past {
 				if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), index.0) {
+					debug_assert!(switched);
 					let inner_index = node.data.last();
 					self.fetched.borrow_mut().push(node);
 					inner_index
 				} else {
 					None
 				}
+			} else {
+				inner_index
 			};
 			if let Some(inner_index) = inner_index {
 				index.1 = inner_index;
 				return Some(index);
+			}
+			if index.0 > self.start_node_index {
+				index.0 -= 1;
+				switched = true;
+			} else {
+				break;
 			}
 		}
 		None
@@ -400,18 +599,20 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		} else {
 			let add_size = value.value.estimate_size() + value.state.estimate_size(); 
 			additional_size = Some(add_size);
-			if self.inner.reference_len + add_size < M::MAX_NODE_LEN {
+			// Allow one excess item (in case an item des not fit into the maximum length)
+			if self.inner.reference_len < M::MAX_NODE_LEN {
 				self.inner.reference_len += add_size;
 				self.inner.data.push(value);
 				return;
 			}
 		}
 
+		// New head
 		let add_size = additional_size.unwrap_or_else(||
 			value.value.estimate_size() + value.state.estimate_size()
 		);
 		self.end_node_index += 1;
-		let mut data = D::init_from(());
+		let mut data = D::init_from(self.node_init_from.clone());
 		data.push(value);
 		let new_node = Node::<V, S, D, M> {
 			data,
@@ -543,12 +744,12 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 			}
 			(in_head, i)
 		};
+		if self.len > at {
+			self.len = at;
+		}
 		if !in_head {
 			let fetch_index = i as u32;
-			self.end_node_index -= fetch_index + 1;
-			if self.len > at {
-				self.len = at;
-			}
+			self.end_node_index -= fetch_index + 1;	
 			let mut fetched_mut = self.fetched.borrow_mut();
 			// reversed ordered.
 			for i in 0..fetch_index + 1 {
@@ -572,8 +773,13 @@ impl<V, S, D, M, B> LinearStorage<V, S> for Head<V, S, D, M, B>
 		node.changed = true;
 
 		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-			let h = node.data.get(index.1);
-			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
+			let h_old = node.data.get(index.1);
+			if node.reference_len > h_old.value.estimate_size() + h_old.state.estimate_size() {
+				node.reference_len -= h_old.value.estimate_size() + h_old.state.estimate_size();
+			} else {
+				// we can have biggest estimatition for head (size can be overestimated).
+				node.reference_len = 0;
+			}
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
 		}
 		node.data.emplace(index.1, h);
@@ -612,7 +818,7 @@ impl<V: EstimateSize, S: EstimateSize> EstimateSize for crate::backend::in_memor
 
 //D is backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>
 // B is std::collections::BTreeMap<std::vec::Vec<u8>, backend::nodes::Node<std::vec::Vec<u8>, u32, backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>, backend::nodes::test::MetaSize>>
-impl<D, M, B> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B>
+impl<D, M, B, NI> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B, NI>
 	where
 		D: EncodedArrayValue,
 {
@@ -625,7 +831,7 @@ impl<D, M, B> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B>
 	}
 }
 
-impl<D, M, B> AsRef<[u8]> for Head<Vec<u8>, u32, D, M, B>
+impl<D, M, B, NI> AsRef<[u8]> for Head<Vec<u8>, u32, D, M, B, NI>
 	where
 		D: AsRef<[u8]>,
 {
@@ -634,7 +840,7 @@ impl<D, M, B> AsRef<[u8]> for Head<Vec<u8>, u32, D, M, B>
 	}
 }
 
-impl<D, M, B> AsMut<[u8]> for Head<Vec<u8>, u32, D, M, B>
+impl<D, M, B, NI> AsMut<[u8]> for Head<Vec<u8>, u32, D, M, B, NI>
 	where
 		D: AsMut<[u8]>,
 {
@@ -643,7 +849,7 @@ impl<D, M, B> AsMut<[u8]> for Head<Vec<u8>, u32, D, M, B>
 	}
 }
 
-impl<V, S, D, M, B> EstimateSize for Head<V, S, D, M, B> {
+impl<V, S, D, M, B, NI> EstimateSize for Head<V, S, D, M, B, NI> {
 	fn estimate_size(&self) -> usize {
 		self.inner.reference_len
 	}
@@ -668,7 +874,6 @@ pub(crate) mod test {
 		const APPLY_SIZE_LIMIT: bool = true;
 		const MAX_NODE_LEN: usize = 25;
 		const MAX_NODE_ITEMS: usize = 8;
-		const MAX_INDEX_ITEMS: usize = 5;
 		const STORAGE_PREFIX: &'static [u8] = b"nodes1";
 	}
 	#[derive(Clone)]
@@ -677,7 +882,6 @@ pub(crate) mod test {
 		const APPLY_SIZE_LIMIT: bool = false;
 		const MAX_NODE_LEN: usize = 0;
 		const MAX_NODE_ITEMS: usize = 3;
-		const MAX_INDEX_ITEMS: usize = 5;
 		const STORAGE_PREFIX: &'static [u8] = b"nodes2";
 	}
 
@@ -691,14 +895,15 @@ pub(crate) mod test {
 
 	fn nodes_push_and_query_inner<D, M>()
 		where
-			D: InitFrom<Init = ()> + LinearStorage<Vec<u8>, u32> + Clone,
+			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u32> + Clone,
 			M: NodesMeta + Clone,
 	{
-		let init_head = InitHead {
+		let init_head = ContextHead {
 			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u32, D, M>>::new(),
 			key: b"any".to_vec(),
+			node_init_from: (),
 		};
-		let mut head = Head::<Vec<u8>, u32, D, M, _>::init_from(init_head);
+		let mut head = Head::<Vec<u8>, u32, D, M, _, _>::init_from(init_head);
 		assert_eq!(head.get_state_lookup(0), None);
 		for i in 0usize..30 {
 			let modu = i % 3;
@@ -722,15 +927,16 @@ pub(crate) mod test {
 	}
 	fn test_linear_storage_inner<D, M>()
 		where
-			D: InitFrom<Init = ()> + LinearStorage<Vec<u8>, u32> + Clone,
+			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u32> + Clone,
 			M: NodesMeta + Clone,
 	{
 		use crate::backend::test::{Value, State};
-		let init_head = InitHead {
+		let init_head = ContextHead {
 			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u32, D, M>>::new(),
 			key: b"any".to_vec(),
+			node_init_from: (),
 		};
-		let mut head = Head::<Vec<u8>, u32, D, M, _>::init_from(init_head);
+		let mut head = Head::<Vec<u8>, u32, D, M, _, _>::init_from(init_head);
 		crate::backend::test::test_linear_storage(&mut head);
 	}
 }

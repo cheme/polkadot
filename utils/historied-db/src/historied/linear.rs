@@ -30,10 +30,10 @@ use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
 use sp_std::convert::TryFrom;
 use sp_std::ops::{SubAssign, Range};
-use codec::{Encode, Decode};
+use codec::{Encode, Decode, Input};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
 use crate::backend::encoded_array::EncodedArrayValue;
-use crate::InitFrom;
+use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use derivative::Derivative;
 use crate::backend::nodes::EstimateSize;
 
@@ -74,6 +74,32 @@ impl<S> LinearState for S where S:
 #[derivative(PartialEq(bound="D: PartialEq"))]
 pub struct Linear<V, S, D>(D, PhantomData<(V, S)>);
 
+impl<V, S, D: Trigger> Trigger for Linear<V, S, D> {
+	const TRIGGER: bool = <D as Trigger>::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if Self::TRIGGER {
+			self.0.trigger_flush();
+		}
+	}
+}
+
+impl<V, S, D: Context> Context for Linear<V, S, D> {
+	type Context = <D as Context>::Context;
+}
+
+impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
+	fn init_from(init: Self::Context) -> Self {
+		Linear(<D as InitFrom>::init_from(init), PhantomData)
+	}
+}
+
+impl<V, S, D: DecodeWithContext> DecodeWithContext for Linear<V, S, D> {
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+		D::decode_with_context(input, init).map(|d| Linear(d, Default::default()))
+	}
+}
+
 impl<V, S, D> Linear<V, S, D> {
 	/// Access inner `LinearStorage`.
 	pub fn storage(&self) -> &D {
@@ -113,20 +139,6 @@ impl<V, S, D: EncodedArrayValue> EncodedArrayValue for Linear<V, S, D> {
 	fn from_slice(slice: &[u8]) -> Self {
 		let v = D::from_slice(slice);
 		Linear(v, PhantomData)
-	}
-}
-
-/*impl<V, S, D: Default> Default for Linear<V, S, D> {
-	fn default() -> Self {
-		let v = D::default();
-		Linear(v, PhantomData)
-	}
-}*/
-
-impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
-	type Init = <D as InitFrom>::Init;
-	fn init_from(init: Self::Init) -> Self {
-		Linear(<D as InitFrom>::init_from(init), PhantomData)
 	}
 }
 
@@ -346,7 +358,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 	/// number that is now 0 (usually the state as gc new_start).
 	type Migrate = (Self::GC, Self::S);
 
-	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
+	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init);
 		let state = at.latest().clone();
 		v.push(HistoriedValue{ value, state });

@@ -1,6 +1,6 @@
 [package]
 name = "radix-tree"
-version = "0.8.0-rc3"
+version = "0.8.0"
 authors = ["Parity Technologies <admin@parity.io>"]
 description = "Radix tree traits and implementations."
 license = "Apache-2.0"
