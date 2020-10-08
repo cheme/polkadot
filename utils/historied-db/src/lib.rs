@@ -324,6 +324,9 @@ pub trait ForkableManagement<H>: Management<H> {
 
 	fn get_db_state_for_fork(&mut self, tag: &H) -> Option<Self::SF>;
 
+	/// Useful to fork in a independant branch (eg no parent reference found).
+	fn init_state_fork(&mut self) -> Self::SF;
+
 	fn latest_state_fork(&mut self) -> Self::SF {
 		let se = self.latest_state();
 		self.inner_fork_state(se)

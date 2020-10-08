@@ -402,7 +402,7 @@ impl<
 				let state = (i.clone(), bi.clone());
 				let start = collect_dropped.len();
 				// TODO again cost of reverse lookup: consider double mapping
-				if let Some(h) = mapping.iter() 
+				if let Some(h) = mapping.iter()
 					.find(|(_k, v)| v == &state)
 					.map(|(k, _v)| k.clone()) {
 					collect_dropped.push(h);
@@ -514,7 +514,7 @@ impl<
 		if to_remove.len() > 0 {
 			change = true;
 			for to_remove in to_remove {
-				self.state.tree.register_drop(&to_remove, None); 
+				self.state.tree.register_drop(&to_remove, None);
 				self.state.tree.storage.handle(&mut self.state.tree.serialize).remove(&to_remove);
 				// TODO EMCH clean mapping for range -> in applied_migrate
 			}
@@ -522,7 +522,7 @@ impl<
 		if to_change.len() > 0 {
 			change = true;
 			for (branch_ix, branch) in to_change {
-				self.state.tree.register_drop(&branch_ix, Some(branch.state.end.clone())); 
+				self.state.tree.register_drop(&branch_ix, Some(branch.state.end.clone()));
 				self.state.tree.storage.handle(&mut self.state.tree.serialize).insert(branch_ix, branch);
 			}
 		}
@@ -580,7 +580,7 @@ impl<
 				meta.composite_treshold,
 			);
 			let branch_state = handle.entry(&branch_index);
-	
+
 			let mut can_fork = true;
 			branch_state.and_modify(|branch_state| {
 				if branch_state.can_append && branch_state.can_add(&number) {
@@ -890,7 +890,7 @@ impl<
 /// a branch index corresponding to the leaf for the fork.
 /// Here we use an in memory copy of the path because it seems
 /// to fit query at a given state with multiple operations
-/// (block processing), that way we iterate on a vec rather than 
+/// (block processing), that way we iterate on a vec rather than
 /// hoping over linked branches.
 /// TODO small vec that ??
 /// TODO add I treshold (everything valid starting at this one)?
@@ -1076,7 +1076,7 @@ impl<I, BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone> BranchState<I, B
  	pub fn can_fork(&self, index: &BI) -> bool {
 		index <= &self.state.end && index > &self.state.start
 	}
- 
+
 	pub fn add_state(&mut self) -> bool {
 		if self.can_append {
 			self.state.end += 1;
@@ -1128,7 +1128,7 @@ pub struct TreeMigrate<I, BI, V> {
 /// indicates the changes journaling can be clean.
 /// TODO requires a function returning all H indices.
 pub struct TreeMigrateGC<I, BI, V> {
-	pub gc: DeltaTreeStateGc<I, BI, V>, 
+	pub gc: DeltaTreeStateGc<I, BI, V>,
 	pub changed_composite_treshold: bool,
 }
 
@@ -1258,7 +1258,7 @@ impl<
 			self.state.tree.if_latest_at(i, bi)
 		})
 	}
-
+	
 	fn latest_state(&mut self) -> Self::SE {
 		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
 		Latest::unchecked_latest(latest.0)
@@ -1347,6 +1347,11 @@ impl<
 
 	fn ref_state_fork(&self, s: &Self::S) -> Self::SF {
 		s.latest()
+	}
+
+	fn init_state_fork(&mut self) -> Self::SF {
+		let se = Latest::unchecked_latest(self.state.tree.meta.get().composite_treshold.clone());
+		self.inner_fork_state(se)
 	}
 
 	fn get_db_state_for_fork(&mut self, state: &H) -> Option<Self::SF> {
