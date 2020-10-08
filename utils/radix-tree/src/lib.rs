@@ -1786,6 +1786,22 @@ impl<'a, N: NodeConf> SeekIterMut<'a, N> {
 	pub fn value_iter(self) -> SeekValueIterMut<'a, N> {
 		SeekValueIterMut(self)
 	}
+	pub fn iter(self) -> IterMut<'a, N> {
+		let dest = self.dest;
+		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
+			let key = pos.index::<N::Radix>(dest)
+				.expect("build from existing data struct");
+			(pos, node, key)
+		}).collect();
+		IterMut {
+			tree: self.tree,
+			stack: IterStackMut {
+				stack,
+				key: self.dest.to_vec(),
+			},
+			finished: false,
+		}
+	}
 	pub fn iter_prefix(mut self) -> IterMut<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
@@ -1982,6 +1998,19 @@ impl<N: NodeConf> Tree<N> {
 		let mut seek_iter = unsafe_ptr.seek_iter_mut(static_prefix);
 		while seek_iter.next() != None { }
 		let iter = seek_iter.iter_prefix().value_iter_mut();
+		OwnedIter {
+			inner: self,
+			iter,
+		}
+	}
+	pub fn owned_iter_from(mut self, prefix: &[u8]) -> OwnedIter<N> {
+		let self_ptr = &mut self as *mut Self;
+		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
+		let static_prefix = prefix as *const [u8];
+		let static_prefix: &'static [u8] = unsafe { static_prefix.as_ref().unwrap() };
+		let mut seek_iter = unsafe_ptr.seek_iter_mut(static_prefix);
+		while seek_iter.next() != None { }
+		let iter = seek_iter.iter().value_iter_mut();
 		OwnedIter {
 			inner: self,
 			iter,

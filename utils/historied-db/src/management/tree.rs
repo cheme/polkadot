@@ -1258,7 +1258,7 @@ impl<
 			self.state.tree.if_latest_at(i, bi)
 		})
 	}
-
+	
 	fn latest_state(&mut self) -> Self::SE {
 		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
 		Latest::unchecked_latest(latest.0)
@@ -1347,6 +1347,11 @@ impl<
 
 	fn ref_state_fork(&self, s: &Self::S) -> Self::SF {
 		s.latest()
+	}
+
+	fn init_state_fork(&mut self) -> Self::SF {
+		let se = Latest::unchecked_latest(self.state.tree.meta.get().composite_treshold.clone());
+		self.inner_fork_state(se)
 	}
 
 	fn get_db_state_for_fork(&mut self, state: &H) -> Option<Self::SF> {

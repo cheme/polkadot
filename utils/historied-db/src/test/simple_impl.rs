@@ -224,6 +224,11 @@ impl<K: Eq + Hash, V> ForkableManagement<StateInput> for Db<K, V> {
 		s.first().cloned().unwrap_or_default()
 	}
 
+	fn init_state_fork(&mut self) -> Self::SF {
+		let se = Latest::unchecked_latest(0);
+		self.inner_fork_state(se)
+	}
+
 	fn get_db_state_for_fork(&mut self, state: &StateInput) -> Option<Self::SF> {
 		self.get_state(state)
 	}

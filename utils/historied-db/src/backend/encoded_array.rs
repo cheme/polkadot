@@ -32,7 +32,7 @@ use crate::historied::HistoriedValue;
 use super::{LinearStorage, LinearStorageSlice, LinearStorageRange};
 use codec::{Encode, Decode, Input as CodecInput};
 use derivative::Derivative;
-use crate::{Context, InitFrom, Trigger};
+use crate::{Context, InitFrom, Trigger, DecodeWithContext};
 
 #[derive(Derivative, Debug)]
 #[cfg_attr(test, derivative(PartialEq(bound="")))]
@@ -107,6 +107,17 @@ impl<'a, V, A> Decode for EncodedArray<'a, V, A> {
 		let v: Vec<u8> = Vec::decode(value)?;
 		let cow_value = Cow::Owned(v);
 		Ok(EncodedArray(EncodedArrayBuff::Cow(cow_value), PhantomData))
+	}
+}
+
+impl<'a, V: Context, A> DecodeWithContext for EncodedArray<'a, V, A> {
+	fn decode_with_context<I: CodecInput>(
+		value: &mut I,
+		_context: &V::Context,
+	) -> Option<Self> {
+		let v: Vec<u8> = Vec::decode(value).ok()?;
+		let cow_value = Cow::Owned(v);
+		Some(EncodedArray(EncodedArrayBuff::Cow(cow_value), PhantomData))
 	}
 }
 
@@ -414,15 +425,11 @@ impl<'a, F: EncodedArrayConfig, V: Context> Trigger for EncodedArray<'a, V, F>
 	}
 }
 
-impl<'a, F: EncodedArrayConfig, V: Context> Context for EncodedArray<'a, V, F>
-	where V: EncodedArrayValue,
-{
+impl<'a, F, V: Context> Context for EncodedArray<'a, V, F> {
 	type Context = V::Context;
 }
 
-impl<'a, F: EncodedArrayConfig, V: Context> InitFrom for EncodedArray<'a, V, F>
-	where V: EncodedArrayValue,
-{
+impl<'a, F: EncodedArrayConfig, V: Context> InitFrom for EncodedArray<'a, V, F> {
 	fn init_from(_init: Self::Context) -> Self {
 		Self::default()
 	}

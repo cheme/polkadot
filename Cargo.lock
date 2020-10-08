@@ -2713,7 +2713,7 @@ dependencies = [
 [[package]]
 name = "kvdb-rocksdb"
 version = "0.9.1"
-source = "git+https://github.com/cheme/parity-common?branch=historied-db-cache#d71af81e0ce419391e66661bcf8afe9d465ece8a"
+source = "git+https://github.com/cheme/parity-common?branch=historied-db-cache#e98a19e0488e387954cedb8931641ac663693cf1"
 dependencies = [
  "fs-swap",
  "kvdb",

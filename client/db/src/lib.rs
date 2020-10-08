@@ -46,18 +46,21 @@ mod stats;
 mod parity_db;
 
 use historied_db::{
-	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
-	ForkableManagement, Latest, UpdateResult,
+	Management, ForkableManagement, DecodeWithContext,
 	historied::{InMemoryValue, Value},
+	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef,
+	Latest, UpdateResult,
 	historied::tree::Tree,
 	management::tree::{Tree as TreeMgmt, ForkPlan},
 	simple_db::TransactionalSerializeDB,
+	backend::nodes::ContextHead,
 };
 
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::io;
 use std::collections::{HashMap, HashSet};
+use offchain::{BlockNodes, BranchNodes};
 
 use sc_client_api::{
 	UsageInfo, MemoryInfo, IoInfo, MemorySize,
@@ -70,7 +73,7 @@ use sp_blockchain::{
 };
 use codec::{Decode, Encode};
 use hash_db::Prefix;
-use sp_trie::{MemoryDB, prefixed_key};
+use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
 use sp_database::{Transaction, RadixTreeDatabase};
 use parking_lot::RwLock;
 use sp_core::{ChangesTrieConfiguration, Hasher};
@@ -98,7 +101,7 @@ use crate::stats::StateUsageStats;
 use log::{trace, debug, warn};
 
 // Re-export the Database trait so that one can pass an implementation of it.
-pub use sp_database::Database;
+pub use sp_database::{Database, OrderedDatabase};
 pub use sc_state_db::PruningMode;
 
 #[cfg(any(feature = "with-kvdb-rocksdb", test))]
@@ -117,7 +120,7 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
 	current_state: historied_db::management::tree::ForkPlan<u32, u32>,
-	db: Arc<kvdb_rocksdb::Database>,
+	db: Arc<dyn OrderedDatabase<DbHash>>,
 	// only assert when spawned from cli command (so tests pass)
 	do_assert: bool,
 }
@@ -146,10 +149,9 @@ pub type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>
 
 impl HistoriedDB {
 	fn storage_inner(&self, key: &[u8], column: u32) -> Result<Option<Vec<u8>>, String> {
-		if let Some(v) = self.db.get(column, key)
-			.map_err(|e| format!("KVDatabase backend error: {:?}", e))? {
-			let v: HValue = Decode::decode(&mut &v[..])
-				.map_err(|e| format!("KVDatabase decode error: {:?}", e))?;
+		if let Some(v) = self.db.get(column, key) {
+			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
+				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
 			use historied_db::historied::ValueRef;
 			let v = v.get(&self.current_state);
 			Ok(v.and_then(|mut v| {
@@ -189,7 +191,7 @@ impl trie_db::partial_db::KVBackend for HistoriedDB {
 		unimplemented!("Historied db is read only")
 	}
 	fn iter<'a>(&'a self) -> trie_db::partial_db::KVBackendIter<'a> {
-		Box::new(self.iter().map(|(k, v)| (k.to_vec(), v)))
+		Box::new(self.iter(crate::columns::StateValues).map(|(k, v)| (k.to_vec(), v)))
 	}
 	fn iter_from<'a>(&'a self, start: &[u8]) -> trie_db::partial_db::KVBackendIter<'a> {
 		Box::new(self.iter_from(start, crate::columns::StateValues).map(|(k, v)| (k.to_vec(), v)))
@@ -292,13 +294,13 @@ mod impl_index_backend {
 }
 
 impl HistoriedDB {
-	pub fn iter<'a>(&'a self) -> impl Iterator<Item = (Box<[u8]>, Vec<u8>)> + 'a {
+	pub fn iter<'a>(&'a self, column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		let current_state = &self.current_state;
-		self.db.iter(crate::columns::StateValues).filter_map(move |(k, v)| {
-			let v: HValue = Decode::decode(&mut &v[..])
-				.map_err(|e| {
-					warn!("k {:?}, v {:?}", k, v);
-					e
+		self.db.iter(column).filter_map(move |(k, v)| {
+			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
+				.or_else(|| {
+					warn!("Invalid historied value k {:?}, v {:?}", k, v);
+					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			use historied_db::historied::ValueRef;
@@ -313,13 +315,13 @@ impl HistoriedDB {
 			}
 		})
 	}
-	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Box<[u8]>, Vec<u8>)> + 'a {
+	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		let current_state = &self.current_state;
 		self.db.iter_from(column, start).filter_map(move |(k, v)| {
-			let v: HValue = Decode::decode(&mut &v[..])
-				.map_err(|e| {
-					warn!("k {:?}, v {:?}", k, v);
-					e
+			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
+				.or_else(|| {
+					warn!("decoding fail for k {:?}, v {:?}", k, v);
+					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			use historied_db::historied::ValueRef;
@@ -334,74 +336,91 @@ impl HistoriedDB {
 			}
 		})
 	}
-
 }
 
 /// Key value db change for at a given block of an historied DB.
-pub struct HistoriedDBMut {
+pub struct HistoriedDBMut<DB> {
+	/// Branch head indexes to change values of a latest block.
 	pub current_state: historied_db::Latest<(u32, u32)>,
-	pub db: Arc<kvdb_rocksdb::Database>,
+	/// Inner database to modify historied values.
+	pub db: DB,
 }
-
-impl HistoriedDBMut {
-	pub fn transaction(&self) -> kvdb::DBTransaction {
-		self.db.transaction()
-	}
-	pub fn process_change_set(&mut self, change_set: StorageCollection) -> (kvdb::DBTransaction, usize) {
-		let mut tx = self.db.transaction();
-		let mut nb = 0;
-		for (k, change) in change_set {
-			self.update_single(k.as_slice(), change, &mut tx);
-			nb += 1;
-		}
-		(tx, nb)
+impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
+	/// Create a transaction for this historied db.
+	pub fn transaction(&self) -> Transaction<DbHash> {
+		Transaction::new()
 	}
 
-	pub fn write_change_set(&mut self, change_set: kvdb::DBTransaction) -> ClientResult<()> {
-		Ok(self.db.write(change_set)
-			.map_err(|e| format!("historied db batch commit failure: {:?}", e))?)
-	}
-
-	/// write a single value in change set.
-	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
-		self.update_single_inner(k, change, change_set, crate::columns::StateValues)
-	}
-	pub fn update_single_index(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
-		self.update_single_inner(k, change, change_set, crate::columns::StateIndexes)
-	}
-	pub fn update_single_offchain(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction) {
-		// TODO could use update_single_inner if same HValue
-		use sp_core::offchain::storage::HValue;
+	/// Update transaction for a offchain local storage historied value.
+	pub fn update_single_offchain(
+		&mut self,
+		k: &[u8],
+		change: Option<Vec<u8>>,
+		change_set: &mut Transaction<DbHash>,
+		branch_nodes: &BranchNodes,
+		block_nodes: &BlockNodes,
+	) {
+		use crate::offchain::HValue;
 		let column = crate::columns::OFFCHAIN;
-		let histo = if let Ok(Some(histo)) = self.db.get(column, k) {
-			Some(HValue::decode(&mut &histo[..]).expect("Bad encoded value in db, closing"))
+		let init_nodes = ContextHead {
+			key: k.to_vec(),
+			backend: block_nodes.clone(),
+			node_init_from: (),
+		};
+		let init = ContextHead {
+			key: k.to_vec(),
+			backend: branch_nodes.clone(),
+			node_init_from: init_nodes.clone(),
+		};
+		let histo = if let Some(histo) = self.db.get(column, k) {
+			Some(HValue::decode_with_context(&mut &histo[..], &(init.clone(), init_nodes.clone())).expect("Bad encoded value in db, closing"))
 		} else {
 			if change.is_none() {
 				return;
 			}
 			None
 		};
+
 		let mut new_value;
 		match if let Some(histo) = histo {
 			new_value = histo;
 			new_value.set(change, &self.current_state)
 		} else {
-			new_value = HValue::new(change, &self.current_state, ((), ()));
+			new_value = HValue::new(change, &self.current_state, (init, init_nodes));
 			historied_db::UpdateResult::Changed(())
 		} {
 			historied_db::UpdateResult::Changed(()) => {
-				change_set.put(column, k, new_value.encode().as_slice());
+				use historied_db::Trigger;
+				new_value.trigger_flush();
+				change_set.set_from_vec(column, k, new_value.encode());
 			},
 			historied_db::UpdateResult::Cleared(()) => {
-				change_set.delete(column, k);
+				use historied_db::Trigger;
+				new_value.trigger_flush();
+				change_set.remove(column, k);
 			},
-			historied_db::UpdateResult::Unchanged => (), 
+			historied_db::UpdateResult::Unchanged => (),
 		}
 	}
+
 	/// write a single value in change set.
-	pub fn update_single_inner(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut kvdb::DBTransaction, column: u32) {
-		let histo = if let Ok(Some(histo)) = self.db.get(column, k) {
-			Some(HValue::decode(&mut &histo[..]).expect("Bad encoded value in db, closing"))
+	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
+		self.update_single_inner(k, change, change_set, crate::columns::StateValues)
+	}
+	pub fn update_single_index(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
+		self.update_single_inner(k, change, change_set, crate::columns::StateIndexes)
+	}
+
+	/// write a single value in change set.
+	pub fn update_single_inner(
+		&mut self,
+		k: &[u8],
+		change: Option<Vec<u8>>,
+		change_set: &mut Transaction<DbHash>,
+		column: u32,
+	) {
+		let histo = if let Some(histo) = self.db.get(column, k) {
+			Some(HValue::decode_with_context(&mut &histo[..], &((), ())).expect("Bad encoded value in db, closing"))
 		} else {
 			if change.is_none() {
 				return;
@@ -423,27 +442,28 @@ impl HistoriedDBMut {
 			new_value.set(vec![0], &self.current_state)
 		} {
 			historied_db::UpdateResult::Changed(()) => {
-				change_set.put(column, k, new_value.encode().as_slice());
+				change_set.set_from_vec(column, k, new_value.encode());
 			},
 			historied_db::UpdateResult::Cleared(()) => {
-				change_set.delete(column, k);
+				change_set.remove(column, k);
 			},
 			historied_db::UpdateResult::Unchanged => (), 
 		}
 	}
+
 	/// write a single value, without checking current state,
 	/// please only use on new empty db.
-	pub fn unchecked_new_single(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
+	pub fn unchecked_new_single(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>) {
 		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateValues)
 	}
-	pub fn unchecked_new_single_index(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut kvdb::DBTransaction) {
+	pub fn unchecked_new_single_index(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>) {
 		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateIndexes)
 	}
-	pub fn unchecked_new_single_inner(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut kvdb::DBTransaction, column: u32) {
+	pub fn unchecked_new_single_inner(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
 		v.push(1);
 		let value = HValue::new(v, &self.current_state, ((), ()));
 		let value = value.encode();
-		change_set.put(column, k, value.as_slice());
+		change_set.set_from_vec(column, k, value);
 		// no need for no value set
 	}
 }
@@ -463,11 +483,7 @@ pub struct RefTrackingState<Block: BlockT> {
 }
 
 impl<B: BlockT> RefTrackingState<B> {
-	fn new(
-		state: DbState<B>,
-		storage: Arc<StorageDb<B>>,
-		parent_hash: Option<B::Hash>,
-	) -> Self {
+	fn new(state: DbState<B>, storage: Arc<StorageDb<B>>, parent_hash: Option<B::Hash>) -> Self {
 		RefTrackingState {
 			state,
 			parent_hash,
@@ -704,6 +720,7 @@ pub struct TreeManagementPersistence;
 pub struct TreeManagementPersistenceNoTx;
 
 
+#[derive(Clone)]
 /// Database backed tree management for a rocksdb database.
 /// TODO consider switching to use of kvdb trait instead of
 /// rocksdb database.
@@ -715,6 +732,7 @@ pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeData
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_DELETE: bool = true;
+	// Use pointer to serialize db with a transactional layer.
 	type Storage = TransactionalSerializeDB<historied_db::simple_db::SerializeDBDyn>;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
@@ -724,10 +742,6 @@ impl historied_db::management::tree::TreeManagementStorage for TreeManagementPer
 	type NeutralElt = historied_tree_bindings::NeutralElt;
 	type TreeMeta = historied_tree_bindings::TreeMeta;
 	type TreeState = historied_tree_bindings::TreeState;
-
-	fn init() -> Self::Storage {
-		unimplemented!("unused")
-	}
 }
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistenceNoTx {
@@ -741,10 +755,6 @@ impl historied_db::management::tree::TreeManagementStorage for TreeManagementPer
 	type NeutralElt = historied_tree_bindings::NeutralElt;
 	type TreeMeta = historied_tree_bindings::TreeMeta;
 	type TreeState = historied_tree_bindings::TreeState;
-
-	fn init() -> Self::Storage {
-		unimplemented!("unused")
-	}
 }
 
 macro_rules! subcollection_prefixed_key {
@@ -838,7 +848,7 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 		let iter = resolve_collection(c).map(|(c, p)| {
 			use kvdb::KeyValueDB;
 			if let Some(p) = p {
-				self.0.iter_with_prefix(c, p)
+				<kvdb_rocksdb::Database as KeyValueDB>::iter_with_prefix(&*self.0, c, p)
 			} else {
 				<kvdb_rocksdb::Database as KeyValueDB>::iter(&*self.0, c)
 			}.map(|(k, v)| (Vec::<u8>::from(k), Vec::<u8>::from(v)))
@@ -849,6 +859,60 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 
 	fn contains_collection(&self, collection: &'static [u8]) -> bool {
 		resolve_collection(collection).is_some()
+	}
+}
+
+// redundant code with kvdb implementation, here only to get iter_from implementation
+// without putting iter_from into kvdb on patched branch
+impl<H: Clone> Database<H> for RocksdbStorage {
+	fn commit(&self, transaction: Transaction<H>) -> sp_database::error::Result<()> {
+		use sp_database::Change;
+		let mut tx = kvdb::DBTransaction::new();
+		for change in transaction.0.into_iter() {
+			match change {
+				Change::Set(col, key, value) => tx.put_vec(col, &key, value),
+				Change::Remove(col, key) => tx.delete(col, &key),
+				_ => unimplemented!(),
+			}
+		}
+		self.0.write(tx).map_err(|e| sp_database::error::DatabaseError(Box::new(e)))
+	}
+
+	fn get(&self, col: u32, key: &[u8]) -> Option<Vec<u8>> {
+		match self.0.get(col, key) {
+			Ok(r) => r,
+			Err(e) =>  {
+				panic!("Critical database eror: {:?}", e);
+			}
+		}
+	}
+
+	fn lookup(&self, _hash: &H) -> Option<Vec<u8>> {
+		unimplemented!();
+	}
+}
+
+impl<H: Clone> OrderedDatabase<H> for RocksdbStorage {
+
+	fn iter<'a>(&'a self, col: u32) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
+		Box::new(self.0.iter(col).map(|(k, v)| (k.to_vec(), v.to_vec())))
+	}
+
+	fn prefix_iter<'a>(
+		&'a self,
+		col: u32,
+		prefix: &'a [u8],
+		trim_prefix: bool,
+	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
+		Box::new(self.0.iter_with_prefix(col, prefix).map(|(k, v)| (k.to_vec(), v.to_vec())))
+	}
+
+	fn iter_from<'a>(
+		&'a self,
+		col: u32,
+		start: &[u8],
+	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
+		Box::new(self.0.iter_from(col, start).map(|(k, v)| (k.to_vec(), v.to_vec())))
 	}
 }
 
@@ -909,7 +973,6 @@ impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
 	}
 }
 
-//pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
 /// Trait for serializing historied db tree management.
 pub mod historied_tree_bindings {
 	macro_rules! static_instance {
@@ -963,17 +1026,19 @@ impl<'a> sc_state_db::MetaDb for StateMetaDb<'a> {
 /// Block database
 pub struct BlockchainDb<Block: BlockT> {
 	db: Arc<dyn Database<DbHash>>,
+	ordered_db: Arc<dyn OrderedDatabase<DbHash>>, // TODO might be better located in parent struct
 	meta: Arc<RwLock<Meta<NumberFor<Block>, Block::Hash>>>,
 	leaves: RwLock<LeafSet<Block::Hash, NumberFor<Block>>>,
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
 }
 
 impl<Block: BlockT> BlockchainDb<Block> {
-	fn new(db: Arc<dyn Database<DbHash>>) -> ClientResult<Self> {
+	fn new(db: Arc<dyn Database<DbHash>>, ordered_db: Arc<dyn OrderedDatabase<DbHash>>) -> ClientResult<Self> {
 		let meta = read_meta::<Block>(&*db, columns::HEADER)?;
 		let leaves = LeafSet::read_from_db(&*db, columns::META, meta_keys::LEAF_PREFIX)?;
 		Ok(BlockchainDb {
 			db,
+			ordered_db,
 			leaves: RwLock::new(leaves),
 			meta: Arc::new(RwLock::new(meta)),
 			header_metadata_cache: Arc::new(HeaderMetadataCache::default()),
@@ -1204,8 +1269,14 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 	fn apply_offchain(
 		&mut self,
 		transaction: &mut Transaction<DbHash>,
-		historied: &mut Option<(&mut HistoriedDBMut, kvdb::DBTransaction)>,
+		historied: Option<&mut HistoriedDBMut<Arc<dyn Database<DbHash>>>>,
 	) {
+
+		let mut historied = historied.map(|historied_db| {
+			let block_nodes = BlockNodes::new(historied_db.db.clone());
+			let branch_nodes = BranchNodes::new(historied_db.db.clone());
+			(historied_db, block_nodes, branch_nodes)
+		});
 		for ((prefix, key), value_operation) in self.offchain_storage_updates.drain() {
 			let key: Vec<u8> = prefix
 				.into_iter()
@@ -1216,17 +1287,21 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 				OffchainOverlayedChange::SetValue(val) => transaction.set_from_vec(columns::OFFCHAIN, &key, val),
 				OffchainOverlayedChange::Remove => transaction.remove(columns::OFFCHAIN, &key),
 				OffchainOverlayedChange::SetLocalValue(val) => {
-					historied.as_mut().map(|(historied_db, transaction_offchain)|
-						historied_db.update_single_offchain(&key, Some(val), transaction_offchain)
+					historied.as_mut().map(|(historied_db, block_nodes, branch_nodes)|
+						historied_db.update_single_offchain(&key, Some(val), transaction, branch_nodes, block_nodes)
 					);
 				},
 				OffchainOverlayedChange::RemoveLocal => {
-					historied.as_mut().map(|(historied_db, transaction_offchain)|
-						historied_db.update_single_offchain(&key, None, transaction_offchain)
+					historied.as_mut().map(|(historied_db, block_nodes, branch_nodes)|
+						historied_db.update_single_offchain(&key, None, transaction, branch_nodes, block_nodes)
 					);
 				},
 			}
 		}
+		historied.as_mut().map(|(_historied_db, block_nodes, branch_nodes)| {
+			block_nodes.apply_transaction(transaction);
+			branch_nodes.apply_transaction(transaction);
+		});
 	}
 
 	fn apply_aux(&mut self, transaction: &mut Transaction<DbHash>) {
@@ -1476,7 +1551,6 @@ pub struct Backend<Block: BlockT> {
 		<HashFor<Block> as Hasher>::Out,
 		TreeManagementPersistence,
 	>>>,
-	historied_state: Arc<kvdb_rocksdb::Database>,
 	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
 	historied_state_do_assert: bool,
 }
@@ -1486,11 +1560,11 @@ impl<Block: BlockT> Backend<Block> {
 	///
 	/// The pruning window is how old a block must be before the state is pruned.
 	pub fn new(config: DatabaseSettings, canonicalization_delay: u64) -> ClientResult<Self> {
-		let (db, ordered, r) = crate::utils::open_database_and_historied::<Block>(
+		let (db, ordered, management) = crate::utils::open_database_and_historied::<Block>(
 			&config,
 			DatabaseType::Full,
 		)?;
-		Self::from_database(db as Arc<_>, ordered, r, canonicalization_delay, &config)
+		Self::from_database(db as Arc<_>, ordered, management, canonicalization_delay, &config)
 	}
 
 	/// Create new memory-backed client backend for tests.
@@ -1515,13 +1589,13 @@ impl<Block: BlockT> Backend<Block> {
 
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
-		ordered_db: historied_db::simple_db::SerializeDBDyn,
-		rocks_histo: Arc<kvdb_rocksdb::Database>,
+		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
+		management_db: historied_db::simple_db::SerializeDBDyn,
 		canonicalization_delay: u64,
 		config: &DatabaseSettings,
 	) -> ClientResult<Self> {
 		let is_archive_pruning = config.pruning.is_archive();
-		let blockchain = BlockchainDb::new(db.clone())?;
+		let blockchain = BlockchainDb::new(db.clone(), ordered_db.clone())?;
 		let meta = blockchain.meta.clone();
 		let map_e = |e: sc_state_db::Error<io::Error>| sp_blockchain::Error::from(
 			format!("State database error: {:?}", e)
@@ -1558,9 +1632,8 @@ impl<Block: BlockT> Backend<Block> {
 			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
 			config.experimental_cache,
 		);
-		let historied_state = rocks_histo;
 		let historied_persistence = TransactionalSerializeDB {
-			db: ordered_db,
+			db: management_db,
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
@@ -1579,7 +1652,6 @@ impl<Block: BlockT> Backend<Block> {
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
 			state_usage: Arc::new(StateUsageStats::new()),
 			historied_management,
-			historied_state,
 			historied_next_finalizable: Arc::new(RwLock::new(None)),
 			historied_state_do_assert: false,
 		})
@@ -1746,17 +1818,99 @@ impl<Block: BlockT> Backend<Block> {
 	fn try_commit_operation(
 		&self,
 		mut operation: BlockImportOperation<Block>,
-		historied_db: &mut Option<HistoriedDBMut>,
 	) -> ClientResult<()> {
 		let mut transaction = Transaction::new();
 		let mut finalization_displaced_leaves = None;
 
 		operation.apply_aux(&mut transaction);
-		let mut historied = historied_db.as_mut().map(|h| {
-			let transaction = h.transaction();
-			(h, transaction)
+
+		let hashes = operation.pending_block.as_ref().map(|pending_block| {
+			let hash = pending_block.header.hash();
+			let parent_hash = *pending_block.header.parent_hash();
+			(hash, parent_hash)
 		});
-		operation.apply_offchain(&mut transaction, &mut historied);
+
+		let (mut historied_db, mut ordered_historied_db) = if let Some((hash, parent_hash)) = hashes {
+			let update_plan = {
+				// lock does notinclude update of value as we do not have concurrent block creation
+				let mut management = self.historied_management.write();
+				if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
+					.unwrap_or_else(|| {
+						// allow this to start from existing state TODO add a stored boolean to only allow
+						// that once in genesis or in tests
+						warn!("state not found for parent hash, appending to latest");
+						management.latest_state_fork()
+					}))
+				{
+					let _query_plan = management.append_external_state(hash.clone(), &state)
+						.ok_or(ClientError::Msg("correct state resolution".into()))?;
+					let update_plan = management.get_db_state_mut(&hash)
+						.ok_or(ClientError::Msg("correct state resolution".into()))?;
+					update_plan
+				} else {
+					return Err("missing update plan".into());
+				}
+			};
+			(Some(HistoriedDBMut {
+				current_state: update_plan.clone(),
+				db: self.blockchain.db.clone(),
+			}), Some(HistoriedDBMut {
+				current_state: update_plan,
+				db: self.blockchain.ordered_db.clone(),
+			}))
+		} else {
+			(None, None)
+		};
+		// write management state changes
+		let pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
+		for (col, (mut changes, dropped)) in pending {
+			if dropped {
+				use historied_db::simple_db::SerializeDB;
+				for (key, _v) in self.historied_management.read().ser_ref().iter(col) {
+					changes.insert(key, None);
+				}
+			}
+			if let Some((col, p)) = resolve_collection(col) {
+				for (key, change) in changes {
+					subcollection_prefixed_key!(p, key);
+					match change {
+						Some(value) => transaction.set_from_vec(col, key, value),
+						None => transaction.remove(col, key),
+					}
+				}
+			} else {
+				warn!("Unknown collection for tree management pending transaction {:?}", col);
+			}
+		}
+
+		operation.apply_offchain(&mut transaction, historied_db.as_mut());
+
+		// index uses non ordered historied_db
+		if let Some(historied_db) = historied_db.as_mut() {
+			// write indexes
+			let mut nb = 0;
+			let index_changeset = operation.db_updates.indexes.clone(); // TODO see how to avoid this clone later (using a single tx would do the trick)
+			for (k, index) in index_changeset {
+				nb += 1;
+				historied_db.update_single_index(
+					k.as_slice(),
+					Some(crate::encode_index(index)),
+					&mut transaction,
+				);
+			}
+			warn!("committed {:?} index in historied db", nb);
+		}
+
+		// state change uses ordered db
+		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
+			let historied_update = operation.storage_updates.clone();
+			let mut nb = 0;
+			for (k, change) in historied_update {
+				ordered_historied_db.update_single(k.as_slice(), change, &mut transaction);
+				nb += 1;
+			}
+			warn!("committed {:?} change in historied db", nb);
+		}
 
 		let mut meta_updates = Vec::with_capacity(operation.finalized_blocks.len());
 		let mut last_finalized_hash = self.blockchain.meta.read().finalized_hash;
@@ -1978,9 +2132,6 @@ impl<Block: BlockT> Backend<Block> {
 		};
 
 		self.storage.db.commit(transaction)?;
-		if let Some((historied_db, transaction)) = historied {
-			historied_db.write_change_set(transaction)?;
-		}
 
 		if let Some((
 			number,
@@ -2181,97 +2332,10 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		let usage = operation.old_state.usage_info();
 		self.state_usage.merge_sm(usage);
 		let last_final = operation.finalized_blocks.last().cloned();
-		let hashes = operation.pending_block.as_ref().map(|pending_block| {
-			let hash = pending_block.header.hash();
-			let parent_hash = *pending_block.header.parent_hash();
-			(hash, parent_hash)
-		});
 
-		let mut historied_db = if let Some((hash, parent_hash)) = hashes {
-			if self.historied_next_finalizable.read().is_none() {
-				let parent_block = BlockId::Hash(parent_hash.clone());
-				if let Some(nb) = self.blockchain.block_number_from_id(&parent_block)? {
-					*self.historied_next_finalizable.write() = Some(nb + HISTORIED_FINALIZATION_WINDOWS.into());
-				}
-			}
-			let update_plan = {
-				// lock does notinclude update of value as we do not have concurrent block creation
-				let mut management = self.historied_management.write();
-				if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
-					.unwrap_or_else(|| {
-						// allow this to start from existing state TODO EMCH add a stored boolean to only allow
-						// that once in genesis
-						warn!("state not found for parent hash, THISISABUG, appending to latest");
-						management.latest_state_fork()
-					}))
-				{
-					// TODO this require to support rollback!! actually we could drop a state
-					// without invalidating next value.
-					// (concurrency would fork here).
-					let query_plan = management.append_external_state(hash.clone(), &state)
-						.expect("correct state resolution");
-					warn!("qp for {:?}, {:?}", hash, query_plan);
-					// TODO EMCH this should be return by append operation!!!
-					let update_plan = management.get_db_state_mut(&hash)
-						.expect("correct state resolution");
-					warn!("up for {:?}, {:?}", hash, update_plan);
-					update_plan
-				} else {
-					// TODO EMCH rollback? Not that we could write the change in mgmt first
-					// and includ the later change in rollback 
-					panic!("missing update plan");
-				}
-			};
-			Some(HistoriedDBMut {
-				current_state: update_plan,
-				db: self.historied_state.clone(),
-			})
-		} else {
-			None
-		};
-
-		let historied_update = operation.storage_updates.clone();
-		let index_changeset = operation.db_updates.indexes.clone(); // TODO see how to avoid this clone later (using a single tx would do the trick)
-		match self.try_commit_operation(operation, &mut historied_db) {
+		match self.try_commit_operation(operation) {
 			Ok(_) => {
-				// TODO avoid failure or manage pending on those historied operation
-				// -> could put in try commit (mgmt change are synch at this point).
-				if let Some(historied_db) = historied_db.as_mut() {
-					let (tx, nb) = historied_db.process_change_set(historied_update);
-					warn!("committed {:?} change in historied db", nb);
-					historied_db.write_change_set(tx)?;
-					// write indexes
-					let mut tx = historied_db.transaction();
-					let mut nb = 0;
-					for (k, index) in index_changeset {
-						nb += 1;
-						historied_db.update_single_index(
-							k.as_slice(),
-							Some(crate::encode_index(index)),
-							&mut tx,
-						); 
-					}
-					warn!("committed {:?} index in historied db", nb);
-					// write management state changes
-					let pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
-					for (col, (changes, dropped)) in pending {
-						if let Some((col, p)) = resolve_collection(col) {
-							if dropped {
-								tx.delete_prefix(col, p.unwrap_or(&[]));
-							}
-							for (key, change) in changes {
-								subcollection_prefixed_key!(p, key);
-								match change {
-									Some(value) => tx.put(col, key, value.as_slice()), 
-									None => tx.delete(col, key),
-								}
-							}
-						} else {
-							warn!("Unknown collection for tree management pending transaction {:?}", col);
-						}
-					}
-					historied_db.write_change_set(tx)?;
-				}
+				// TODO move in try_commit
 				if let Some(latest_final) = last_final {
 					let block = latest_final.0;
 					if let (Some(number), Some(hash)) = (self.blockchain.block_number_from_id(&block)?,
@@ -2488,7 +2552,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						).ok_or("Historied management error")?;
 					HistoriedDB {
 						current_state,
-						db: self.historied_state.clone(),
+						db: self.blockchain.ordered_db.clone(),
 						do_assert: self.historied_state_do_assert,
 					}
 				};
@@ -2545,7 +2609,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 //							.ok_or_else(|| format!("Historied management missing state for hash {:?}", hash))?;
 						HistoriedDB {
 							current_state,
-							db: self.historied_state.clone(),
+							db: self.blockchain.ordered_db.clone(),
 							do_assert: self.historied_state_do_assert,
 						}
 					};
