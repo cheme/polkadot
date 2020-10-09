@@ -29,7 +29,7 @@ type Tree = radix_tree::Tree<radix_tree::Node256NoBackend>;
 
 trait Map {
 	fn insert(&mut self, key: Vec<u8>, value: Vec<u8>);
-	fn get(&mut self, key: Vec<u8>) -> &Vec<u8>;
+	fn get(&self, key: Vec<u8>) -> &Vec<u8>;
 	fn remove(&mut self, key: Vec<u8>);
 }
 
@@ -37,8 +37,8 @@ impl Map for HashMap<Vec<u8>, Vec<u8>> {
 	fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
 		self.insert(key, value);
 	}
-	fn get(&mut self, key: Vec<u8>) -> &Vec<u8> {
-		(&*self).get(key.as_slice()).unwrap()
+	fn get(&self, key: Vec<u8>) -> &Vec<u8> {
+		self.get(&key).unwrap()
 	}
 	fn remove(&mut self, key: Vec<u8>) {
 		self.remove(&key);
@@ -49,8 +49,8 @@ impl Map for BTreeMap<Vec<u8>, Vec<u8>> {
 	fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
 		self.insert(key, value);
 	}
-	fn get(&mut self, key: Vec<u8>) -> &Vec<u8> {
-		(&*self).get(key.as_slice()).unwrap()
+	fn get(&self, key: Vec<u8>) -> &Vec<u8> {
+		self.get(key.as_slice()).unwrap()
 	}
 	fn remove(&mut self, key: Vec<u8>) {
 		self.remove(&key);
@@ -61,8 +61,8 @@ impl Map for Tree {
 	fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
 		self.insert(key.as_slice(), value);
 	}
-	fn get(&mut self, key: Vec<u8>) -> &Vec<u8> {
-		self.get_mut(&key).map(|m| &*m).unwrap()
+	fn get(&self, key: Vec<u8>) -> &Vec<u8> {
+		self.get_ref(&key).unwrap()
 	}
 	fn remove(&mut self, key: Vec<u8>) {
 		self.remove(&key);
@@ -76,7 +76,7 @@ fn do_inserts<M: Map>(mut map: M, to_insert: Vec<(Vec<u8>, Vec<u8>)>) {
 	black_box(map);
 }
 
-fn do_gets<M: Map>(mut map: M, to_get: Vec<Vec<u8>>) {
+fn do_gets<M: Map>(map: M, to_get: Vec<Vec<u8>>) {
 	for k in to_get {
 		let v = map.get(k);
 		black_box(v);
