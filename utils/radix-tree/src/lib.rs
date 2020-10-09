@@ -113,9 +113,11 @@ pub trait RadixConf {
 	/// DEPTH in byte when aligned or in bit (2^DEPTH == NUMBER_CHILDREN).
 	/// TODO is that of any use?
 	const DEPTH: usize;
+	#[inline(always)]
 	/// Advance one item in depth.
 	/// Return next mask and number of incremented bytes.
 	fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize);
+	#[inline(always)]
 	/// Advance with multiple steps.
 	fn advance_by(mut previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
 		let mut bytes = 0;
@@ -126,9 +128,11 @@ pub trait RadixConf {
 		}
 		(previous_mask, bytes)
 	}
+	#[inline(always)]
 	/// Get index at a given position.
 	fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex>;
 	/// Set index at a given position.
+	#[inline(always)]
 	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex);
 	/// (get a mask corresponding to a end position).
 	// let mask = !(255u8 >> delta.leading_zeros()); + TODO round to nibble
@@ -204,6 +208,7 @@ impl RadixConf for Radix16Conf {
 	type KeyIndex = u8;
 	const CHILDREN_CAPACITY: usize = 16;
 	const DEPTH: usize = 4;
+	#[inline(always)]
 	fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
 		if previous_mask {
 			(false, 1)
@@ -211,17 +216,20 @@ impl RadixConf for Radix16Conf {
 			(true, 0)
 		}
 	}
+	#[inline(always)]
 	fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
 		unimplemented!()
 	}
 	fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
 		unimplemented!()
 	}
+	#[inline(always)]
 	fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
 		key.get(at.index).map(|byte| {
 			at.mask.index(*byte)
 		})
 	}
+	#[inline(always)]
 	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 		if key.len() <= at.index {
 			key.resize(at.index + 1, 0);
@@ -237,9 +245,11 @@ impl RadixConf for Radix256Conf {
 	type KeyIndex = u8;
 	const CHILDREN_CAPACITY: usize = 256;
 	const DEPTH: usize = 1;
+	#[inline(always)]
 	fn advance(_previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
 		((), 1)
 	}
+	#[inline(always)]
 	fn advance_by(_previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
 		((), nb)
 	}
@@ -251,6 +261,7 @@ impl RadixConf for Radix256Conf {
 			at.mask.index(*byte)
 		})
 	}
+	#[inline(always)]
 	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 		if key.len() <= at.index {
 			key.resize(at.index + 1, 0);
@@ -266,6 +277,7 @@ impl RadixConf for Radix2Conf {
 	type KeyIndex = bool;
 	const CHILDREN_CAPACITY: usize = 2;
 	const DEPTH: usize = 1;
+	#[inline(always)]
 	fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
 		if previous_mask < 255 {
 			(previous_mask + 1, 0)
@@ -273,17 +285,20 @@ impl RadixConf for Radix2Conf {
 			(0, 1)
 		}
 	}
+	#[inline(always)]
 	fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
 		unimplemented!()
 	}
 	fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
 		unimplemented!()
 	}
+	#[inline(always)]
 	fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
 		key.get(at.index).map(|byte| {
 			at.mask.index(*byte) > 0
 		})
 	}
+	#[inline(always)]
 	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 		if key.len() <= at.index {
 			key.resize(at.index + 1, 0);
@@ -309,8 +324,10 @@ pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 	/// Mask right part of a byte.
 	fn mask_end(&self, byte: u8) -> u8;
 	/// Extract u8 index from this byte.
+	#[inline(always)]
 	fn index(&self, byte: u8) -> u8;
 	/// Insert u8 index into this byte.
+	#[inline(always)]
 	fn set_index(&self, byte: u8, index: u8) -> u8;
 //	fn mask_mask(&self, other: Self) -> Self;
 	/// TODO use constant
@@ -322,27 +339,34 @@ pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 }
 
 impl MaskKeyByte for () {
+	#[inline(always)]
 	fn mask(&self, byte: u8) -> u8 {
 		byte
 	}
+	#[inline(always)]
 	fn mask_end(&self, byte: u8) -> u8 {
 		byte
 	}
 /*	fn mask_mask(&self, other: Self) -> Self {
 		()
 	}*/
+	#[inline(always)]
 	fn first() -> Self {
 		()
 	}
+	#[inline(always)]
 	fn last() -> Self {
 		()
 	}
+	#[inline(always)]
 	fn index(&self, byte: u8) -> u8 {
 		byte
 	}
+	#[inline(always)]
 	fn set_index(&self, _byte: u8, index: u8) -> u8 {
 		index
 	}
+	#[inline(always)]
 	fn cmp(&self, _other: Self) -> Ordering {
 		Ordering::Equal
 	}
@@ -364,6 +388,7 @@ impl MaskKeyByte for bool {
 		}
 	}
 
+	#[inline(always)]
 	fn index(&self, byte: u8) -> u8 {
 		if *self {
 			(byte & 0xf0) >> 4
@@ -371,6 +396,7 @@ impl MaskKeyByte for bool {
 			byte & 0x0f
 		}
 	}
+	#[inline(always)]
 	fn set_index(&self, byte: u8, index: u8) -> u8 {
 		if *self {
 			(byte & 0x0f) | (index << 4)
@@ -402,6 +428,7 @@ impl MaskKeyByte for u8 {
 	fn mask_end(&self, byte: u8) -> u8 {
 		byte & (0b11111111 << (7 - self) )
 	}
+	#[inline(always)]
 	fn index(&self, byte: u8) -> u8 {
 		(byte & (0b10000000 >> self)) >> (7 - self)
 	}
@@ -491,9 +518,11 @@ impl<P> Position<P>
 			mask,
 		}
 	}
+	#[inline(always)]
 	fn index<R: RadixConf<Alignment = P>>(&self, key: &[u8]) -> Option<R::KeyIndex> {
 		R::index(key, *self)
 	}
+	#[inline(always)]
 	fn set_index<R: RadixConf<Alignment = P>>(&self, key: &mut Vec<u8>, index: R::KeyIndex) {
 		R::set_index(key, *self, index)
 	}
@@ -540,6 +569,7 @@ impl<D, P> PrefixKey<D, P>
 	}
 */
 
+	#[inline(always)]
 	fn index<R: RadixConf<Alignment = P>>(&self, position: Position<P>) -> R::KeyIndex {
 		position.index::<R>(self.data.borrow())
 			.expect("TODO consider safe api here")
