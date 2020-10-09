@@ -918,6 +918,11 @@ impl<N: NodeConf> Node<N> {
 	) -> usize {
 		self.key.depth()
 	}
+	pub fn value_ref(
+		&self,
+	) -> Option<&Vec<u8>> {
+		self.value.as_ref()
+	}
 	pub fn value(
 		&self,
 	) -> Option<&[u8]> {
@@ -1427,7 +1432,7 @@ macro_rules! flatten_children {
 		#[derive(Clone)]
 		#[derive(Debug)]
 		#[derive(PartialEq)]
-		struct $inner_node_type<$($backend_gen)?>($(core::marker::PhantomData<$backend_gen>)?);
+		pub struct $inner_node_type<$($backend_gen)?>($(core::marker::PhantomData<$backend_gen>)?);
 		impl<$($backend_gen)?> NodeConf for $inner_node_type<$($backend_gen)?>
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
 		{
@@ -1440,7 +1445,7 @@ macro_rules! flatten_children {
 		#[derivative(Clone)]
 		#[derivative(PartialEq)]
 		#[derivative(Debug)]
-		struct $type_alias<$($backend_gen)?>($inner_type<$inner_children_type<$($backend_gen)?>>)
+		pub struct $type_alias<$($backend_gen)?>($inner_type<$inner_children_type<$($backend_gen)?>>)
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?;
 
 		impl<$($backend_gen)?> Children for $type_alias<$($backend_gen)?>
@@ -1517,7 +1522,6 @@ flatten_children!(
 	Radix256Conf,
 	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
 );
-
 
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -2216,11 +2220,11 @@ impl<N: NodeConf + 'static> Iterator for OwnedIter<N> {
 }
 	
 impl<N: NodeConf> Tree<N> {
-	pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
+	pub fn get_ref(&self, key: &[u8]) -> Option<&Vec<u8>> {
 		if let Some(top) = self.tree.as_ref() {
 			let mut current = top;
 			if key.len() == 0 {
-				return current.value();
+				return current.value_ref();
 			}
 			let dest_position = Position {
 				index: key.len(),
@@ -2242,13 +2246,16 @@ impl<N: NodeConf> Tree<N> {
 						return None;
 					},
 					Descent::Match(_position) => {
-						return current.value();
+						return current.value_ref();
 					},
 				}
 			}
 		} else {
 			None
 		}
+	}
+	pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
+		self.get_ref(key).map(|v| v.as_slice())
 	}
 	pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut Vec<u8>> {
 		if let Some(top) = self.tree.as_mut() {
