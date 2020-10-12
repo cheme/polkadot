@@ -1290,8 +1290,36 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 pub struct Children256<N> (
 	// 256 array is to big but ok for initial implementation
 	Option<Box<[Option<N>; 256]>>,
-	usize,
+	u8,
 );
+
+/// 48 children for art tree.
+#[derive(Derivative)]
+#[derivative(Clone)]
+pub struct Children48<N> (
+	Option<([u8; 256], Box<[Option<N>; 48]>)>,
+	u8,
+);
+
+/// Adaptative only between 48 and 256.
+#[derive(Derivative)]
+#[derivative(Clone)]
+pub enum ART48_256<N> {
+	ART48(Children48<N>),
+	ART256(Children256<N>),
+}
+
+const fn empty_48_children<N>() -> [Option<N>; 48] {
+	// TODO copy tree crate macro
+	[
+		None, None, None, None, None, None, None, None,
+		None, None, None, None, None, None, None, None,
+		None, None, None, None, None, None, None, None,
+		None, None, None, None, None, None, None, None,
+		None, None, None, None, None, None, None, None,
+		None, None, None, None, None, None, None, None,
+	]
+}
 
 const fn empty_256_children<N>() -> [Option<N>; 256] {
 	// TODO copy tree crate macro
@@ -1333,6 +1361,9 @@ const fn empty_256_children<N>() -> [Option<N>; 256] {
 
 impl<N: PartialEq> PartialEq for Children256<N> {
 	fn eq(&self, other: &Self) -> bool {
+		if self.1 != other.1 {
+			return false;
+		}
 		match (self.0.as_ref(), other.0.as_ref()) {
 			(Some(self_children), Some(other_children)) =>  {
 				for i in 0..256 {
@@ -1347,6 +1378,49 @@ impl<N: PartialEq> PartialEq for Children256<N> {
 		}
 	}
 }
+
+impl<N: PartialEq> PartialEq for Children48<N> {
+	fn eq(&self, other: &Self) -> bool {
+		if self.1 != other.1 {
+			return false;
+		}
+		match (self.0.as_ref(), other.0.as_ref()) {
+			(Some(self_children), Some(other_children)) =>  {
+				for i in 0..256 {
+					if self_children.0[i] != other_children.0[i] {
+						return false;
+					}
+					for i in 0..48 {
+						if self_children.1[i] != other_children.1[i] {
+							return false;
+						}
+					}
+				}
+				true
+			},
+			(None, None) => true,
+			_ => false,
+		}
+	}
+}
+
+impl<N: Debug + PartialEq + Clone> PartialEq for ART48_256<N> {
+	fn eq(&self, other: &Self) -> bool {
+		if self.len() != other.len() {
+			return false;
+		}
+		// slow implementation but this should only use for testing.
+		// (the fact that two different treshould are used to switch
+		// between variant is making impl a bit tricky.
+		for i in 0..self.len() {
+			if self.get_child(i) != other.get_child(i) {
+				return false;
+			}
+		}
+		true
+	}
+}
+	
 impl<N: Debug> Debug for Children256<N> {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
 		if let Some(children) = self.0.as_ref() {
@@ -1355,6 +1429,18 @@ impl<N: Debug> Debug for Children256<N> {
 			let empty: &[N] = &[]; 
 			empty.fmt(f)
 		}
+	}
+}
+
+impl<N: Debug> Debug for Children48<N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
+		"unimplemented children 48".fmt(f)
+	}
+}
+
+impl<N: Debug> Debug for ART48_256<N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
+		"unimplemented art children format".fmt(f)
 	}
 }
 
@@ -1398,7 +1484,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 	fn number_child(
 		&self,
 	) -> usize {
-		self.1
+		self.1 as usize
 	}
 	fn get_child(
 		&self,
@@ -1411,6 +1497,261 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
 		self.0.as_mut().and_then(|b| b[index as usize].as_mut())
+	}
+}
+
+impl<N: Debug + PartialEq + Clone> Children256<N> {
+	fn need_reduce(
+		&self,
+	) -> bool {
+		self.1 < REM_TRESHOLD48
+	}
+	fn reduce_node(&mut self) -> Children48<N> {
+		debug_assert!(self.1 <= 48);
+		let mut result = Children48::empty();
+		for i in 0..self.1 {
+			result.set_child(i, self.remove_child(i)
+				.expect("In index range")
+			);
+		}
+		result
+	}
+}
+
+const UNSET48: u8 = 49u8;
+// we cannot really change this or at least I see no use
+// in anticipating a node switch when growing
+const ADD_TRESHOLD48: u8 = 48u8;
+
+// using smaller that 48 to avoid add-remove-add-remove...
+// situation
+const REM_TRESHOLD48: u8 = 40u8;
+
+impl<N: Debug + PartialEq + Clone> Children48<N> {
+//	type Radix = Radix256Conf;
+//	type Node = N;
+
+	fn empty() -> Self {
+		Children48(None, 0)
+	}
+
+	fn grow_node(&mut self) -> Children256<N> {
+		if self.0.is_none() || self.1 == 0 {
+			return Children256::empty();
+		}
+		let mut result = Children256::empty();
+		// can probably come up with something faster
+		for i in 0..self.1 {
+			result.set_child(i, self.remove_child(i)
+				.expect("In index range")
+			);
+		}
+		result
+	}
+
+	fn can_set_child(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> bool {
+		if self.0.is_none() || self.1 < ADD_TRESHOLD48{
+			return true;
+		}
+		let (indexes, _values) = self.0.as_ref()
+			.expect("Lazy init above");
+		let is_new = indexes[index as usize] == UNSET48;
+		if is_new && self.1 >= ADD_TRESHOLD48 {
+			return false;
+		}
+		true
+	}
+
+	fn set_child(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+		child: N,
+	) -> Option<Option<N>> {
+		if self.0.is_none() {
+			self.0 = Some(([UNSET48; 256], Box::new(empty_48_children())));
+		}
+		let (indexes, values) = self.0.as_mut()
+			.expect("Lazy init above");
+		let is_new = indexes[index as usize] == UNSET48;
+		if is_new && self.1 >= ADD_TRESHOLD48 {
+			return None;
+		}
+		indexes[index as usize] = self.1;
+		let result = if is_new {
+			values[self.1 as usize] = Some(child);
+			None
+		} else {
+			replace(&mut values[self.1 as usize], Some(child))
+		};
+		self.1 += 1;
+		Some(result)
+	}
+
+	fn remove_child(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_mut() {
+			if indexes[index as usize] != UNSET48 {
+				let old_index = indexes[index as usize];
+				let result = replace(&mut values[old_index as usize], None);
+				indexes[index as usize] = UNSET48;
+				if index != self.1 {
+					// slow removal implementation (may do something here with u128 bit ops.
+					let mut found = None;
+					for ix in indexes.iter() {
+						if *ix == self.1 {
+							found = Some(*ix as usize);
+							break;
+						}
+					}
+					if let Some(ix) = found {
+						let v = values[indexes[ix] as usize].take();
+						values[old_index as usize] = v;
+						indexes[ix] = old_index;
+					}
+				}
+				self.1 -= 1;
+				result
+			} else {
+				None
+			}
+		} else {
+			None
+		}
+	}
+	fn number_child(
+		&self,
+	) -> usize {
+		self.1 as usize
+	}
+	fn get_child(
+		&self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<&N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_ref() {
+			let index = indexes[index as usize];
+			if index == UNSET48 {
+				return None;
+			}
+			values[index as usize].as_ref()
+		} else {
+			None
+		}
+	}
+	fn get_child_mut(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<&mut N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_mut() {
+			let index = indexes[index as usize];
+			if index == UNSET48 {
+				return None;
+			}
+			values[index as usize].as_mut()
+		} else {
+			None
+		}
+	}
+}
+
+impl<N> ART48_256<N> {
+	fn len(&self) -> u8 {
+		match self {
+			ART48_256::ART48(inner) => inner.1,
+			ART48_256::ART256(inner) => inner.1,
+		}
+	}
+}
+
+impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
+	type Radix = Radix256Conf;
+	type Node = N;
+
+	fn empty() -> Self {
+		ART48_256::ART48(Children48::empty())
+	}
+	fn set_child(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+		child: N,
+	) -> Option<N> {
+		let mut new_256 = match self {
+			ART48_256::ART48(inner) => {
+				if inner.can_set_child(index) {
+					return inner.set_child(index, child)
+						.expect("checked above");
+				} else {
+					inner.grow_node()
+				}
+			},
+			ART48_256::ART256(inner) => {
+				return inner.set_child(index, child);
+			},
+		};
+		let result = new_256.set_child(index, child);
+		*self = ART48_256::ART256(new_256);
+		result
+	}
+	fn remove_child(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) -> Option<N> {
+		let (result, do_reduce) = match self {
+			ART48_256::ART256(inner) => {
+				let result = inner.remove_child(index);
+				if result.is_some() && inner.need_reduce() {
+					(result, Some(inner.reduce_node()))
+				} else {
+					(result, None)
+				}
+			},
+			ART48_256::ART48(inner) => {
+				(inner.remove_child(index), None)
+			},
+		};
+		if let Some(do_reduce) = do_reduce {
+			*self = ART48_256::ART48(do_reduce);
+		}
+		result
+	}
+	fn number_child(
+		&self,
+	) -> usize {
+		match self {
+			ART48_256::ART256(inner) => inner.number_child(),
+			ART48_256::ART48(inner) => inner.number_child(),
+		}
+	}
+	fn get_child(
+		&self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) -> Option<&N> {
+		match self {
+			ART48_256::ART256(inner) => inner.get_child(index),
+			ART48_256::ART48(inner) => inner.get_child(index),
+		}
+	}
+	fn get_child_mut(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) -> Option<&mut N> {
+		match self {
+			ART48_256::ART256(inner) => inner.get_child_mut(index),
+			ART48_256::ART48(inner) => inner.get_child_mut(index),
+		}
 	}
 }
 
@@ -1490,6 +1831,7 @@ macro_rules! flatten_children {
 		}
 	}
 }
+
 flatten_children!(
 	Children256Flatten,
 	Node256Flatten,
@@ -1498,6 +1840,16 @@ flatten_children!(
 	Radix256Conf,
 	(),
 );
+
+flatten_children!(
+	Children256FlattenART,
+	Node256FlattenART,
+	Node256NoBackendART,
+	ART48_256,
+	Radix256Conf,
+	(),
+);
+
 flatten_children!(
 	Children256Flatten2,
 	Node256Flatten2,
@@ -2654,6 +3006,7 @@ pub mod $module_name {
 }
 }
 test_for!(test_256, Node256NoBackend, false);
+test_for!(test_256_art, Node256NoBackendART, false);
 test_for!(test_256_hash, Node256HashBackend, true);
 test_for!(test_256_hash_tx, Node256TxBackend, true);
 test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);
