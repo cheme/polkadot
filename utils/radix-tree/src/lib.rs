@@ -1602,12 +1602,13 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 				let old_index = indexes[index as usize];
 				let result = replace(&mut values[old_index as usize], None);
 				indexes[index as usize] = UNSET48;
-				if index != self.1 {
+				self.1 -= 1;
+				if old_index != self.1 {
 					// slow removal implementation (may do something here with u128 bit ops.
 					let mut found = None;
-					for ix in indexes.iter() {
-						if *ix == self.1 {
-							found = Some(*ix as usize);
+					for (ix, value_ix) in indexes.iter().enumerate() {
+						if *value_ix == self.1 {
+							found = Some(ix);
 							break;
 						}
 					}
@@ -1617,7 +1618,6 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 						indexes[ix] = old_index;
 					}
 				}
-				self.1 -= 1;
 				result
 			} else {
 				None
@@ -2989,6 +2989,7 @@ pub mod $module_name {
 	#[test]
 	fn replay_insert_remove_fuzzing() {
 		let datas = [
+			vec![0x0,0x0,0x3b,0x60,0x32,0xff,0xff,0xff,0x60,0x0,0x3b,0x60,0x32,0xae,],
 			vec![100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 121, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 0, 0, 0, 0, 0, 251, 0, 0, 0, 4],
 			vec![0, 1, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 75, 0],
 			vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 96, 0, 16, 96],
