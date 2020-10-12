@@ -1366,7 +1366,7 @@ impl<N: PartialEq> PartialEq for Children256<N> {
 		}
 		match (self.0.as_ref(), other.0.as_ref()) {
 			(Some(self_children), Some(other_children)) =>  {
-				for i in 0..256 {
+				for i in 0..=255 {
 					if self_children[i] != other_children[i] {
 						return false;
 					}
@@ -1386,7 +1386,7 @@ impl<N: PartialEq> PartialEq for Children48<N> {
 		}
 		match (self.0.as_ref(), other.0.as_ref()) {
 			(Some(self_children), Some(other_children)) =>  {
-				for i in 0..256 {
+				for i in 0..=255 {
 					if self_children.0[i] != other_children.0[i] {
 						return false;
 					}
@@ -1509,10 +1509,10 @@ impl<N: Debug + PartialEq + Clone> Children256<N> {
 	fn reduce_node(&mut self) -> Children48<N> {
 		debug_assert!(self.1 <= 48);
 		let mut result = Children48::empty();
-		for i in 0..self.1 {
-			result.set_child(i, self.remove_child(i)
-				.expect("In index range")
-			);
+		for i in 0..=255 {
+			if let Some(child) = self.remove_child(i) {
+				result.set_child(i, child);
+			}
 		}
 		result
 	}
@@ -1541,7 +1541,7 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 		}
 		let mut result = Children256::empty();
 		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..256 {
+			for i in 0..=255 {
 				let ix = indexes[i];
 				if ix != UNSET48 {
 					let value = values[ix as usize].take()
