@@ -19,7 +19,7 @@
 
 use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
 	Position, MaskKeyByte, NodeIndex, Node, NodeBackend, RadixConf,
-	PrefixKeyConf, BackendFor, Children};
+	PrefixKeyConf, BackendFor, Children, NodeInternal};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use hashbrown::HashMap;
@@ -170,7 +170,7 @@ fn decode_node<N>(
 	};
 
 	let value: Option<Vec<u8>> = Decode::decode(input)?;
-	let mut node = Node::<N>::new(
+	let mut node = NodeInternal::<N>::new(
 		prefix.as_slice(),
 		PositionFor::<N> {
 			index: 0,
@@ -359,7 +359,7 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			LazyExt::Unresolved(_, _, _, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
 				let mask = <N::Radix as RadixConf>::Alignment::encode_mask(position.mask); 
-				Node::<N>::new(
+				NodeInternal::<N>::new(
 					key,
 					position,
 					position,
@@ -451,6 +451,9 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			},
 		}
 	}
+	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(_node: &mut NodeInternal<N>, _recursive: bool) {
+		unimplemented!()
+	}
 }
 
 impl<B: Backend> NodeBackend for DirectExt<B> {
@@ -523,6 +526,9 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 			ext.changed = false;
 			ext.inner.write(ext.key.clone(), encoded)
 		}
+	}
+	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(_node: &mut NodeInternal<N>, _recursive: bool) {
+		unimplemented!()
 	}
 }
 
