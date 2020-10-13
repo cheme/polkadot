@@ -1599,7 +1599,7 @@ impl<N: Debug + PartialEq + Clone> Children256<N> {
 	fn need_reduce(
 		&self,
 	) -> bool {
-		self.1 < REM_TRESHOLD48
+		self.1 <= REM_TRESHOLD48
 	}
 	fn reduce_node(&mut self) -> Children48<N> {
 		debug_assert!(self.1 <= 48);
@@ -1633,6 +1633,28 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 
 	fn empty() -> Self {
 		Children48(None, 0)
+	}
+
+	fn need_reduce(
+		&self,
+	) -> bool {
+		self.1 <= REM_TRESHOLD16
+	}
+
+	fn reduce_node(&mut self) -> Children16<N> {
+		debug_assert!(self.1 <= 16);
+		let mut result = Children16::empty();
+		if let Some((indexes, values)) = self.0.as_mut() {
+			for i in 0..=255 {
+				let index = indexes[i as usize];
+				if index != UNSET48 {
+					if let Some(value) = values[index as usize].take() {
+						result.set_child(i, value);
+					}
+				}
+			}
+		}
+		result
 	}
 
 	fn grow_node(&mut self) -> Children256<N> {
@@ -1684,7 +1706,7 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 			return None;
 		}
 		let result = if is_new {
-			indexes[index as usize] == self.1;
+			indexes[index as usize] = self.1;
 			values[self.1 as usize] = Some(child);
 			self.1 += 1;
 			None
@@ -1791,6 +1813,26 @@ impl<N: Debug + PartialEq + Clone> Children16<N> {
 				let value = values[i as usize].take()
 					.expect("Restricted by size");
 				result.set_child(ix, value);
+			}
+		}
+		result
+	}
+
+	fn need_reduce(
+		&self,
+	) -> bool {
+		self.1 <= REM_TRESHOLD4
+	}
+
+	fn reduce_node(&mut self) -> Children4<N> {
+		debug_assert!(self.1 <= 4);
+		let mut result = Children4::empty();
+		if let Some((indexes, values)) = self.0.as_mut() {
+			for i in 0..self.1 {
+				let index = indexes[i as usize];
+				if let Some(value) = values[index as usize].take() {
+					result.set_child(index, value);
+				}
 			}
 		}
 		result
@@ -1942,7 +1984,7 @@ impl<N: Debug + PartialEq + Clone> Children4<N> {
 				existing_index = Some(i);
 			}
 		}
-		if existing_index.is_none() && self.1 >= ADD_TRESHOLD16 {
+		if existing_index.is_none() && self.1 >= ADD_TRESHOLD4 {
 			return (None, Some(child));
 		}
 		let result = if let Some(i) = existing_index {
@@ -2031,6 +2073,8 @@ impl<N: Debug + PartialEq + Clone> Children4<N> {
 impl<N> ART48_256<N> {
 	fn len(&self) -> u8 {
 		match self {
+			ART48_256::ART4(inner) => inner.1,
+			ART48_256::ART16(inner) => inner.1,
 			ART48_256::ART48(inner) => inner.1,
 			ART48_256::ART256(inner) => inner.1,
 		}
@@ -2042,20 +2086,40 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 	type Node = N;
 
 	fn empty() -> Self {
-		ART48_256::ART48(Children48::empty())
+		ART48_256::ART4(Children4::empty())
 	}
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: N,
+		mut child: N,
 	) -> Option<N> {
 		let mut new_256 = match self {
+			ART48_256::ART4(inner) => {
+				match inner.set_child(index, child) {
+					(Some(result), None) => return result,
+					(None, Some(value)) => {
+						child = value;
+						ART48_256::ART16(inner.grow_node())
+					},
+					_ => unreachable!(),
+				}
+			},
+			ART48_256::ART16(inner) => {
+				match inner.set_child(index, child) {
+					(Some(result), None) => return result,
+					(None, Some(value)) => {
+						child = value;
+						ART48_256::ART48(inner.grow_node())
+					},
+					_ => unreachable!(),
+				}
+			},
 			ART48_256::ART48(inner) => {
 				if inner.can_set_child(index) {
 					return inner.set_child(index, child)
 						.expect("checked above");
 				} else {
-					inner.grow_node()
+					ART48_256::ART256(inner.grow_node())
 				}
 			},
 			ART48_256::ART256(inner) => {
@@ -2063,7 +2127,7 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 			},
 		};
 		let result = new_256.set_child(index, child);
-		*self = ART48_256::ART256(new_256);
+		*self = new_256;
 		result
 	}
 	fn remove_child(
@@ -2074,17 +2138,33 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 			ART48_256::ART256(inner) => {
 				let result = inner.remove_child(index);
 				if result.is_some() && inner.need_reduce() {
-					(result, Some(inner.reduce_node()))
+					(result, Some(ART48_256::ART48(inner.reduce_node())))
 				} else {
 					(result, None)
 				}
 			},
 			ART48_256::ART48(inner) => {
+				let result = inner.remove_child(index);
+				if result.is_some() && inner.need_reduce() {
+					(result, Some(ART48_256::ART16(inner.reduce_node())))
+				} else {
+					(result, None)
+				}
+			},
+			ART48_256::ART16(inner) => {
+				let result = inner.remove_child(index);
+				if result.is_some() && inner.need_reduce() {
+					(result, Some(ART48_256::ART4(inner.reduce_node())))
+				} else {
+					(result, None)
+				}
+			},
+			ART48_256::ART4(inner) => {
 				(inner.remove_child(index), None)
 			},
 		};
 		if let Some(do_reduce) = do_reduce {
-			*self = ART48_256::ART48(do_reduce);
+			*self = do_reduce;
 		}
 		result
 	}
@@ -2094,6 +2174,8 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 		match self {
 			ART48_256::ART256(inner) => inner.number_child(),
 			ART48_256::ART48(inner) => inner.number_child(),
+			ART48_256::ART16(inner) => inner.number_child(),
+			ART48_256::ART4(inner) => inner.number_child(),
 		}
 	}
 	fn get_child(
@@ -2103,6 +2185,8 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 		match self {
 			ART48_256::ART256(inner) => inner.get_child(index),
 			ART48_256::ART48(inner) => inner.get_child(index),
+			ART48_256::ART16(inner) => inner.get_child(index),
+			ART48_256::ART4(inner) => inner.get_child(index),
 		}
 	}
 	fn get_child_mut(
@@ -2112,6 +2196,8 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 		match self {
 			ART48_256::ART256(inner) => inner.get_child_mut(index),
 			ART48_256::ART48(inner) => inner.get_child_mut(index),
+			ART48_256::ART16(inner) => inner.get_child_mut(index),
+			ART48_256::ART4(inner) => inner.get_child_mut(index),
 		}
 	}
 }
