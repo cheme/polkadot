@@ -1301,12 +1301,45 @@ pub struct Children48<N> (
 	u8,
 );
 
+/// 16 children for art tree.
+#[derive(Derivative)]
+#[derivative(Clone)]
+pub struct Children16<N> (
+	Option<([u8; 16], Box<[Option<N>; 16]>)>,
+	u8,
+);
+
+/// 4 children for art tree.
+#[derive(Derivative)]
+#[derivative(Clone)]
+pub struct Children4<N> (
+	Option<([u8; 4], Box<[Option<N>; 4]>)>,
+	u8,
+);
+
 /// Adaptative only between 48 and 256.
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub enum ART48_256<N> {
+	ART4(Children4<N>),
+	ART16(Children16<N>),
 	ART48(Children48<N>),
 	ART256(Children256<N>),
+}
+
+const fn empty_4_children<N>() -> [Option<N>; 4] {
+	// TODO copy tree crate macro
+	[
+		None, None, None, None,
+	]
+}
+
+const fn empty_16_children<N>() -> [Option<N>; 16] {
+	// TODO copy tree crate macro
+	[
+		None, None, None, None, None, None, None, None,
+		None, None, None, None, None, None, None, None,
+	]
 }
 
 const fn empty_48_children<N>() -> [Option<N>; 48] {
@@ -1404,6 +1437,56 @@ impl<N: PartialEq> PartialEq for Children48<N> {
 	}
 }
 
+impl<N: PartialEq> PartialEq for Children16<N> {
+	fn eq(&self, other: &Self) -> bool {
+		if self.1 != other.1 {
+				return false;
+		}
+		match (self.0.as_ref(), other.0.as_ref()) {
+			(Some(self_children), Some(other_children)) =>  {
+				for i in 0..self.1 {
+					if self_children.0[i as usize] != other_children.0[i as usize] {
+						return false;
+					}
+					for i in 0..self.1 {
+						if self_children.1[i as usize] != other_children.1[i as usize] {
+							return false;
+						}
+					}
+				}
+				true
+			},
+			(None, None) => true,
+			_ => false,
+		}
+	}
+}
+
+impl<N: PartialEq> PartialEq for Children4<N> {
+	fn eq(&self, other: &Self) -> bool {
+		if self.1 != other.1 {
+				return false;
+		}
+		match (self.0.as_ref(), other.0.as_ref()) {
+			(Some(self_children), Some(other_children)) =>  {
+				for i in 0..self.1 {
+					if self_children.0[i as usize] != other_children.0[i as usize] {
+						return false;
+					}
+					for i in 0..self.1 {
+						if self_children.1[i as usize] != other_children.1[i as usize] {
+							return false;
+						}
+					}
+				}
+				true
+			},
+			(None, None) => true,
+			_ => false,
+		}
+	}
+}
+
 impl<N: Debug + PartialEq + Clone> PartialEq for ART48_256<N> {
 	fn eq(&self, other: &Self) -> bool {
 		if self.len() != other.len() {
@@ -1435,6 +1518,18 @@ impl<N: Debug> Debug for Children256<N> {
 impl<N: Debug> Debug for Children48<N> {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
 		"unimplemented children 48".fmt(f)
+	}
+}
+
+impl<N: Debug> Debug for Children16<N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
+		"unimplemented children 16".fmt(f)
+	}
+}
+
+impl<N: Debug> Debug for Children4<N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
+		"unimplemented children 4".fmt(f)
 	}
 }
 
@@ -1519,13 +1614,18 @@ impl<N: Debug + PartialEq + Clone> Children256<N> {
 }
 
 const UNSET48: u8 = 49u8;
+
 // we cannot really change this or at least I see no use
 // in anticipating a node switch when growing
 const ADD_TRESHOLD48: u8 = 48u8;
+const ADD_TRESHOLD16: u8 = 16u8;
+const ADD_TRESHOLD4: u8 = 4u8;
 
 // using smaller that 48 to avoid add-remove-add-remove...
 // situation
 const REM_TRESHOLD48: u8 = 40u8;
+const REM_TRESHOLD16: u8 = 16u8;
+const REM_TRESHOLD4: u8 = 4u8;
 
 impl<N: Debug + PartialEq + Clone> Children48<N> {
 //	type Radix = Radix256Conf;
@@ -1583,14 +1683,15 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 		if is_new && self.1 >= ADD_TRESHOLD48 {
 			return None;
 		}
-		indexes[index as usize] = self.1;
 		let result = if is_new {
+			indexes[index as usize] == self.1;
 			values[self.1 as usize] = Some(child);
+			self.1 += 1;
 			None
 		} else {
-			replace(&mut values[self.1 as usize], Some(child))
+			let ix = indexes[index as usize];
+			replace(&mut values[ix as usize], Some(child))
 		};
-		self.1 += 1;
 		Some(result)
 	}
 
@@ -1668,6 +1769,262 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 		} else {
 			None
 		}
+	}
+}
+
+impl<N: Debug + PartialEq + Clone> Children16<N> {
+//	type Radix = Radix256Conf;
+//	type Node = N;
+
+	fn empty() -> Self {
+		Children16(None, 0)
+	}
+
+	fn grow_node(&mut self) -> Children48<N> {
+		if self.0.is_none() || self.1 == 0 {
+			return Children48::empty();
+		}
+		let mut result = Children48::empty();
+		if let Some((indexes, values)) = self.0.as_mut() {
+			for i in 0..self.1 {
+				let ix = indexes[i as usize];
+				let value = values[i as usize].take()
+					.expect("Restricted by size");
+				result.set_child(ix, value);
+			}
+		}
+		result
+	}
+
+	// return either the old value or the value to set after growth.
+	fn set_child(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+		child: N,
+	) -> (Option<Option<N>>, Option<N>) {
+		if self.0.is_none() {
+			self.0 = Some(([0u8; 16], Box::new(empty_16_children())));
+		}
+		let (indexes, values) = self.0.as_mut()
+			.expect("Lazy init above");
+		let mut existing_index = None;
+		// TODO something to do with bit expr
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				existing_index = Some(i);
+			}
+		}
+		if existing_index.is_none() && self.1 >= ADD_TRESHOLD16 {
+			return (None, Some(child));
+		}
+		let result = if let Some(i) = existing_index {
+			indexes[i as usize] = index;
+			replace(&mut values[i as usize], Some(child))
+		} else {
+			indexes[self.1 as usize] = index;
+			values[self.1 as usize] = Some(child);
+			self.1 += 1;
+			None
+		};
+		(Some(result), None)
+	}
+
+	fn remove_child(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_mut() {
+			let mut existing_index = None;
+			// TODO something to do with bit expr
+			for i in 0..self.1 {
+				if indexes[i as usize] == index {
+					existing_index = Some(i);
+				}
+			}
+			if let Some(ix) = existing_index {
+				self.1 -= 1;
+				if ix == self.1 {
+					replace(&mut values[ix as usize], None)
+				} else {
+					let result = replace(&mut values[ix as usize], None);
+					values[ix as usize] = values[self.1 as usize].take();
+					indexes[ix as usize] = indexes[self.1 as usize];
+					result
+				}
+			} else {
+				None
+			}
+		} else {
+			None
+		}
+	}
+	fn number_child(
+		&self,
+	) -> usize {
+		self.1 as usize
+	}
+	fn get_child(
+		&self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<&N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_ref() {
+			for i in 0..self.1 {
+				if indexes[i as usize] == index {
+					return values[i as usize].as_ref()
+				}
+			}
+		}
+		None
+	}
+	fn get_child_mut(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<&mut N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_mut() {
+			for i in 0..self.1 {
+				if indexes[i as usize] == index {
+					return values[i as usize].as_mut()
+				}
+			}
+		}
+		None
+	}
+}
+
+impl<N: Debug + PartialEq + Clone> Children4<N> {
+//	type Radix = Radix256Conf;
+//	type Node = N;
+
+	fn empty() -> Self {
+		Children4(None, 0)
+	}
+
+	fn grow_node(&mut self) -> Children16<N> {
+		if self.0.is_none() || self.1 == 0 {
+			return Children16::empty();
+		}
+		let mut result = Children16::empty();
+		if let Some((indexes, values)) = self.0.as_mut() {
+			for i in 0..self.1 {
+				let ix = indexes[i as usize];
+				let value = values[i as usize].take()
+					.expect("Restricted by size");
+				result.set_child(ix, value);
+			}
+		}
+		result
+	}
+
+	// return either the old value or the value to set after growth.
+	fn set_child(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+		child: N,
+	) -> (Option<Option<N>>, Option<N>) {
+		if self.0.is_none() {
+			self.0 = Some(([0u8; 4], Box::new(empty_4_children())));
+		}
+		let (indexes, values) = self.0.as_mut()
+			.expect("Lazy init above");
+		let mut existing_index = None;
+		// TODO something to do with bit expr
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				existing_index = Some(i);
+			}
+		}
+		if existing_index.is_none() && self.1 >= ADD_TRESHOLD16 {
+			return (None, Some(child));
+		}
+		let result = if let Some(i) = existing_index {
+			indexes[i as usize] = index;
+			replace(&mut values[i as usize], Some(child))
+		} else {
+			indexes[self.1 as usize] = index;
+			values[self.1 as usize] = Some(child);
+			self.1 += 1;
+			None
+		};
+		(Some(result), None)
+	}
+
+	fn remove_child(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_mut() {
+			let mut existing_index = None;
+			// TODO something to do with bit expr
+			for i in 0..self.1 {
+				if indexes[i as usize] == index {
+					existing_index = Some(i);
+				}
+			}
+			if let Some(ix) = existing_index {
+				self.1 -= 1;
+				if ix == self.1 {
+					replace(&mut values[ix as usize], None)
+				} else {
+					let result = replace(&mut values[ix as usize], None);
+					values[ix as usize] = values[self.1 as usize].take();
+					indexes[ix as usize] = indexes[self.1 as usize];
+					result
+				}
+			} else {
+				None
+			}
+		} else {
+			None
+		}
+	}
+	fn number_child(
+		&self,
+	) -> usize {
+		self.1 as usize
+	}
+	fn get_child(
+		&self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<&N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_ref() {
+			for i in 0..self.1 {
+				if indexes[i as usize] == index {
+					return values[i as usize].as_ref()
+				}
+			}
+		}
+		None
+	}
+	fn get_child_mut(
+		&mut self,
+		index: <Radix256Conf as RadixConf>::KeyIndex,
+	) -> Option<&mut N> {
+		if self.1 == 0 {
+			return None;
+		}
+		if let Some((indexes, values)) = self.0.as_mut() {
+			for i in 0..self.1 {
+				if indexes[i as usize] == index {
+					return values[i as usize].as_mut()
+				}
+			}
+		}
+		None
 	}
 }
 
