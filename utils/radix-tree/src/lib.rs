@@ -1292,7 +1292,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 #[derivative(Clone)]
 pub struct Children256<N> (
 	// 256 array is to big but ok for initial implementation
-	Option<[Option<N>; 256]>,
+	Option<Box<[Option<N>; 256]>>,
 	u8,
 );
 
@@ -1555,7 +1555,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 		child: N,
 	) -> Option<N> {
 		if self.0.is_none() {
-			self.0 = Some(empty_256_children());
+			self.0 = Some(Box::new(empty_256_children()));
 		}
 		let children = self.0.as_mut()
 			.expect("Lazy init above");
