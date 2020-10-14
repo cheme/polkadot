@@ -26,6 +26,8 @@ use std::{
 use crate::{columns, Database, DbHash, Transaction};
 use parking_lot::Mutex;
 use log::error;
+use codec::{Encode, Decode, Codec};
+use sp_runtime::traits::{NumberFor, Block as BlockT, SaturatedConversion};
 
 /// Offchain local storage
 #[derive(Clone)]
@@ -119,6 +121,175 @@ impl sp_core::offchain::OffchainStorage for LocalStorage {
 			}
 		}
 		is_set
+	}
+}
+
+/// Current state of journaling changes.
+#[derive(Encode, Decode)]
+pub(crate) struct CanonicalDefferedUpdate {
+	first_non_canonical: u64,
+	next_fork_index: std::collections::VecDeque<u64>,
+	#[codec(skip)]
+	revert: Option<(u64, std::collections::VecDeque<u64>)>,
+}
+
+/// When using `Local` api, indexing changes
+/// are only committed on block canonicalization.
+/// Until then, the changes are stored in serialized
+/// journal structue (one per block).
+#[derive(Encode, Decode)]
+struct JournalRecord<BlockHash> {
+	hash: BlockHash,
+	inserted: Vec<(Vec<u8>, Vec<u8>)>,
+	deleted: Vec<Vec<u8>>,
+}
+
+fn to_meta_key<S: Codec>(suffix: &[u8], data: &S) -> Vec<u8> {
+	let mut buffer = data.encode();
+	buffer.extend(suffix);
+	buffer
+}
+
+const OFFCHAIN_LOCAL_JOURNAL: &[u8] = b"offchain_journal";
+const OFFCHAIN_JOURNALS_PENDING: &[u8] = b"offchain_journal_pending";
+
+fn to_journal_key(block: u64, index: u64) -> Vec<u8> {
+	to_meta_key(OFFCHAIN_LOCAL_JOURNAL, &(block, index))
+}
+
+impl CanonicalDefferedUpdate {
+	/// Add a change set to a transaction.
+	pub fn new(db: &dyn Database<DbHash>) -> sp_blockchain::Result<Self> {
+		Ok(if let Some(encoded) = db.get(columns::OFFCHAIN, OFFCHAIN_JOURNALS_PENDING) {
+			CanonicalDefferedUpdate::decode(&mut encoded.as_slice())
+				.map_err(|e| sp_blockchain::Error::from(format!("Invalid offchain journal counter: {:?}", e)))?
+		} else {
+			// init
+			CanonicalDefferedUpdate {
+				first_non_canonical: 1,
+				next_fork_index: Default::default(),
+				revert: Default::default(),
+			}
+		})
+	}
+
+	pub fn write(&self, transaction: &mut Transaction<DbHash>) {
+		transaction.set_from_vec(columns::OFFCHAIN, OFFCHAIN_JOURNALS_PENDING, self.encode());
+	}
+
+	/// Add a change set to a transaction.
+	pub fn new_block<Block: BlockT>(
+		&mut self,
+		hash: Block::Hash,
+		number: NumberFor<Block>,
+		changes: super::CanonicalOffchainChanges,
+		transaction: &mut Transaction<DbHash>,
+	) {
+		let number_u64 = number.saturated_into::<u64>();
+		if number_u64 == 0 {
+			return self.genesis_new_block(changes, transaction);
+		}
+		let index = (number_u64 - self.first_non_canonical) as usize;
+		// pending change is an actual update
+		while self.next_fork_index.len() <= index {
+			self.next_fork_index.push_back(0);
+		}
+		let fork_index = self.next_fork_index[index];
+		let key = to_journal_key(number_u64, fork_index);
+		self.next_fork_index[index] = fork_index + 1;
+		let record = JournalRecord::<Block::Hash> {
+			hash,
+			inserted: changes.inserted,
+			deleted: changes.deleted,
+		};
+		transaction.set_from_vec(columns::OFFCHAIN, &key, record.encode());
+		self.write(transaction);
+	}
+
+	/// For genesis we do not wait for finalization to commit changes.
+	fn genesis_new_block(
+		&mut self,
+		changes: super::CanonicalOffchainChanges,
+		transaction: &mut Transaction<DbHash>,
+	) {
+		for (key, value) in changes.inserted {
+			transaction.set_from_vec(columns::OFFCHAIN, &key, value);
+		}
+		for key in changes.deleted {
+			transaction.remove(columns::OFFCHAIN, &key);
+		}
+	}
+
+	/// Store a copy of  state before modification.
+	pub fn start_pending(&mut self) {
+		// If not we got a concurrency issue
+		assert!(self.revert.is_none());
+		self.revert = Some((self.first_non_canonical, self.next_fork_index.clone()));
+	}
+
+	/// Reverts index change in case we did not commit some transactional
+	/// changes.
+	pub fn revert_pending(&mut self) {
+		if let Some(revert) = self.revert.take() {
+			self.first_non_canonical = revert.0;
+			self.next_fork_index = revert.1;
+		}
+	}
+
+	/// Changes are applied (internally the revert value is dropped).
+	pub fn apply_pending(&mut self) {
+		self.revert = None;
+	}
+
+	/// Number of block that where skipped on finalization.
+	pub fn skipped_finalize<Block: BlockT>(
+		&self,
+		number: NumberFor<Block>,
+	) -> usize {
+		let number_u64 = number.saturated_into::<u64>();
+		number_u64.saturating_sub(self.first_non_canonical) as usize
+	}
+	
+	pub fn finalize<Block: BlockT>(
+		&mut self,
+		hash: Block::Hash,
+		number: NumberFor<Block>,
+		transaction: &mut Transaction<DbHash>,
+		db: &dyn Database<DbHash>,
+	) {
+		let number_u64 = number.saturated_into::<u64>();
+		// finalize need to be done without skipping blocks.
+		assert!(number_u64 == self.first_non_canonical);
+		if let Some(nb) = self.next_fork_index.pop_front() {
+			let mut found = false;
+			for fork_index in 0..nb {
+				let key = to_journal_key(number_u64, fork_index);
+				if !found {
+					// hash could be split in another key value to avoid decoding cost
+					if let Some(journal) = db.get(columns::OFFCHAIN, &key)
+						.and_then(|v| JournalRecord::<Block::Hash>::decode(&mut v.as_slice()).ok()) {
+						if journal.hash == hash {
+							for (key, value) in journal.inserted {
+								transaction.set_from_vec(columns::OFFCHAIN, &key, value);
+							}
+							for key in journal.deleted {
+								transaction.remove(columns::OFFCHAIN, &key);
+							}
+							found = true;
+							continue;
+						}
+					}
+				}
+				// Note that we do not delete invalid fork branch in depth.
+				// We only remove journal for this finalized height,
+				// there will be orphan consecutive journal that will be removed
+				// later when their height will be finalized.
+				// This is not optimal but makes code simplier.
+				transaction.remove(columns::OFFCHAIN, &key);
+			}
+		}
+		self.first_non_canonical += 1;
+		self.write(transaction);
 	}
 }
 

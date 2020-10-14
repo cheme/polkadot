@@ -69,7 +69,7 @@ impl<T: OffchainStorage + 'static> OffchainApi for Offchain<T> {
 
 		let prefix = match kind {
 			StorageKind::PERSISTENT => sp_offchain::STORAGE_PREFIX,
-			StorageKind::LOCAL => return Err(Error::UnavailableStorageKind),
+			StorageKind::LOCAL => sp_offchain::LOCAL_STORAGE_PREFIX,
 		};
 		Ok(self.storage.read().get(prefix, &*key).map(Into::into))
 	}

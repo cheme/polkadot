@@ -23,6 +23,9 @@
 /// Re-export of parent module scope storage prefix.
 pub use sp_core::offchain::STORAGE_PREFIX;
 
+/// Re-export of parent module scope local storage prefix.
+pub use sp_core::offchain::LOCAL_STORAGE_PREFIX;
+
 sp_api::decl_runtime_apis! {
 	/// The offchain worker api.
 	#[api_version(2)]

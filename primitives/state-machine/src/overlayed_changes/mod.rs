@@ -682,6 +682,15 @@ impl OverlayedChanges {
 		}
 	}
 
+	/// Write a key value pair to the local offchain storage overlay.
+	pub fn set_local_offchain_storage(&mut self, key: &[u8], value: Option<&[u8]>) {
+		use ::sp_core::offchain::LOCAL_STORAGE_PREFIX;
+		match value {
+			Some(value) => self.offchain.set(LOCAL_STORAGE_PREFIX, key, value),
+			None => self.offchain.remove(LOCAL_STORAGE_PREFIX, key),
+		}
+	}
+
 	/// Drain all elements of offchain changeset.
 	pub fn drain_offchain(&mut self) -> OffchainOverlayedChangesIntoIter {
 		self.offchain.drain()

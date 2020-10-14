@@ -202,6 +202,10 @@ where
 		self.overlay.set_offchain_storage(key, value)
 	}
 
+	fn set_local_offchain_storage(&mut self, key: &[u8], value: Option<&[u8]>) {
+		self.overlay.set_local_offchain_storage(key, value)
+	}
+
 	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
 		let _guard = guard();
 		let result = self.overlay.storage(key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||

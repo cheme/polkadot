@@ -32,6 +32,9 @@ pub mod testing;
 /// Local storage prefix used by the Offchain Worker API to
 pub const STORAGE_PREFIX : &'static [u8] = b"storage";
 
+/// Local storage prefix used by the Offchain Worker API to
+pub const LOCAL_STORAGE_PREFIX : &'static [u8] = b"local_storage";
+
 /// Offchain workers local storage.
 pub trait OffchainStorage: Clone + Send + Sync {
 	/// Persist a value in storage under given key and prefix.
@@ -753,6 +756,12 @@ pub enum OffchainOverlayedChange {
 	Remove,
 	/// Overwrite the value of an associated key
 	SetValue(Vec<u8>),
+	/// Remove the data associated with the key,
+	/// only for canonical block.
+	RemoveLocal,
+	/// Overwrite the value of an associated key,
+	/// only for canonical block.
+	SetValueLocal(Vec<u8>),
 }
 
 #[cfg(test)]

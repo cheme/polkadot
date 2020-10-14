@@ -88,6 +88,8 @@ impl TestPersistentOffchainDB {
 			match value_operation {
 				OffchainOverlayedChange::SetValue(val) => me.set(b"", key.as_slice(), val.as_slice()),
 				OffchainOverlayedChange::Remove => me.remove(b"", key.as_slice()),
+				OffchainOverlayedChange::SetValueLocal(_val) => unimplemented!("No support for Local change in test backend"),
+				OffchainOverlayedChange::RemoveLocal => unimplemented!("No support for Local change in test backend"),
 			}
 		}
 	}

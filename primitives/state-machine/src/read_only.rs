@@ -78,6 +78,10 @@ impl<'a, H: Hasher, B: 'a + Backend<H>> Externalities for ReadOnlyExternalities<
 		panic!("Should not be used in read-only externalities!")
 	}
 
+	fn set_local_offchain_storage(&mut self, _key: &[u8], _value: Option<&[u8]>) {
+		panic!("Should not be used in read-only externalities!")
+	}
+
 	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
 		self.backend.storage(key).expect("Backed failed for storage in ReadOnlyExternalities")
 	}

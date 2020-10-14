@@ -747,10 +747,21 @@ pub trait OffchainIndex {
 		self.set_offchain_storage(key, Some(value));
 	}
 
+	/// Write a key value pair to the local Offchain DB database in a buffered fashion.
+	fn set_local(&mut self, key: &[u8], value: &[u8]) {
+		self.set_local_offchain_storage(key, Some(value));
+	}
+
 	/// Remove a key and its associated value from the Offchain DB.
 	fn clear(&mut self, key: &[u8]) {
 		self.set_offchain_storage(key, None);
 	}
+
+	/// Remove a key and its associated value from the Offchain DB.
+	fn clear_local(&mut self, key: &[u8]) {
+		self.set_local_offchain_storage(key, None);
+	}
+
 }
 
 #[cfg(feature = "std")]

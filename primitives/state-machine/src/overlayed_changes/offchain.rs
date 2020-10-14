@@ -85,6 +85,28 @@ impl OffchainOverlayedChanges {
 		}
 	}
 
+	/// Remove a key and its associated value from the local offchain database.
+	pub fn remove_local(&mut self, prefix: &[u8], key: &[u8]) {
+		if let Self::Enabled(storage) = self {
+			let _ = storage.set(
+				(prefix.to_vec(), key.to_vec()),
+				OffchainOverlayedChange::RemoveLocal,
+				None,
+			);
+		}
+	}
+
+	/// Set the value associated with a key under a prefix to the local value provided.
+	pub fn set_local(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
+		if let Self::Enabled(storage) = self {
+			let _ = storage.set(
+				(prefix.to_vec(), key.to_vec()),
+				OffchainOverlayedChange::SetValueLocal(value.to_vec()),
+				None,
+			);
+		}
+	}
+
 	/// Obtain a associated value to the given key in storage with prefix.
 	pub fn get(&self, prefix: &[u8], key: &[u8]) -> Option<OffchainOverlayedChange> {
 		if let Self::Enabled(storage) = self {

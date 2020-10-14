@@ -592,8 +592,14 @@ pub struct BlockImportOperation<Block: BlockT> {
 	commit_state: bool,
 }
 
+#[derive(Default)]
+struct CanonicalOffchainChanges {
+	inserted: Vec<(Vec<u8>, Vec<u8>)>,
+	deleted: Vec<Vec<u8>>,
+}
+
 impl<Block: BlockT> BlockImportOperation<Block> {
-	fn apply_offchain(&mut self, transaction: &mut Transaction<DbHash>) {
+	fn apply_offchain(&mut self, transaction: &mut Transaction<DbHash>, local: &mut CanonicalOffchainChanges) {
 		for ((prefix, key), value_operation) in self.offchain_storage_updates.drain(..) {
 			let key: Vec<u8> = prefix
 				.into_iter()
@@ -603,6 +609,8 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 			match value_operation {
 				OffchainOverlayedChange::SetValue(val) => transaction.set_from_vec(columns::OFFCHAIN, &key, val),
 				OffchainOverlayedChange::Remove => transaction.remove(columns::OFFCHAIN, &key),
+				OffchainOverlayedChange::SetValueLocal(val) => local.inserted.push((key, val)),
+				OffchainOverlayedChange::RemoveLocal => local.deleted.push(key),
 			}
 		}
 	}
@@ -826,6 +834,7 @@ impl<T: Clone> FrozenForDuration<T> {
 pub struct Backend<Block: BlockT> {
 	storage: Arc<StorageDb<Block>>,
 	offchain_storage: offchain::LocalStorage,
+	offchain_journals: Arc<RwLock<offchain::CanonicalDefferedUpdate>>,
 	changes_tries_storage: DbChangesTrieStorage<Block>,
 	blockchain: BlockchainDb<Block>,
 	canonicalization_delay: u64,
@@ -882,6 +891,7 @@ impl<Block: BlockT> Backend<Block> {
 			prefix_keys: !config.source.supports_ref_counting(),
 		};
 		let offchain_storage = offchain::LocalStorage::new(db.clone());
+		let offchain_journals = Arc::new(RwLock::new(offchain::CanonicalDefferedUpdate::new(&*db)?));
 		let changes_tries_storage = DbChangesTrieStorage::new(
 			db,
 			blockchain.header_metadata_cache.clone(),
@@ -901,6 +911,7 @@ impl<Block: BlockT> Backend<Block> {
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
+			offchain_journals,
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
@@ -1074,7 +1085,8 @@ impl<Block: BlockT> Backend<Block> {
 		let mut finalization_displaced_leaves = None;
 
 		operation.apply_aux(&mut transaction);
-		operation.apply_offchain(&mut transaction);
+		let mut pending_offchain = CanonicalOffchainChanges::default();
+		operation.apply_offchain(&mut transaction, &mut pending_offchain);
 
 		let mut meta_updates = Vec::with_capacity(operation.finalized_blocks.len());
 		let mut last_finalized_hash = self.blockchain.meta.read().finalized_hash;
@@ -1083,7 +1095,29 @@ impl<Block: BlockT> Backend<Block> {
 		for (block, justification) in operation.finalized_blocks {
 			let block_hash = self.blockchain.expect_block_hash_from_id(&block)?;
 			let block_header = self.blockchain.expect_header(BlockId::Hash(block_hash))?;
+			let number = block_header.number();
 
+			// offchain journal api does not allow skipping blocks when finalizing,
+			// manually process them if needed.
+			let skipped = self.offchain_journals.read().skipped_finalize::<Block>(number.clone());
+			let mut previous_blocks = Vec::with_capacity(skipped);
+			if skipped > 0 {
+				let mut previous_hash = block_header.parent_hash().clone();
+				let mut previous_number = number.clone() - NumberFor::<Block>::one();
+				previous_blocks.push((previous_hash.clone(), previous_number));
+				for _ in 1..skipped {
+					let header = self.blockchain.expect_header(BlockId::Hash(previous_hash))?;
+					previous_hash = header.parent_hash().clone();
+					previous_number = previous_number.clone() - NumberFor::<Block>::one();
+					previous_blocks.push((previous_hash.clone(), previous_number));
+				}
+			}
+			for (block_hash, number) in previous_blocks.into_iter().rev() {
+				self.offchain_journals.write()
+					.finalize::<Block>(block_hash, number, &mut transaction, &*self.storage.db);
+			}
+			self.offchain_journals.write()
+				.finalize::<Block>(block_hash, number.clone(), &mut transaction, &*self.storage.db);
 			meta_updates.push(self.finalize_block_with_transaction(
 				&mut transaction,
 				&block_hash,
@@ -1100,6 +1134,8 @@ impl<Block: BlockT> Backend<Block> {
 			let hash = pending_block.header.hash();
 			let parent_hash = *pending_block.header.parent_hash();
 			let number = pending_block.header.number().clone();
+
+			self.offchain_journals.write().new_block::<Block>(hash, number, pending_offchain, &mut transaction);
 
 			// blocks are keyed by number + hash.
 			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
@@ -1463,13 +1499,16 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		let usage = operation.old_state.usage_info();
 		self.state_usage.merge_sm(usage);
 
+		self.offchain_journals.write().start_pending();
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
 				self.storage.state_db.apply_pending();
+				self.offchain_journals.write().apply_pending();
 				Ok(())
 			},
 			e @ Err(_) => {
 				self.storage.state_db.revert_pending();
+				self.offchain_journals.write().revert_pending();
 				e
 			}
 		}
@@ -1782,6 +1821,17 @@ pub(crate) mod tests {
 		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
 		extrinsics_root: H256,
 	) -> H256 {
+		insert_block(backend, number, parent_hash, changes, None, extrinsics_root)
+	}
+
+	pub fn insert_block(
+		backend: &Backend<Block>,
+		number: u64,
+		parent_hash: H256,
+		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
+		offchain: Option<OffchainChangesCollection>,
+		extrinsics_root: H256,
+	) -> H256 {
 		use sp_runtime::testing::Digest;
 
 		let mut digest = Digest::default();
@@ -1809,6 +1859,9 @@ pub(crate) mod tests {
 		backend.begin_state_operation(&mut op, block_id).unwrap();
 		op.set_block_data(header, Some(Vec::new()), None, NewBlockState::Best).unwrap();
 		op.update_changes_trie((changes_trie_update, ChangesTrieCacheAction::Clear)).unwrap();
+		if let Some(offchain) = offchain {
+			op.update_offchain_storage(offchain).unwrap();
+		}
 		backend.commit_operation(op).unwrap();
 
 		header_hash
@@ -2403,5 +2456,64 @@ pub(crate) mod tests {
 			.unwrap().unwrap();
 		assert_eq!(cht_root_1, cht_root_2);
 		assert_eq!(cht_root_2, cht_root_3);
+	}
+
+	#[test]
+	fn offchain_backends_local_indexing() {
+		use sp_core::offchain::OffchainStorage;
+
+		let backend = Backend::<Block>::new_test(10, 10);
+
+		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
+		let offchain_storage = backend.offchain_storage().unwrap();
+		assert_eq!(offchain_storage.get(b"prefix1", b"key1"), None);
+
+		let mut ooc = OffchainChangesCollection::default();
+		ooc.push((
+			(b"prefix1".to_vec(), b"key1".to_vec()),
+			OffchainOverlayedChange::SetValueLocal(b"value1".to_vec()),
+		));
+		let block1 = insert_block(&backend, 1, block0, None, Some(ooc), Default::default());
+		let offchain_storage = backend.offchain_storage().unwrap();
+		assert_eq!(offchain_storage.get(b"prefix1", b"/key1"), None);
+
+		let mut ooc = OffchainChangesCollection::default();
+		ooc.push(
+			((b"prefix1".to_vec(), b"key1".to_vec()),
+			OffchainOverlayedChange::SetValueLocal(b"value2".to_vec()),
+		));
+		let block2 = insert_block(&backend, 2, block1, None, Some(ooc), Default::default());
+		let offchain_storage = backend.offchain_storage().unwrap();
+		assert_eq!(offchain_storage.get(b"prefix1", b"/key1"), None);
+
+		let mut ooc = OffchainChangesCollection::default();
+		ooc.push(
+			((b"prefix1".to_vec(), b"key1".to_vec()),
+			OffchainOverlayedChange::RemoveLocal,
+		));
+		let block3 = insert_block(&backend, 3, block2, None, Some(ooc), Default::default());
+		let offchain_storage = backend.offchain_storage().unwrap();
+		assert_eq!(offchain_storage.get(b"prefix1", b"/key1"), None);
+
+		{
+			let mut op = backend.begin_operation().unwrap();
+			backend.begin_state_operation(&mut op, BlockId::Hash(block0)).unwrap();
+			op.mark_finalized(BlockId::Hash(block1), None).unwrap();
+			backend.commit_operation(op).unwrap();
+		}
+
+		let offchain_storage = backend.offchain_storage().unwrap();
+		assert_eq!(offchain_storage.get(b"prefix1", b"/key1"), Some(b"value1".to_vec()));
+
+		{
+			let mut op = backend.begin_operation().unwrap();
+			backend.begin_state_operation(&mut op, BlockId::Hash(block0)).unwrap();
+			op.mark_finalized(BlockId::Hash(block2), None).unwrap();
+			op.mark_finalized(BlockId::Hash(block3), None).unwrap();
+			backend.commit_operation(op).unwrap();
+		}
+
+		let offchain_storage = backend.offchain_storage().unwrap();
+		assert_eq!(offchain_storage.get(b"prefix1", b"/key1"), None);
 	}
 }
