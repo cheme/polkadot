@@ -19,7 +19,7 @@
 
 use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
 	Position, MaskKeyByte, NodeIndex, Node, NodeBackend, RadixConf,
-	PrefixKeyConf, BackendFor, Children, NodeInternal};
+	PrefixKeyConf, BackendFor, Children, NodeInner};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use hashbrown::HashMap;
@@ -170,7 +170,7 @@ fn decode_node<N>(
 	};
 
 	let value: Option<Vec<u8>> = Decode::decode(input)?;
-	let mut node = NodeInternal::<N>::new(
+	let mut node = NodeInner::<N>::new(
 		prefix.as_slice(),
 		PositionFor::<N> {
 			index: 0,
@@ -217,7 +217,7 @@ fn decode_node<N>(
 }
 
 fn encode_node<N: NodeConf>(
-	node: &Node<N>,
+	node: &NodeInner<N>,
 ) -> Vec<u8> {
 	let mut result = Vec::new();
 	/*if <N::Radix as RadixConf>::Alignment::DEFAULT.is_none() {
@@ -359,7 +359,7 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			LazyExt::Unresolved(_, _, _, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
 				let mask = <N::Radix as RadixConf>::Alignment::encode_mask(position.mask); 
-				NodeInternal::<N>::new(
+				NodeInner::<N>::new(
 					key,
 					position,
 					position,
@@ -421,7 +421,7 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			},
 		}
 	}
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
+	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(node: &mut NodeInner<N>, recursive: bool) {
 		match node.ext() {
 			LazyExt::Resolved(_, _, false)
 			| LazyExt::Unresolved(..) => (),
@@ -450,9 +450,6 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 				}
 			},
 		}
-	}
-	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(_node: &mut NodeInternal<N>, _recursive: bool) {
-		unimplemented!()
 	}
 }
 
@@ -505,7 +502,7 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 		let ext = node.ext_mut();
 		ext.inner.remove(ext.key.as_slice());
 	}
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
+	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(node: &mut NodeInner<N>, recursive: bool) {
 		if node.ext().changed == true {
 			if recursive && node.children.number_child() > 0 {
 				let mut key_index = KeyIndexFor::<N>::zero();
@@ -526,9 +523,6 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 			ext.changed = false;
 			ext.inner.write(ext.key.clone(), encoded)
 		}
-	}
-	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(_node: &mut NodeInternal<N>, _recursive: bool) {
-		unimplemented!()
 	}
 }
 
