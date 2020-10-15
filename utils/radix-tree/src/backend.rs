@@ -18,10 +18,11 @@
 //! Use a backend for existing nodes.
 
 use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
-	Position, MaskKeyByte, NodeIndex, Node, NodeBackend, RadixConf,
-	PrefixKeyConf, BackendFor, Children, NodeInner};
+	Position, MaskKeyByte, NodeIndex, NodeBox, NodeBackend, RadixConf,
+	PrefixKeyConf, BackendFor, Children, Node};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
+use alloc::boxed::Box;
 use hashbrown::HashMap;
 use codec::{Encode, Decode, Error as CodecError, Input};
 use core::cell::RefCell;
@@ -170,7 +171,7 @@ fn decode_node<N>(
 	};
 
 	let value: Option<Vec<u8>> = Decode::decode(input)?;
-	let mut node = NodeInner::<N>::new(
+	let mut node = Node::<N>::new(
 		prefix.as_slice(),
 		PositionFor::<N> {
 			index: 0,
@@ -217,7 +218,7 @@ fn decode_node<N>(
 }
 
 fn encode_node<N: NodeConf>(
-	node: &NodeInner<N>,
+	node: &Node<N>,
 ) -> Vec<u8> {
 	let mut result = Vec::new();
 	/*if <N::Radix as RadixConf>::Alignment::DEFAULT.is_none() {
@@ -351,15 +352,15 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			},
 		}
 	}
-	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<Node<N>> {
-		decode_node(&[], PositionFor::<N>::zero(), init).ok()
+	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<NodeBox<N>> {
+		decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
 	}
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
+	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N> {
 		match self {
 			LazyExt::Unresolved(_, _, _, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
 				let mask = <N::Radix as RadixConf>::Alignment::encode_mask(position.mask); 
-				NodeInner::<N>::new(
+				Node::<N>::new_box(
 					key,
 					position,
 					position,
@@ -405,7 +406,7 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			LazyExt::Unresolved(..) => panic!("Node need to be resolved first"),
 		}
 	}
-	fn delete<N: NodeConf<NodeBackend = Self>>(mut node: Node<N>) {
+	fn delete<N: NodeConf<NodeBackend = Self>>(mut node: NodeBox<N>) {
 		match node.ext_mut() {
 			LazyExt::Resolved(key, backend, ..) => {
 				backend.remove(key.as_slice());
@@ -421,7 +422,7 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			},
 		}
 	}
-	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(node: &mut NodeInner<N>, recursive: bool) {
+	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
 		match node.ext() {
 			LazyExt::Resolved(_, _, false)
 			| LazyExt::Unresolved(..) => (),
@@ -477,11 +478,12 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 			changed: true,
 		}
 	}
-	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<Node<N>> {
-		decode_node(&[], PositionFor::<N>::zero(), init).ok()
+	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<NodeBox<N>> {
+		decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
 	}
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
+	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N> {
 		decode_node(&key, position, &self.inner)
+			.map(Box::new)
 			.expect("Corrupted backend, missing node")
 	}
 
@@ -498,11 +500,11 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 	fn set_change(&mut self) {
 		self.changed = true;
 	}
-	fn delete<N: NodeConf<NodeBackend = Self>>(mut node: Node<N>) {
+	fn delete<N: NodeConf<NodeBackend = Self>>(mut node: NodeBox<N>) {
 		let ext = node.ext_mut();
 		ext.inner.remove(ext.key.as_slice());
 	}
-	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(node: &mut NodeInner<N>, recursive: bool) {
+	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
 		if node.ext().changed == true {
 			if recursive && node.children.number_child() > 0 {
 				let mut key_index = KeyIndexFor::<N>::zero();

@@ -153,18 +153,15 @@ pub trait NodeBackend: Clone {
 	fn existing_node(init: &Self::Backend, key: backend::Key) -> Self;
 	fn new_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Self;
 	fn new_node(&self, key: backend::Key) -> Self;
-	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<Node<N>>;
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N>;
+	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<NodeBox<N>>;
+	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N>;
 	fn backend_key<N: NodeConf<NodeBackend = Self>>(key: &[u8], position: PositionFor<N>) -> backend::Key;
 	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(key: &backend::Key) -> (&[u8], PositionFor<N>);
 	fn resolve<N: NodeConf<NodeBackend = Self>>(node: &Node<N>);
 	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>);
 	fn set_change(&mut self);
-	fn delete<N: NodeConf<NodeBackend = Self>>(node: Node<N>);
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
-		Self::commit_change_internal(node.as_mut(), recursive)
-	}
-	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(node: &mut NodeInner<N>, recursive: bool);
+	fn delete<N: NodeConf<NodeBackend = Self>>(node: NodeBox<N>);
+	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool);
 }
 
 impl NodeBackend for () {
@@ -179,10 +176,10 @@ impl NodeBackend for () {
 	fn new_node(&self, _key: backend::Key) -> Self {
 		()
 	}
-	fn get_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Option<Node<N>> {
+	fn get_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Option<NodeBox<N>> {
 		unreachable!("Inactive implementation");
 	}
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, _key: &[u8], _position: PositionFor<N>) -> Node<N> {
+	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, _key: &[u8], _position: PositionFor<N>) -> NodeBox<N> {
 		unreachable!("Inactive implementation");
 	}
 	fn backend_key<N: NodeConf<NodeBackend = Self>>(_key: &[u8], _position: PositionFor<N>) -> backend::Key {
@@ -194,9 +191,8 @@ impl NodeBackend for () {
 	fn resolve<N: NodeConf<NodeBackend = Self>>(_node: &Node<N>) { }
 	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>) { }
 	fn set_change(&mut self) { }
-	fn delete<N: NodeConf<NodeBackend = Self>>(_node: Node<N>) { }
+	fn delete<N: NodeConf<NodeBackend = Self>>(_node: NodeBox<N>) { }
 	fn commit_change<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>, _recursive: bool) { }
-	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(_node: &mut NodeInner<N>, _recursive: bool) { }
 }
 
 pub struct Radix256Conf;
@@ -781,7 +777,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
 	type NodeBackend: NodeBackend;
 
-	fn new_node_split(node: &NodeInner<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeBackend {
+	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeBackend {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
 			ext
 		} else {
@@ -811,11 +807,12 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	}
 }
 
-pub type Node<N> = Box<NodeInner<N>>;
+pub type NodeBox<N> = Box<Node<N>>;
+
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(PartialEq)]
-pub struct NodeInner<N>
+pub struct Node<N>
 	where
 		N: NodeConf,
 {
@@ -846,9 +843,9 @@ impl<N: NodeConf> Debug for Node<N> {
 	}
 }
 
-impl<N: NodeConf> Drop for NodeInner<N> {
+impl<N: NodeConf> Drop for Node<N> {
 	fn drop(&mut self) {
-		N::NodeBackend::commit_change_internal(self, false);
+		N::NodeBackend::commit_change(self, false);
 	}
 }
 
@@ -868,7 +865,17 @@ impl<P, C> Node<P, C>
 }
 */
 
-impl<N: NodeConf> NodeInner<N> {
+impl<N: NodeConf> Node<N> {
+	pub fn new_box(
+		key: &[u8],
+		start_position: PositionFor<N>,
+		end_position: PositionFor<N>,
+		value: Option<Vec<u8>>,
+		init: (),
+		ext: N::NodeBackend,
+	) -> NodeBox<N> {
+		Box::new(Self::new(key, start_position, end_position, value, init, ext))
+	}
 	pub fn new(
 		key: &[u8],
 		start_position: PositionFor<N>,
@@ -877,12 +884,12 @@ impl<N: NodeConf> NodeInner<N> {
 		_init: (),
 		ext: N::NodeBackend,
 	) -> Node<N> {
-		Box::new(NodeInner {
+		Node {
 			key: PrefixKey::new_offset(key, start_position, end_position),
 			value,
 			children: N::Children::empty(),
 			ext,
-		})
+		}
 	}
 	pub fn descend(
 		&self,
@@ -957,7 +964,7 @@ impl<N: NodeConf> NodeInner<N> {
 	pub fn get_child(
 		&self,
 		index: KeyIndexFor<N>,
-	) -> Option<&Box<Self>> {
+	) -> Option<&Self> {
 		//N::NodeBackend::resolve(self);
 		let result = self.children.get_child(index);
 		result.as_ref().map(|c| N::NodeBackend::resolve(c));
@@ -972,7 +979,7 @@ impl<N: NodeConf> NodeInner<N> {
 	pub fn get_child_mut(
 		&mut self,
 		index: KeyIndexFor<N>,
-	) -> Option<&mut Box<Self>> {
+	) -> Option<&mut Self> {
 		//N::NodeBackend::resolve_mut(self);
 		let mut result = self.children.get_child_mut(index);
 		result.as_mut().map(|c| N::NodeBackend::resolve_mut(c));
@@ -1009,7 +1016,7 @@ impl<N: NodeConf> NodeInner<N> {
 		let child_prefix = self.key.split_off::<N::Radix>(at);
 		let child_value = self.value.take();
 		let child_children = replace(&mut self.children, N::Children::empty());
-		let child = Box::new(NodeInner {
+		let child = Box::new(Node {
 			key: child_prefix,
 			value: child_value,
 			children: child_children,
@@ -1091,7 +1098,7 @@ pub struct Tree<N>
 	where
 		N: NodeConf,
 {
-	tree: Option<Node<N>>,
+	tree: Option<NodeBox<N>>,
 	#[derivative(Debug="ignore")]
 	#[derivative(PartialEq="ignore")]
 	pub init: BackendFor<N>,
@@ -1133,12 +1140,12 @@ pub trait Children: Clone + Debug + PartialEq {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: Self::Node,
-	) -> Option<Self::Node>;
+		child: Box<Self::Node>,
+	) -> Option<Box<Self::Node>>;
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<Self::Node>;
+	) -> Option<Box<Self::Node>>;
 	fn number_child(
 		&self,
 	) -> usize;
@@ -1215,7 +1222,7 @@ impl NodeIndex for u8 {
 #[derivative(Debug)]
 #[derivative(PartialEq)]
 struct Children2<N> (
-	Option<Box<(Option<N>, Option<N>)>>
+	Option<(Option<Box<N>>, Option<Box<N>>)>
 );
 
 impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
@@ -1228,10 +1235,10 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: N,
-	) -> Option<N> {
+		child: Box<N>,
+	) -> Option<Box<N>> {
 		if self.0.is_none() {
-			self.0 = Some(Box::new((None, None)));
+			self.0 = Some((None, None));
 		}
 		let children = self.0.as_mut()
 			.expect("Lazy init above");
@@ -1244,7 +1251,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<N> {
+	) -> Option<Box<N>> {
 		if let Some(children) = self.0.as_mut() {
 			if index {
 				replace(&mut children.0, None)
@@ -1259,7 +1266,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 		&self,
 	) -> usize {
 		match self.0.as_ref() {
-			Some(b) => match b.as_ref() {
+			Some(b) => match &b {
 				(Some(_), Some(_)) => 2,
 				(None, Some(_)) => 1,
 				(Some(_), None) => 1,
@@ -1273,9 +1280,9 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&N> {
 		self.0.as_ref().and_then(|b| if index {
-			b.0.as_ref()
+			b.0.as_ref().map(AsRef::as_ref)
 		} else {
-			b.1.as_ref()
+			b.1.as_ref().map(AsRef::as_ref)
 		})
 	}
 	fn get_child_mut(
@@ -1283,9 +1290,9 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
 		self.0.as_mut().and_then(|b| if index {
-			b.0.as_mut()
+			b.0.as_mut().map(AsMut::as_mut)
 		} else {
-			b.1.as_mut()
+			b.1.as_mut().map(AsMut::as_mut)
 		})
 	}
 }
@@ -1294,7 +1301,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children2<N> {
 #[derivative(Clone)]
 pub struct Children256<N> (
 	// 256 array is to big but ok for initial implementation
-	Option<[Option<N>; 256]>,
+	Option<[Option<Box<N>>; 256]>,
 	u8,
 );
 
@@ -1302,7 +1309,7 @@ pub struct Children256<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct Children48<N> (
-	Option<([u8; 256], [Option<N>; 48])>,
+	Option<([u8; 256], [Option<Box<N>>; 48])>,
 	u8,
 );
 
@@ -1310,7 +1317,7 @@ pub struct Children48<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct Children16<N> (
-	Option<([u8; 16], [Option<N>; 16])>,
+	Option<([u8; 16], [Option<Box<N>>; 16])>,
 	u8,
 );
 
@@ -1318,7 +1325,7 @@ pub struct Children16<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct Children4<N> (
-	Option<([u8; 4], [Option<N>; 4])>,
+	Option<([u8; 4], [Option<Box<N>>; 4])>,
 	u8,
 );
 
@@ -1554,8 +1561,8 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: N,
-	) -> Option<N> {
+		child: Box<N>,
+	) -> Option<Box<N>> {
 		if self.0.is_none() {
 			self.0 = Some(empty_256_children());
 		}
@@ -1570,7 +1577,7 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<N> {
+	) -> Option<Box<N>> {
 		if let Some(children) = self.0.as_mut() {
 			let result = replace(&mut children[index as usize], None);
 			if result.is_some() {
@@ -1591,12 +1598,14 @@ impl<N: Debug + PartialEq + Clone> Children for Children256<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&N> {
 		self.0.as_ref().and_then(|b| b[index as usize].as_ref())
+			.map(AsRef::as_ref)
 	}
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
 		self.0.as_mut().and_then(|b| b[index as usize].as_mut())
+			.map(AsMut::as_mut)
 	}
 }
 
@@ -1699,8 +1708,8 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-		child: N,
-	) -> Option<Option<N>> {
+		child: Box<N>,
+	) -> Option<Option<Box<N>>> {
 		if self.0.is_none() {
 			self.0 = Some(([UNSET48; 256], empty_48_children()));
 		}
@@ -1725,7 +1734,7 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 	fn remove_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-	) -> Option<N> {
+	) -> Option<Box<N>> {
 		if self.1 == 0 {
 			return None;
 		}
@@ -1775,7 +1784,7 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 			if index == UNSET48 {
 				return None;
 			}
-			values[index as usize].as_ref()
+			values[index as usize].as_ref().map(AsRef::as_ref)
 		} else {
 			None
 		}
@@ -1792,7 +1801,7 @@ impl<N: Debug + PartialEq + Clone> Children48<N> {
 			if index == UNSET48 {
 				return None;
 			}
-			values[index as usize].as_mut()
+			values[index as usize].as_mut().map(AsMut::as_mut)
 		} else {
 			None
 		}
@@ -1847,8 +1856,8 @@ impl<N: Debug + PartialEq + Clone> Children16<N> {
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-		child: N,
-	) -> (Option<Option<N>>, Option<N>) {
+		child: Box<N>,
+	) -> (Option<Option<Box<N>>>, Option<Box<N>>) {
 		if self.0.is_none() {
 			self.0 = Some(([0u8; 16], empty_16_children()));
 		}
@@ -1879,7 +1888,7 @@ impl<N: Debug + PartialEq + Clone> Children16<N> {
 	fn remove_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-	) -> Option<N> {
+	) -> Option<Box<N>> {
 		if self.1 == 0 {
 			return None;
 		}
@@ -1923,7 +1932,7 @@ impl<N: Debug + PartialEq + Clone> Children16<N> {
 		if let Some((indexes, values)) = self.0.as_ref() {
 			for i in 0..self.1 {
 				if indexes[i as usize] == index {
-					return values[i as usize].as_ref()
+					return values[i as usize].as_ref().map(AsRef::as_ref)
 				}
 			}
 		}
@@ -1939,7 +1948,7 @@ impl<N: Debug + PartialEq + Clone> Children16<N> {
 		if let Some((indexes, values)) = self.0.as_mut() {
 			for i in 0..self.1 {
 				if indexes[i as usize] == index {
-					return values[i as usize].as_mut()
+					return values[i as usize].as_mut().map(AsMut::as_mut)
 				}
 			}
 		}
@@ -1975,8 +1984,8 @@ impl<N: Debug + PartialEq + Clone> Children4<N> {
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-		child: N,
-	) -> (Option<Option<N>>, Option<N>) {
+		child: Box<N>,
+	) -> (Option<Option<Box<N>>>, Option<Box<N>>) {
 		if self.0.is_none() {
 			self.0 = Some(([0u8; 4], empty_4_children()));
 		}
@@ -2007,7 +2016,7 @@ impl<N: Debug + PartialEq + Clone> Children4<N> {
 	fn remove_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-	) -> Option<N> {
+	) -> Option<Box<N>> {
 		if self.1 == 0 {
 			return None;
 		}
@@ -2051,7 +2060,7 @@ impl<N: Debug + PartialEq + Clone> Children4<N> {
 		if let Some((indexes, values)) = self.0.as_ref() {
 			for i in 0..self.1 {
 				if indexes[i as usize] == index {
-					return values[i as usize].as_ref()
+					return values[i as usize].as_ref().map(AsRef::as_ref)
 				}
 			}
 		}
@@ -2067,7 +2076,7 @@ impl<N: Debug + PartialEq + Clone> Children4<N> {
 		if let Some((indexes, values)) = self.0.as_mut() {
 			for i in 0..self.1 {
 				if indexes[i as usize] == index {
-					return values[i as usize].as_mut()
+					return values[i as usize].as_mut().map(AsMut::as_mut)
 				}
 			}
 		}
@@ -2096,8 +2105,8 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		mut child: N,
-	) -> Option<N> {
+		mut child: Box<N>,
+	) -> Option<Box<N>> {
 		let mut new_256 = match self {
 			ART48_256::ART4(inner) => {
 				match inner.set_child(index, child) {
@@ -2138,7 +2147,7 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<N> {
+	) -> Option<Box<N>> {
 		let (result, do_reduce) = match self {
 			ART48_256::ART256(inner) => {
 				let result = inner.remove_child(index);
@@ -2253,14 +2262,14 @@ macro_rules! flatten_children {
 			fn set_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-				child: $inner_children_type<$($backend_gen)?>,
-			) -> Option<$inner_children_type<$($backend_gen)?>> {
+				child: Box<$inner_children_type<$($backend_gen)?>>,
+			) -> Option<Box<$inner_children_type<$($backend_gen)?>>> {
 				self.0.set_child(index, child)
 			}
 			fn remove_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<$inner_children_type<$($backend_gen)?>> {
+			) -> Option<Box<$inner_children_type<$($backend_gen)?>>> {
 				self.0.remove_child(index)
 			}
 			fn number_child(
@@ -2649,7 +2658,7 @@ impl<'a, N: NodeConf> SeekIterMut<'a, N> {
 					//		// TODO put ref in stack.
 					if let Some(node) = self.tree.tree.as_mut() {
 						let zero = PositionFor::<N>::zero();
-						self.stack.stack.push((zero, node));
+						self.stack.stack.push((zero, node.as_mut()));
 					} else {
 						self.reach_dest = true;
 					}
@@ -2949,7 +2958,7 @@ impl<'a, N: NodeConf> IterMut<'a, N> {
 					let first_key = KeyIndexFor::<N>::zero();
 					node.new_end(&mut self.stack.key, zero);
 					let zero = zero.next_by::<N::Radix>(node.depth());
-					self.stack.stack.push((zero, node, first_key));
+					self.stack.stack.push((zero, node.as_mut(), first_key));
 				} else {
 					self.finished = true;
 				}
@@ -3026,7 +3035,7 @@ impl<N: NodeConf + 'static> Iterator for OwnedIter<N> {
 impl<N: NodeConf> Tree<N> {
 	pub fn get_ref(&self, key: &[u8]) -> Option<&Vec<u8>> {
 		if let Some(top) = self.tree.as_ref() {
-			let mut current = top;
+			let mut current = top.as_ref();
 			if key.len() == 0 {
 				return current.value_ref();
 			}
@@ -3063,7 +3072,7 @@ impl<N: NodeConf> Tree<N> {
 	}
 	pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut Vec<u8>> {
 		if let Some(top) = self.tree.as_mut() {
-			let mut current = top;
+			let mut current = top.as_mut();
 			if key.len() == 0 {
 				return current.value_mut();
 			}
@@ -3103,7 +3112,7 @@ impl<N: NodeConf> Tree<N> {
 		};
 		let mut position = PositionFor::<N>::zero();
 		if let Some(top) = self.tree.as_mut() {
-			let mut current = top;
+			let mut current = top.as_mut();
 			if key.len() == 0 && current.depth() == 0 {
 				return current.set_value(value);
 			}
@@ -3120,7 +3129,7 @@ impl<N: NodeConf> Tree<N> {
 							}
 						} else {
 							let child_position = child_position.next::<N::Radix>();
-							let new_child = NodeInner::<N>::new(
+							let new_child = Node::<N>::new_box(
 								key,
 								child_position,
 								dest_position,
@@ -3136,7 +3145,7 @@ impl<N: NodeConf> Tree<N> {
 						// insert middle node
 						current.split_off(key, position, middle_position);
 						let child_start = middle_position.next::<N::Radix>();
-						let new_child = NodeInner::<N>::new(
+						let new_child = Node::<N>::new_box(
 							key,
 							child_start,
 							dest_position,
@@ -3161,7 +3170,7 @@ impl<N: NodeConf> Tree<N> {
 				}
 			}
 		} else {
-			self.tree = Some(NodeInner::<N>::new(
+			self.tree = Some(Node::<N>::new_box(
 				key,
 				position,
 				dest_position,
