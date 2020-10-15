@@ -1016,7 +1016,7 @@ impl<N: NodeConf> Node<N> {
 	pub fn fuse_child(
 		&mut self,
 	) {
-		if let Some(index) = self.children.first() {
+		if let Some(index) = self.children.first_child_index() {
 			if let Some(mut child) = self.children.remove_child(index) {
 				N::NodeBackend::resolve_mut(&mut child);
 				let position = PositionFor::<N> {
@@ -1151,7 +1151,7 @@ pub trait Children: Clone + Debug + PartialEq {
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut Self::Node>;
-	fn first(
+	fn first_child_index(
 		&self,
 	) -> Option<<Self::Radix as RadixConf>::KeyIndex> {
 		let mut ix = <Self::Radix as RadixConf>::KeyIndex::zero();
