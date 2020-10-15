@@ -162,6 +162,7 @@ pub trait NodeBackend: Clone {
 	fn set_change(&mut self);
 	fn delete<N: NodeConf<NodeBackend = Self>>(node: Node<N>);
 	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool);
+	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(node: &mut NodeInternal<N>, recursive: bool);
 }
 
 impl NodeBackend for () {
@@ -193,6 +194,7 @@ impl NodeBackend for () {
 	fn set_change(&mut self) { }
 	fn delete<N: NodeConf<NodeBackend = Self>>(_node: Node<N>) { }
 	fn commit_change<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>, _recursive: bool) { }
+	fn commit_change_internal<N: NodeConf<NodeBackend = Self>>(_node: &mut NodeInternal<N>, _recursive: bool) { }
 }
 
 pub struct Radix256Conf;
@@ -777,7 +779,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
 	type NodeBackend: NodeBackend;
 
-	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeBackend {
+	fn new_node_split(node: &NodeInternal<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeBackend {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
 			ext
 		} else {
@@ -807,10 +809,11 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	}
 }
 
+pub type Node<N> = Box<NodeInternal<N>>;
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(PartialEq)]
-pub struct Node<N>
+pub struct NodeInternal<N>
 	where
 		N: NodeConf,
 {
@@ -841,9 +844,9 @@ impl<N: NodeConf> Debug for Node<N> {
 	}
 }
 
-impl<N: NodeConf> Drop for Node<N> {
+impl<N: NodeConf> Drop for NodeInternal<N> {
 	fn drop(&mut self) {
-		N::NodeBackend::commit_change(self, false);
+		N::NodeBackend::commit_change_internal(self, false);
 	}
 }
 
@@ -863,7 +866,7 @@ impl<P, C> Node<P, C>
 }
 */
 
-impl<N: NodeConf> Node<N> {
+impl<N: NodeConf> NodeInternal<N> {
 	pub fn new(
 		key: &[u8],
 		start_position: PositionFor<N>,
@@ -871,13 +874,13 @@ impl<N: NodeConf> Node<N> {
 		value: Option<Vec<u8>>,
 		_init: (),
 		ext: N::NodeBackend,
-	) -> Self {
-		Node {
+	) -> Node<N> {
+		Box::new(NodeInternal {
 			key: PrefixKey::new_offset(key, start_position, end_position),
 			value,
 			children: N::Children::empty(),
 			ext,
-		}
+		})
 	}
 	pub fn descend(
 		&self,
@@ -952,7 +955,7 @@ impl<N: NodeConf> Node<N> {
 	pub fn get_child(
 		&self,
 		index: KeyIndexFor<N>,
-	) -> Option<&Self> {
+	) -> Option<&Box<Self>> {
 		//N::NodeBackend::resolve(self);
 		let result = self.children.get_child(index);
 		result.as_ref().map(|c| N::NodeBackend::resolve(c));
@@ -967,7 +970,7 @@ impl<N: NodeConf> Node<N> {
 	pub fn get_child_mut(
 		&mut self,
 		index: KeyIndexFor<N>,
-	) -> Option<&mut Self> {
+	) -> Option<&mut Box<Self>> {
 		//N::NodeBackend::resolve_mut(self);
 		let mut result = self.children.get_child_mut(index);
 		result.as_mut().map(|c| N::NodeBackend::resolve_mut(c));
@@ -976,15 +979,15 @@ impl<N: NodeConf> Node<N> {
 	pub fn set_child(
 		&mut self,
 		index: KeyIndexFor<N>,
-		child: Self,
-	) -> Option<Self> {
+		child: Box<Self>,
+	) -> Option<Box<Self>> {
 		self.ext.set_change();
 		self.children.set_child(index, child)
 	}
 	pub fn remove_child(
 		&mut self,
 		index: KeyIndexFor<N>,
-	) -> Option<Self> {
+	) -> Option<Box<Self>> {
 		let result = self.children.remove_child(index);
 		if result.is_some() {
 			self.ext.set_change();
@@ -1004,12 +1007,12 @@ impl<N: NodeConf> Node<N> {
 		let child_prefix = self.key.split_off::<N::Radix>(at);
 		let child_value = self.value.take();
 		let child_children = replace(&mut self.children, N::Children::empty());
-		let child = Node {
+		let child = Box::new(NodeInternal {
 			key: child_prefix,
 			value: child_value,
 			children: child_children,
 			ext, 
-		};
+		});
 		self.children.set_child(index, child);
 		self.ext.set_change();
 	}
@@ -3115,7 +3118,7 @@ impl<N: NodeConf> Tree<N> {
 							}
 						} else {
 							let child_position = child_position.next::<N::Radix>();
-							let new_child = Node::<N>::new(
+							let new_child = NodeInternal::<N>::new(
 								key,
 								child_position,
 								dest_position,
@@ -3131,7 +3134,7 @@ impl<N: NodeConf> Tree<N> {
 						// insert middle node
 						current.split_off(key, position, middle_position);
 						let child_start = middle_position.next::<N::Radix>();
-						let new_child = Node::<N>::new(
+						let new_child = NodeInternal::<N>::new(
 							key,
 							child_start,
 							dest_position,
@@ -3156,7 +3159,7 @@ impl<N: NodeConf> Tree<N> {
 				}
 			}
 		} else {
-			self.tree = Some(Node::<N>::new(
+			self.tree = Some(NodeInternal::<N>::new(
 				key,
 				position,
 				dest_position,
