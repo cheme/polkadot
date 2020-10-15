@@ -91,8 +91,8 @@ fn do_removes<M: Map>(mut map: M, to_remove: Vec<Vec<u8>>) {
 	black_box(map);
 }
 
-fn fill<M: Map>(map: &mut M, key_size: usize, total: usize, returned: usize) -> Vec<Vec<u8>> {
-	let mut rng = thread_rng();
+fn fill<M: Map>(map: &mut M, key_size: usize, total: usize, returned: usize, seed: u64) -> Vec<Vec<u8>> {
+	let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
 	let mut result = Vec::with_capacity(returned);
 	for _ in 0..total {
 		let key = (0..key_size).map(|_| rng.gen()).collect::<Vec<u8>>();
@@ -103,8 +103,8 @@ fn fill<M: Map>(map: &mut M, key_size: usize, total: usize, returned: usize) -> 
 	}
 	result
 }
-fn gen_to_insert(key_size: usize, n: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
-	let mut rng = thread_rng();
+fn gen_to_insert(key_size: usize, n: usize, seed: u64) -> Vec<(Vec<u8>, Vec<u8>)> {
+	let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
 	(0..n).map(|_| (
 		(0..key_size).map(|_| rng.gen()).collect::<Vec<u8>>(),
 		(0..key_size).map(|_| rng.gen()).collect::<Vec<u8>>()
@@ -112,6 +112,8 @@ fn gen_to_insert(key_size: usize, n: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
+	let seed = 5u64;
+	let seed_insert = 8u64;
 	for &filled in &[1_000, 10_000, 100_000] {
 		//let key_size = 1;
 		//let key_size = 2;
@@ -123,20 +125,20 @@ fn criterion_benchmark(c: &mut Criterion) {
 			b.iter_batched(
 				|| {
 					let mut map = Tree::new(());
-					let returned = fill(&mut map, key_size, filled, returned_size);
+					let returned = fill(&mut map, key_size, filled, returned_size, seed);
 					(map.clone(), returned.clone())
 				},
 				|(map, returned)| do_gets(black_box(map), black_box(returned)),
 				criterion::BatchSize::LargeInput,
 			);
 		});
-
+/*
 		let name = format!("HASHMAP GET filled={}", filled);
 		c.bench_function(&name, |b| {
 			b.iter_batched(
 				|| {
 					let mut map = HashMap::new();
-					let returned = fill(&mut map, key_size, filled, returned_size);
+					let returned = fill(&mut map, key_size, filled, returned_size, seed);
 					(map.clone(), returned.clone())
 				},
 				|(map, returned)| do_gets(black_box(map), black_box(returned)),
@@ -149,33 +151,33 @@ fn criterion_benchmark(c: &mut Criterion) {
 			b.iter_batched(
 				|| {
 					let mut map = BTreeMap::new();
-					let returned = fill(&mut map, key_size, filled, returned_size);
+					let returned = fill(&mut map, key_size, filled, returned_size, seed);
 					(map.clone(), returned.clone())
 				},
 				|(map, returned)| do_gets(black_box(map), black_box(returned)),
 				criterion::BatchSize::LargeInput,
 			);
 		});
-
+*/
 		let name = format!("RADIX REMOVE filled={}", filled);
 		c.bench_function(&name, |b| {
 			b.iter_batched(
 				|| {
 					let mut map = Tree::new(());
-					let returned = fill(&mut map, key_size, filled, returned_size);
+					let returned = fill(&mut map, key_size, filled, returned_size, seed);
 					(map.clone(), returned.clone())
 				},
 				|(map, returned)| do_removes(black_box(map), black_box(returned)),
 				criterion::BatchSize::LargeInput,
 			);
 		});
-
+/*
 		let name = format!("HASHMAP REMOVE filled={}", filled);
 		c.bench_function(&name, |b| {
 			b.iter_batched(
 				|| {
 					let mut map = HashMap::new();
-					let returned = fill(&mut map, key_size, filled, returned_size);
+					let returned = fill(&mut map, key_size, filled, returned_size, seed);
 					(map.clone(), returned.clone())
 				},
 				|(map, returned)| do_removes(black_box(map), black_box(returned)),
@@ -188,35 +190,35 @@ fn criterion_benchmark(c: &mut Criterion) {
 			b.iter_batched(
 				|| {
 					let mut map = BTreeMap::new();
-					let returned = fill(&mut map, key_size, filled, returned_size);
+					let returned = fill(&mut map, key_size, filled, returned_size, seed);
 					(map.clone(), returned.clone())
 				},
 				|(map, returned)| do_removes(black_box(map), black_box(returned)),
 				criterion::BatchSize::LargeInput,
 			);
 		});
-
+*/
 		let name = format!("RADIX INSERT filled={}", filled);
 		c.bench_function(&name, |b| {
 			b.iter_batched(
 				|| {
 					let mut map = Tree::new(());
-					let _ = fill(&mut map, key_size, filled, 0);
-					let to_insert = gen_to_insert(key_size, returned_size);
+					let _ = fill(&mut map, key_size, filled, 0, seed);
+					let to_insert = gen_to_insert(key_size, returned_size, seed_insert);
 					(map.clone(), to_insert.clone())
 				},
 				|(map, to_insert)| do_inserts(black_box(map), black_box(to_insert)),
 				criterion::BatchSize::LargeInput,
 			);
 		});
-
+/*
 		let name = format!("HASHMAP INSERT filled={}", filled);
 		c.bench_function(&name, |b| {
 			b.iter_batched(
 				|| {
 					let mut map = HashMap::new();
-					let _ = fill(&mut map, key_size, filled, 0);
-					let to_insert = gen_to_insert(key_size, returned_size);
+					let _ = fill(&mut map, key_size, filled, 0, seed);
+					let to_insert = gen_to_insert(key_size, returned_size, seed_insert);
 					(map.clone(), to_insert.clone())
 				},
 				|(map, to_insert)| do_inserts(black_box(map), black_box(to_insert)),
@@ -229,14 +231,15 @@ fn criterion_benchmark(c: &mut Criterion) {
 			b.iter_batched(
 				|| {
 					let mut map = BTreeMap::new();
-					let _ = fill(&mut map, key_size, filled, 0);
-					let to_insert = gen_to_insert(key_size, returned_size);
+					let _ = fill(&mut map, key_size, filled, 0, seed);
+					let to_insert = gen_to_insert(key_size, returned_size, seed_insert);
 					(map.clone(), to_insert.clone())
 				},
 				|(map, to_insert)| do_inserts(black_box(map), black_box(to_insert)),
 				criterion::BatchSize::LargeInput,
 			);
 		});
+*/
 	}
 }
 
