@@ -785,31 +785,10 @@ impl<'a, P> PrefixKey<&'a [u8], P>
 	}
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-/// To implement optimistic lookup implementation, we either
-/// store key in path nodes or with value.
-/// This struct is a 0 length place older used depending on the
-/// implementation.
-pub struct UnusedKey;
-
-impl Into<Key> for UnusedKey {
-	fn into(self) -> Key {
-		panic!("Incorrect type use with OPTIMISTIC LOOKUP definition");
-	}
-}
-
 pub trait NodeConf: Debug + PartialEq + Clone + Sized {
-	/// TODO implement optimistic lookup
-	const OPTIMISTIC_LOOKUP: bool;
 	type Radix: RadixConf;
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
 	type NodeBackend: NodeBackend;
-	/// For optimistic look, the key storing type `Key`, otherwhise
-	/// `UnusedKey`. Other type definition will result in error.
-	type ValueKey: Into<Key>;
-	/// For non optimistic look, the key storing type `NodeKeyBuff`, otherwhise
-	/// `UnusedKey`. Other type definition will result in error.
-	type NodeKey: Into<Key> + Clone + PartialEq;
 
 	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeBackend {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
@@ -851,7 +830,7 @@ pub struct Node<N>
 {
 	// TODO this should be able to use &'a[u8] for iteration
 	// and querying.
-	key: PrefixKey<N::NodeKey, AlignmentFor<N>>,
+	key: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
 	//pub value: usize,
 	value: Option<Vec<u8>>,
 	//pub left: usize,
@@ -2261,9 +2240,6 @@ macro_rules! flatten_children {
 		$inner_type: ident,
 		$inner_radix: ident,
 		$backend: ty,
-		$optimistic: expr,
-		$nodekey: ty,
-		$valuekey: ty,
 		$($backend_gen: ident, )?
 		$({ $backend_ty: ident: $backend_const: tt $(+ $backend_const2: tt)* })?
 	) => {
@@ -2274,12 +2250,9 @@ macro_rules! flatten_children {
 		impl<$($backend_gen)?> NodeConf for $inner_node_type<$($backend_gen)?>
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
 		{
-			const OPTIMISTIC_LOOKUP: bool = $optimistic;
 			type Radix = $inner_radix;
 			type Children = $type_alias<$($backend_gen)?>;
 			type NodeBackend = $backend;
-			type NodeKey = $nodekey;
-			type ValueKey = $valuekey;
 		}
 		type $inner_children_type<$($backend_gen)?> = Node<$inner_node_type<$($backend_gen)?>>;
 		#[derive(Derivative)]
@@ -2339,7 +2312,6 @@ flatten_children!(
 	Children256,
 	Radix256Conf,
 	(),
-	false, NodeKeyBuff, UnusedKey,
 );
 
 flatten_children!(
@@ -2349,7 +2321,6 @@ flatten_children!(
 	ART48_256,
 	Radix256Conf,
 	(),
-	false, NodeKeyBuff, UnusedKey,
 );
 
 flatten_children!(
@@ -2359,7 +2330,6 @@ flatten_children!(
 	Children256,
 	Radix256Conf,
 	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
-	false, NodeKeyBuff, UnusedKey,
 );
 flatten_children!(
 	Children256Flatten3,
@@ -2368,7 +2338,6 @@ flatten_children!(
 	Children256,
 	Radix256Conf,
 	backend::LazyExt<backend::RcBackend<backend::MapBackend>>,
-	false, NodeKeyBuff, UnusedKey,
 );
 flatten_children!(
 	Children256Flatten4,
@@ -2377,7 +2346,6 @@ flatten_children!(
 	Children256,
 	Radix256Conf,
 	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
-	false, NodeKeyBuff, UnusedKey,
 );
 
 #[derive(Derivative)]
