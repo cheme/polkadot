@@ -34,6 +34,12 @@ use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::mem::replace;
 
+
+pub type Key = NodeKeyBuff;
+//type NodeKeyBuff = smallvec::SmallVec<[u8; 64]>;
+type NodeKeyBuff = Vec<u8>;
+pub type NodeBox<N> = Box<Node<N>>;
+
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Debug)]
@@ -129,7 +135,7 @@ pub trait RadixConf {
 	/// Get index at a given position.
 	fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex>;
 	/// Set index at a given position.
-	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex);
+	fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex);
 	/// (get a mask corresponding to a end position).
 	// let mask = !(255u8 >> delta.leading_zeros()); + TODO round to nibble
 	fn mask_from_delta(delta: u8) -> MaskFor<Self>;
@@ -150,13 +156,13 @@ pub trait NodeBackend: Clone {
 	const DEFAULT: Option<Self> = None;
 	/// Indicate if we display the whole tree on format.
 	const DO_DEBUG: bool = true;
-	fn existing_node(init: &Self::Backend, key: backend::Key) -> Self;
+	fn existing_node(init: &Self::Backend, key: Key) -> Self;
 	fn new_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Self;
-	fn new_node(&self, key: backend::Key) -> Self;
+	fn new_node(&self, key: Key) -> Self;
 	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<NodeBox<N>>;
 	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N>;
-	fn backend_key<N: NodeConf<NodeBackend = Self>>(key: &[u8], position: PositionFor<N>) -> backend::Key;
-	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(key: &backend::Key) -> (&[u8], PositionFor<N>);
+	fn backend_key<N: NodeConf<NodeBackend = Self>>(key: &[u8], position: PositionFor<N>) -> Key;
+	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(key: &Key) -> (&[u8], PositionFor<N>);
 	fn resolve<N: NodeConf<NodeBackend = Self>>(node: &Node<N>);
 	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>);
 	fn set_change(&mut self);
@@ -167,13 +173,13 @@ pub trait NodeBackend: Clone {
 impl NodeBackend for () {
 	type Backend = ();
 	const DEFAULT: Option<Self> = Some(());
-	fn existing_node(_init: &Self::Backend, _key: backend::Key) -> Self {
+	fn existing_node(_init: &Self::Backend, _key: Key) -> Self {
 		()
 	}
 	fn new_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Self {
 		()
 	}
-	fn new_node(&self, _key: backend::Key) -> Self {
+	fn new_node(&self, _key: Key) -> Self {
 		()
 	}
 	fn get_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Option<NodeBox<N>> {
@@ -182,10 +188,10 @@ impl NodeBackend for () {
 	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, _key: &[u8], _position: PositionFor<N>) -> NodeBox<N> {
 		unreachable!("Inactive implementation");
 	}
-	fn backend_key<N: NodeConf<NodeBackend = Self>>(_key: &[u8], _position: PositionFor<N>) -> backend::Key {
+	fn backend_key<N: NodeConf<NodeBackend = Self>>(_key: &[u8], _position: PositionFor<N>) -> Key {
 		unreachable!("Inactive implementation");
 	}
-	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(_key: &backend::Key) -> (&[u8], PositionFor<N>) {
+	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(_key: &Key) -> (&[u8], PositionFor<N>) {
 		unreachable!("Inactive implementation");
 	}
 	fn resolve<N: NodeConf<NodeBackend = Self>>(_node: &Node<N>) { }
@@ -222,7 +228,7 @@ impl RadixConf for Radix16Conf {
 			at.mask.index(*byte)
 		})
 	}
-	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex) {
+	fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 		if key.len() <= at.index {
 			key.resize(at.index + 1, 0);
 		}
@@ -251,7 +257,7 @@ impl RadixConf for Radix256Conf {
 			at.mask.index(*byte)
 		})
 	}
-	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex) {
+	fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 		if key.len() <= at.index {
 			key.resize(at.index + 1, 0);
 		}
@@ -284,7 +290,7 @@ impl RadixConf for Radix2Conf {
 			at.mask.index(*byte) > 0
 		})
 	}
-	fn set_index(key: &mut Vec<u8>, at: Position<Self::Alignment>, index: Self::KeyIndex) {
+	fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 		if key.len() <= at.index {
 			key.resize(at.index + 1, 0);
 		}
@@ -494,7 +500,7 @@ impl<P> Position<P>
 	fn index<R: RadixConf<Alignment = P>>(&self, key: &[u8]) -> Option<R::KeyIndex> {
 		R::index(key, *self)
 	}
-	fn set_index<R: RadixConf<Alignment = P>>(&self, key: &mut Vec<u8>, index: R::KeyIndex) {
+	fn set_index<R: RadixConf<Alignment = P>>(&self, key: &mut NodeKeyBuff, index: R::KeyIndex) {
 		R::set_index(key, *self, index)
 	}
 
@@ -556,24 +562,31 @@ impl<D, P> PrefixKey<D, P>
 		}
 	}
 }
-impl<P> PrefixKey<Vec<u8>, P>
+impl<P> PrefixKey<NodeKeyBuff, P>
 	where
 		P: PrefixKeyConf,
 {
 	// TODO consider returning the skipped byte aka key index (avoid fetching it before split_off)
 	fn split_off<R: RadixConf<Alignment = P>>(&mut self, position: Position<P>) -> Self {
 		let split_end = self.end;
-		let mut split = if position.mask == MaskFor::<R>::first() {
+		let mut split: NodeKeyBuff = if position.mask == MaskFor::<R>::first() {
+			// No splitoff for smallvec
+			//let split = self.data[position.index..].into();
+			//self.data.truncate(position.index);
 			let split = self.data.split_off(position.index);
 			self.end = position.mask;
 			split
 		} else {
+			// No splitoff for smallvec
+			//let split = self.data[position.index + 1..].into();
+			//self.data.truncate(position.index + 1);
 			let split = self.data.split_off(position.index + 1);
 			self.end = position.mask;
 			split
 		};
 		let (split_start, increment) = R::advance(position.mask);
 		if increment > 0 {
+			//split = split[increment..].into();
 			split = split.split_off(increment);
 		}
 		PrefixKey {
@@ -730,7 +743,7 @@ fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 	}
 */
 
-impl<P> PrefixKey<Vec<u8>, P>
+impl<P> PrefixKey<NodeKeyBuff, P>
 	where
 		P: PrefixKeyConf,
 {
@@ -738,9 +751,9 @@ impl<P> PrefixKey<Vec<u8>, P>
 	/// `empty` should be use.
 	fn new_offset<Q: Borrow<[u8]>>(key: Q, start: Position<P>, end: Position<P>) -> Self {
 		let data = if end.mask == P::Mask::first() {
-			key.borrow()[start.index..end.index].to_vec()
+			key.borrow()[start.index..end.index].into()
 		} else {
-			key.borrow()[start.index..end.index + 1].to_vec()
+			key.borrow()[start.index..end.index + 1].into()
 		};
 
 /*		if data.len() > 0 {
@@ -781,7 +794,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
 			ext
 		} else {
-			let mut key = key.to_vec();
+			let mut key = key.into();
 			node.new_end(&mut key, position);
 			let at = at.next::<Self::Radix>();
 			// TODO consider owned variant of `backend_key` !!
@@ -807,7 +820,6 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	}
 }
 
-pub type NodeBox<N> = Box<Node<N>>;
 
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -818,7 +830,7 @@ pub struct Node<N>
 {
 	// TODO this should be able to use &'a[u8] for iteration
 	// and querying.
-	key: PrefixKey<Vec<u8>, AlignmentFor<N>>,
+	key: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
 	//pub value: usize,
 	value: Option<Vec<u8>>,
 	//pub left: usize,
@@ -1052,7 +1064,7 @@ impl<N: NodeConf> Node<N> {
 	}
 
 	// TODO make it a trait function?
-	pub fn new_end(&self, stack: &mut Vec<u8>, node_position: PositionFor<N>) {
+	pub fn new_end(&self, stack: &mut Key, node_position: PositionFor<N>) {
 		let depth = self.depth();
 		if depth == 0 {
 			return;
@@ -2475,7 +2487,7 @@ impl<'a, N: NodeConf> SeekIter<'a, N> {
 			tree: self.tree,
 			stack: IterStack {
 				stack,
-				key: self.dest.to_vec(),
+				key: self.dest.into(),
 			},
 			finished: false,
 		}
@@ -2491,7 +2503,7 @@ impl<'a, N: NodeConf> SeekIter<'a, N> {
 			tree: self.tree,
 			stack: IterStack {
 				stack,
-				key: self.dest.to_vec(),
+				key: self.dest.into(),
 			},
 			finished: false,
 		}
@@ -2614,7 +2626,7 @@ impl<'a, N: NodeConf> SeekIterMut<'a, N> {
 			tree: self.tree,
 			stack: IterStackMut {
 				stack,
-				key: self.dest.to_vec(),
+				key: self.dest.into(),
 			},
 			finished: false,
 		}
@@ -2630,7 +2642,7 @@ impl<'a, N: NodeConf> SeekIterMut<'a, N> {
 			tree: self.tree,
 			stack: IterStackMut {
 				stack,
-				key: self.dest.to_vec(),
+				key: self.dest.into(),
 			},
 			finished: false,
 		}
@@ -2710,7 +2722,7 @@ struct IterStack<'a, N: NodeConf> {
 	// downward, or where we descend from if going upward.
 	stack: Vec<(PositionFor<N>, &'a Node<N>, KeyIndexFor<N>)>,
 	// The key used with the stack.
-	key: Vec<u8>,
+	key: Key,
 }
 
 /// Stack of Node to reach a position.
@@ -2720,14 +2732,14 @@ struct IterStackMut<N: NodeConf> {
 	// downward, or where we descend from if going upward.
 	stack: Vec<(PositionFor<N>, *mut Node<N>, KeyIndexFor<N>)>,
 	// The key used with the stack.
-	key: Vec<u8>,
+	key: Key,
 }
 
 impl<'a, N: NodeConf> IterStack<'a, N> {
 	fn new() -> Self {
 		IterStack {
 			stack: Vec::new(),
-			key: Vec::new(),
+			key: Default::default(),
 		}
 	}
 }
@@ -2736,7 +2748,7 @@ impl<N: NodeConf> IterStackMut<N> {
 	fn new() -> Self {
 		IterStackMut {
 			stack: Vec::new(),
-			key: Vec::new(),
+			key: Default::default(),
 		}
 	}
 }
@@ -2974,7 +2986,7 @@ impl<'a, N: NodeConf> IterMut<'a, N> {
 impl<'a, N: NodeConf> Iterator for Iter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Vec<u8>, PositionFor<N>, &'a Node<N>);
+	type Item = (Key, PositionFor<N>, &'a Node<N>);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(p, n)| (self.stack.key.clone(), p, n))
 	}
@@ -2983,7 +2995,7 @@ impl<'a, N: NodeConf> Iterator for Iter<'a, N> {
 impl<'a, N: NodeConf> Iterator for IterMut<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Vec<u8>, PositionFor<N>, &'a mut Node<N>);
+	type Item = (Key, PositionFor<N>, &'a mut Node<N>);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(p, n)| (self.stack.key.clone(), p, n))
 	}
@@ -2992,7 +3004,7 @@ impl<'a, N: NodeConf> Iterator for IterMut<'a, N> {
 impl<'a, N: NodeConf> Iterator for ValueIter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Vec<u8>, &'a [u8]);
+	type Item = (Key, &'a [u8]);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
@@ -3010,7 +3022,7 @@ impl<'a, N: NodeConf> Iterator for ValueIter<'a, N> {
 impl<'a, N: NodeConf> Iterator for ValueIterMut<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Vec<u8>, &'a mut Vec<u8>);
+	type Item = (Key, &'a mut Vec<u8>);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
@@ -3026,7 +3038,7 @@ impl<'a, N: NodeConf> Iterator for ValueIterMut<'a, N> {
 }
 
 impl<N: NodeConf + 'static> Iterator for OwnedIter<N> {
-	type Item = (Vec<u8>, Vec<u8>);
+	type Item = (Key, Vec<u8>);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.iter.next().map(|(key, value)| (key, value.clone()))
 	}

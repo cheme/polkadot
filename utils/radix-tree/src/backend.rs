@@ -19,7 +19,7 @@
 
 use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
 	Position, MaskKeyByte, NodeIndex, NodeBox, NodeBackend, RadixConf,
-	PrefixKeyConf, BackendFor, Children, Node};
+	PrefixKeyConf, BackendFor, Children, Node, Key};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use alloc::boxed::Box;
@@ -30,8 +30,7 @@ use derivative::Derivative;
 #[cfg(feature = "std")]
 pub use arc_backend::ArcBackend;
 
-pub type Key = Vec<u8>;
-pub type MapBackend = HashMap<Vec<u8>, Vec<u8>>;
+pub type MapBackend = HashMap<Key, Vec<u8>>;
 
 /// Read only backend to use with a tree.
 pub trait ReadBackend {
@@ -46,7 +45,7 @@ impl<'a, B: ReadBackend> ReadBackend for &'a B {
 
 /// The backend to use for a tree.
 pub trait BackendInner: ReadBackend {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>);
+	fn write(&mut self, k: Key, v: Vec<u8>);
 	fn remove(&mut self, k: &[u8]);
 }
 
@@ -60,7 +59,7 @@ impl ReadBackend for MapBackend {
 }
 
 impl BackendInner for MapBackend {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+	fn write(&mut self, k: Key, v: Vec<u8>) {
 		self.insert(k, v);
 	}
 	fn remove(&mut self, k: &[u8]) {
@@ -82,16 +81,16 @@ impl<B> RcBackend<B> {
 fn key_addressed<N: NodeConf>(
 	key: &[u8],
 	start_postion: PositionFor<N>,
-) -> Vec<u8> {
+) -> Key {
 	if <N::Radix as RadixConf>::Alignment::ALIGNED {
-		key[..start_postion.index].to_vec()
+		key[..start_postion.index].into()
 	} else {
 		if start_postion.mask == MaskFor::<N::Radix>::first() {
-			let mut result = key[..start_postion.index - 1].to_vec();
+			let mut result: Key = key[..start_postion.index - 1].into();
 			result.push(255);
 			result
 		} else {
-			let mut result = key[..start_postion.index].to_vec();
+			let mut result: Key = key[..start_postion.index].into();
 			if start_postion.index != 0 {
 				result[start_postion.index - 1] = start_postion.mask.mask_end(result[start_postion.index - 1]);
 			};
@@ -187,7 +186,7 @@ fn decode_node<N>(
 	let mut key_index = KeyIndexFor::<N>::zero();
 	let mut byte_index = 0;
 	let mut input_index = 0;
-	let mut child_key = key.to_vec();
+	let mut child_key = key.into();
 	node.new_end(&mut child_key, start);
 	let child_position = end.next::<N::Radix>();
 	loop {
@@ -264,7 +263,7 @@ impl<B: BackendInner> ReadBackend for RcBackend<B> {
 }
 
 impl<B: BackendInner> BackendInner for RcBackend<B> {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+	fn write(&mut self, k: Key, v: Vec<u8>) {
 		self.0.borrow_mut().write(k, v)
 	}
 	fn remove(&mut self, k: &[u8]) {
@@ -278,7 +277,7 @@ impl<B: BackendInner> Backend for RcBackend<B> { }
 /// The backend to use for a tree.
 pub struct TransactionBackend<B> {
 	inner: B,
-	changes: HashMap<Vec<u8>, Option<Vec<u8>>>,
+	changes: HashMap<Key, Option<Vec<u8>>>,
 }
 
 impl<B> TransactionBackend<B> {
@@ -288,7 +287,7 @@ impl<B> TransactionBackend<B> {
 			changes: Default::default(),
 		}
 	}
-	pub fn drain_changes(&mut self) -> HashMap<Vec<u8>, Option<Vec<u8>>> {
+	pub fn drain_changes(&mut self) -> HashMap<Key, Option<Vec<u8>>> {
 		core::mem::replace(&mut self.changes, Default::default())
 	}
 }
@@ -302,11 +301,11 @@ impl<B: ReadBackend> ReadBackend for TransactionBackend<B> {
 }
 
 impl<B: ReadBackend> BackendInner for TransactionBackend<B> {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+	fn write(&mut self, k: Key, v: Vec<u8>) {
 		self.changes.insert(k, Some(v));
 	}
 	fn remove(&mut self, k: &[u8]) {
-		self.changes.insert(k.to_vec(), None);
+		self.changes.insert(k.into(), None);
 	}
 }
 
