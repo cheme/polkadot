@@ -36,8 +36,8 @@ use core::mem::replace;
 
 
 pub type Key = NodeKeyBuff;
-//type NodeKeyBuff = smallvec::SmallVec<[u8; 64]>;
-type NodeKeyBuff = Vec<u8>;
+type NodeKeyBuff = smallvec::SmallVec<[u8; 32]>;
+//type NodeKeyBuff = Vec<u8>;
 pub type NodeBox<N> = Box<Node<N>>;
 
 #[derive(Derivative)]
@@ -571,23 +571,23 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 		let split_end = self.end;
 		let mut split: NodeKeyBuff = if position.mask == MaskFor::<R>::first() {
 			// No splitoff for smallvec
-			//let split = self.data[position.index..].into();
-			//self.data.truncate(position.index);
-			let split = self.data.split_off(position.index);
+			let split = self.data[position.index..].into();
+			self.data.truncate(position.index);
+			// let split = self.data.split_off(position.index);
 			self.end = position.mask;
 			split
 		} else {
 			// No splitoff for smallvec
-			//let split = self.data[position.index + 1..].into();
-			//self.data.truncate(position.index + 1);
-			let split = self.data.split_off(position.index + 1);
+			let split = self.data[position.index + 1..].into();
+			self.data.truncate(position.index + 1);
+			//let split = self.data.split_off(position.index + 1);
 			self.end = position.mask;
 			split
 		};
 		let (split_start, increment) = R::advance(position.mask);
 		if increment > 0 {
-			//split = split[increment..].into();
-			split = split.split_off(increment);
+			split = split[increment..].into();
+			//split = split.split_off(increment);
 		}
 		PrefixKey {
 			data: split,
