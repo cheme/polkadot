@@ -43,7 +43,7 @@ pub type NodeBox<N> = Box<Node<N>>;
 /// Value trait constraints.
 pub trait Value: Clone + Debug + PartialEq { }
 
-impl<V: Codec + Clone + Debug + PartialEq> Value for V { }
+impl<V: Clone + Debug + PartialEq> Value for V { }
 
 #[derive(Derivative)]
 #[derivative(Clone)]
