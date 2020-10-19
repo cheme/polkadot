@@ -62,8 +62,6 @@ impl<V: Any + Codec> Aggregate for V {
 	}
 }
 
-#[derive(PartialEq, Eq)]
-#[derive(Encode, Decode, Debug)]
 enum AggregateState {
 	Building,
 	Unresolved,
@@ -73,7 +71,32 @@ enum AggregateState {
 	Changed(Box<dyn Aggregate>, Vec<(StorageKey, Option<AggregateFilter>)>),
 }
 
-#[derive(Encode, Decode)]
+#[cfg(feature = "std")]
+impl std::fmt::Debug for AggregateState {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		"TODO aggregate state debug".fmt(f)
+	}
+}
+#[cfg(not(feature = "std"))]
+impl alloc::fmt::Debug for AggregateState {
+	fn fmt(&self, f: &mut alloc::fmt::Formatter) -> alloc::fmt::Result {
+		"TODO aggregate state debug".fmt(f)
+	}
+}
+
+impl sp_std::cmp::PartialEq<Self> for AggregateState {
+	fn eq(&self, other: &Self) -> bool {
+		// we assume equality only for same pointer, this is not
+		// correct but needed for using radix_tree: TODO should relax radix_tree bound
+		match (self, other) {
+			(_, _) => false,
+		}
+	}
+}
+
+impl sp_std::cmp::Eq for AggregateState {
+}
+
 struct FiltersTransaction {
 	location: StorageKey,
 	filter: AggregateFilter,
