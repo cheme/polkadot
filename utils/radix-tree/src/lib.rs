@@ -153,7 +153,7 @@ type KeyIndexFor<N> = <<N as NodeConf>::Radix as RadixConf>::KeyIndex;
 type BackendFor<N> = <<N as NodeConf>::NodeBackend as NodeBackend<N>>::Backend;
 
 /// Node backend management.
-pub trait NodeBackend<N: NodeConf<NodeBackend = Self>>: Clone {
+pub trait NodeBackend<N: NodeConf>: Clone {
 	/// Inner backend used.
 	type Backend: Clone;
 	/// Default value for inactive implementation.
