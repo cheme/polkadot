@@ -169,7 +169,7 @@ fn decode_node<N>(
 		}
 	};
 
-	let value: Option<Vec<u8>> = Decode::decode(input)?;
+	let value: Option<N::Value> = Decode::decode(input)?;
 	let mut node = Node::<N>::new(
 		prefix.as_slice(),
 		PositionFor::<N> {

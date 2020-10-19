@@ -33,12 +33,17 @@ use alloc::borrow::Borrow;
 use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::mem::replace;
-
+use codec::Codec;
 
 pub type Key = NodeKeyBuff;
 //type NodeKeyBuff = smallvec::SmallVec<[u8; 64]>;
 type NodeKeyBuff = Vec<u8>;
 pub type NodeBox<N> = Box<Node<N>>;
+
+/// Value trait constraints.
+pub trait Value: Codec + Clone + Debug + PartialEq { }
+
+impl<V: Codec + Clone + Debug + PartialEq> Value for V { }
 
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -63,6 +68,7 @@ pub trait PrefixKeyConf {
 	type Mask: MaskKeyByte;
 	/// Encode the byte mask, it needs to be ordered when encoded.
 	fn encode_mask(mask: Self::Mask) -> u8;
+	/// Decode the byte mask.
 	fn decode_mask(mask: u8) -> Self::Mask;
 }
 
@@ -787,6 +793,7 @@ impl<'a, P> PrefixKey<&'a [u8], P>
 
 pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	type Radix: RadixConf;
+	type Value: Value;
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
 	type NodeBackend: NodeBackend;
 
@@ -832,7 +839,7 @@ pub struct Node<N>
 	// and querying.
 	key: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
 	//pub value: usize,
-	value: Option<Vec<u8>>,
+	value: Option<N::Value>,
 	//pub left: usize,
 	//pub right: usize,
 	// TODO if backend behind, then Self would neeed to implement a Node trait with lazy loading...
@@ -882,7 +889,7 @@ impl<N: NodeConf> Node<N> {
 		key: &[u8],
 		start_position: PositionFor<N>,
 		end_position: PositionFor<N>,
-		value: Option<Vec<u8>>,
+		value: Option<N::Value>,
 		init: (),
 		ext: N::NodeBackend,
 	) -> NodeBox<N> {
@@ -892,7 +899,7 @@ impl<N: NodeConf> Node<N> {
 		key: &[u8],
 		start_position: PositionFor<N>,
 		end_position: PositionFor<N>,
-		value: Option<Vec<u8>>,
+		value: Option<N::Value>,
 		_init: (),
 		ext: N::NodeBackend,
 	) -> Node<N> {
@@ -942,30 +949,25 @@ impl<N: NodeConf> Node<N> {
 	) -> usize {
 		self.key.depth()
 	}
-	pub fn value_ref(
-		&self,
-	) -> Option<&Vec<u8>> {
-		self.value.as_ref()
-	}
 	pub fn value(
 		&self,
-	) -> Option<&[u8]> {
-		self.value.as_ref().map(|v| v.as_slice())
+	) -> Option<&N::Value> {
+		self.value.as_ref()
 	}
 	pub fn value_mut(
 		&mut self,
-	) -> Option<&mut Vec<u8>> {
+	) -> Option<&mut N::Value> {
 		self.value.as_mut()
 	}
 	pub fn set_value(
 		&mut self,
-		value: Vec<u8>,
-	) -> Option<Vec<u8>> {
+		value: N::Value,
+	) -> Option<N::Value> {
 		replace(&mut self.value, Some(value))
 	}
 	pub fn remove_value(
 		&mut self,
-	) -> Option<Vec<u8>> {
+	) -> Option<N::Value> {
 		replace(&mut self.value, None)
 	}
 	pub fn number_child(
@@ -2246,27 +2248,28 @@ macro_rules! flatten_children {
 		#[derive(Clone)]
 		#[derive(Debug)]
 		#[derive(PartialEq)]
-		pub struct $inner_node_type<$($backend_gen)?>($(core::marker::PhantomData<$backend_gen>)?);
-		impl<$($backend_gen)?> NodeConf for $inner_node_type<$($backend_gen)?>
+		pub struct $inner_node_type<V: Value, $($backend_gen)?>(core::marker::PhantomData<V>, $(core::marker::PhantomData<$backend_gen>)?);
+		impl<V: Value, $($backend_gen)?> NodeConf for $inner_node_type<V, $($backend_gen)?>
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
 		{
 			type Radix = $inner_radix;
-			type Children = $type_alias<$($backend_gen)?>;
+			type Value = V;
+			type Children = $type_alias<V, $($backend_gen)?>;
 			type NodeBackend = $backend;
 		}
-		type $inner_children_type<$($backend_gen)?> = Node<$inner_node_type<$($backend_gen)?>>;
+		type $inner_children_type<V, $($backend_gen)?> = Node<$inner_node_type<V, $($backend_gen)?>>;
 		#[derive(Derivative)]
 		#[derivative(Clone)]
 		#[derivative(PartialEq)]
 		#[derivative(Debug)]
-		pub struct $type_alias<$($backend_gen)?>($inner_type<$inner_children_type<$($backend_gen)?>>)
+		pub struct $type_alias<V: Value, $($backend_gen)?>($inner_type<$inner_children_type<V, $($backend_gen)?>>)
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?;
 
-		impl<$($backend_gen)?> Children for $type_alias<$($backend_gen)?>
+		impl<V: Value, $($backend_gen)?> Children for $type_alias<V, $($backend_gen)?>
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
 		{
 			type Radix = $inner_radix;
-			type Node = Node<$inner_node_type<$($backend_gen)?>>;
+			type Node = Node<$inner_node_type<V, $($backend_gen)?>>;
 
 			fn empty() -> Self {
 				$type_alias($inner_type::empty())
@@ -2274,14 +2277,14 @@ macro_rules! flatten_children {
 			fn set_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-				child: Box<$inner_children_type<$($backend_gen)?>>,
-			) -> Option<Box<$inner_children_type<$($backend_gen)?>>> {
+				child: Box<$inner_children_type<V, $($backend_gen)?>>,
+			) -> Option<Box<$inner_children_type<V, $($backend_gen)?>>> {
 				self.0.set_child(index, child)
 			}
 			fn remove_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<Box<$inner_children_type<$($backend_gen)?>>> {
+			) -> Option<Box<$inner_children_type<V, $($backend_gen)?>>> {
 				self.0.remove_child(index)
 			}
 			fn number_child(
@@ -2292,13 +2295,13 @@ macro_rules! flatten_children {
 			fn get_child(
 				&self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&$inner_children_type<$($backend_gen)?>> {
+			) -> Option<&$inner_children_type<V, $($backend_gen)?>> {
 				self.0.get_child(index)
 			}
 			fn get_child_mut(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&mut $inner_children_type<$($backend_gen)?>> {
+			) -> Option<&mut $inner_children_type<V, $($backend_gen)?>> {
 				self.0.get_child_mut(index)
 			}
 		}
@@ -2560,7 +2563,7 @@ impl<'a, N: NodeConf> Iterator for SeekIter<'a, N> {
 }
 
 impl<'a, N: NodeConf> Iterator for SeekValueIter<'a, N> {
-	type Item = (&'a [u8], &'a [u8]);
+	type Item = (&'a [u8], &'a N::Value);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((key, _pos, node)) = self.0.next() {
@@ -2701,7 +2704,7 @@ impl<'a, N: NodeConf> Iterator for SeekIterMut<'a, N> {
 }
 
 impl<'a, N: NodeConf> Iterator for SeekValueIterMut<'a, N> {
-	type Item = (&'a [u8], &'a [u8]);
+	type Item = (&'a [u8], &'a N::Value);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((key, _pos, node)) = self.0.next() {
@@ -3004,7 +3007,7 @@ impl<'a, N: NodeConf> Iterator for IterMut<'a, N> {
 impl<'a, N: NodeConf> Iterator for ValueIter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Key, &'a [u8]);
+	type Item = (Key, &'a N::Value);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
@@ -3022,7 +3025,7 @@ impl<'a, N: NodeConf> Iterator for ValueIter<'a, N> {
 impl<'a, N: NodeConf> Iterator for ValueIterMut<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
-	type Item = (Key, &'a mut Vec<u8>);
+	type Item = (Key, &'a mut N::Value);
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
@@ -3038,18 +3041,18 @@ impl<'a, N: NodeConf> Iterator for ValueIterMut<'a, N> {
 }
 
 impl<N: NodeConf + 'static> Iterator for OwnedIter<N> {
-	type Item = (Key, Vec<u8>);
+	type Item = (Key, N::Value);
 	fn next(&mut self) -> Option<Self::Item> {
 		self.iter.next().map(|(key, value)| (key, value.clone()))
 	}
 }
 	
 impl<N: NodeConf> Tree<N> {
-	pub fn get_ref(&self, key: &[u8]) -> Option<&Vec<u8>> {
+	pub fn get(&self, key: &[u8]) -> Option<&N::Value> {
 		if let Some(top) = self.tree.as_ref() {
 			let mut current = top.as_ref();
 			if key.len() == 0 {
-				return current.value_ref();
+				return current.value();
 			}
 			let dest_position = Position {
 				index: key.len(),
@@ -3071,7 +3074,7 @@ impl<N: NodeConf> Tree<N> {
 						return None;
 					},
 					Descent::Match(_position) => {
-						return current.value_ref();
+						return current.value();
 					},
 				}
 			}
@@ -3079,10 +3082,7 @@ impl<N: NodeConf> Tree<N> {
 			None
 		}
 	}
-	pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
-		self.get_ref(key).map(|v| v.as_slice())
-	}
-	pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut Vec<u8>> {
+	pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut N::Value> {
 		if let Some(top) = self.tree.as_mut() {
 			let mut current = top.as_mut();
 			if key.len() == 0 {
@@ -3117,7 +3117,7 @@ impl<N: NodeConf> Tree<N> {
 		}
 	}
 
-	pub fn insert(&mut self, key: &[u8], value: Vec<u8>) -> Option<Vec<u8>> {
+	pub fn insert(&mut self, key: &[u8], value: N::Value) -> Option<N::Value> {
 		let dest_position = PositionFor::<N> {
 			index: key.len(),
 			mask: MaskFor::<N::Radix>::first(),
@@ -3193,7 +3193,7 @@ impl<N: NodeConf> Tree<N> {
 			None
 		}
 	}
-	pub fn remove(&mut self, key: &[u8]) -> Option<Vec<u8>> {
+	pub fn remove(&mut self, key: &[u8]) -> Option<N::Value> {
 		let mut position = PositionFor::<N>::zero();
 		let mut empty_tree = None;
 		if let Some(top) = self.tree.as_mut() {
@@ -3290,10 +3290,10 @@ pub mod $module_name {
 
 	#[cfg(test)]
 	const CHECK_BACKEND: bool = $check_backend_ser;
-	type NodeConf = super::$backend_conf;
+	type NodeConf = super::$backend_conf<Vec<u8>>;
 
-	fn new_backend() -> BackendFor<$backend_conf> {
-		BackendFor::<$backend_conf>::default()
+	fn new_backend() -> BackendFor<NodeConf> {
+		BackendFor::<NodeConf>::default()
 	}
 
 	#[test]
@@ -3492,10 +3492,11 @@ mod lazy_test {
 	use crate::*;
 	use alloc::collections::btree_map::BTreeMap;
 
-	type NodeConf = super::Node256LazyHashBackend;
+	type Value = Vec<u8>;
+	type NodeConf = super::Node256LazyHashBackend<Value>;
 
-	fn new_backend() -> BackendFor<Node256LazyHashBackend> {
-		BackendFor::<Node256LazyHashBackend>::default()
+	fn new_backend() -> BackendFor<Node256LazyHashBackend<Value>> {
+		BackendFor::<Node256LazyHashBackend<Value>>::default()
 	}
 
 	fn compare_iter_mut<K: Borrow<[u8]>>(left: &mut Tree::<NodeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
@@ -3539,7 +3540,7 @@ mod lazy_test {
 		assert_eq!(None, t1.insert(b"key3", value1.clone()));
 		assert_eq!(None, t2.insert(b"key3", value1.clone()));
 		// Shouldn't call get on a lazy tree, but here we got all in memory.
-		assert_eq!(t1.get(&b"key3"[..]), Some(value1.as_slice()));
+		assert_eq!(t1.get(&b"key3"[..]), Some(&value1));
 		assert_eq!(t1.get_mut(&b"key3"[..]), Some(&mut value1));
 		if drop {
 			core::mem::drop(t1);
