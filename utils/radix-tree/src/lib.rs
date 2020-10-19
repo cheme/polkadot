@@ -41,7 +41,7 @@ type NodeKeyBuff = Vec<u8>;
 pub type NodeBox<N> = Box<Node<N>>;
 
 /// Value trait constraints.
-pub trait Value: Codec + Clone + Debug + PartialEq { }
+pub trait Value: Clone + Debug + PartialEq { }
 
 impl<V: Codec + Clone + Debug + PartialEq> Value for V { }
 
@@ -150,10 +150,10 @@ pub trait RadixConf {
 type PositionFor<N> = Position<<<N as NodeConf>::Radix as RadixConf>::Alignment>;
 type AlignmentFor<N> = <<N as NodeConf>::Radix as RadixConf>::Alignment;
 type KeyIndexFor<N> = <<N as NodeConf>::Radix as RadixConf>::KeyIndex;
-type BackendFor<N> = <<N as NodeConf>::NodeBackend as NodeBackend>::Backend;
+type BackendFor<N> = <<N as NodeConf>::NodeBackend as NodeBackend<N>>::Backend;
 
 /// Node backend management.
-pub trait NodeBackend: Clone {
+pub trait NodeBackend<N: NodeConf<NodeBackend = Self>>: Clone {
 	/// Inner backend used.
 	type Backend: Clone;
 	/// Default value for inactive implementation.
@@ -163,48 +163,48 @@ pub trait NodeBackend: Clone {
 	/// Indicate if we display the whole tree on format.
 	const DO_DEBUG: bool = true;
 	fn existing_node(init: &Self::Backend, key: Key) -> Self;
-	fn new_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Self;
+	fn new_root(init: &Self::Backend) -> Self;
 	fn new_node(&self, key: Key) -> Self;
-	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<NodeBox<N>>;
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N>;
-	fn backend_key<N: NodeConf<NodeBackend = Self>>(key: &[u8], position: PositionFor<N>) -> Key;
-	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(key: &Key) -> (&[u8], PositionFor<N>);
-	fn resolve<N: NodeConf<NodeBackend = Self>>(node: &Node<N>);
-	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>);
+	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>>;
+	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N>;
+	fn backend_key(key: &[u8], position: PositionFor<N>) -> Key;
+	fn from_backend_key(key: &Key) -> (&[u8], PositionFor<N>);
+	fn resolve(node: &Node<N>);
+	fn resolve_mut(node: &mut Node<N>);
 	fn set_change(&mut self);
-	fn delete<N: NodeConf<NodeBackend = Self>>(node: NodeBox<N>);
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool);
+	fn delete(node: NodeBox<N>);
+	fn commit_change(node: &mut Node<N>, recursive: bool);
 }
 
-impl NodeBackend for () {
+impl<N: NodeConf<NodeBackend = ()>> NodeBackend<N> for () {
 	type Backend = ();
 	const DEFAULT: Option<Self> = Some(());
 	fn existing_node(_init: &Self::Backend, _key: Key) -> Self {
 		()
 	}
-	fn new_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Self {
+	fn new_root(_init: &Self::Backend) -> Self {
 		()
 	}
 	fn new_node(&self, _key: Key) -> Self {
 		()
 	}
-	fn get_root<N: NodeConf<NodeBackend = Self>>(_init: &Self::Backend) -> Option<NodeBox<N>> {
+	fn get_root(_init: &Self::Backend) -> Option<NodeBox<N>> {
 		unreachable!("Inactive implementation");
 	}
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, _key: &[u8], _position: PositionFor<N>) -> NodeBox<N> {
+	fn fetch_node(&self, _key: &[u8], _position: PositionFor<N>) -> NodeBox<N> {
 		unreachable!("Inactive implementation");
 	}
-	fn backend_key<N: NodeConf<NodeBackend = Self>>(_key: &[u8], _position: PositionFor<N>) -> Key {
+	fn backend_key(_key: &[u8], _position: PositionFor<N>) -> Key {
 		unreachable!("Inactive implementation");
 	}
-	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(_key: &Key) -> (&[u8], PositionFor<N>) {
+	fn from_backend_key(_key: &Key) -> (&[u8], PositionFor<N>) {
 		unreachable!("Inactive implementation");
 	}
-	fn resolve<N: NodeConf<NodeBackend = Self>>(_node: &Node<N>) { }
-	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>) { }
+	fn resolve(_node: &Node<N>) { }
+	fn resolve_mut(_node: &mut Node<N>) { }
 	fn set_change(&mut self) { }
-	fn delete<N: NodeConf<NodeBackend = Self>>(_node: NodeBox<N>) { }
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>, _recursive: bool) { }
+	fn delete(_node: NodeBox<N>) { }
+	fn commit_change(_node: &mut Node<N>, _recursive: bool) { }
 }
 
 pub struct Radix256Conf;
@@ -795,7 +795,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 	type Radix: RadixConf;
 	type Value: Value;
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
-	type NodeBackend: NodeBackend;
+	type NodeBackend: NodeBackend<Self>;
 
 	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeBackend {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
@@ -805,7 +805,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 			node.new_end(&mut key, position);
 			let at = at.next::<Self::Radix>();
 			// TODO consider owned variant of `backend_key` !!
-			let key = Self::NodeBackend::backend_key::<Self>(key.as_slice(), at);
+			let key = Self::NodeBackend::backend_key(key.as_slice(), at);
 			Self::NodeBackend::new_node(&node.ext, key)
 		}
 	}
@@ -814,7 +814,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
 			ext
 		} else {
-			let key = Self::NodeBackend::backend_key::<Self>(key, position);
+			let key = Self::NodeBackend::backend_key(key, position);
 			Self::NodeBackend::new_node(&node.ext, key)
 		}
 	}
@@ -822,7 +822,7 @@ pub trait NodeConf: Debug + PartialEq + Clone + Sized {
 		if let Some(ext) = Self::NodeBackend::DEFAULT {
 			ext
 		} else {
-			Self::NodeBackend::new_root::<Self>(init)
+			Self::NodeBackend::new_root(init)
 		}
 	}
 }
@@ -2236,6 +2236,7 @@ impl<N: Debug + PartialEq + Clone> Children for ART48_256<N> {
 /// and a `RadixConf` type.
 macro_rules! flatten_children {
 	(
+		$(!value_bound: $( $value_const: ident)*,)?
 		$type_alias: ident,
 		$inner_children_type: ident,
 		$inner_node_type: ident,
@@ -2249,7 +2250,7 @@ macro_rules! flatten_children {
 		#[derive(Debug)]
 		#[derive(PartialEq)]
 		pub struct $inner_node_type<V: Value, $($backend_gen)?>(core::marker::PhantomData<V>, $(core::marker::PhantomData<$backend_gen>)?);
-		impl<V: Value, $($backend_gen)?> NodeConf for $inner_node_type<V, $($backend_gen)?>
+		impl<V: Value $($(+ $value_const)*)?, $($backend_gen)?> NodeConf for $inner_node_type<V, $($backend_gen)?>
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
 		{
 			type Radix = $inner_radix;
@@ -2262,10 +2263,10 @@ macro_rules! flatten_children {
 		#[derivative(Clone)]
 		#[derivative(PartialEq)]
 		#[derivative(Debug)]
-		pub struct $type_alias<V: Value, $($backend_gen)?>($inner_type<$inner_children_type<V, $($backend_gen)?>>)
+		pub struct $type_alias<V: Value $($(+ $value_const)*)?, $($backend_gen)?>($inner_type<$inner_children_type<V, $($backend_gen)?>>)
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?;
 
-		impl<V: Value, $($backend_gen)?> Children for $type_alias<V, $($backend_gen)?>
+		impl<V: Value $($(+ $value_const)*)?, $($backend_gen)?> Children for $type_alias<V, $($backend_gen)?>
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
 		{
 			type Radix = $inner_radix;
@@ -2327,6 +2328,7 @@ flatten_children!(
 );
 
 flatten_children!(
+	!value_bound: Codec,
 	Children256Flatten2,
 	Node256Flatten2,
 	Node256HashBackend,
@@ -2334,7 +2336,9 @@ flatten_children!(
 	Radix256Conf,
 	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
 );
+
 flatten_children!(
+	!value_bound: Codec,
 	Children256Flatten3,
 	Node256Flatten3,
 	Node256LazyHashBackend,
@@ -2342,7 +2346,9 @@ flatten_children!(
 	Radix256Conf,
 	backend::LazyExt<backend::RcBackend<backend::MapBackend>>,
 );
+
 flatten_children!(
+	!value_bound: Codec,
 	Children256Flatten4,
 	Node256Flatten4,
 	Node256TxBackend,
