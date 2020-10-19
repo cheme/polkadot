@@ -84,20 +84,6 @@ impl alloc::fmt::Debug for AggregateState {
 	}
 }
 
-impl sp_std::cmp::PartialEq<Self> for AggregateState {
-	fn eq(&self, other: &Self) -> bool {
-		// Rather incorrect implementation, but radix_tree need it and bound is hard
-		// to relax. TODO try to relax a bit more.
-		match (self, other) {
-			(&AggregateState::Dropped, &AggregateState::Dropped) => true,
-			(_, _) => false,
-		}
-	}
-}
-
-impl sp_std::cmp::Eq for AggregateState {
-}
-
 struct FiltersTransaction {
 	location: StorageKey,
 	filter: AggregateFilter,
