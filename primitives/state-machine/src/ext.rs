@@ -103,6 +103,9 @@ pub struct Ext<'a, H, N, B>
 	/// The overlayed changes destined for the Offchain DB.
 	#[cfg(feature = "std")]
 	offchain_overlay: &'a mut OffchainOverlayedChanges,
+	/// The cached aggregate state.
+/// TODO cache_aggregate: &'a mut crate::aggregate::OverlayedAggregates,
+/// That is initialized from client one.
 	/// The storage backend to read from.
 	backend: &'a B,
 	/// The cache for the storage transactions.
@@ -118,7 +121,6 @@ pub struct Ext<'a, H, N, B>
 	#[cfg(feature = "std")]
 	extensions: Option<OverlayedExtensions<'a>>,
 }
-
 
 impl<'a, H, N, B> Ext<'a, H, N, B>
 	where

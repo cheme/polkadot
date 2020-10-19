@@ -244,6 +244,11 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 
 	/// Update the whitelist for tracking db reads/writes
 	fn set_whitelist(&self, _: Vec<TrackedStorageKey>) {}
+
+	/// Get a cached aggregate.
+	fn encoded_aggregate(&self, _key: &[u8]) -> Option<Vec<u8>> {
+		None
+	}
 }
 
 impl<'a, T: Backend<H>, H: Hasher> Backend<H> for &'a T {

@@ -26,6 +26,7 @@ mod in_memory_backend;
 #[cfg(feature = "std")]
 mod changes_trie;
 mod error;
+mod aggregates;
 mod ext;
 #[cfg(feature = "std")]
 mod testing;
