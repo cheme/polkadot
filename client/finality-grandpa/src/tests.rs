@@ -26,7 +26,7 @@ use sc_network_test::{
 	TestClient, TestNetFactory, FullPeerConfig,
 };
 use sc_network::config::{ProtocolConfig, BoxFinalityProofRequestBuilder};
-use parking_lot::Mutex;
+use parking_lot::{RwLock, Mutex};
 use futures_timer::Delay;
 use tokio::runtime::{Runtime, Handle};
 use sp_keyring::Ed25519Keyring;
@@ -43,6 +43,7 @@ use parity_scale_codec::Decode;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT, HashFor};
 use sp_runtime::generic::{BlockId, DigestItem};
 use sp_core::{H256, crypto::Public};
+use sp_keystore::{SyncCryptoStorePtr, SyncCryptoStore};
 use sp_finality_grandpa::{GRANDPA_ENGINE_ID, AuthorityList, EquivocationProof, GrandpaApi, OpaqueKeyOwnershipProof};
 use sp_state_machine::{InMemoryBackend, prove_read, read_proof_check};
 
@@ -54,9 +55,10 @@ use consensus_changes::ConsensusChanges;
 use sc_block_builder::BlockBuilderProvider;
 use sc_consensus::LongestChain;
 use sp_state_machine::SimpleProof;
+use sc_keystore::LocalKeystore;
+use sp_application_crypto::key_types::GRANDPA;
 
 type ProofCheckBackend<H> = sp_state_machine::InMemoryProofCheckBackend<H, SimpleProof>;
-
 type TestLinkHalf =
 	LinkHalf<Block, PeersFullClient, LongestChain<substrate_test_runtime_client::Backend, Block>>;
 type PeerData = Mutex<Option<TestLinkHalf>>;
@@ -288,10 +290,11 @@ fn make_ids(keys: &[Ed25519Keyring]) -> AuthorityList {
 	keys.iter().map(|key| key.clone().public().into()).map(|id| (id, 1)).collect()
 }
 
-fn create_keystore(authority: Ed25519Keyring) -> (BareCryptoStorePtr, tempfile::TempDir) {
+fn create_keystore(authority: Ed25519Keyring) -> (SyncCryptoStorePtr, tempfile::TempDir) {
 	let keystore_path = tempfile::tempdir().expect("Creates keystore path");
-	let keystore = sc_keystore::Store::open(keystore_path.path(), None).expect("Creates keystore");
-	keystore.write().insert_ephemeral_from_seed::<AuthorityPair>(&authority.to_seed())
+	let keystore = Arc::new(LocalKeystore::open(keystore_path.path(), None)
+		.expect("Creates keystore"));
+	SyncCryptoStore::ed25519_generate_new(&*keystore, GRANDPA, Some(&authority.to_seed()))
 		.expect("Creates authority key");
 
 	(keystore, keystore_path)
@@ -370,7 +373,6 @@ fn run_to_completion_with<F>(
 			},
 			link: link,
 			network: net_service,
-			inherent_data_providers: InherentDataProviders::new(),
 			telemetry_on_connect: None,
 			voting_rule: (),
 			prometheus_registry: None,
@@ -420,7 +422,7 @@ fn add_forced_change(
 
 #[test]
 fn finalize_3_voters_no_observers() {
-	let _ = env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 	let peers = &[Ed25519Keyring::Alice, Ed25519Keyring::Bob, Ed25519Keyring::Charlie];
 	let voters = make_ids(peers);
@@ -502,7 +504,6 @@ fn finalize_3_voters_1_full_observer() {
 			},
 			link: link,
 			network: net_service,
-			inherent_data_providers: InherentDataProviders::new(),
 			telemetry_on_connect: None,
 			voting_rule: (),
 			prometheus_registry: None,
@@ -525,7 +526,7 @@ fn finalize_3_voters_1_full_observer() {
 
 #[test]
 fn transition_3_voters_twice_1_full_observer() {
-	let _ = env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let peers_a = &[
 		Ed25519Keyring::Alice,
 		Ed25519Keyring::Bob,
@@ -666,7 +667,6 @@ fn transition_3_voters_twice_1_full_observer() {
 			},
 			link: link,
 			network: net_service,
-			inherent_data_providers: InherentDataProviders::new(),
 			telemetry_on_connect: None,
 			voting_rule: (),
 			prometheus_registry: None,
@@ -795,7 +795,7 @@ fn sync_justifications_on_change_blocks() {
 
 #[test]
 fn finalizes_multiple_pending_changes_in_order() {
-	let _ = env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 
 	let peers_a = &[Ed25519Keyring::Alice, Ed25519Keyring::Bob, Ed25519Keyring::Charlie];
@@ -855,7 +855,7 @@ fn finalizes_multiple_pending_changes_in_order() {
 
 #[test]
 fn force_change_to_new_set() {
-	let _ = env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 	// two of these guys are offline.
 	let genesis_authorities = &[
@@ -1017,7 +1017,7 @@ fn voter_persists_its_votes() {
 	use futures::future;
 	use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver};
 
-	let _ = env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 
 	// we have two authorities but we'll only be running the voter for alice
@@ -1056,7 +1056,7 @@ fn voter_persists_its_votes() {
 			voter_rx: TracingUnboundedReceiver<()>,
 			net: Arc<Mutex<GrandpaTestNet>>,
 			client: PeersClient,
-			keystore: BareCryptoStorePtr,
+			keystore: SyncCryptoStorePtr,
 		}
 
 		impl Future for ResettableVoter {
@@ -1091,7 +1091,6 @@ fn voter_persists_its_votes() {
 							},
 							link,
 							network: this.net.lock().peers[0].network_service().clone(),
-							inherent_data_providers: InherentDataProviders::new(),
 							telemetry_on_connect: None,
 							voting_rule: VotingRulesBuilder::default().build(),
 							prometheus_registry: None,
@@ -1273,7 +1272,7 @@ fn voter_persists_its_votes() {
 
 #[test]
 fn finalize_3_voters_1_light_observer() {
-	let _ = env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 	let authorities = &[Ed25519Keyring::Alice, Ed25519Keyring::Bob, Ed25519Keyring::Charlie];
 	let voters = make_ids(authorities);
@@ -1318,7 +1317,7 @@ fn finalize_3_voters_1_light_observer() {
 
 #[test]
 fn finality_proof_is_fetched_by_light_client_when_consensus_data_changes() {
-	let _ = ::env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 
 	let peers = &[Ed25519Keyring::Alice];
@@ -1348,7 +1347,7 @@ fn empty_finality_proof_is_returned_to_light_client_when_authority_set_is_differ
 	// for debug: to ensure that without forced change light client will sync finality proof
 	const FORCE_CHANGE: bool = true;
 
-	let _ = ::env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 
 	// two of these guys are offline.
@@ -1412,7 +1411,7 @@ fn empty_finality_proof_is_returned_to_light_client_when_authority_set_is_differ
 
 #[test]
 fn voter_catches_up_to_latest_round_when_behind() {
-	let _ = env_logger::try_init();
+	sp_tracing::try_init_simple();
 	let mut runtime = Runtime::new().unwrap();
 
 	let peers = &[Ed25519Keyring::Alice, Ed25519Keyring::Bob];
@@ -1437,7 +1436,6 @@ fn voter_catches_up_to_latest_round_when_behind() {
 			},
 			link,
 			network: net.lock().peer(peer_id).network_service().clone(),
-			inherent_data_providers: InherentDataProviders::new(),
 			telemetry_on_connect: None,
 			voting_rule: (),
 			prometheus_registry: None,
@@ -1536,7 +1534,7 @@ type TestEnvironment<N, VR> = Environment<
 
 fn test_environment<N, VR>(
 	link: &TestLinkHalf,
-	keystore: Option<BareCryptoStorePtr>,
+	keystore: Option<SyncCryptoStorePtr>,
 	network_service: N,
 	voting_rule: VR,
 ) -> TestEnvironment<N, VR>

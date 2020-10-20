@@ -18,10 +18,13 @@
 //! Trie-based state machine backend essence used to read values
 //! from storage.
 
-use std::ops::Deref;
+#[cfg(feature = "std")]
 use std::sync::Arc;
-use std::marker::PhantomData;
-use log::{debug, warn};
+#[cfg(feature = "std")]
+use parking_lot::RwLock;
+use sp_std::marker::PhantomData;
+use sp_std::{ops::Deref, boxed::Box, vec::Vec};
+use crate::{warn, debug};
 use hash_db::{self, Hasher, Prefix};
 use sp_trie::{Trie, MemoryDB, PrefixedMemoryDB, DBValue, ChildrenProofMap,
 	empty_child_trie_root, read_trie_value, read_child_trie_value,
@@ -30,9 +33,15 @@ use sp_trie::trie_types::{TrieDB, TrieError, Layout};
 use crate::{backend::Consolidate, StorageKey, StorageValue};
 use sp_core::storage::{ChildInfo, ChildrenMap};
 use codec::{Decode, Encode};
-use parking_lot::RwLock;
 
-type Result<T> = std::result::Result<T, String>;
+#[cfg(not(feature = "std"))]
+macro_rules! format {
+	($($arg:tt)+) => (
+		crate::DefaultError
+	);
+}
+
+type Result<V> = sp_std::result::Result<V, crate::DefaultError>;
 
 /// Patricia trie-based storage trait.
 pub trait Storage<H: Hasher>: Send + Sync {
@@ -45,6 +54,9 @@ pub struct TrieBackendEssence<S: TrieBackendStorage<H>, H: Hasher> {
 	storage: S,
 	root: H::Out,
 	empty: H::Out,
+	// TODO root registration for no_std is not needed, we can make it fine
+	// if we put a trait (putting RwLock behind std).
+	#[cfg(feature = "std")]
 	/// If defined, we store encoded visited roots for top_trie and child trie in this
 	/// map. It also act as a cache.
 	register_roots: Option<RwLock<ChildrenMap<Option<StorageValue>>>>,
@@ -84,12 +96,14 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 	pub fn new(
 		storage: S,
 		root: H::Out,
+		#[cfg(feature = "std")]
 		register_roots: Option<RwLock<ChildrenMap<Option<StorageValue>>>>,
 	) -> Self {
 		TrieBackendEssence {
 			storage,
 			root,
 			empty: H::hash(&[0u8]),
+			#[cfg(feature = "std")]
 			register_roots,
 		}
 	}
@@ -104,6 +118,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		&mut self.storage
 	}
 
+	#[cfg(feature = "std")]
 	/// Get register root reference.
 	pub fn register_roots(&self) -> Option<&RwLock<ChildrenMap<Option<StorageValue>>>> {
 		self.register_roots.as_ref()
@@ -131,10 +146,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 	}
 
 	/// Access the root of the child storage in its parent trie
-	pub(crate) fn child_root_encoded(
-		&self,
-		child_info: &ChildInfo,
-	) -> Result<Option<StorageValue>> {
+	pub(crate) fn child_root(&self, child_info: &ChildInfo) -> Result<Option<StorageValue>> {
+		#[cfg(feature = "std")]
 		if let Some(cache) = self.register_roots.as_ref() {
 			if let Some(result) = cache.read().get(child_info) {
 				return Ok(result.clone());
@@ -143,30 +156,10 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 
 		let root: Option<StorageValue> = self.storage(child_info.prefixed_storage_key().as_slice())?;
 
+		#[cfg(feature = "std")]
 		if let Some(cache) = self.register_roots.as_ref() {
 			cache.write().insert(child_info.clone(), root.clone());
 		}
-
-		Ok(root)
-	}
-
-	/// Access the root of the child storage in its parent trie
-	fn child_root(&self, child_info: &ChildInfo) -> Result<Option<H::Out>> {
-		if let Some(cache) = self.register_roots.as_ref() {
-			if let Some(root) = cache.read().get(child_info) {
-				let root = root.as_ref()
-					.and_then(|encoded_root| Decode::decode(&mut &encoded_root[..]).ok());
-				return Ok(root);
-			}
-		}
-
-		let encoded_root = self.storage(child_info.prefixed_storage_key().as_slice())?;
-		if let Some(cache) = self.register_roots.as_ref() {
-			cache.write().insert(child_info.clone(), encoded_root.clone());
-		}
-
-		let root: Option<H::Out> = encoded_root
-			.and_then(|encoded_root| Decode::decode(&mut &encoded_root[..]).ok());
 
 		Ok(root)
 	}
@@ -178,10 +171,18 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>> {
-		let hash = match self.child_root(child_info)? {
+		let child_root = match self.child_root(child_info)? {
 			Some(child_root) => child_root,
 			None => return Ok(None),
 		};
+
+		let mut hash = H::Out::default();
+
+		if child_root.len() != hash.as_ref().len() {
+			return Err(format!("Invalid child storage hash at {:?}", child_info.storage_key()));
+		}
+		// note: child_root and hash must be same size, panics otherwise.
+		hash.as_mut().copy_from_slice(&child_root[..]);
 
 		self.next_storage_key_from_root(&hash, Some(child_info), key)
 	}
@@ -248,7 +249,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>> {
-		let root = self.child_root_encoded(child_info)?
+		let root = self.child_root(child_info)?
 			.unwrap_or_else(|| empty_child_trie_root::<Layout<H>>().encode());
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
@@ -267,7 +268,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		child_info: &ChildInfo,
 		f: F,
 	) {
-		let root = match self.child_root_encoded(child_info) {
+		let root = match self.child_root(child_info) {
 			Ok(v) => v.unwrap_or_else(|| empty_child_trie_root::<Layout<H>>().encode()),
 			Err(e) => {
 				debug!(target: "trie", "Error while iterating child storage: {}", e);
@@ -292,7 +293,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		prefix: &[u8],
 		mut f: F,
 	) {
-		let root_vec = match self.child_root_encoded(child_info) {
+		let root_vec = match self.child_root(child_info) {
 			Ok(v) => v.unwrap_or_else(|| empty_child_trie_root::<Layout<H>>().encode()),
 			Err(e) => {
 				debug!(target: "trie", "Error while iterating child storage: {}", e);
@@ -316,7 +317,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		mut f: F,
 		child_info: Option<&ChildInfo>,
 	) {
-		let mut iter = move |db| -> std::result::Result<(), Box<TrieError<H::Out>>> {
+		let mut iter = move |db| -> sp_std::result::Result<(), Box<TrieError<H::Out>>> {
 			let trie = TrieDB::<H>::new(db, root)?;
 
 			for x in TrieDBIterator::new_prefixed(&trie, prefix)? {
@@ -447,10 +448,13 @@ impl<'a, H: Hasher, S: TrieBackendStorage<H>> TrieBackendStorage<H> for &'a S {
 }
 
 // This implementation is used by normal storage trie clients.
+#[cfg(feature = "std")]
 impl<H: Hasher> TrieBackendStorage<H> for Arc<dyn Storage<H>> {
 	type Overlay = PrefixedMemoryDB<H>;
 
 	fn get(&self, _child_info: &ChildInfo, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>> {
+		// TODO how comes we do not use child info here, is it because this is a flatten one?
+		// Add assertion??
 		Storage::<H>::get(self.deref(), key, prefix)
 	}
 }
@@ -460,6 +464,8 @@ impl<H: Hasher> TrieBackendStorage<H> for PrefixedMemoryDB<H> {
 	type Overlay = PrefixedMemoryDB<H>;
 
 	fn get(&self, _child_info: &ChildInfo, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>> {
+		// TODO how comes we do not use child info here, is it because this is a flatten one?
+		// Add assertion?
 		Ok(hash_db::HashDB::get(self, key, prefix))
 	}
 }
@@ -468,6 +474,8 @@ impl<H: Hasher> TrieBackendStorage<H> for MemoryDB<H> {
 	type Overlay = MemoryDB<H>;
 
 	fn get(&self, _child_info: &ChildInfo, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>> {
+		// TODO how comes we do not use child info here, is it because this is a flatten one?
+		// Add assertion?
 		Ok(hash_db::HashDB::get(self, key, prefix))
 	}
 }

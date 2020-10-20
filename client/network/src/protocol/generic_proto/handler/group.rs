@@ -53,8 +53,8 @@ use crate::protocol::generic_proto::{
 };
 
 use bytes::BytesMut;
-use libp2p::core::{either::{EitherError, EitherOutput}, ConnectedPoint, PeerId};
-use libp2p::core::upgrade::{EitherUpgrade, UpgradeError, SelectUpgrade, InboundUpgrade, OutboundUpgrade};
+use libp2p::core::{either::EitherOutput, ConnectedPoint, PeerId};
+use libp2p::core::upgrade::{UpgradeError, SelectUpgrade, InboundUpgrade, OutboundUpgrade};
 use libp2p::swarm::{
 	ProtocolsHandler, ProtocolsHandlerEvent,
 	IntoProtocolsHandler,
@@ -70,7 +70,7 @@ use futures::{
 };
 use log::{debug, error};
 use parking_lot::{Mutex, RwLock};
-use std::{borrow::Cow, error, io, str, sync::Arc, task::{Context, Poll}};
+use std::{borrow::Cow, str, sync::Arc, task::{Context, Poll}};
 
 /// Number of pending notifications in asynchronous contexts.
 /// See [`NotificationsSink::reserve_notification`] for context.
@@ -113,10 +113,11 @@ pub struct NotifsHandler {
 	/// Handler for backwards-compatibility.
 	legacy: LegacyProtoHandler,
 
-	/// In the situation where `legacy.is_open()` is true, but we haven't sent out any
-	/// [`NotifsHandlerOut::Open`] event yet, this contains the handshake received on the legacy
-	/// substream.
-	pending_legacy_handshake: Option<Vec<u8>>,
+	/// In the situation where either the legacy substream has been opened or the handshake-bearing
+	/// notifications protocol is open, but we haven't sent out any [`NotifsHandlerOut::Open`]
+	/// event yet, this contains the received handshake waiting to be reported through the
+	/// external API.
+	pending_handshake: Option<Vec<u8>>,
 
 	/// State of this handler.
 	enabled: EnabledState,
@@ -172,7 +173,7 @@ impl IntoProtocolsHandler for NotifsHandlerProto {
 				.collect(),
 			endpoint: connected_point.clone(),
 			legacy: self.legacy.into_handler(remote_peer_id, connected_point),
-			pending_legacy_handshake: None,
+			pending_handshake: None,
 			enabled: EnabledState::Initial,
 			pending_in: Vec::new(),
 			notifications_sink_rx: None,
@@ -228,14 +229,6 @@ pub enum NotifsHandlerOut {
 
 		/// Message that has been received.
 		message: BytesMut,
-	},
-
-	/// An error has happened on the protocol level with this node.
-	ProtocolError {
-		/// If true the error is severe, such as a protocol violation.
-		is_severe: bool,
-		/// The error that happened.
-		error: Box<dyn error::Error + Send + Sync>,
 	},
 }
 
@@ -360,11 +353,20 @@ impl NotifsHandlerProto {
 	/// `list` is a list of notification protocols names, and the message to send as part of the
 	/// handshake. At the moment, the message is always the same whether we open a substream
 	/// ourselves or respond to handshake from the remote.
+	///
+	/// The first protocol in `list` is special-cased as the protocol that contains the handshake
+	/// to report through the [`NotifsHandlerOut::Open`] event.
+	///
+	/// # Panic
+	///
+	/// - Panics if `list` is empty.
+	///
 	pub fn new(
 		legacy: RegisteredProtocol,
 		list: impl Into<Vec<(Cow<'static, str>, Arc<RwLock<Vec<u8>>>)>>,
 	) -> Self {
 		let list = list.into();
+		assert!(!list.is_empty());
 
 		let out_handlers = list
 			.clone()
@@ -391,28 +393,30 @@ impl ProtocolsHandler for NotifsHandler {
 	type OutEvent = NotifsHandlerOut;
 	type Error = NotifsHandlerError;
 	type InboundProtocol = SelectUpgrade<UpgradeCollec<NotificationsIn>, RegisteredProtocol>;
-	type OutboundProtocol = EitherUpgrade<NotificationsOut, RegisteredProtocol>;
-	// Index within the `out_handlers`; None for legacy
-	type OutboundOpenInfo = Option<usize>;
+	type OutboundProtocol = NotificationsOut;
+	// Index within the `out_handlers`
+	type OutboundOpenInfo = usize;
+	type InboundOpenInfo = ();
 
-	fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol> {
+	fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, ()> {
 		let in_handlers = self.in_handlers.iter()
 			.map(|(h, _)| h.listen_protocol().into_upgrade().1)
 			.collect::<UpgradeCollec<_>>();
 
 		let proto = SelectUpgrade::new(in_handlers, self.legacy.listen_protocol().into_upgrade().1);
-		SubstreamProtocol::new(proto)
+		SubstreamProtocol::new(proto, ())
 	}
 
 	fn inject_fully_negotiated_inbound(
 		&mut self,
-		out: <Self::InboundProtocol as InboundUpgrade<NegotiatedSubstream>>::Output
+		out: <Self::InboundProtocol as InboundUpgrade<NegotiatedSubstream>>::Output,
+		(): ()
 	) {
 		match out {
 			EitherOutput::First((out, num)) =>
-				self.in_handlers[num].0.inject_fully_negotiated_inbound(out),
+				self.in_handlers[num].0.inject_fully_negotiated_inbound(out, ()),
 			EitherOutput::Second(out) =>
-				self.legacy.inject_fully_negotiated_inbound(out),
+				self.legacy.inject_fully_negotiated_inbound(out, ()),
 		}
 	}
 
@@ -421,13 +425,7 @@ impl ProtocolsHandler for NotifsHandler {
 		out: <Self::OutboundProtocol as OutboundUpgrade<NegotiatedSubstream>>::Output,
 		num: Self::OutboundOpenInfo
 	) {
-		match (out, num) {
-			(EitherOutput::First(out), Some(num)) =>
-				self.out_handlers[num].0.inject_fully_negotiated_outbound(out, ()),
-			(EitherOutput::Second(out), None) =>
-				self.legacy.inject_fully_negotiated_outbound(out, ()),
-			_ => error!("inject_fully_negotiated_outbound called with wrong parameters"),
-		}
+		self.out_handlers[num].0.inject_fully_negotiated_outbound(out, ())
 	}
 
 	fn inject_event(&mut self, message: NotifsHandlerIn) {
@@ -476,45 +474,30 @@ impl ProtocolsHandler for NotifsHandler {
 
 	fn inject_dial_upgrade_error(
 		&mut self,
-		num: Option<usize>,
-		err: ProtocolsHandlerUpgrErr<EitherError<NotificationsHandshakeError, io::Error>>
+		num: usize,
+		err: ProtocolsHandlerUpgrErr<NotificationsHandshakeError>
 	) {
-		match (err, num) {
-			(ProtocolsHandlerUpgrErr::Timeout, Some(num)) =>
+		match err {
+			ProtocolsHandlerUpgrErr::Timeout =>
 				self.out_handlers[num].0.inject_dial_upgrade_error(
 					(),
 					ProtocolsHandlerUpgrErr::Timeout
 				),
-			(ProtocolsHandlerUpgrErr::Timeout, None) =>
-				self.legacy.inject_dial_upgrade_error((), ProtocolsHandlerUpgrErr::Timeout),
-			(ProtocolsHandlerUpgrErr::Timer, Some(num)) =>
+			ProtocolsHandlerUpgrErr::Timer =>
 				self.out_handlers[num].0.inject_dial_upgrade_error(
 					(),
 					ProtocolsHandlerUpgrErr::Timer
 				),
-			(ProtocolsHandlerUpgrErr::Timer, None) =>
-				self.legacy.inject_dial_upgrade_error((), ProtocolsHandlerUpgrErr::Timer),
-			(ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Select(err)), Some(num)) =>
+			ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Select(err)) =>
 				self.out_handlers[num].0.inject_dial_upgrade_error(
 					(),
 					ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Select(err))
 				),
-			(ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Select(err)), None) =>
-				self.legacy.inject_dial_upgrade_error(
-					(),
-					ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Select(err))
-				),
-			(ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Apply(EitherError::A(err))), Some(num)) =>
+			ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Apply(err)) =>
 				self.out_handlers[num].0.inject_dial_upgrade_error(
 					(),
 					ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Apply(err))
 				),
-			(ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Apply(EitherError::B(err))), None) =>
-				self.legacy.inject_dial_upgrade_error(
-					(),
-					ProtocolsHandlerUpgrErr::Upgrade(UpgradeError::Apply(err))
-				),
-			_ => error!("inject_dial_upgrade_error called with bad parameters"),
 		}
 	}
 
@@ -612,30 +595,30 @@ impl ProtocolsHandler for NotifsHandler {
 			}
 		}
 
-		// If `self.pending_legacy_handshake` is `Some`, we are in a state where the legacy
-		// substream is open but the user isn't aware yet of the substreams being open.
+		// If `self.pending_handshake` is `Some`, we are in a state where the handshake-bearing
+		// substream (either the legacy substream or the one special-cased as providing the
+		// handshake) is open but the user isn't aware yet of the substreams being open.
 		// When that is the case, neither the legacy substream nor the incoming notifications
 		// substreams should be polled, otherwise there is a risk of receiving messages from them.
-		if self.pending_legacy_handshake.is_none() {
+		if self.pending_handshake.is_none() {
 			while let Poll::Ready(ev) = self.legacy.poll(cx) {
 				match ev {
-					ProtocolsHandlerEvent::OutboundSubstreamRequest { protocol, info: () } =>
-						return Poll::Ready(ProtocolsHandlerEvent::OutboundSubstreamRequest {
-							protocol: protocol.map_upgrade(EitherUpgrade::B),
-							info: None,
-						}),
+					ProtocolsHandlerEvent::OutboundSubstreamRequest { protocol, .. } =>
+						match *protocol.info() {},
 					ProtocolsHandlerEvent::Custom(LegacyProtoHandlerOut::CustomProtocolOpen {
 						received_handshake,
 						..
 					}) => {
-						self.pending_legacy_handshake = Some(received_handshake);
+						if self.notifications_sink_rx.is_none() {
+							debug_assert!(self.pending_handshake.is_none());
+							self.pending_handshake = Some(received_handshake);
+						}
 						cx.waker().wake_by_ref();
 						return Poll::Pending;
 					},
 					ProtocolsHandlerEvent::Custom(LegacyProtoHandlerOut::CustomProtocolClosed { reason, .. }) => {
 						// We consciously drop the receivers despite notifications being potentially
 						// still buffered up.
-						debug_assert!(self.notifications_sink_rx.is_some());
 						self.notifications_sink_rx = None;
 
 						return Poll::Ready(ProtocolsHandlerEvent::Custom(
@@ -643,15 +626,10 @@ impl ProtocolsHandler for NotifsHandler {
 						))
 					},
 					ProtocolsHandlerEvent::Custom(LegacyProtoHandlerOut::CustomMessage { message }) => {
-						debug_assert!(self.notifications_sink_rx.is_some());
 						return Poll::Ready(ProtocolsHandlerEvent::Custom(
 							NotifsHandlerOut::CustomMessage { message }
 						))
 					},
-					ProtocolsHandlerEvent::Custom(LegacyProtoHandlerOut::ProtocolError { is_severe, error }) =>
-						return Poll::Ready(ProtocolsHandlerEvent::Custom(
-							NotifsHandlerOut::ProtocolError { is_severe, error }
-						)),
 					ProtocolsHandlerEvent::Close(err) =>
 						return Poll::Ready(ProtocolsHandlerEvent::Close(NotifsHandlerError::Legacy(err))),
 				}
@@ -660,7 +638,7 @@ impl ProtocolsHandler for NotifsHandler {
 
 		for (handler_num, (handler, handshake_message)) in self.in_handlers.iter_mut().enumerate() {
 			loop {
-				let poll = if self.pending_legacy_handshake.is_none() {
+				let poll = if self.notifications_sink_rx.is_some() {
 					handler.poll(cx)
 				} else {
 					handler.poll_process(cx)
@@ -689,7 +667,7 @@ impl ProtocolsHandler for NotifsHandler {
 						},
 					ProtocolsHandlerEvent::Custom(NotifsInHandlerOut::Closed) => {},
 					ProtocolsHandlerEvent::Custom(NotifsInHandlerOut::Notif(message)) => {
-						debug_assert!(self.pending_legacy_handshake.is_none());
+						debug_assert!(self.pending_handshake.is_none());
 						if self.notifications_sink_rx.is_some() {
 							let msg = NotifsHandlerOut::Notification {
 								message,
@@ -705,19 +683,24 @@ impl ProtocolsHandler for NotifsHandler {
 		for (handler_num, (handler, _)) in self.out_handlers.iter_mut().enumerate() {
 			while let Poll::Ready(ev) = handler.poll(cx) {
 				match ev {
-					ProtocolsHandlerEvent::OutboundSubstreamRequest { protocol, info: () } =>
+					ProtocolsHandlerEvent::OutboundSubstreamRequest { protocol } =>
 						return Poll::Ready(ProtocolsHandlerEvent::OutboundSubstreamRequest {
-							protocol: protocol.map_upgrade(EitherUpgrade::A),
-							info: Some(handler_num),
+							protocol: protocol
+								.map_info(|()| handler_num),
 						}),
 					ProtocolsHandlerEvent::Close(err) => void::unreachable(err),
 
-					// At the moment we don't actually care whether any notifications protocol
-					// opens or closes.
-					// Whether our communications with the remote are open or closed entirely
-					// depends on the legacy substream, because as long as we are open the user of
-					// this struct might try to send legacy protocol messages which we need to
-					// deliver for things to work properly.
+					// Opened substream on the handshake-bearing notification protocol.
+					ProtocolsHandlerEvent::Custom(NotifsOutHandlerOut::Open { handshake })
+						if handler_num == 0 =>
+					{
+						if self.notifications_sink_rx.is_none() && self.pending_handshake.is_none() {
+							self.pending_handshake = Some(handshake);
+						}
+					},
+
+					// Nothing to do in response to other notification substreams being opened
+					// or closed.
 					ProtocolsHandlerEvent::Custom(NotifsOutHandlerOut::Open { .. }) => {},
 					ProtocolsHandlerEvent::Custom(NotifsOutHandlerOut::Closed) => {},
 					ProtocolsHandlerEvent::Custom(NotifsOutHandlerOut::Refused) => {},
@@ -726,7 +709,7 @@ impl ProtocolsHandler for NotifsHandler {
 		}
 
 		if self.out_handlers.iter().all(|(h, _)| h.is_open() || h.is_refused()) {
-			if let Some(handshake) = self.pending_legacy_handshake.take() {
+			if let Some(handshake) = self.pending_handshake.take() {
 				let (async_tx, async_rx) = mpsc::channel(ASYNC_NOTIFICATIONS_BUFFER_SIZE);
 				let (sync_tx, sync_rx) = mpsc::channel(SYNC_NOTIFICATIONS_BUFFER_SIZE);
 				let notifications_sink = NotificationsSink {

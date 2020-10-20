@@ -281,21 +281,8 @@ pub fn parse_str_addr(addr_str: &str) -> Result<(PeerId, Multiaddr), ParseErr> {
 /// Splits a Multiaddress into a Multiaddress and PeerId.
 pub fn parse_addr(mut addr: Multiaddr)-> Result<(PeerId, Multiaddr), ParseErr> {
 	let who = match addr.pop() {
-		Some(multiaddr::Protocol::P2p(key)) => {
-			if !matches!(key.algorithm(), multiaddr::multihash::Code::Identity) {
-				// (note: this is the "person bowing" emoji)
-				log::warn!(
-					"🙇 You are using the peer ID {}. This peer ID uses a legacy, deprecated \
-					representation that will no longer be supported in the future. \
-					Please refresh it by performing a RPC query to the appropriate node, \
-					by looking at its logs, or by using `subkey inspect-node-key` on its \
-					private key.",
-					bs58::encode(key.as_bytes()).into_string()
-				);
-			}
-
-			PeerId::from_multihash(key).map_err(|_| ParseErr::InvalidPeerId)?
-		},
+		Some(multiaddr::Protocol::P2p(key)) => PeerId::from_multihash(key)
+			.map_err(|_| ParseErr::InvalidPeerId)?,
 		_ => return Err(ParseErr::PeerIdMissing),
 	};
 
@@ -464,7 +451,6 @@ impl NetworkConfiguration {
 				enable_mdns: false,
 				allow_private_ipv4: true,
 				wasm_external_transport: None,
-				use_yamux_flow_control: false,
 			},
 			max_parallel_downloads: 5,
 			allow_non_globals_in_dht: false,
@@ -532,8 +518,6 @@ pub enum TransportConfig {
 		/// This parameter exists whatever the target platform is, but it is expected to be set to
 		/// `Some` only when compiling for WASM.
 		wasm_external_transport: Option<wasm_ext::ExtTransport>,
-		/// Use flow control for yamux streams if set to true.
-		use_yamux_flow_control: bool,
 	},
 
 	/// Only allow connections within the same process.
@@ -625,10 +609,26 @@ impl NodeKeyConfig {
 				Ok(Keypair::Ed25519(k.into())),
 
 			Ed25519(Secret::File(f)) =>
-				get_secret(f,
-					|mut b| ed25519::SecretKey::from_bytes(&mut b),
+				get_secret(
+					f,
+					|mut b| {
+						match String::from_utf8(b.to_vec())
+							.ok()
+							.and_then(|s|{
+								if s.len() == 64 {
+									hex::decode(&s).ok()
+								} else {
+									None
+								}}
+							)
+						{
+							Some(s) => ed25519::SecretKey::from_bytes(s),
+							_ => ed25519::SecretKey::from_bytes(&mut b),
+						}
+					},
 					ed25519::SecretKey::generate,
-					|b| b.as_ref().to_vec())
+					|b| b.as_ref().to_vec()
+				)
 				.map(ed25519::Keypair::from)
 				.map(Keypair::Ed25519),
 		}

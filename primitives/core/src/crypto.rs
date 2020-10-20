@@ -409,6 +409,15 @@ macro_rules! ss58_address_format {
 		}
 
 		#[cfg(feature = "std")]
+		impl std::str::FromStr for Ss58AddressFormat {
+			type Err = ParseError;
+
+			fn from_str(data: &str) -> Result<Self, Self::Err> {
+				Self::try_from(data)
+			}
+		}
+
+		#[cfg(feature = "std")]
 		impl std::fmt::Display for ParseError {
 			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 				write!(f, "failed to parse network value as u8")
@@ -463,8 +472,12 @@ ss58_address_format!(
 		(13, "substratee", "Any SubstraTEE off-chain network private account (*25519).")
 	KulupuAccount =>
 		(16, "kulupu", "Kulupu mainnet, standard account (*25519).")
+	DarkAccount =>
+		(17, "dark", "Dark mainnet, standard account (*25519).")
 	DarwiniaAccount =>
 		(18, "darwinia", "Darwinia Chain mainnet, standard account (*25519).")
+	GeekAccount =>
+		(19, "geek", "GeekCash mainnet, standard account (*25519).")
 	StafiAccount =>
 		(20, "stafi", "Stafi mainnet, standard account (*25519).")
 	DockTestAccount =>
@@ -473,6 +486,10 @@ ss58_address_format!(
 		(22, "dock-mainnet", "Dock mainnet, standard account (*25519).")
 	ShiftNrg =>
 		(23, "shift", "ShiftNrg mainnet, standard account (*25519).")
+	ZeroAccount =>
+		(24, "zero", "ZERO mainnet, standard account (*25519).")
+	AlphavilleAccount =>
+		(25, "alphaville", "ZERO testnet, standard account (*25519).")
 	SubsocialAccount =>
 		(28, "subsocial", "Subsocial network, standard account (*25519).")
 	PhalaAccount =>
@@ -483,6 +500,8 @@ ss58_address_format!(
 		(33, "datahighway", "DataHighway mainnet, standard account (*25519).")
 	CentrifugeAccount =>
 		(36, "centrifuge", "Centrifuge Chain mainnet, standard account (*25519).")
+	NodleAccount =>
+		(37, "nodle", "Nodle Chain mainnet, standard account (*25519).")
 	SubstrateAccount =>
 		(42, "substrate", "Any Substrate network, standard account (*25519).")
 	Reserved43 =>
@@ -564,7 +583,17 @@ impl<T: Sized + AsMut<[u8]> + AsRef<[u8]> + Default + Derive> Ss58Codec for T {
 
 /// Trait suitable for typical cryptographic PKI key public type.
 pub trait Public:
-	AsRef<[u8]> + AsMut<[u8]> + Default + Derive + CryptoType + PartialEq + Eq + Clone + Send + Sync
+	AsRef<[u8]>
+	+ AsMut<[u8]>
+	+ Default
+	+ Derive
+	+ CryptoType
+	+ PartialEq
+	+ Eq
+	+ Clone
+	+ Send
+	+ Sync
+	+ for<'a> TryFrom<&'a [u8]>
 {
 	/// A new instance from the given slice.
 	///
@@ -729,6 +758,14 @@ mod dummy {
 				#[allow(mutable_transmutes)]
 				sp_std::mem::transmute::<_, &'static mut [u8]>(&b""[..])
 			}
+		}
+	}
+
+	impl<'a> TryFrom<&'a [u8]> for Dummy {
+		type Error = ();
+
+		fn try_from(_: &'a [u8]) -> Result<Self, ()> {
+			Ok(Self)
 		}
 	}
 
@@ -1087,6 +1124,13 @@ mod tests {
 	impl AsMut<[u8]> for TestPublic {
 		fn as_mut(&mut self) -> &mut [u8] {
 			&mut []
+		}
+	}
+	impl<'a> TryFrom<&'a [u8]> for TestPublic {
+		type Error = ();
+
+		fn try_from(_: &'a [u8]) -> Result<Self, ()> {
+			Ok(Self)
 		}
 	}
 	impl CryptoType for TestPublic {
