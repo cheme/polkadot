@@ -298,7 +298,7 @@ impl<
 		match gc {
 			MultipleMigrate::Noops => (),
 			MultipleMigrate::JournalGc(gc) => {
-				if let Some(new_start) = gc.composite_treshold_new_start.as_ref() {
+				if let Some(new_start) = gc.pruning_treshold.as_ref() {
 					if linear_index <= &new_start {
 						return true;
 					}
@@ -388,7 +388,7 @@ impl<
 	fn state_gc(&mut self, gc: &TreeStateGc<I, BI, V>) -> UpdateResult<()> {
 		let neutral = &gc.neutral_element;
 		let mut result = UpdateResult::Unchanged;
-		let start_composite = &gc.composite_treshold_new_start;
+		let start_history = &gc.pruning_treshold;
 		let mut gc_iter = gc.storage.iter().rev();
 		let mut next_branch_index = self.branches.last();
 	
@@ -399,8 +399,8 @@ impl<
 			next_branch_index = self.branches.previous_index(index);
 			if gc.0 == branch_index {
 				let (start, end) = gc.1.range();
-				let start = start_composite.as_ref().and_then(|start_composite| if &start < start_composite {
-					Some(start_composite.clone())
+				let start = start_history.as_ref().and_then(|start_history| if &start < start_history {
+					Some(start_history.clone())
 				} else {
 					None
 				}).unwrap_or(start);
@@ -449,13 +449,13 @@ impl<
 		// Also apply new start on all.
 		let neutral = &gc.neutral_element;
 		let mut result = UpdateResult::Unchanged;
-		let start_composite = gc.composite_treshold_new_start.as_ref();
+		let start_history = gc.pruning_treshold.as_ref();
 		let mut first_new_start = false;
 		let mut next_branch_index = self.branches.last();
 		while let Some(branch_ix) = next_branch_index {
 			let mut branch = self.branches.get(branch_ix);
 			let new_start = if branch.state <= gc.composite_treshold.0 {
-				match start_composite.as_ref() {
+				match start_history.as_ref() {
 					None => None,
 					Some(n_start) => {
 						if first_new_start {
@@ -470,7 +470,7 @@ impl<
 									first_new_start = true;
 								}
 							}
-							start_composite.cloned()
+							start_history.cloned()
 						}
 					},
 				}
@@ -1054,7 +1054,7 @@ mod test {
 		assert_eq!(gc_item3.nb_internal_branch(), 1);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
 
-		// on previous state set migrate with composite_treshold_new_start 
+		// on previous state set migrate with pruning_treshold 
 		let filter_in = [33, 34, 35, 6];
 		let mut gc_item1 = item1.clone();
 		let mut gc_item2 = item2.clone();

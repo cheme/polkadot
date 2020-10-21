@@ -176,8 +176,9 @@ pub(crate) struct TreeMeta<I, BI> {
 	/// Next value for composite treshold (requires data migration
 	/// to switch current treshold but can already be use by gc).
 	pub(crate) next_composite_treshold: Option<(I, BI)>,
-	/// Changed pruning treshold for composite part.
-	pub(crate) composite_pruning_treshold: Option<BI>,
+	/// Pruned history index, all history before this cannot be queried.
+	/// Those state can be pruned.
+	pub(crate) pruning_treshold: Option<BI>,
 	/// Is composite latest, so can we write its last state (only
 	/// possible on new or after a migration).
 	pub(crate) composite_latest: bool,
@@ -189,7 +190,7 @@ impl<I: Default, BI: Default> Default for TreeMeta<I, BI> {
 			last_index: I::default(),
 			composite_treshold: Default::default(),
 			next_composite_treshold: None,
-			composite_pruning_treshold: None,
+			pruning_treshold: None,
 			composite_latest: true,
 		}
 	}
@@ -247,7 +248,7 @@ pub struct TreeStateGc<I, BI, V> {
 	/// see TreeMeta `composite_treshold`
 	pub(crate) composite_treshold: (I, BI),
 	/// All data before this can get pruned for composite non forked part.
-	pub(crate) composite_treshold_new_start: Option<BI>,
+	pub(crate) pruning_treshold: Option<BI>,
 	/// see TreeManagement `neutral_element`
 	pub(crate) neutral_element: Option<V>,
 }
@@ -265,7 +266,7 @@ pub struct DeltaTreeStateGc<I, BI, V> {
 	/// potentially allows skipping some iteration into storage.
 	pub(crate) composite_treshold: (I, BI),
 	/// All data before this can get pruned for composite non forked part.
-	pub(crate) composite_treshold_new_start: Option<BI>,
+	pub(crate) pruning_treshold: Option<BI>,
 	/// see TreeManagement `neutral_element`
 	pub(crate) neutral_element: Option<V>,
 }
@@ -533,7 +534,7 @@ impl<
 		if switch_index != tree_meta.composite_treshold || prune_index.is_some() {
 			let mut tree_meta = tree_meta.clone();
 			tree_meta.next_composite_treshold = Some(switch_index);
-			tree_meta.composite_pruning_treshold = prune_index;
+			tree_meta.pruning_treshold = prune_index;
 			handle.set(tree_meta);
 			change = true;
 		}
@@ -1141,8 +1142,8 @@ pub struct TreeRewrite<I, BI, V> {
 	/// Possible change in composite treshold.
 	pub composite_treshold: (I, BI),
 	pub changed_composite_treshold: bool,
-	/// All data before this can get pruned for composite non forked part.
-	pub composite_treshold_new_start: Option<BI>,
+	/// All data before this can get pruned.
+	pub pruning_treshold: Option<BI>,
 	/// see TreeManagement `neutral_element`
 	pub neutral_element: Option<V>,
 }
@@ -1174,7 +1175,7 @@ impl<
 		let tree_meta = self.state.tree.meta.get();
 		let composite_treshold = tree_meta.next_composite_treshold.clone()
 			.unwrap_or(tree_meta.composite_treshold.clone());
-		let composite_treshold_new_start = tree_meta.composite_pruning_treshold.clone();
+		let pruning_treshold = tree_meta.pruning_treshold.clone();
 		let neutral_element = self.neutral_element.get().clone();
 		let gc = if Self::JOURNAL_DELETE {
 			let mut storage = BTreeMap::new();
@@ -1182,14 +1183,14 @@ impl<
 				storage.insert(k, v);
 			}
 
-			if composite_treshold_new_start.is_none() && storage.is_empty() {
+			if pruning_treshold.is_none() && storage.is_empty() {
 				return None;
 			}
 
 			let gc = DeltaTreeStateGc {
 				storage,
 				composite_treshold,
-				composite_treshold_new_start,
+				pruning_treshold,
 				neutral_element,
 			};
 
@@ -1206,7 +1207,7 @@ impl<
 			let gc = TreeStateGc {
 				storage,
 				composite_treshold,
-				composite_treshold_new_start,
+				pruning_treshold,
 				neutral_element,
 			};
 			MultipleGc::State(gc)
@@ -1316,7 +1317,7 @@ impl<
 				tree_meta.composite_treshold = treshold;
 				meta_change = true;
 			}
-			if tree_meta.composite_pruning_treshold.take().is_some() {
+			if tree_meta.pruning_treshold.take().is_some() {
 				meta_change = true;
 			}
 			if meta_change {
