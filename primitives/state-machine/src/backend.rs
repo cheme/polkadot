@@ -20,21 +20,25 @@
 use hash_db::Hasher;
 use codec::{Decode, Encode};
 use sp_core::{
-	traits::RuntimeCode,
 	storage::{ChildInfo, well_known_keys, TrackedStorageKey}
 };
 use crate::{
 	UsageInfo, StorageKey, StorageValue, StorageCollection, ChildStorageCollection,
 };
 use sp_trie::{ProofInput, BackendProof};
+use sp_std::vec::Vec;
+#[cfg(feature = "std")]
+use sp_core::traits::RuntimeCode;
 
-
+#[cfg(feature = "std")]
 /// Access the state of the recording proof backend of a backend.
 pub type RecordBackendFor<B, H> = sp_trie::RecordBackendFor<<B as Backend<H>>::StorageProof, H>;
 
+#[cfg(feature = "std")]
 /// Access the raw proof of a backend.
 pub type ProofRawFor<B, H> = <<B as Backend<H>>::StorageProof as BackendProof<H>>::ProofRaw;
 
+#[cfg(feature = "std")]
 /// Access the proof of a backend.
 pub type ProofFor<B, H> = <B as Backend<H>>::StorageProof;
 
@@ -42,19 +46,22 @@ pub type ProofFor<B, H> = <B as Backend<H>>::StorageProof;
 /// to it.
 ///
 /// The clone operation (if implemented) should be cheap.
-pub trait Backend<H: Hasher>: Sized + std::fmt::Debug {
+pub trait Backend<H: Hasher>: Sized + sp_std::fmt::Debug {
 	/// An error type when fetching data is not possible.
 	type Error: super::Error;
 
 	/// Storage changes to be applied if committing
 	type Transaction: Consolidate + Default + Send;
 
+	#[cfg(feature = "std")] // TODO extract those std associated trait in a different trait
 	/// Proof to use with this backend.
 	type StorageProof: BackendProof<H>;
 
+	#[cfg(feature = "std")]
 	/// Associated backend for recording proof.
 	type RecProofBackend: RecProofBackend<H, StorageProof = Self::StorageProof>;
 
+	#[cfg(feature = "std")]
 	/// Associated backend for using a proof.
 	type ProofCheckBackend: ProofCheckBackend<H, StorageProof = Self::StorageProof>;
 
@@ -171,11 +178,13 @@ pub trait Backend<H: Hasher>: Sized + std::fmt::Debug {
 		all
 	}
 
+	#[cfg(feature = "std")]
 	/// Try convert into a recording proof backend.
 	fn as_proof_backend(self) -> Option<Self::RecProofBackend> {
 		self.from_previous_rec_state(Default::default(), Default::default())
 	}
 
+	#[cfg(feature = "std")]
 	/// Try convert into a recording proof backend from previous recording state.
 	/// Using a previous proof backend avoids a costier merge of proof later.
 	fn from_previous_rec_state(
@@ -269,6 +278,8 @@ pub trait Backend<H: Hasher>: Sized + std::fmt::Debug {
 
 /// Transaction containing a set of key values updates.
 /// TODO EMCH see if should move in client (eg client api)
+/// TODO should definitely move in client, and also make explicit this
+/// works as trie nodes (const ?) with unique or rc Keys?
 pub trait HashDBNodesTransaction<K, V> {
 	/// First pair element is new values, and second is deleted keys.
 	/// `prefix_keys` indicate if keys with prefixes should be use, this is mainly
@@ -291,6 +302,7 @@ pub trait InstantiableStateBackend<H>: Backend<H>
 	fn extract_state(self) -> (Self::Storage, H::Out);
 }
 
+#[cfg(feature = "std")]
 /// Backend that can be instantiated from intital content.
 pub trait GenesisStateBackend<H>: Backend<H>
 	where
@@ -300,6 +312,7 @@ pub trait GenesisStateBackend<H>: Backend<H>
 	fn new(storage: sp_core::storage::Storage) -> Self;
 }
 
+#[cfg(feature = "std")]
 /// Backend used to record a proof.
 pub trait RecProofBackend<H>: crate::backend::Backend<H>
 	where
@@ -326,6 +339,7 @@ pub trait RecProofBackend<H>: crate::backend::Backend<H>
 	}
 }
 
+#[cfg(feature = "std")]
 /// Backend used to run a proof.
 pub trait ProofCheckBackend<H>: Sized + crate::backend::Backend<H>
 	where
@@ -345,8 +359,11 @@ impl<'a, T, H> Backend<H> for &'a T
 {
 	type Error = T::Error;
 	type Transaction = T::Transaction;
+	#[cfg(feature = "std")]
 	type StorageProof = T::StorageProof;
+	#[cfg(feature = "std")]
 	type RecProofBackend = T::RecProofBackend;
+	#[cfg(feature = "std")]
 	type ProofCheckBackend = T::ProofCheckBackend;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
@@ -423,6 +440,7 @@ impl<'a, T, H> Backend<H> for &'a T
 		(*self).usage_info()
 	}
 
+	#[cfg(feature = "std")]
 	fn from_previous_rec_state(
 		self,
 		_previous: RecordBackendFor<Self, H>,
@@ -484,11 +502,13 @@ pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut sp_trie::MemoryDB<H>, input:
 }
 
 /// Wrapper to create a [`RuntimeCode`] from a type that implements [`Backend`].
+#[cfg(feature = "std")]
 pub struct BackendRuntimeCode<'a, B, H> {
 	backend: &'a B,
 	_marker: std::marker::PhantomData<H>,
 }
 
+#[cfg(feature = "std")]
 impl<'a, B: Backend<H>, H: Hasher> sp_core::traits::FetchRuntimeCode for
 	BackendRuntimeCode<'a, B, H>
 {
@@ -497,6 +517,7 @@ impl<'a, B: Backend<H>, H: Hasher> sp_core::traits::FetchRuntimeCode for
 	}
 }
 
+#[cfg(feature = "std")]
 impl<'a, B: Backend<H>, H: Hasher> BackendRuntimeCode<'a, B, H> where H::Out: Encode {
 	/// Create a new instance.
 	pub fn new(backend: &'a B) -> Self {

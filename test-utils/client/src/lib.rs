@@ -33,7 +33,7 @@ pub use sp_keyring::{
 	ed25519::Keyring as Ed25519Keyring,
 	sr25519::Keyring as Sr25519Keyring,
 };
-pub use sp_core::traits::BareCryptoStorePtr;
+pub use sp_keystore::{SyncCryptoStorePtr, SyncCryptoStore};
 pub use sp_runtime::{Storage, StorageChild};
 pub use sp_state_machine::ExecutionStrategy;
 pub use sc_service::{RpcHandlers, RpcSession, client};
@@ -79,7 +79,7 @@ pub struct TestClientBuilder<Block: BlockT, Executor, Backend, G: GenesisInit> {
 	child_storage_extension: HashMap<Vec<u8>, StorageChild>,
 	backend: Arc<Backend>,
 	_executor: std::marker::PhantomData<Executor>,
-	keystore: Option<BareCryptoStorePtr>,
+	keystore: Option<SyncCryptoStorePtr>,
 	fork_blocks: ForkBlocks<Block>,
 	bad_blocks: BadBlocks<Block>,
 }
@@ -129,7 +129,7 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 	}
 
 	/// Set the keystore that should be used by the externalities.
-	pub fn set_keystore(mut self, keystore: BareCryptoStorePtr) -> Self {
+	pub fn set_keystore(mut self, keystore: SyncCryptoStorePtr) -> Self {
 		self.keystore = Some(keystore);
 		self
 	}
@@ -227,7 +227,7 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 			self.bad_blocks,
 			ExecutionExtensions::new(
 				self.execution_strategies,
-				self.keystore.clone(),
+				self.keystore,
 			),
 			None,
 			ClientConfig::default(),

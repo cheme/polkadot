@@ -17,21 +17,27 @@
 
 //! Trie-based state machine backend.
 
-use log::{warn, debug};
+use crate::{warn, debug};
 use hash_db::Hasher;
 use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root,
 	ChildrenProofMap, ProofInput, BackendProof, FullBackendProof};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
+#[cfg(feature = "std")]
 use crate::backend::RecordBackendFor;
 use sp_core::storage::{ChildInfo, ChildInfoProof, ChildType};
 use codec::{Codec, Decode, Encode};
+#[cfg(feature = "std")]
+use crate::{
+	backend::{ProofCheckBackend, InstantiableStateBackend, GenesisStateBackend},
+};
 use crate::{
 	StorageKey, StorageValue, Backend,
-	backend::{ProofCheckBackend, InstantiableStateBackend, GenesisStateBackend},
 	trie_backend_essence::{TrieBackendEssence, TrieBackendStorage, Ephemeral},
 };
+#[cfg(feature = "std")]
 use parking_lot::RwLock;
-use std::marker::PhantomData;
+use sp_std::marker::PhantomData;
+use sp_std::{boxed::Box, vec::Vec};
 
 /// Patricia trie-based backend. Transaction type is an overlay of changes to commit.
 pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher, P> {
@@ -43,13 +49,19 @@ impl<S: TrieBackendStorage<H>, H: Hasher, P> TrieBackend<S, H, P> where H::Out: 
 	/// Create new trie-based backend.
 	pub fn new(storage: S, root: H::Out) -> Self {
 		TrieBackend {
-			essence: TrieBackendEssence::new(storage, root, None),
+			essence: TrieBackendEssence::new(
+				storage,
+				root,
+				#[cfg(feature = "std")]
+				None,
+			),
 			_ph: PhantomData,
 		}
 	}
 
 	/// Create a trie backend that also record visited trie roots.
 	/// Visited trie roots allow packing proofs and does cache child trie roots.
+	#[cfg(feature = "std")]
 	pub fn new_with_roots(storage: S, root: H::Out) -> Self {
 		let register_roots = Some(RwLock::new(Default::default()));
 		TrieBackend {
@@ -58,6 +70,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher, P> TrieBackend<S, H, P> where H::Out: 
 		}
 	}
 
+	#[cfg(feature = "std")]
 	/// Get registered roots. Empty input is returned when the backend is
 	/// not configured to register roots.
 	pub fn extract_registered_roots(&self) -> ProofInput {
@@ -65,7 +78,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher, P> TrieBackend<S, H, P> where H::Out: 
 			let mut dest = ChildrenProofMap::default();
 			dest.insert(ChildInfoProof::top_trie(), self.essence.root().encode());
 			let roots = {
-				std::mem::replace(&mut *register_roots.write(), Default::default())
+				sp_std::mem::replace(&mut *register_roots.write(), Default::default())
 			};
 			for (child_info, root) in roots.into_iter() {
 				if let Some(root) = root {
@@ -78,6 +91,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher, P> TrieBackend<S, H, P> where H::Out: 
 		}
 	}
 
+	#[cfg(feature = "std")]
 	/// Set previously registered roots.
 	/// Return false if there is some conflicting information (roots should not change
 	/// for a given `StateMachine` instante).
@@ -128,8 +142,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher, P> TrieBackend<S, H, P> where H::Out: 
 	}
 }
 
-impl<S: TrieBackendStorage<H>, H: Hasher, P> std::fmt::Debug for TrieBackend<S, H, P> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<S: TrieBackendStorage<H>, H: Hasher, P> sp_std::fmt::Debug for TrieBackend<S, H, P> {
+	fn fmt(&self, f: &mut sp_std::fmt::Formatter<'_>) -> sp_std::fmt::Result {
 		write!(f, "TrieBackend")
 	}
 }
@@ -140,14 +154,17 @@ impl<S, H, P> Backend<H> for TrieBackend<S, H, P> where
 	H::Out: Ord + Codec,
 	P: BackendProof<H>,
 {
-	type Error = String;
+	type Error = crate::DefaultError;
 	type Transaction = S::Overlay;
+	#[cfg(feature = "std")]
 	type StorageProof = P;
+	#[cfg(feature = "std")]
 	type RecProofBackend = crate::proving_backend::ProvingBackend<
 		S,
 		H,
 		Self::StorageProof,
 	>;
+	#[cfg(feature = "std")]
 	type ProofCheckBackend = crate::InMemoryProofCheckBackend<H, P>;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
@@ -272,7 +289,7 @@ impl<S, H, P> Backend<H> for TrieBackend<S, H, P> where
 		};
 
 		let mut write_overlay = S::Overlay::default();
-		let mut root = match self.essence.child_root_encoded(child_info) {
+		let mut root = match self.essence.child_root(child_info) {
 			Ok(value) =>
 				value.and_then(|r| Decode::decode(&mut &r[..]).ok()).unwrap_or_else(|| default_root.clone()),
 			Err(e) => {
@@ -304,6 +321,7 @@ impl<S, H, P> Backend<H> for TrieBackend<S, H, P> where
 		(root, is_default, write_overlay)
 	}
 
+	#[cfg(feature = "std")]
 	fn from_previous_rec_state(
 		self,
 		recorder: RecordBackendFor<Self, H>,
@@ -338,6 +356,7 @@ impl<S, H, P> Backend<H> for TrieBackend<S, H, P> where
 	}
 }
 
+#[cfg(feature = "std")]
 impl<H: Hasher, P> ProofCheckBackend<H> for crate::InMemoryProofCheckBackend<H, P>
 	where
 		H::Out: Ord + Codec,
@@ -353,6 +372,7 @@ impl<H: Hasher, P> ProofCheckBackend<H> for crate::InMemoryProofCheckBackend<H, 
 	}
 }
 
+#[cfg(feature = "std")]
 impl<S, H, P> InstantiableStateBackend<H> for TrieBackend<S, H, P>
 	where
 		H: Hasher,
@@ -373,6 +393,7 @@ impl<S, H, P> InstantiableStateBackend<H> for TrieBackend<S, H, P>
 	}
 }
 
+#[cfg(feature = "std")]
 impl<H, P> ProofCheckBackend<H> for crate::InMemoryFullProofCheckBackend<H, P>
 	where
 		H: Hasher,
@@ -389,6 +410,7 @@ impl<H, P> ProofCheckBackend<H> for crate::InMemoryFullProofCheckBackend<H, P>
 	}
 }
 
+#[cfg(feature = "std")]
 impl<H, P> GenesisStateBackend<H> for crate::InMemoryProofCheckBackend<H, P>
 	where
 		H: Hasher,
