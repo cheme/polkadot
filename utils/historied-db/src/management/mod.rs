@@ -201,6 +201,7 @@ impl<X: ManagementConsumer + Send + Sync> ManagementConsumerSync for X { }
 /// Management consumer base implementation.
 pub struct JournalForMigrationBasis<S: Ord, K, Db, DbConf> {
 	touched_keys: crate::simple_db::SerializeMap<S, Vec<K>, Db, DbConf>,
+	db: Db,
 }
 
 impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
@@ -212,8 +213,8 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 {
 	/// Note that if we got no information of the state, using `is_new` as
 	/// false is always safe.
-	pub fn add_changes(&mut self, db: &mut Db, state: S, mut changes: Vec<K>, is_new: bool) {
-		let mut handle = self.touched_keys.handle(db);
+	pub fn add_changes(&mut self, state: S, mut changes: Vec<K>, is_new: bool) {
+		let mut handle = self.touched_keys.handle(&mut self.db);
 		let changes = if is_new {
 			changes.dedup();
 			changes
@@ -230,14 +231,15 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		handle.insert(state, changes);
 	}
 
-	pub fn remove_changes_at(&mut self, db: &mut Db, state: &S) -> Option<Vec<K>> {
-		let mut handle = self.touched_keys.handle(db);
+	pub fn remove_changes_at(&mut self, state: &S) -> Option<Vec<K>> {
+		let mut handle = self.touched_keys.handle(&mut self.db);
 		handle.remove(state)
 	}
 
-	pub fn from_db(db: &Db) -> Self {
+	pub fn from_db(db: Db) -> Self {
 		JournalForMigrationBasis {
-			touched_keys: crate::simple_db::SerializeMap::default_from_db(db),
+			touched_keys: crate::simple_db::SerializeMap::default_from_db(&db),
+			db,
 		}
 	}
 }
