@@ -200,6 +200,13 @@ impl SerializeDB for () {
 	}
 }
 
+#[cfg(feature = "std")]
+use std::sync::Arc;
+#[cfg(not(feature = "std"))]
+use alloc::sync::Arc;
+/// Serialize db as a boxed dynamic pointer.
+pub type SerializeDBArc = Arc<dyn SerializeDB + Send + Sync>;
+
 /// Serialize db as a boxed dynamic pointer.
 pub type SerializeDBDyn = Box<dyn SerializeDB + Send + Sync>;
 
