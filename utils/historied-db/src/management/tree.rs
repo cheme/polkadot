@@ -31,6 +31,11 @@ use crate::{Management, ManagementRef, Migrate, ForkableManagement, Latest};
 use codec::{Codec, Encode, Decode};
 use crate::simple_db::{SerializeDB, SerializeMap, SerializeVariable, SerializeInstanceMap, SerializeInstanceVariable};
 use derivative::Derivative;
+/*#[cfg(feature = "std")]
+use std::sync::Arc;
+#[cfg(not(feature = "std"))]
+use alloc::sync::Arc;
+*/
 
 // TODO try removing Send + Sync here.
 pub trait TreeManagementStorage: Sized {
@@ -297,6 +302,47 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
 	neutral_element: SerializeVariable<Option<V>, S::Storage, S::NeutralElt>,
 }
 
+#[derive(Derivative)]
+#[derivative(Debug(bound="H: Debug, V: Debug, I: Debug, BI: Debug, S::Storage: Debug"))]
+#[cfg_attr(test, derivative(PartialEq(bound="H: PartialEq, V: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
+pub struct TreeManagementWithConsumer<H: Ord, I: Ord + 'static, BI: 'static, V: 'static, S: TreeManagementStorage> {
+	inner: TreeManagement<H, I, BI, V, S>,
+	#[derivative(Debug="ignore")]
+	#[derivative(PartialEq="ignore")]
+	registered_consumer: RegisterdConsumer<I, BI, V>,
+}
+struct RegisterdConsumer<I: 'static, BI: 'static, V: 'static>(Vec<Box<dyn super::ManagementConsumer<MultipleMigrate<I, BI, V>>>>);
+
+impl<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> sp_std::ops::Deref for TreeManagementWithConsumer<H, I, BI, V, S> {
+	type Target = TreeManagement<H, I, BI, V, S>;
+	fn deref(&self) -> &Self::Target {
+		&self.inner
+	}
+}
+
+impl<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> sp_std::ops::DerefMut for TreeManagementWithConsumer<H, I, BI, V, S> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.inner
+	}
+}
+
+impl<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> From<TreeManagement<H, I, BI, V, S>> for TreeManagementWithConsumer<H, I, BI, V, S> {
+	fn from(inner: TreeManagement<H, I, BI, V, S>) -> Self {
+		TreeManagementWithConsumer {
+			inner,
+			registered_consumer: RegisterdConsumer(Vec::new()),
+		}
+	}
+}
+
+impl<I, BI, V> Drop for RegisterdConsumer<I, BI, V> {
+	fn drop(&mut self) {
+		for consumer in self.0.iter() {
+			consumer.unlock()
+		}
+	}
+}
+
 impl<H, I, BI, V, S> Default for TreeManagement<H, I, BI, V, S>
 	where
 		H: Ord,
@@ -540,8 +586,59 @@ impl<
 		}
 		change
 	}
+
 }
 
+impl<
+	H: Clone + Ord + Codec,
+	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
+	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
+	V: Clone + Default + Codec, // TODO why default?
+	S: TreeManagementStorage,
+> TreeManagementWithConsumer<H, I, BI, V, S> {
+/*	pub fn register_consumer_sync(&mut self, consumer: Arc<dyn super::ManagementConsumerSync>) {
+	}*/
+
+	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<MultipleMigrate<I, BI, V>>>) {
+		self.registered_consumer.0.push(consumer);
+	}
+
+	pub fn migrate(self) -> Self {
+		let consumers = self.registered_consumer;
+		let (locked_management, gc) = self.inner.get_migrate();
+		let need_lock = match &gc {
+			MultipleMigrate::JournalGc(..) => {
+				// no need for lock on consumers
+				false
+			},
+			MultipleMigrate::Rewrite(..) => {
+				// need lock
+				true
+			},
+			MultipleMigrate::Noops => {
+				return TreeManagementWithConsumer {
+					inner: locked_management.applied_migrate(),
+					registered_consumer: consumers,
+				};
+			},
+		};
+		for consumer in consumers.0.iter() {
+			if need_lock {
+				consumer.migrate_lock(&gc);
+				consumer.unlock();
+			} else {
+				consumer.migrate(&gc);
+			}
+		}
+		
+		TreeManagementWithConsumer {
+			inner: locked_management.applied_migrate(),
+			registered_consumer: consumers,
+		}
+	}
+}
+
+	
 impl<
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
@@ -1246,7 +1343,7 @@ impl<
 	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
-	V: Clone + Default + Codec,
+	V: Clone + Default + Codec, // TODO why default?
 	S: TreeManagementStorage,
 > Management<H> for TreeManagement<H, I, BI, V, S> {
 	// TODO attach gc infos to allow some lazy cleanup (make it optional)

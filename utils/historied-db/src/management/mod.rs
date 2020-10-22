@@ -163,3 +163,122 @@ pub mod linear {
 		}
 	}
 }
+
+/*
+#[cfg(feature = "std")]
+use std::sync::Arc;
+#[cfg(not(feature = "std"))]
+use alloc::sync::Arc;
+*/
+
+/// Dynamic trait to register historied db
+/// implementation in order to allow migration
+/// (state global change requires to update all associated dbs).
+pub trait ManagementConsumer<Gc>: 'static {
+
+	fn need_journal_change(&self) -> bool;
+
+	/// Obtain journal change needed for migration.
+	/// 
+	/// With GC TODO link no global lock is needed,
+	/// so the tree state can have changes that occurs during migration.
+	/// With some GC TODO link to the one with state, a global state lock
+	/// is needed.
+	/// Therefore this api directly update the inner state.
+	/// TODO add gc to param
+	fn migrate(&self, migrate: &Gc) -> Option<Vec<Vec<u8>>>;
+
+	/// Apply migrate keys after locking.
+	/// TODO add gc to param
+	fn migrate_lock(&self, migrate: &Gc) -> Option<Vec<Vec<u8>>>;
+
+	/// Lock access, usually for the time of the migration.
+	/// This api is rather unsafe, returning a struct with raii unlock
+	/// would be better, but that is for the sake of using this
+	/// trait as a dynamic trait.
+	/// Caller of this api is responsible for unlocking on drop.
+	/// (see `JournalForMigration` base implementation).
+	fn lock(&self);
+
+	/// Lock access, usually for the time of the migration.
+	///
+	/// Unlock shall never fail, it is valid to unlock a non locked
+	/// consumer.
+	fn unlock(&self);
+}
+
+/// Register db, this associate treemanagement.
+pub fn consumer_to_register<Gc, C: ManagementConsumer<Gc> + Clone>(c: &C) -> Box<dyn ManagementConsumer<Gc>> {
+	Box::new(c.clone())
+}
+
+/* This is not require I guess.
+/// Most consume db usage happens in multi-threading scenario.
+pub trait ManagementConsumerSync: ManagementConsumer + Send + Sync { }
+
+/// Register db, this associate treemanagement.
+pub fn consumer_to_register_sync<C: ManagementConsumerSync + Clone>(c: &C) -> Arc<dyn ManagementConsumer> {
+	Arc::new(c.clone())
+}
+
+impl<X: ManagementConsumer + Send + Sync> ManagementConsumerSync for X { }
+*/
+/// Management consumer base implementation.
+pub struct JournalForMigrationBasis<S: Ord, K, Db, DbConf> {
+	touched_keys: crate::simple_db::SerializeMap<S, Vec<K>, Db, DbConf>,
+}
+
+impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
+	where
+		S: codec::Encode + Clone + Ord,
+		K: codec::Codec + Clone + Ord,
+		Db: crate::simple_db::SerializeDB,
+		DbConf: crate::simple_db::SerializeInstanceMap,
+{
+	/// Note that if we got no information of the state, using `is_new` as
+	/// false is always safe.
+	pub fn add_changes(&mut self, db: &mut Db, state: S, mut changes: Vec<K>, is_new: bool) {
+		let mut handle = self.touched_keys.handle(db);
+		let changes = if is_new {
+			changes.dedup();
+			changes
+		} else {
+			if let Some(existing) = handle.get(&state) {
+				let mut existing = existing.clone();
+				merge_keys(&mut existing, changes);
+				existing
+			} else {
+				changes.dedup();
+				changes
+			}
+		};
+		handle.insert(state, changes);
+	}
+
+	pub fn remove_changes_at(&mut self, db: &mut Db, state: &S) -> Option<Vec<K>> {
+		let mut handle = self.touched_keys.handle(db);
+		handle.remove(state)
+	}
+}
+
+// TODO test case or btreeset impl.
+fn merge_keys<K: Ord>(origin: &mut Vec<K>, mut keys: Vec<K>) {
+	origin.sort_unstable();
+	keys.sort_unstable();
+	let mut cursor: usize = 0;
+	let end = origin.len();
+	for key in keys.into_iter() {
+		if Some(&key) == origin.last() {
+			// skip (avoid duplicate in keys)
+		} else if cursor == end {
+			origin.push(key);
+		} else {
+			while origin[cursor] < key && cursor != end {
+				cursor += 1;
+			}
+			if cursor < end && origin[cursor] != key {
+				origin.push(key);
+			}
+		}
+	}
+}
