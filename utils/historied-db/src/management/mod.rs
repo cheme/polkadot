@@ -176,35 +176,7 @@ use alloc::sync::Arc;
 /// (state global change requires to update all associated dbs).
 pub trait ManagementConsumer<Gc>: 'static {
 
-	fn need_journal_change(&self) -> bool;
-
-	/// Obtain journal change needed for migration.
-	/// 
-	/// With GC TODO link no global lock is needed,
-	/// so the tree state can have changes that occurs during migration.
-	/// With some GC TODO link to the one with state, a global state lock
-	/// is needed.
-	/// Therefore this api directly update the inner state.
-	/// TODO add gc to param
 	fn migrate(&self, migrate: &Gc) -> Option<Vec<Vec<u8>>>;
-
-	/// Apply migrate keys after locking.
-	/// TODO add gc to param
-	fn migrate_lock(&self, migrate: &Gc) -> Option<Vec<Vec<u8>>>;
-
-	/// Lock access, usually for the time of the migration.
-	/// This api is rather unsafe, returning a struct with raii unlock
-	/// would be better, but that is for the sake of using this
-	/// trait as a dynamic trait.
-	/// Caller of this api is responsible for unlocking on drop.
-	/// (see `JournalForMigration` base implementation).
-	fn lock(&self);
-
-	/// Lock access, usually for the time of the migration.
-	///
-	/// Unlock shall never fail, it is valid to unlock a non locked
-	/// consumer.
-	fn unlock(&self);
 }
 
 /// Register db, this associate treemanagement.

@@ -335,14 +335,6 @@ impl<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> From<TreeManagement<H, I, 
 	}
 }
 
-impl<I, BI, V> Drop for RegisterdConsumer<I, BI, V> {
-	fn drop(&mut self) {
-		for consumer in self.0.iter() {
-			consumer.unlock()
-		}
-	}
-}
-
 impl<H, I, BI, V, S> Default for TreeManagement<H, I, BI, V, S>
 	where
 		H: Ord,
@@ -606,28 +598,13 @@ impl<
 	pub fn migrate(self) -> Self {
 		let consumers = self.registered_consumer;
 		let (locked_management, gc) = self.inner.get_migrate();
-		let need_lock = match &gc {
-			MultipleMigrate::JournalGc(..) => {
-				// no need for lock on consumers
-				false
-			},
-			MultipleMigrate::Rewrite(..) => {
-				// need lock
-				true
-			},
-			MultipleMigrate::Noops => {
-				return TreeManagementWithConsumer {
-					inner: locked_management.applied_migrate(),
-					registered_consumer: consumers,
-				};
-			},
+		let need_migrate = match &gc {
+			MultipleMigrate::Noops => false,
+			_ => true,
 		};
-		for consumer in consumers.0.iter() {
-			if need_lock {
-				consumer.migrate_lock(&gc);
-				consumer.unlock();
-			} else {
-				consumer.migrate(&gc);
+		if need_migrate {
+			for consumer in consumers.0.iter() {
+					consumer.migrate(&gc);
 			}
 		}
 		
