@@ -256,7 +256,7 @@ fn merge_keys<K: Ord>(origin: &mut Vec<K>, mut keys: Vec<K>) {
 		} else if cursor == end {
 			origin.push(key);
 		} else {
-			while origin[cursor] < key && cursor != end {
+			while cursor != end && origin[cursor] < key {
 				cursor += 1;
 			}
 			if cursor < end && origin[cursor] != key {
