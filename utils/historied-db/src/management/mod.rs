@@ -234,6 +234,12 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		let mut handle = self.touched_keys.handle(db);
 		handle.remove(state)
 	}
+
+	pub fn from_db(db: &Db) -> Self {
+		JournalForMigrationBasis {
+			touched_keys: crate::simple_db::SerializeMap::default_from_db(db),
+		}
+	}
 }
 
 // TODO test case or btreeset impl.
