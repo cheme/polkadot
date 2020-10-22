@@ -171,6 +171,9 @@ use std::sync::Arc;
 use alloc::sync::Arc;
 */
 
+use sp_std::vec::Vec;
+use sp_std::boxed::Box;
+
 /// Dynamic trait to register historied db
 /// implementation in order to allow migration
 /// (state global change requires to update all associated dbs).
