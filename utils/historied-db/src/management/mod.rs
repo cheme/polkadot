@@ -177,7 +177,7 @@ use sp_std::boxed::Box;
 /// Dynamic trait to register historied db
 /// implementation in order to allow migration
 /// (state global change requires to update all associated dbs).
-pub trait ManagementConsumer<Gc>: 'static {
+pub trait ManagementConsumer<Gc>: Send + Sync + 'static {
 
 	fn migrate(&self, migrate: &Gc) -> Option<Vec<Vec<u8>>>;
 }

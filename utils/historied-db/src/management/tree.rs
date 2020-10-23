@@ -40,7 +40,7 @@ use alloc::sync::Arc;
 
 // TODO try removing Send + Sync here.
 pub trait TreeManagementStorage: Sized {
-	/// Do we keep trace of changes.
+	/// Do we keep trace of changes. TODO rename JOURNAL_CHANGES
 	const JOURNAL_DELETE: bool;
 	type Storage: SerializeDB + Send + Sync;
 	type Mapping: SerializeInstanceMap + Send + Sync;
