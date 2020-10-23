@@ -240,6 +240,9 @@ impl<'a, H, M: Management<H>> Migrate<'a, H, M> {
 	pub fn management(&mut self) -> &mut M {
 		self.0
 	}
+	pub fn migrate(&mut self) -> &mut M::Migrate {
+		&mut self.1
+ 	}
 }
 
 pub enum Ref<'a, V> {

@@ -283,18 +283,27 @@ pub enum MultipleGc<I, BI, V> {
 	State(TreeStateGc<I, BI, V>),
 }
 
-impl<I, BI, V> MultipleGc<I, BI, V> {
+impl<I, BI: Clone, V> MultipleGc<I, BI, V> {
 	/// Return upper limit (all sate before it are touched),
 	/// and explicit touched state.
 	pub fn touched_state(&self) -> (Option<BI>, impl Iterator<Item = (I, BI)>) {
 
+		let (pruning, touched) = match self {
+			MultipleGc::Journaled(gc) => {
+				let iter: Option<std::iter::Empty<(I, BI)>> = unimplemented!();
+				(gc.pruning_treshold.clone(), iter)
+			},
+			MultipleGc::State(gc) => {
+				(None, None)
+			},
+		};
 
 		// TODO require storing original range un DeltaTreeStateGc for the iterator.
 		// TODO when using in actual consumer, it means that journals need to be
 		// stored ordered with (BI, I) as key (currently it is I, BI).
 		// Note that iterating on all value will be ok there since we always got BI
 		// incremental.
-		(self.pruning_treshold.clone(), unimplemented!())
+		(pruning, touched.into_iter().flatten())
 	}
 }
 
