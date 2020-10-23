@@ -303,38 +303,7 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
 	neutral_element: SerializeVariable<Option<V>, S::Storage, S::NeutralElt>,
 }
 
-#[derive(Derivative)]
-#[derivative(Debug(bound="H: Debug, V: Debug, I: Debug, BI: Debug, S::Storage: Debug"))]
-#[cfg_attr(test, derivative(PartialEq(bound="H: PartialEq, V: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
-pub struct TreeManagementWithConsumer<H: Ord, I: Ord + 'static, BI: 'static, V: 'static, S: TreeManagementStorage> {
-	inner: TreeManagement<H, I, BI, V, S>,
-	#[derivative(Debug="ignore")]
-	#[derivative(PartialEq="ignore")]
-	registered_consumer: RegisterdConsumer<I, BI, V>,
-}
-struct RegisterdConsumer<I: 'static, BI: 'static, V: 'static>(Vec<Box<dyn super::ManagementConsumer<MultipleMigrate<I, BI, V>>>>);
-
-impl<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> sp_std::ops::Deref for TreeManagementWithConsumer<H, I, BI, V, S> {
-	type Target = TreeManagement<H, I, BI, V, S>;
-	fn deref(&self) -> &Self::Target {
-		&self.inner
-	}
-}
-
-impl<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> sp_std::ops::DerefMut for TreeManagementWithConsumer<H, I, BI, V, S> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.inner
-	}
-}
-
-impl<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> From<TreeManagement<H, I, BI, V, S>> for TreeManagementWithConsumer<H, I, BI, V, S> {
-	fn from(inner: TreeManagement<H, I, BI, V, S>) -> Self {
-		TreeManagementWithConsumer {
-			inner,
-			registered_consumer: RegisterdConsumer(Vec::new()),
-		}
-	}
-}
+pub struct RegisteredConsumer<I: 'static, BI: 'static, V: 'static>(Vec<Box<dyn super::ManagementConsumer<MultipleMigrate<I, BI, V>>>>);
 
 impl<H, I, BI, V, S> Default for TreeManagement<H, I, BI, V, S>
 	where
@@ -583,36 +552,34 @@ impl<
 }
 
 impl<
-	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
 	V: Clone + Default + Codec, // TODO why default?
-	S: TreeManagementStorage,
-> TreeManagementWithConsumer<H, I, BI, V, S> {
+> RegisteredConsumer<I, BI, V> {
 /*	pub fn register_consumer_sync(&mut self, consumer: Arc<dyn super::ManagementConsumerSync>) {
 	}*/
 
 	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<MultipleMigrate<I, BI, V>>>) {
-		self.registered_consumer.0.push(consumer);
+		self.0.push(consumer);
 	}
 
-	pub fn migrate(self) -> Self {
-		let consumers = self.registered_consumer;
-		let (locked_management, gc) = self.inner.get_migrate();
+	pub fn migrate<H, S>(&self, mgmt: TreeManagement<H, I, BI, V, S>) -> TreeManagement<H, I, BI, V, S>
+		where
+			H: Clone + Ord + Codec,
+			S: TreeManagementStorage,
+	{
+		let (locked_management, gc) = mgmt.get_migrate();
 		let need_migrate = match &gc {
 			MultipleMigrate::Noops => false,
 			_ => true,
 		};
 		if need_migrate {
-			for consumer in consumers.0.iter() {
+			for consumer in self.0.iter() {
 					consumer.migrate(&gc);
 			}
 		}
 		
-		TreeManagementWithConsumer {
-			inner: locked_management.applied_migrate(),
-			registered_consumer: consumers,
-		}
+		locked_management.applied_migrate()
 	}
 }
 
