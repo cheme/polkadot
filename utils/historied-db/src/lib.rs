@@ -233,8 +233,12 @@ impl<'a, H, M: Management<H>> Migrate<'a, H, M> {
 	pub fn applied_migrate(self) {
 		self.0.applied_migrate();
 	}
-	pub fn migrate(&mut self) -> &mut M::Migrate {
-		&mut self.1
+	/// When using management from migrate,
+	/// please unsure that you are not modifying
+	/// management state in an incompatible way
+	/// with the migration.
+	pub fn management(&mut self) -> &mut M {
+		self.0
 	}
 }
 
