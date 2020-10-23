@@ -307,6 +307,17 @@ pub struct RegisteredConsumer<H: Ord + 'static, I: Ord + 'static, BI: 'static, V
 	Vec<Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, V, S>>>>,
 );
 
+impl<H, I, BI, V, S> Default for RegisteredConsumer<H, I, BI, V, S>
+	where
+		H: Ord,
+		I: Ord,
+		S: TreeManagementStorage,
+{
+	fn default() -> Self {
+		RegisteredConsumer(Vec::new())
+	}
+}
+
 impl<H, I, BI, V, S> Default for TreeManagement<H, I, BI, V, S>
 	where
 		H: Ord,
