@@ -568,6 +568,10 @@ impl<
 			H: Clone + Ord + Codec,
 			S: TreeManagementStorage,
 	{
+		// In this case (register consumer is design to run with sync backends), the management
+		// lock is very likely to be ineffective.
+		// TODO this get_migrate api is not really good, a locked write (depending on type of
+		// migration) would work better.
 		let (locked_management, gc) = mgmt.get_migrate();
 		let need_migrate = match &gc {
 			MultipleMigrate::Noops => false,
