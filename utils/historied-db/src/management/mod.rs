@@ -126,7 +126,7 @@ pub mod linear {
 				.map(|(k, _v)| k.clone())
 		}
 
-		fn get_migrate(self) -> (Migrate<H, Self>, Self::Migrate) {
+		fn get_migrate(&mut self) -> Migrate<H, Self> {
 			unimplemented!()
 		}
 
@@ -173,17 +173,16 @@ use alloc::sync::Arc;
 
 use sp_std::vec::Vec;
 use sp_std::boxed::Box;
-
+use crate::{Management, Migrate};
 /// Dynamic trait to register historied db
 /// implementation in order to allow migration
 /// (state global change requires to update all associated dbs).
-pub trait ManagementConsumer<Gc>: Send + Sync + 'static {
-
-	fn migrate(&self, migrate: &Gc) -> Option<Vec<Vec<u8>>>;
+pub trait ManagementConsumer<H, M: Management<H>>: Send + Sync + 'static {
+	fn migrate(&self, migrate: &mut Migrate<H, M>) -> Option<Vec<Vec<u8>>>;
 }
 
 /// Register db, this associate treemanagement.
-pub fn consumer_to_register<Gc, C: ManagementConsumer<Gc> + Clone>(c: &C) -> Box<dyn ManagementConsumer<Gc>> {
+pub fn consumer_to_register<H, M: Management<H>, C: ManagementConsumer<H, M> + Clone>(c: &C) -> Box<dyn ManagementConsumer<H, M>> {
 	Box::new(c.clone())
 }
 

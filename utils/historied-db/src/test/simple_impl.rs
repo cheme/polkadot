@@ -204,8 +204,8 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 		}
 	}
 
-	fn get_migrate(self) -> (Migrate<StateInput, Self>, Self::Migrate) {
-		(Migrate::capture(self), ())
+	fn get_migrate(&mut self) -> Migrate<StateInput, Self> {
+		Migrate(self, (), sp_std::marker::PhantomData)
 	}
 
 	fn applied_migrate(&mut self) { }

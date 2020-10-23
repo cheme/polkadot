@@ -303,7 +303,9 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
 	neutral_element: SerializeVariable<Option<V>, S::Storage, S::NeutralElt>,
 }
 
-pub struct RegisteredConsumer<I: 'static, BI: 'static, V: 'static>(Vec<Box<dyn super::ManagementConsumer<MultipleMigrate<I, BI, V>>>>);
+pub struct RegisteredConsumer<H: Ord + 'static, I: Ord + 'static, BI: 'static, V: 'static, S: TreeManagementStorage + 'static>(
+	Vec<Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, V, S>>>>,
+);
 
 impl<H, I, BI, V, S> Default for TreeManagement<H, I, BI, V, S>
 	where
@@ -555,35 +557,33 @@ impl<
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
 	V: Clone + Default + Codec, // TODO why default?
-> RegisteredConsumer<I, BI, V> {
+	H: Clone + Ord + Codec,
+	S: TreeManagementStorage,
+> RegisteredConsumer<H, I, BI, V, S> {
 /*	pub fn register_consumer_sync(&mut self, consumer: Arc<dyn super::ManagementConsumerSync>) {
 	}*/
 
-	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<MultipleMigrate<I, BI, V>>>) {
+	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, V, S>>>) {
 		self.0.push(consumer);
 	}
 
-	pub fn migrate<H, S>(&self, mgmt: TreeManagement<H, I, BI, V, S>) -> TreeManagement<H, I, BI, V, S>
-		where
-			H: Clone + Ord + Codec,
-			S: TreeManagementStorage,
-	{
+	pub fn migrate(&self, mgmt: &mut TreeManagement<H, I, BI, V, S>) {
 		// In this case (register consumer is design to run with sync backends), the management
 		// lock is very likely to be ineffective.
 		// TODO this get_migrate api is not really good, a locked write (depending on type of
 		// migration) would work better.
-		let (locked_management, gc) = mgmt.get_migrate();
-		let need_migrate = match &gc {
+		let mut migrate = mgmt.get_migrate();
+		let need_migrate = match &migrate.1 {
 			MultipleMigrate::Noops => false,
 			_ => true,
 		};
 		if need_migrate {
 			for consumer in self.0.iter() {
-					consumer.migrate(&gc);
+					consumer.migrate(&mut migrate);
 			}
 		}
 		
-		locked_management.applied_migrate()
+		migrate.0.applied_migrate()
 	}
 }
 
@@ -1337,7 +1337,7 @@ impl<
 			.map(|(k, _v)| k.clone())
 	}
 
-	fn get_migrate(self) -> (Migrate<H, Self>, Self::Migrate) {
+	fn get_migrate(&mut self) -> Migrate<H, Self> {
 		let migrate = if S::JOURNAL_DELETE {
 			// initial migrate strategie is gc.
 			if let Some(MultipleGc::Journaled(gc)) = self.get_inner_gc() {
@@ -1349,7 +1349,7 @@ impl<
 			unimplemented!();
 		};
 
-		(Migrate::capture(self), migrate)
+		Migrate(self, migrate, sp_std::marker::PhantomData)
 	}
 
 	fn applied_migrate(&mut self) {

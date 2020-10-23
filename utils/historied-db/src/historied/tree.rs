@@ -1031,12 +1031,12 @@ mod test {
 		let mut gc_item4 = item4.clone();
 		let mut states = states;
 		{
-			let (mig, mut gc) = states.get_migrate();
-			gc_item1.migrate(&mut gc);
-			gc_item2.migrate(&mut gc);
-			gc_item3.migrate(&mut gc);
-			gc_item4.migrate(&mut gc);
-			states = mig.applied_migrate();
+			let mut gc = states.get_migrate();
+			gc_item1.migrate(gc.migrate());
+			gc_item2.migrate(gc.migrate());
+			gc_item3.migrate(gc.migrate());
+			gc_item4.migrate(gc.migrate());
+			gc.applied_migrate();
 		}
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
@@ -1064,12 +1064,12 @@ mod test {
 		let fp = states.get_db_state(&StateInput(35)).unwrap();
 		states.canonicalize(fp, *s3tmp.latest(), Some(s3tmp.latest().1));
 		{
-			let (mig, mut gc) = states.get_migrate();
-			gc_item1.migrate(&mut gc);
-			gc_item2.migrate(&mut gc);
-			gc_item3.migrate(&mut gc);
-			gc_item4.migrate(&mut gc);
-			states = mig.applied_migrate();
+			let mut gc = states.get_migrate();
+			gc_item1.migrate(gc.migrate());
+			gc_item2.migrate(gc.migrate());
+			gc_item3.migrate(gc.migrate());
+			gc_item4.migrate(gc.migrate());
+			gc.applied_migrate();
 			//panic!("{:?}", (gc, item3, gc_item3));
 		}
 		for i in filter_in.iter() {
