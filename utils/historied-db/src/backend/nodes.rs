@@ -792,6 +792,18 @@ impl EstimateSize for Vec<u8> {
 	}
 }
 
+impl EstimateSize for u64 {
+	fn estimate_size(&self) -> usize {
+		8
+	}
+}
+
+impl EstimateSize for u128 {
+	fn estimate_size(&self) -> usize {
+		16
+	}
+}
+
 impl EstimateSize for u32 {
 	fn estimate_size(&self) -> usize {
 		4
