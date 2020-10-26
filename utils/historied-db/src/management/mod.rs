@@ -234,7 +234,12 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		handle.remove(state)
 	}
 
-	pub fn remove_changes_before(&mut self, db: &mut Db, state: &S) -> Vec<Vec<K>> {
+	pub fn remove_changes_before(
+		&mut self,
+		db: &mut Db,
+		state: &S,
+		result: &mut sp_std::collections::btree_set::BTreeSet<K>,
+	) {
 		let mut handle = self.touched_keys.handle(db);
 		// TODO can be better with entry iterator (or key iterator at least)
 		let mut to_remove = Vec::new();
@@ -245,13 +250,13 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 				break;
 			}
 		}
-		let mut result = Vec::new();
 		for state in to_remove.into_iter() {
 			if let Some(v) = handle.remove(&state) {
-				result.push(v);
+				for k in v {
+					result.insert(k);
+				}
 			}
 		}
-		result
 	}
 
 	pub fn from_db(db: &Db) -> Self {
