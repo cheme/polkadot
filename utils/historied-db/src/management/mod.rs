@@ -165,7 +165,6 @@ use crate::{Management, Migrate};
 /// (state global change requires to update all associated dbs).
 pub trait ManagementConsumer<H, M: Management<H>>: Send + Sync + 'static {
 	fn migrate(&self, migrate: &mut Migrate<H, M>);
-	fn default_as_neutral_element(&self) -> bool;
 }
 
 /// Register db, this associate treemanagement.
