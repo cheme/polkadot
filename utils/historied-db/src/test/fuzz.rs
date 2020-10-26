@@ -25,8 +25,8 @@ use crate::{
 };
 use crate::test::simple_impl::StateInput;
 
-pub type InMemoryMgmt = crate::management::tree::TreeManagement<StateInput, u32, u32, u16, ()>;
-pub type InMemoryMgmtSer = crate::management::tree::TreeManagement<StateInput, u32, u32, u16, SerFuzz>;
+pub type InMemoryMgmt = crate::management::tree::TreeManagement<StateInput, u32, u32, ()>;
+pub type InMemoryMgmtSer = crate::management::tree::TreeManagement<StateInput, u32, u32, SerFuzz>;
 
 #[derive(Default)]
 /// Serialize for fuzzer.

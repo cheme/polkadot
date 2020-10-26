@@ -238,12 +238,11 @@ impl<I: Ord + Default + Codec, BI: Default + Codec, S: TreeManagementStorage> Tr
 }
 
 #[derive(Derivative)]
-#[derivative(Debug(bound="V: Debug, I: Debug, BI: Debug, S::Storage: Debug"))]
-#[derivative(Clone(bound="V: Clone, I: Clone, BI: Clone, S::Storage: Clone"))]
-#[cfg_attr(test, derivative(PartialEq(bound="V: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
-pub struct TreeState<I: Ord, BI, V, S: TreeManagementStorage> {
+#[derivative(Debug(bound="I: Debug, BI: Debug, S::Storage: Debug"))]
+#[derivative(Clone(bound="I: Clone, BI: Clone, S::Storage: Clone"))]
+#[cfg_attr(test, derivative(PartialEq(bound="I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
+pub struct TreeState<I: Ord, BI, S: TreeManagementStorage> {
 	pub(crate) tree: Tree<I, BI, S>,
-	pub(crate) neutral_element: Option<V>,
 }
 
 /// Gc against a current tree state.
@@ -328,31 +327,30 @@ impl<I: Clone, BI: Clone + Ord + AddAssign<u32>> MultipleMigrate<I, BI> {
 	}
 }
 
-impl<I: Ord, BI, V, S: TreeManagementStorage> TreeState<I, BI, V, S> {
+impl<I: Ord, BI, S: TreeManagementStorage> TreeState<I, BI, S> {
 	pub fn ser(&mut self) -> &mut S::Storage {
 		&mut self.tree.serialize
 	}
 }
 
 #[derive(Derivative)]
-#[derivative(Debug(bound="H: Debug, V: Debug, I: Debug, BI: Debug, S::Storage: Debug"))]
-#[derivative(Clone(bound="H: Clone, V: Clone, I: Clone, BI: Clone, S::Storage: Clone"))]
-#[cfg_attr(test, derivative(PartialEq(bound="H: PartialEq, V: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
+#[derivative(Debug(bound="H: Debug, I: Debug, BI: Debug, S::Storage: Debug"))]
+#[derivative(Clone(bound="H: Clone, I: Clone, BI: Clone, S::Storage: Clone"))]
+#[cfg_attr(test, derivative(PartialEq(bound="H: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
 // TODO EMCH !!! remove V, and make neutral element a trait constant of Value.
-pub struct TreeManagement<H: Ord, I: Ord, BI, V, S: TreeManagementStorage> {
-	state: TreeState<I, BI, V, S>,
+pub struct TreeManagement<H: Ord, I: Ord, BI, S: TreeManagementStorage> {
+	state: TreeState<I, BI, S>,
 	mapping: SerializeMap<H, (I, BI), S::Storage, S::Mapping>,
 	touched_gc: SerializeVariable<bool, S::Storage, S::TouchedGC>, // TODO currently damned unused thing??
-	current_gc: SerializeVariable<TreeMigrate<I, BI, V>, S::Storage, S::CurrentGC>, // TODO currently unused??
+	current_gc: SerializeVariable<TreeMigrate<I, BI>, S::Storage, S::CurrentGC>, // TODO currently unused??
 	last_in_use_index: SerializeVariable<((I, BI), Option<H>), S::Storage, S::LastIndex>, // TODO rename to last inserted as we do not rebase on query
-	neutral_element: SerializeVariable<Option<V>, S::Storage, S::NeutralElt>,
 }
 
-pub struct RegisteredConsumer<H: Ord + 'static, I: Ord + 'static, BI: 'static, V: 'static, S: TreeManagementStorage + 'static>(
-	Vec<Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, V, S>>>>,
+pub struct RegisteredConsumer<H: Ord + 'static, I: Ord + 'static, BI: 'static, S: TreeManagementStorage + 'static>(
+	Vec<Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, S>>>>,
 );
 
-impl<H, I, BI, V, S> Default for RegisteredConsumer<H, I, BI, V, S>
+impl<H, I, BI, S> Default for RegisteredConsumer<H, I, BI, S>
 	where
 		H: Ord,
 		I: Ord,
@@ -363,7 +361,7 @@ impl<H, I, BI, V, S> Default for RegisteredConsumer<H, I, BI, V, S>
 	}
 }
 
-impl<H, I, BI, V, S> Default for TreeManagement<H, I, BI, V, S>
+impl<H, I, BI, S> Default for TreeManagement<H, I, BI, S>
 	where
 		H: Ord,
 		I: Default + Ord,
@@ -377,31 +375,25 @@ impl<H, I, BI, V, S> Default for TreeManagement<H, I, BI, V, S>
 		TreeManagement {
 			state: TreeState {
 				tree,
-				neutral_element: Default::default(),
 			},
 			mapping,
 			touched_gc: Default::default(),
 			current_gc: Default::default(),
 			last_in_use_index: Default::default(),
-			neutral_element: Default::default(),
 		}
 	}
 }
 
-impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, V: Codec + Clone, S: TreeManagementStorage> TreeManagement<H, I, BI, V, S> {
+impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManagementStorage> TreeManagement<H, I, BI, S> {
 	/// Initialize from a default ser
-	pub fn from_ser(mut serialize: S::Storage) -> Self {
-		let mut neutral_element_ser = SerializeVariable::<Option<V>, S::Storage, S::NeutralElt>::from_ser(&serialize);
-		let neutral_element = neutral_element_ser.handle(&mut serialize).get().clone();
+	pub fn from_ser(serialize: S::Storage) -> Self {
 		let mapping = SerializeMap::default_from_db(&serialize);
 		TreeManagement {
 			mapping,
 			touched_gc: SerializeVariable::from_ser(&serialize),
 			current_gc: SerializeVariable::from_ser(&serialize),
 			last_in_use_index: SerializeVariable::from_ser(&serialize),
-			neutral_element: neutral_element_ser,
 			state: TreeState {
-				neutral_element,
 				tree: Tree::from_ser(serialize),
 			},
 		}
@@ -423,28 +415,11 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, V: Codec + C
 }
 
 impl<
-	H: Ord,
-	I: Ord,
-	BI,
-	V: Codec,
-	S: TreeManagementStorage,
-> TreeManagement<H, I, BI, V, S> {
-	pub fn define_neutral_element(mut self, n: V) -> Self {
-		// TODO refactor bound and put V to clone probably
-		let n2 = V::decode(&mut &n.encode()[..]).expect("Directly from encode");
-		self.neutral_element.handle(self.state.ser()).set(Some(n));
-		self.state.neutral_element = Some(n2);
-		self
-	}
-}
-
-impl<
 	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
-	V,
 	S: TreeManagementStorage,
-> TreeManagement<H, I, BI, V, S> {
+> TreeManagement<H, I, BI, S> {
 	/// Associate a state for the initial root (default index).
 	pub fn map_root_state(&mut self, root: H) {
 		self.mapping.handle(self.state.ser()).insert(root, Default::default());
@@ -613,18 +588,17 @@ impl<
 impl<
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
-	V: Clone + Default + Codec, // TODO why default?
 	H: Clone + Ord + Codec,
 	S: TreeManagementStorage,
-> RegisteredConsumer<H, I, BI, V, S> {
+> RegisteredConsumer<H, I, BI, S> {
 /*	pub fn register_consumer_sync(&mut self, consumer: Arc<dyn super::ManagementConsumerSync>) {
 	}*/
 
-	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, V, S>>>) {
+	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, S>>>) {
 		self.0.push(consumer);
 	}
 
-	pub fn migrate(&self, mgmt: &mut TreeManagement<H, I, BI, V, S>) {
+	pub fn migrate(&self, mgmt: &mut TreeManagement<H, I, BI, S>) {
 		// In this case (register consumer is design to run with sync backends), the management
 		// lock is very likely to be ineffective.
 		// TODO this get_migrate api is not really good, a locked write (depending on type of
@@ -636,7 +610,7 @@ impl<
 		};
 		if need_migrate {
 			for consumer in self.0.iter() {
-					consumer.migrate(&mut migrate);
+				consumer.migrate(&mut migrate);
 			}
 		}
 		
@@ -1211,24 +1185,21 @@ impl<I, BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone> BranchState<I, B
 
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct BranchGC<I, BI, V> {
+pub struct BranchGC<I, BI> {
 	pub branch_index: I,
 	/// A new start - end limit for the branch or a removed
 	/// branch.
-	pub new_range: Option<LinearGC<BI, V>>,
+	pub new_range: Option<LinearGC<BI>>,
 }
 
 
 // TODO delete
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct TreeMigrate<I, BI, V> {
+pub struct TreeMigrate<I, BI> {
 	/// Every modified branch.
 	/// Ordered by branch index.
-	pub changes: Vec<BranchGC<I, BI, V>>,
-	// TODO is also in every lineargc of branchgc.
-	pub neutral_element: Option<V>,
-	// TODO add the key elements (as option to trigger registration or not).
+	pub changes: Vec<BranchGC<I, BI>>,
 }
 
 /// Same as `DeltaTreeStateGc`, but also
@@ -1259,11 +1230,10 @@ pub enum MultipleMigrate<I, BI> {
 	Noops,
 }
 
-impl<I, BI, V> Default for TreeMigrate<I, BI, V> {
+impl<I, BI> Default for TreeMigrate<I, BI> {
 	fn default() -> Self {
 		TreeMigrate {
 			changes: Vec::new(),
-			neutral_element: None,
 		}
 	}
 }
@@ -1272,9 +1242,8 @@ impl<
 	H: Ord + Clone + Codec,
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
-	V: Clone + Default + Codec,
 	S: TreeManagementStorage,
-> TreeManagement<H, I, BI, V, S> {
+> TreeManagement<H, I, BI, S> {
 	fn get_inner_gc(&self) -> Option<MultipleGc<I, BI>> {
 		let tree_meta = self.state.tree.meta.get();
 		let composite_treshold = tree_meta.next_composite_treshold.clone()
@@ -1322,9 +1291,8 @@ impl<
 	H: Ord + Clone + Codec,
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
-	V: Clone + Default + Codec,
 	S: TreeManagementStorage,
-> ManagementRef<H> for TreeManagement<H, I, BI, V, S> {
+> ManagementRef<H> for TreeManagement<H, I, BI, S> {
 	type S = ForkPlan<I, BI>;
 	/// Garbage collect over current
 	/// state or registered changes.
@@ -1347,9 +1315,8 @@ impl<
 	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
-	V: Clone + Default + Codec, // TODO why default?
 	S: TreeManagementStorage,
-> Management<H> for TreeManagement<H, I, BI, V, S> {
+> Management<H> for TreeManagement<H, I, BI, S> {
 	// TODO attach gc infos to allow some lazy cleanup (make it optional)
 	// on set and on get_mut
 	type SE = Latest<(I, BI)>;
@@ -1436,9 +1403,8 @@ impl<
 	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
 	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
-	V: Clone + Default + Codec,
 	S: TreeManagementStorage,
-> ForkableManagement<H> for TreeManagement<H, I, BI, V, S> {
+> ForkableManagement<H> for TreeManagement<H, I, BI, S> {
 	const JOURNAL_DELETE: bool = S::JOURNAL_DELETE;
 
 	type SF = (I, BI);

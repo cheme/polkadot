@@ -352,7 +352,7 @@ impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> InMemoryValueSlice<Vec<u
 impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value<V> for Linear<V, S, D> {
 	type SE = Latest<S>;
 	type Index = S;
-	type GC = LinearGC<S, V>;
+	type GC = LinearGC<S>;
 	/// Migrate will act as GC but also align state to 0.
 	/// The index index in second position is the old start state
 	/// number that is now 0 (usually the state as gc new_start).
@@ -387,7 +387,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		UpdateResult::Unchanged
 	}
 
-	fn gc(&mut self, gc: &Self::GC, _neutral: Option<&V>) -> UpdateResult<()> {
+	fn gc(&mut self, gc: &Self::GC, neutral: Option<&V>) -> UpdateResult<()> {
 		if gc.new_start.is_some() && gc.new_start == gc.new_end {
 			self.0.clear();
 			return UpdateResult::Cleared(());
@@ -427,7 +427,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 					// This does not handle consecutive neutral element, but
 					// it is considered marginal and bad usage (in theory one
 					// should not push two consecutive identical values).
-					if let Some(neutral) = gc.neutral_element.as_ref() {
+					if let Some(neutral) = neutral {
 						if neutral == &self.0.get(handle).value {
 							index += 1;
 						}
@@ -506,15 +506,11 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Condi
 
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct LinearGC<S, V> {
+pub struct LinearGC<S> {
 	// inclusive
 	pub(crate) new_start: Option<S>,
 	// exclusive
 	pub(crate) new_end: Option<S>,
-	// Element that do not need to be kept
-	// if at start (no value returns is the
-	// same as this value).
-	pub(crate) neutral_element: Option<V>,
 }
 
 impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u32>> {
@@ -567,12 +563,10 @@ mod test {
 			let gc1 = LinearGC {
 				new_start: None,
 				new_end: Some(i as u32),
-				neutral_element: None,
 			};
 			let gc2 = LinearGC {
 				new_start: None,
 				new_end: Some(i as u32),
-				neutral_element: Some(vec![0u8]),
 			};
 			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc1, neutral1);
@@ -609,12 +603,10 @@ mod test {
 			let gc1 = LinearGC {
 				new_start: Some(i as u32),
 				new_end: None,
-				neutral_element: None,
 			};
 			let gc2 = LinearGC {
 				new_start: Some(i as u32),
 				new_end: None,
-				neutral_element: Some(vec![0u8]),
 			};
 			let mut first = Linear(first_storage.clone(), Default::default());
 			first.gc(&gc1, neutral1);

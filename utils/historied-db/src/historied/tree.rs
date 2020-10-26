@@ -406,7 +406,6 @@ impl<
 				let mut gc = LinearGC {
 					new_start: Some(start),
 					new_end:  Some(end),
-					neutral_element: neutral.cloned(),
 				};
 
 				let mut branch = self.branches.get(index);
@@ -485,7 +484,6 @@ impl<
 					Some(LinearGC {
 						new_start,
 						new_end: change.0.clone(),
-						neutral_element: neutral.cloned(),
 					})
 				}
 			} else {
@@ -493,7 +491,6 @@ impl<
 					Some(LinearGC {
 						new_start,
 						new_end: None,
-						neutral_element: neutral.cloned(),
 					})
 				} else {
 					None
