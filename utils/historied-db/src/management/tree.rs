@@ -285,17 +285,39 @@ pub enum MultipleGc<I, BI, V> {
 	State(TreeStateGc<I, BI, V>),
 }
 
-impl<I, BI: Clone, V> MultipleGc<I, BI, V> {
+impl<I: Clone, BI: Clone + Ord + AddAssign<u32>, V> MultipleGc<I, BI, V> {
 	/// Return upper limit (all sate before it are touched),
 	/// and explicit touched state.
 	pub fn touched_state(&self) -> (Option<BI>, impl Iterator<Item = (I, BI)>) {
 
 		let (pruning, touched) = match self {
 			MultipleGc::Journaled(gc) => {
-				let iter: Option<std::iter::Empty<(I, BI)>> = unimplemented!();
+				let iter = Some(
+					gc.storage.clone().into_iter()
+						.map(|(index, (change, old))| {
+							let mut bindex = old.start;
+							let end = old.end;
+							sp_std::iter::from_fn(move || {
+								if bindex < end {
+									let result = Some(bindex.clone());
+									bindex += 1u32;
+									result
+								} else {
+									None
+								}
+							}).filter_map(move |branch_index| match change.as_ref() {
+								Some(new_end) => if &branch_index >= new_end {
+									Some((index.clone(), branch_index))
+								} else {
+									None
+								},
+								None => Some((index.clone(), branch_index)),
+							})
+						}).flatten()
+				);
 				(gc.pruning_treshold.clone(), iter)
 			},
-			MultipleGc::State(gc) => {
+			MultipleGc::State(_gc) => {
 				(None, None)
 			},
 		};
@@ -930,7 +952,7 @@ impl<
 					} else {
 						None
 					},
-					Some((None, old_range)) => None,
+					Some((None, _)) => None,
 					None => Some((new_node_index, branch_range)),
 				} {
 					journal_delete.insert(branch_index.clone(), (Some(to_insert), old_range));
