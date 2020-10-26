@@ -204,7 +204,7 @@ pub struct JournalForMigrationBasis<S: Ord, K, Db, DbConf> {
 
 impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 	where
-		S: codec::Encode + Clone + Ord,
+		S: codec::Codec + Clone + Ord,
 		K: codec::Codec + Clone + Ord,
 		Db: crate::simple_db::SerializeDB,
 		DbConf: crate::simple_db::SerializeInstanceMap,
@@ -232,6 +232,26 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 	pub fn remove_changes_at(&mut self, db: &mut Db, state: &S) -> Option<Vec<K>> {
 		let mut handle = self.touched_keys.handle(db);
 		handle.remove(state)
+	}
+
+	pub fn remove_changes_before(&mut self, db: &mut Db, state: &S) -> Vec<Vec<K>> {
+		let mut handle = self.touched_keys.handle(db);
+		// TODO can be better with entry iterator (or key iterator at least)
+		let mut to_remove = Vec::new();
+		for kv in handle.iter() {
+			if &kv.0 < state {
+				to_remove.push(kv.0);
+			} else {
+				break;
+			}
+		}
+		let mut result = Vec::new();
+		for state in to_remove.into_iter() {
+			if let Some(v) = handle.remove(&state) {
+				result.push(v);
+			}
+		}
+		result
 	}
 
 	pub fn from_db(db: &Db) -> Self {

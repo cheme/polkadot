@@ -355,6 +355,10 @@ impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
 		self.collection.clear();
 	}
 
+	pub fn clear_cache(&mut self) {
+		self.cache.clear();
+	}
+
 	pub fn insert(&'a mut self, k: K, v: V) -> &V {
 		self.collection.write(k.encode().as_slice(), v.encode().as_slice());
 		let res = self.cache.entry(k)
