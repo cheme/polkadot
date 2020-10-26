@@ -55,15 +55,15 @@ pub trait NodesMeta: Sized {
 
 /// Backend storing nodes.
 pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
-	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<Node<V, S, D, M>>;
+	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>>;
 
 	/// a default addressing scheme for storage that natively works
 	/// as a simple key value storage.
-	fn vec_address(reference_key: &[u8], relative_index: u32) -> Vec<u8> {
+	fn vec_address(reference_key: &[u8], relative_index: u64) -> Vec<u8> {
 		let storage_prefix = M::STORAGE_PREFIX;
-		let mut result = Vec::with_capacity(reference_key.len() + storage_prefix.len() + 8);
+		let mut result = Vec::with_capacity(reference_key.len() + storage_prefix.len() + 12);
 		result.extend_from_slice(storage_prefix);
-		result.extend_from_slice(&(reference_key.len() as u32).to_be_bytes());
+		result.extend_from_slice(&(reference_key.len() as u64).to_be_bytes());
 		result.extend_from_slice(reference_key);
 		result.extend_from_slice(&relative_index.to_be_bytes());
 		result
@@ -71,24 +71,24 @@ pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
 }
 
 pub trait NodeStorageMut<V, S, D, M> {
-	fn set_node(&mut self, reference_key: &[u8], relative_index: u32, node: &Node<V, S, D, M>);
-	fn remove_node(&mut self, reference_key: &[u8], relative_index: u32);
+	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &Node<V, S, D, M>);
+	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64);
 }
 
 // Note that this should not be use out of test as it clone the whole btree map many times.
 impl<V, S, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
-	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<Node<V, S, D, M>> {
+	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>> {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.get(&key).cloned()
 	}
 }
 
 impl<V, S, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
-	fn set_node(&mut self, reference_key: &[u8], relative_index: u32, node: &Node<V, S, D, M>) {
+	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &Node<V, S, D, M>) {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.insert(key, node.clone());
 	}
-	fn remove_node(&mut self, reference_key: &[u8], relative_index: u32) {
+	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64) {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.remove(&key);
 	}
@@ -148,13 +148,13 @@ pub struct Head<V, S, D, M, B, NI> {
 	/// finishing at most at the very first historied node.
 	fetched: RefCell<Vec<Node<V, S, D, M>>>, // TODO consider smallvec
 	/// Keep trace of initial index start to apply change lazilly.
-	old_start_node_index: u32,
+	old_start_node_index: u64,
 	/// Keep trace of initial index end to apply change lazilly.
-	old_end_node_index: u32,
+	old_end_node_index: u64,
 	/// The index of the first node, inclusive.
-	start_node_index: u32,
+	start_node_index: u64,
 	/// The index of the last node, non inclusive (next index to use)
-	end_node_index: u32,
+	end_node_index: u64,
 	/// Number of historied values stored in head and all past nodes.
 	len: usize,
 	/// Backend key used for this head, or any unique identifying key
@@ -170,11 +170,11 @@ pub struct Head<V, S, D, M, B, NI> {
 /// Codec fragment for node
 pub struct HeadCodec {
 	/// The index of the first node, inclusive.
-	start_node_index: u32,
+	start_node_index: u64,
 	/// The index of the last node, non inclusive (next index to use)
-	end_node_index: u32,
+	end_node_index: u64,
 	/// Number of historied values stored in head and all past nodes.
-	len: u32,
+	len: u64,
 }
 
 impl<V, S, D, M, B, NI> Encode for Head<V, S, D, M, B, NI>
@@ -190,7 +190,7 @@ impl<V, S, D, M, B, NI> Encode for Head<V, S, D, M, B, NI>
 		HeadCodec {
 			start_node_index: self.start_node_index,
 			end_node_index: self.end_node_index,
-			len: self.len as u32,
+			len: self.len as u64,
 		}.encode_to(dest)
 	}
 }
@@ -294,7 +294,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 				if trigger {
 					node.trigger_flush();
 				}
-				self.backend.set_node(&self.reference_key[..], self.end_node_index - 1 - index as u32 , node);
+				self.backend.set_node(&self.reference_key[..], self.end_node_index - 1 - index as u64 , node);
 				node.changed = false;
 			}
 		}
@@ -394,7 +394,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 						return Some((fetch_index, index - start));
 					}
 				} else {
-					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u32) {
+					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u64) {
 						start -= node.data.len();
 						let r = if index >= start {
 							Some((self.fetched.borrow().len(), index - start))
@@ -431,7 +431,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	// Fetched node index (end_node_index is head).
 	// If true the node needs to be inserted.
 	// Inner node linear storage index.
-	type Index = (u32, D::Index);
+	type Index = (u64, D::Index);
 	fn last(&self) -> Option<Self::Index> {
 		if self.len == 0 {
 			return None;
@@ -518,11 +518,11 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		// TODO see if could replace all fetch node with handle use and replace this.
 		self.fetch_node(index).and_then(|(node_index, inner_node_index)| {
 			if node_index == self.end_node_index as usize {
-				self.inner.data.lookup(inner_node_index).map(|index| (node_index as u32, index))
+				self.inner.data.lookup(inner_node_index).map(|index| (node_index as u64, index))
 			} else {
 				self.fetched.borrow().get(node_index)
 					.and_then(|inner|
-					inner.data.lookup(inner_node_index).map(|index| (node_index as u32, index))
+					inner.data.lookup(inner_node_index).map(|index| (node_index as u64, index))
 				)
 			}
 		})
@@ -576,7 +576,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				node.changed = true;
 				node.data.truncate_until(ix)
 			}
-			self.start_node_index += self.end_node_index - i as u32 - 1;
+			self.start_node_index += self.end_node_index - i as u64 - 1;
 			if self.len > split_off {
 				self.len -= split_off;
 			} else {
@@ -748,7 +748,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			self.len = at;
 		}
 		if !in_head {
-			let fetch_index = i as u32;
+			let fetch_index = i as u64;
 			self.end_node_index -= fetch_index + 1;	
 			let mut fetched_mut = self.fetched.borrow_mut();
 			// reversed ordered.
