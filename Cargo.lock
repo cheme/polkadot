@@ -281,6 +281,7 @@ version = "0.8.0"
 dependencies = [
  "derivative",
  "hash-db",
+ "num-traits",
  "parity-scale-codec",
  "smallvec",
  "sp-std",

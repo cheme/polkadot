@@ -25,6 +25,7 @@ use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, Line
 use crate::historied::linear::{Linear, LinearState, LinearGC};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
 use sp_std::ops::SubAssign;
+use num_traits::One;
 use sp_std::vec::Vec;
 use sp_std::marker::PhantomData;
 use crate::Latest;
@@ -59,7 +60,7 @@ macro_rules! tree_get {
 				} else if branch_index == &state_branch_index {
 					// TODO add a lower bound check (maybe debug_assert it only).
 					let mut upper_bound = state_branch_range.end.clone();
-					upper_bound -= BI::from(1u32);
+					upper_bound -= BI::one();
 					let branch = self.branches.$branch_query(branch_ix).value;
 					if let Some(result) = $value_query(&branch, &upper_bound) {
 						return Some($post_process(result, branch))
@@ -164,7 +165,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + From<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 	BD: LinearStorage<V, BI>,
@@ -185,7 +186,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + From<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Clone,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V, BI>,
@@ -195,7 +196,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + From<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V, BI>,
@@ -538,7 +539,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + From<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V, BI, Context = D::Context>,
@@ -590,7 +591,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + From<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V, BI>,
@@ -667,7 +668,7 @@ impl<
 // skipped.
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + From<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V, BI>,
@@ -706,7 +707,7 @@ impl Tree<u32, u32, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + From<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Clone + AsRef<[u8]> + AsMut<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
 	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V, BI>,

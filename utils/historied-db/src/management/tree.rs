@@ -26,6 +26,7 @@ use sp_std::collections::btree_map::BTreeMap;
 use sp_std::vec::Vec;
 use sp_std::boxed::Box;
 use sp_std::fmt::Debug;
+use num_traits::One;
 use crate::println;
 use crate::historied::linear::LinearGC;
 use crate::{Management, ManagementRef, Migrate, ForkableManagement, Latest};
@@ -416,8 +417,8 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManag
 
 impl<
 	H: Clone + Ord + Codec,
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + From<u32>,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + From<u32>,
+	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > TreeManagement<H, I, BI, S> {
 	/// Associate a state for the initial root (default index).
@@ -468,7 +469,7 @@ impl<
 			return;
 		}
 		let mut previous_index = state.1.clone();
-		previous_index -= BI::from(1u32);
+		previous_index -= BI::one();
 		if let Some((parent, branch_end)) = self.state.tree.branch_state(&state.0)
 			.map(|s| if s.state.start <= previous_index {
 				((state.0.clone(), previous_index), s.state.end)
@@ -479,7 +480,7 @@ impl<
 			// TODO consider moving thit to tree `apply_drop_state`!! (others calls are at tree level)
 			while bi < branch_end { // TODO should be < branch_end - 1
 				call_back(&state.0, &bi, self.state.ser());
-				bi += BI::from(1u32);
+				bi += BI::one();
 			}
 			call_back(&state.0, &state.1, self.state.ser());
 			self.state.tree.apply_drop_state(&state.0, &state.1, &mut call_back);
@@ -586,8 +587,8 @@ impl<
 }
 
 impl<
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + From<u32>,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + From<u32>,
+	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	H: Clone + Ord + Codec,
 	S: TreeManagementStorage,
 > RegisteredConsumer<H, I, BI, S> {
@@ -620,8 +621,8 @@ impl<
 
 	
 impl<
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + From<u32>,
-	BI: Ord + Default + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + From<u32>,
+	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+	BI: Ord + Default + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > Tree<I, BI, S> {
 	/// Return anchor index for this branch history:
@@ -640,7 +641,7 @@ impl<
 		if branch_index <= meta.composite_treshold.0 {
 			// only allow terminal append
 			let mut next = meta.composite_treshold.1.clone();
-			next += BI::from(1u32);
+			next += BI::one();
 			if number == next {
 				if meta.composite_latest {
 					meta.composite_latest = false;
@@ -679,7 +680,7 @@ impl<
 			}
 		}
 		Some(if create_new {
-			meta.last_index += I::from(1u32);
+			meta.last_index += I::one();
 			let state = BranchState::new(number, branch_index);
 			self.storage.handle(&mut self.serialize).insert(meta.last_index.clone(), state);
 			let result = meta.last_index.clone();
@@ -707,7 +708,7 @@ impl<
 		}
 		self.storage.handle(&mut self.serialize).get(&branch_index).map(|branch| {
 			let mut end = branch.state.end.clone();
-			end -= BI::from(1u32);
+			end -= BI::one();
 			Latest::unchecked_latest((branch_index, end))
 		})
 	}
@@ -731,7 +732,7 @@ impl<
 				None
 			} else {
 				let mut end = branch.state.end.clone();
-				end -= BI::from(1u32);
+				end -= BI::one();
 				if seq_index == end {
 					Some(Latest::unchecked_latest((branch_index, end)))
 				} else {
@@ -744,7 +745,7 @@ impl<
 	/// TODO doc & switch to &I
 	pub fn query_plan_at(&mut self, (branch_index, mut index) : (I, BI)) -> ForkPlan<I, BI> {
 		// make index exclusive
-		index += BI::from(1u32);
+		index += BI::one();
 		self.query_plan_inner(branch_index, Some(index))
 	}
 	/// TODO doc & switch to &I
@@ -867,7 +868,7 @@ impl<
 			self.register_drop(branch_index, last.clone(), register);
 		}
 		while &last.end > node_index {
-			last.end -= BI::from(1u32);
+			last.end -= BI::one();
 			self.apply_drop_state_rec_call(branch_index, &last.end, call_back, false);
 		}
 	}
@@ -899,7 +900,7 @@ impl<
 			let mut bi = s.state.start.clone();
 			while bi < s.state.end {
 				call_back(&i, &bi, &mut self.serialize);
-				bi += BI::from(1u32);
+				bi += BI::one();
 			}
 			self.storage.handle(&mut self.serialize).remove(&i);
 			// composite to false, as no in composite branch are stored.
@@ -980,7 +981,7 @@ pub struct ForkPlan<I, BI> {
 	pub composite_treshold: (I, BI),
 }
 
-impl<I: Clone, BI: Clone + SubAssign<BI> + From<u32>> ForkPlan<I, BI> {
+impl<I: Clone, BI: Clone + SubAssign<BI> + One> ForkPlan<I, BI> {
 	/// Extract latest state index use by the fork plan.
 	pub fn latest_index(&self) -> (I, BI) {
 		self.latest()
@@ -988,7 +989,7 @@ impl<I: Clone, BI: Clone + SubAssign<BI> + From<u32>> ForkPlan<I, BI> {
 	fn latest(&self) -> (I, BI) {
 		if let Some(branch_plan) = self.history.last() {
 			let mut index = branch_plan.state.end.clone();
-			index -= BI::from(1u32);
+			index -= BI::one();
 			(branch_plan.branch_index.clone(), index)
 		} else {
 			self.composite_treshold.clone()
@@ -1013,7 +1014,7 @@ pub struct BranchPlan<I, BI> {
 	pub state: BranchRange<BI>,
 }
 
-impl<'a, I: Default + Eq + Ord + Clone, BI: SubAssign<BI> + Ord + Clone + From<u32>> BranchesContainer<I, BI> for &'a ForkPlan<I, BI> {
+impl<'a, I: Default + Eq + Ord + Clone, BI: SubAssign<BI> + Ord + Clone + One> BranchesContainer<I, BI> for &'a ForkPlan<I, BI> {
 	type Branch = &'a BranchRange<BI>;
 	type Iter = ForkPlanIter<'a, I, BI>;
 
@@ -1061,7 +1062,7 @@ impl<'a, I: Clone, BI> Iterator for ForkPlanIter<'a, I, BI> {
 	}
 }
 
-impl<I: Ord + SubAssign<I> + Clone + From<u32>> BranchContainer<I> for BranchRange<I> {
+impl<I: Ord + SubAssign<I> + Clone + One> BranchContainer<I> for BranchRange<I> {
 
 	fn exists(&self, i: &I) -> bool {
 		i >= &self.start && i < &self.end
@@ -1070,7 +1071,7 @@ impl<I: Ord + SubAssign<I> + Clone + From<u32>> BranchContainer<I> for BranchRan
 	fn last_index(&self) -> I {
 		let mut r = self.end.clone();
 		// underflow should not happen as long as branchstateref are not allowed to be empty.
-		r -= I::from(1u32);
+		r -= I::one();
 		r
 	}
 }
@@ -1121,7 +1122,7 @@ impl<I: Default, BI: Default + AddAssign<u32>> Default for BranchState<I, BI> {
 	}
 }
 
-impl<I, BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + From<u32>> BranchState<I, BI> {
+impl<I, BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI> {
 
 	pub fn query_plan(&self) -> BranchRange<BI> {
 		self.state.clone()
@@ -1137,7 +1138,7 @@ impl<I, BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + From<u32>> Branch
 
 	pub fn new(offset: BI, parent_branch_index: I) -> Self {
 		let mut end = offset.clone();
-		end += BI::from(1u32);
+		end += BI::one();
 		BranchState {
 			state: BranchRange {
 				start: offset,
@@ -1160,7 +1161,7 @@ impl<I, BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + From<u32>> Branch
 
 	pub fn add_state(&mut self) -> bool {
 		if self.can_append {
-			self.state.end += BI::from(1u32);
+			self.state.end += BI::one();
 			true
 		} else {
 			false
@@ -1170,7 +1171,7 @@ impl<I, BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + From<u32>> Branch
 	/// Return true if resulting branch is empty.
 	pub fn drop_state(&mut self) -> bool {
 		if self.state.end > self.state.start {
-			self.state.end -= BI::from(1u32);
+			self.state.end -= BI::one();
 			self.can_append = false;
 			if self.state.end == self.state.start {
 				true
@@ -1240,8 +1241,8 @@ impl<I, BI> Default for TreeMigrate<I, BI> {
 
 impl<
 	H: Ord + Clone + Codec,
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + From<u32>,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + From<u32>,
+	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > TreeManagement<H, I, BI, S> {
 	fn get_inner_gc(&self) -> Option<MultipleGc<I, BI>> {
@@ -1289,8 +1290,8 @@ impl<
 	
 impl<
 	H: Ord + Clone + Codec,
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + From<u32>,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + From<u32>,
+	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > ManagementRef<H> for TreeManagement<H, I, BI, S> {
 	type S = ForkPlan<I, BI>;
@@ -1313,8 +1314,8 @@ impl<
 
 impl<
 	H: Clone + Ord + Codec,
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + From<u32>,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + From<u32>,
+	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > Management<H> for TreeManagement<H, I, BI, S> {
 	// TODO attach gc infos to allow some lazy cleanup (make it optional)
@@ -1350,7 +1351,7 @@ impl<
 		let state = state.history.last()
 			.map(|b| (b.branch_index.clone(), b.state.end.clone()))
 			.map(|mut b| {
-				b.1 -= BI::from(1u32);
+				b.1 -= BI::one();
 				b
 			})
 			.unwrap_or((Default::default(), Default::default()));
@@ -1401,8 +1402,8 @@ impl<
 
 impl<
 	H: Clone + Ord + Codec,
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + From<u32>,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + From<u32>,
+	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > ForkableManagement<H> for TreeManagement<H, I, BI, S> {
 	const JOURNAL_DELETE: bool = S::JOURNAL_DELETE;
@@ -1430,7 +1431,7 @@ impl<
 	fn append_external_state(&mut self, state: H, at: &Self::SF) -> Option<Self::SE> {
 		let (branch_index, index) = at;
 		let mut index = index.clone();
-		index += BI::from(1u32);
+		index += BI::one();
 		if let Some(branch_index) = self.state.tree.add_state(branch_index.clone(), index.clone()) {
 			let last_in_use_index = (branch_index.clone(), index);
 			self.last_in_use_index.handle(self.state.ser())

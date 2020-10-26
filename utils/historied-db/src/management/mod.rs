@@ -25,6 +25,7 @@ pub mod linear {
 
 	use crate::{Latest, Management, ManagementRef, Migrate, LinearManagement};
 	use sp_std::ops::{AddAssign, SubAssign};
+	use num_traits::One;
 
 	// This is for small state as there is no double
 	// mapping an some operation goes through full scan.
@@ -127,13 +128,13 @@ pub mod linear {
 
 	impl<
 	H: Ord + Clone,
-	S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + From<u32>,
+	S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + One,
 	> LinearManagement<H> for LinearInMemoryManagement<H, S> {
 		fn append_external_state(&mut self, state: H) -> Option<Self::S> {
 			if !self.can_append {
 				return None;
 			}
-			self.current_state += S::from(1u32);
+			self.current_state += S::one();
 			self.mapping.insert(state, self.current_state.clone());
 			Some(self.current_state.clone())
 		}
@@ -141,7 +142,7 @@ pub mod linear {
 		fn drop_last_state(&mut self) -> Self::S {
 			let mut v = S::default();
 			if self.current_state != v {
-				v += S::from(1u32);
+				v += S::one();
 				self.current_state -= v;
 			}
 			self.can_append = true;

@@ -28,7 +28,6 @@ use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRe
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
-use sp_std::convert::TryFrom;
 use sp_std::ops::{SubAssign, Range};
 use codec::{Encode, Decode, Input};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
@@ -46,8 +45,6 @@ pub trait LinearState:
 	+ Clone
 	+ Ord
 	+ PartialOrd
-	+ TryFrom<u32>
-	+ PartialEq<u32>
 {
 	// stored state and query state are
 	// the same for linear state.
@@ -65,8 +62,6 @@ impl<S> LinearState for S where S:
 	+ Clone
 	+ Ord
 	+ PartialOrd
-	+ TryFrom<u32>
-	+ PartialEq<u32>
 { }
 
 /// Implementation of linear value history storage.
