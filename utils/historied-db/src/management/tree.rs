@@ -281,7 +281,7 @@ pub enum MultipleGc<I, BI> {
 	State(TreeStateGc<I, BI>),
 }
 
-impl<I: Clone, BI: Clone + Ord + AddAssign<u32>> MultipleMigrate<I, BI> {
+impl<I: Clone, BI: Clone + Ord + AddAssign<BI> + One> MultipleMigrate<I, BI> {
 	/// Return upper limit (all sate before it are touched),
 	/// and explicit touched state.
 	pub fn touched_state(&self) -> (Option<BI>, impl Iterator<Item = (I, BI)>) {
@@ -296,7 +296,7 @@ impl<I: Clone, BI: Clone + Ord + AddAssign<u32>> MultipleMigrate<I, BI> {
 							sp_std::iter::from_fn(move || {
 								if bindex < end {
 									let result = Some(bindex.clone());
-									bindex += 1u32;
+									bindex += BI::one();
 									result
 								} else {
 									None
