@@ -119,7 +119,7 @@ impl<I, BI: Clone> BranchState<I, BI> {
 
 /// This is a simple range, end non inclusive.
 /// TODO type alias or use ops::Range? see next todo?
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Encode, Decode)]
 pub struct BranchRange<I> {
 	// TODO rewrite this to use as single linear index?
 	// we could always start at 0 but the state could not
@@ -163,7 +163,9 @@ pub struct Tree<I: Ord, BI, S: TreeManagementStorage> {
 	// value is always in a low number branch behind a few fork.
 	// A longest branch pointer per history is also a viable
 	// strategy and avoid fragmenting the history to much.
-	pub(crate) journal_delete: SerializeMap<I, Option<BI>, S::Storage, S::JournalDelete>,
+	//
+	// First optional BI is new end or delete, second is the previous range value.
+	pub(crate) journal_delete: SerializeMap<I, (Option<BI>, BranchRange<BI>), S::Storage, S::JournalDelete>,
 }
 
 #[derive(Derivative, Encode, Decode)]
@@ -267,7 +269,7 @@ pub struct TreeStateGc<I, BI, V> {
 #[derive(Clone, Debug)]
 pub struct DeltaTreeStateGc<I, BI, V> {
 	/// Set of every branch that get reduced (new end stored) or deleted.
-	pub(crate) storage: BTreeMap<I, Option<BI>>,
+	pub(crate) storage: BTreeMap<I, (Option<BI>, BranchRange<BI>)>,
 	/// New composite treshold value, this is not strictly needed but
 	/// potentially allows skipping some iteration into storage.
 	pub(crate) composite_treshold: (I, BI),
@@ -546,29 +548,30 @@ impl<
 					debug_assert!(ref_range.start == branch.state.start);
 					debug_assert!(ref_range.end <= branch.state.end);
 					if ref_range.end < branch.state.end {
+						let old = ref_range.clone();
 						branch.state.end = ref_range.end.clone();
 						branch.can_append = false;
-						to_change.push((branch_ix, branch));
+						to_change.push((branch_ix, branch, old));
 						// TODO EMCH clean mapping for ends shifts
 					}
 				} else {
 					println!("rem {:?}", branch_ix);
-					to_remove.push(branch_ix.clone());
+					to_remove.push((branch_ix.clone(), branch.state.clone()));
 				}
 			}
 		}
 		if to_remove.len() > 0 {
 			change = true;
 			for to_remove in to_remove {
-				self.state.tree.register_drop(&to_remove, None);
-				self.state.tree.storage.handle(&mut self.state.tree.serialize).remove(&to_remove);
+				self.state.tree.register_drop(&to_remove.0, to_remove.1, None);
+				self.state.tree.storage.handle(&mut self.state.tree.serialize).remove(&to_remove.0);
 				// TODO EMCH clean mapping for range -> in applied_migrate
 			}
 		}
 		if to_change.len() > 0 {
 			change = true;
-			for (branch_ix, branch) in to_change {
-				self.state.tree.register_drop(&branch_ix, Some(branch.state.end.clone()));
+			for (branch_ix, branch, old_branch) in to_change {
+				self.state.tree.register_drop(&branch_ix, old_branch, Some(branch.state.end.clone()));
 				self.state.tree.storage.handle(&mut self.state.tree.serialize).insert(branch_ix, branch);
 			}
 		}
@@ -625,7 +628,7 @@ impl<
 	
 impl<
 	I: Clone + Default + SubAssign<u32> + AddAssign<u32> + Ord + Debug + Codec,
-	BI: Ord + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
+	BI: Ord + Default + Eq + SubAssign<u32> + AddAssign<u32> + Clone + Default + Debug + Codec,
 	S: TreeManagementStorage,
 > Tree<I, BI, S> {
 	/// Return anchor index for this branch history:
@@ -848,7 +851,7 @@ impl<
 		branch_entry.and_modify(|branch| {
 			has_branch = true;
 			branch.is_latest = true;
-			last = branch.state.end.clone();
+			last = branch.state.clone();
 			while &branch.state.end > node_index {
 				// TODO a function to drop multiple state in linear.
 				if branch.drop_state() {
@@ -868,11 +871,11 @@ impl<
 			self.storage.handle(&mut self.serialize).remove(branch_index);
 		}
 		if let Some(register) = register {
-			self.register_drop(branch_index, register);
+			self.register_drop(branch_index, last.clone(), register);
 		}
-		while &last > node_index {
-			last -= 1;
-			self.apply_drop_state_rec_call(branch_index, &last, call_back, false);
+		while &last.end > node_index {
+			last.end -= 1;
+			self.apply_drop_state_rec_call(branch_index, &last.end, call_back, false);
 		}
 	}
 
@@ -897,7 +900,7 @@ impl<
 			}
 		}
 		for (i, s) in to_delete.into_iter() {
-			self.register_drop(&i, None);
+			self.register_drop(&i, s.state.clone(), None);
 			// TODO these drop is a full branch drop: we could recurse on ourselves
 			// into calling function and this function rec on itself and do its own drop
 			let mut bi = s.state.start.clone();
@@ -913,24 +916,27 @@ impl<
 
 	fn register_drop(&mut self,
 		branch_index: &I,
+		branch_range: BranchRange<BI>,
 		new_node_index: Option<BI>, // if none this is a delete
 	) {
 		if S::JOURNAL_DELETE {
 			let mut journal_delete = self.journal_delete.handle(&mut self.serialize);
 			if let Some(new_node_index) = new_node_index {
-				if let Some(to_insert) = match journal_delete.get(branch_index) {
-					Some(Some(old)) => if &new_node_index < old {
-						Some(new_node_index)
+				if let Some((to_insert, old_range)) = match journal_delete.get(branch_index) {
+					Some((Some(old), old_range)) => if &new_node_index < old {
+						// can use old range because the range gets read only on first
+						// change.
+						Some((new_node_index, old_range.clone()))
 					} else {
 						None
 					},
-					Some(None) => None,
-					None => Some(new_node_index),
+					Some((None, old_range)) => None,
+					None => Some((new_node_index, branch_range)),
 				} {
-					journal_delete.insert(branch_index.clone(), Some(to_insert));
+					journal_delete.insert(branch_index.clone(), (Some(to_insert), old_range));
 				}
 			} else {
-				journal_delete.insert(branch_index.clone(), None);
+				journal_delete.insert(branch_index.clone(), (None, branch_range));
 			}
 		}
 	}

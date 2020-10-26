@@ -304,7 +304,7 @@ impl<
 					}
 				}
 				if let Some(br) = gc.storage.get(&index) {
-					return if let Some(bi) = br.as_ref() {
+					return if let Some(bi) = br.0.as_ref() {
 						bi <= linear_index
 					} else {
 						true
@@ -479,14 +479,14 @@ impl<
 			};
 
 			if let Some(mut gc) = if let Some(change) = gc.storage.get(&branch.state) {
-				if change.is_none() {
+				if change.0.is_none() {
 					self.branches.remove(branch_ix);
 					result = UpdateResult::Changed(());
 					None
 				} else {
 					Some(LinearGC {
 						new_start,
-						new_end: change.clone(),
+						new_end: change.0.clone(),
 						neutral_element: neutral.clone(),
 					})
 				}

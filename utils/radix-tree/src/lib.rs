@@ -1982,7 +1982,7 @@ impl<N: Debug + Clone> Children4<N> {
 }
 
 impl<N> ART48_256<N> {
-	fn len(&self) -> u8 {
+	pub fn len(&self) -> u8 {
 		match self {
 			ART48_256::ART4(inner) => inner.1,
 			ART48_256::ART16(inner) => inner.1,
