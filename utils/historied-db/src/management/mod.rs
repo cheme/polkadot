@@ -178,7 +178,7 @@ use crate::{Management, Migrate};
 /// implementation in order to allow migration
 /// (state global change requires to update all associated dbs).
 pub trait ManagementConsumer<H, M: Management<H>>: Send + Sync + 'static {
-	fn migrate(&self, migrate: &mut Migrate<H, M>) -> Option<Vec<Vec<u8>>>;
+	fn migrate(&self, migrate: &mut Migrate<H, M>);
 }
 
 /// Register db, this associate treemanagement.
