@@ -127,13 +127,13 @@ pub mod linear {
 
 	impl<
 	H: Ord + Clone,
-	S: Default + Clone + SubAssign<S> + AddAssign<u32> + Ord,
+	S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + From<u32>,
 	> LinearManagement<H> for LinearInMemoryManagement<H, S> {
 		fn append_external_state(&mut self, state: H) -> Option<Self::S> {
 			if !self.can_append {
 				return None;
 			}
-			self.current_state += 1;
+			self.current_state += S::from(1u32);
 			self.mapping.insert(state, self.current_state.clone());
 			Some(self.current_state.clone())
 		}
@@ -141,7 +141,7 @@ pub mod linear {
 		fn drop_last_state(&mut self) -> Self::S {
 			let mut v = S::default();
 			if self.current_state != v {
-				v += 1;
+				v += S::from(1u32);
 				self.current_state -= v;
 			}
 			self.can_append = true;
