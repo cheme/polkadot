@@ -387,7 +387,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		UpdateResult::Unchanged
 	}
 
-	fn gc(&mut self, gc: &Self::GC) -> UpdateResult<()> {
+	fn gc(&mut self, gc: &Self::GC, _neutral: Option<&V>) -> UpdateResult<()> {
 		if gc.new_start.is_some() && gc.new_start == gc.new_end {
 			self.0.clear();
 			return UpdateResult::Cleared(());
@@ -450,8 +450,8 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 		end_result
 	}
 
-	fn migrate(&mut self, (gc, mig): &Self::Migrate) -> UpdateResult<()> {
-		let res = self.gc(gc);
+	fn migrate(&mut self, (gc, mig): &Self::Migrate, neutral: Option<&V>) -> UpdateResult<()> {
+		let res = self.gc(gc, neutral);
 		let mut next_index = self.0.last();
 		let result = if next_index.is_some() {
 			UpdateResult::Changed(())
@@ -560,6 +560,9 @@ mod test {
 			[Some(1), Some(2), Some(3), None],
 			[Some(1), Some(2), Some(3), Some(4)],
 		];
+		let neutral1 = None;
+		let neutral2_owned = Some(vec![0u8]);
+		let neutral2 = neutral2_owned.as_ref();
 		for i in 1..5 {
 			let gc1 = LinearGC {
 				new_start: None,
@@ -572,17 +575,17 @@ mod test {
 				neutral_element: Some(vec![0u8]),
 			};
 			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc1);
+			first.gc(&gc1, neutral1);
 			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc1);
+			second.gc(&gc1, neutral1);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
 			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc2);
+			first.gc(&gc2, neutral2);
 			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc2);
+			second.gc(&gc2, neutral2);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
@@ -614,17 +617,17 @@ mod test {
 				neutral_element: Some(vec![0u8]),
 			};
 			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc1);
+			first.gc(&gc1, neutral1);
 			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc1);
+			second.gc(&gc1, neutral1);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
 			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc2);
+			first.gc(&gc2, neutral2);
 			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc2);
+			second.gc(&gc2, neutral2);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_second[i - 1][j]);

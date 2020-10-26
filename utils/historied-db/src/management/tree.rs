@@ -250,15 +250,13 @@ pub struct TreeState<I: Ord, BI, V, S: TreeManagementStorage> {
 /// This requires going through all of a historied value
 /// branches and should be use when gc happens rarely.
 #[derive(Clone, Debug)]
-pub struct TreeStateGc<I, BI, V> {
+pub struct TreeStateGc<I, BI> {
 	/// see Tree `storage`
 	pub(crate) storage: BTreeMap<I, BranchState<I, BI>>,
 	/// see TreeMeta `composite_treshold`
 	pub(crate) composite_treshold: (I, BI),
 	/// All data before this can get pruned for composite non forked part.
 	pub(crate) pruning_treshold: Option<BI>,
-	/// see TreeManagement `neutral_element`
-	pub(crate) neutral_element: Option<V>,
 }
 
 /// Gc against a given set of changes.
@@ -267,7 +265,7 @@ pub struct TreeStateGc<I, BI, V> {
 /// Generally if management collect those information (see associated
 /// constant `JOURNAL_DELETE`) this gc should be use.
 #[derive(Clone, Debug)]
-pub struct DeltaTreeStateGc<I, BI, V> {
+pub struct DeltaTreeStateGc<I, BI> {
 	/// Set of every branch that get reduced (new end stored) or deleted.
 	pub(crate) storage: BTreeMap<I, (Option<BI>, BranchRange<BI>)>,
 	/// New composite treshold value, this is not strictly needed but
@@ -275,17 +273,15 @@ pub struct DeltaTreeStateGc<I, BI, V> {
 	pub(crate) composite_treshold: (I, BI),
 	/// All data before this can get pruned for composite non forked part.
 	pub(crate) pruning_treshold: Option<BI>,
-	/// see TreeManagement `neutral_element`
-	pub(crate) neutral_element: Option<V>,
 }
 
 #[derive(Clone, Debug)]
-pub enum MultipleGc<I, BI, V> {
-	Journaled(DeltaTreeStateGc<I, BI, V>),
-	State(TreeStateGc<I, BI, V>),
+pub enum MultipleGc<I, BI> {
+	Journaled(DeltaTreeStateGc<I, BI>),
+	State(TreeStateGc<I, BI>),
 }
 
-impl<I: Clone, BI: Clone + Ord + AddAssign<u32>, V> MultipleMigrate<I, BI, V> {
+impl<I: Clone, BI: Clone + Ord + AddAssign<u32>> MultipleMigrate<I, BI> {
 	/// Return upper limit (all sate before it are touched),
 	/// and explicit touched state.
 	pub fn touched_state(&self) -> (Option<BI>, impl Iterator<Item = (I, BI)>) {
@@ -1238,15 +1234,15 @@ pub struct TreeMigrate<I, BI, V> {
 /// Same as `DeltaTreeStateGc`, but also
 /// indicates the changes journaling can be clean.
 /// TODO requires a function returning all H indices.
-pub struct TreeMigrateGC<I, BI, V> {
-	pub gc: DeltaTreeStateGc<I, BI, V>,
+pub struct TreeMigrateGC<I, BI> {
+	pub gc: DeltaTreeStateGc<I, BI>,
 	pub changed_composite_treshold: bool,
 }
 
 #[derive(Debug, Clone)]
 /// A migration that swap some branch indices.
 /// Note that we do not touch indices into branch.
-pub struct TreeRewrite<I, BI, V> {
+pub struct TreeRewrite<I, BI> {
 	/// Original branch index (and optionally a treshold) mapped to new branch index or deleted.
 	pub rewrite: Vec<((I, Option<BI>), Option<I>)>,
 	/// Possible change in composite treshold.
@@ -1254,14 +1250,12 @@ pub struct TreeRewrite<I, BI, V> {
 	pub changed_composite_treshold: bool,
 	/// All data before this can get pruned.
 	pub pruning_treshold: Option<BI>,
-	/// see TreeManagement `neutral_element`
-	pub neutral_element: Option<V>,
 }
 
 #[derive(Debug, Clone)]
-pub enum MultipleMigrate<I, BI, V> {
-	JournalGc(DeltaTreeStateGc<I, BI, V>),
-	Rewrite(TreeRewrite<I, BI, V>),
+pub enum MultipleMigrate<I, BI> {
+	JournalGc(DeltaTreeStateGc<I, BI>),
+	Rewrite(TreeRewrite<I, BI>),
 	Noops,
 }
 
@@ -1281,12 +1275,11 @@ impl<
 	V: Clone + Default + Codec,
 	S: TreeManagementStorage,
 > TreeManagement<H, I, BI, V, S> {
-	fn get_inner_gc(&self) -> Option<MultipleGc<I, BI, V>> {
+	fn get_inner_gc(&self) -> Option<MultipleGc<I, BI>> {
 		let tree_meta = self.state.tree.meta.get();
 		let composite_treshold = tree_meta.next_composite_treshold.clone()
 			.unwrap_or(tree_meta.composite_treshold.clone());
 		let pruning_treshold = tree_meta.pruning_treshold.clone();
-		let neutral_element = self.neutral_element.get().clone();
 		let gc = if Self::JOURNAL_DELETE {
 			let mut storage = BTreeMap::new();
 			for (k, v) in self.state.tree.journal_delete.iter(&self.state.tree.serialize) {
@@ -1301,7 +1294,6 @@ impl<
 				storage,
 				composite_treshold,
 				pruning_treshold,
-				neutral_element,
 			};
 
 			MultipleGc::Journaled(gc)
@@ -1318,7 +1310,6 @@ impl<
 				storage,
 				composite_treshold,
 				pruning_treshold,
-				neutral_element,
 			};
 			MultipleGc::State(gc)
 		};
@@ -1338,9 +1329,9 @@ impl<
 	/// Garbage collect over current
 	/// state or registered changes.
 	/// Choice is related to `TreeManagementStorage::JOURNAL_DELETE`.
-	type GC = MultipleGc<I, BI, V>;
+	type GC = MultipleGc<I, BI>;
 	/// TODO this needs some branch index mappings.
-	type Migrate = MultipleMigrate<I, BI, V>;
+	type Migrate = MultipleMigrate<I, BI>;
 	//type Migrate = TreeMigrate<I, BI, V>;
 
 	fn get_db_state(&mut self, state: &H) -> Option<Self::S> {

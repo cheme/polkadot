@@ -219,9 +219,9 @@ pub trait StateDB<K, V>: StateDBRef<K, V> {
 	/// The caller should ensure that a key only corresponds to one value.
 	fn remove(&mut self, key: &K, at: &Self::SE);
 	// TODO see issue on value for mut on gc
-	fn gc(&mut self, gc: &Self::GC);
+	fn gc(&mut self, gc: &Self::GC, neutral: Option<&V>);
 	// TODO see issue on value for mut on gc
-	fn migrate(&mut self, mig: &mut Self::Migrate);
+	fn migrate(&mut self, mig: &mut Self::Migrate, neutral: Option<&V>);
 }
 
 /// Type holding a state db to lock the management, until applying migration.

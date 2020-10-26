@@ -93,7 +93,7 @@ pub trait Value<V>: ValueRef<V> + Context {
 	fn discard(&mut self, at: &Self::SE) -> UpdateResult<Option<V>>;
 
 	/// Garbage collect value.
-	fn gc(&mut self, gc: &Self::GC) -> UpdateResult<()>;
+	fn gc(&mut self, gc: &Self::GC, neutral: Option<&V>) -> UpdateResult<()>;
 
 	/// Check if migrate should be applied if this state index
 	/// got modified.
@@ -102,7 +102,7 @@ pub trait Value<V>: ValueRef<V> + Context {
 	/// Migrate a value, all value needs to migrate at once, as
 	/// the content will not be valid with post-migration states
 	/// otherwise.
-	fn migrate(&mut self, mig: &Self::Migrate) -> UpdateResult<()>;
+	fn migrate(&mut self, mig: &Self::Migrate, neutral: Option<&V>) -> UpdateResult<()>;
 }
 
 /// Returns pointer to in memory value.
@@ -269,11 +269,11 @@ impl<K: Ord + Clone, V: Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeMap<K, V
 		self.0.remove(&key);
 	}
 
-	fn gc(&mut self, gc: &Self::GC) {
+	fn gc(&mut self, gc: &Self::GC, neutral: Option<&V>) {
 		// retain for btreemap missing here.
 		let mut to_remove = Vec::new();
 		for (key, h) in self.0.iter_mut() {
-			match h.gc(gc) {
+			match h.gc(gc, neutral) {
 				UpdateResult::Cleared(_) => (),
 				_ => break,
 			}
@@ -284,11 +284,11 @@ impl<K: Ord + Clone, V: Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeMap<K, V
 		}
 	}
 
-	fn migrate(&mut self, mig: &mut Self::Migrate) {
+	fn migrate(&mut self, mig: &mut Self::Migrate, neutral: Option<&V>) {
 		// retain for btreemap missing here.
 		let mut to_remove = Vec::new();
 		for (key, h) in self.0.iter_mut() {
-			match h.migrate(mig) {
+			match h.migrate(mig, neutral) {
 				UpdateResult::Cleared(_) => (),
 				_ => break,
 			}
@@ -359,7 +359,7 @@ impl<
 		self.touched_keys.entry(at.index()).or_default().push(key.clone());
 	}
 
-	fn gc(&mut self, gc: &Self::GC) {
+	fn gc(&mut self, gc: &Self::GC, neutral: Option<&V>) {
 		let mut keys: sp_std::collections::btree_set::BTreeSet<_> = Default::default();
 		for touched in self.touched_keys.values() {
 			for key in touched.iter() {
@@ -368,7 +368,7 @@ impl<
 		}
 		for key in keys {
 			if let Some(mut hist) = <DB as PlainDB<_, _>>::get(&self.db, &key) {
-				match hist.gc(gc) {
+				match hist.gc(gc, neutral) {
 					UpdateResult::Changed(_) => self.db.emplace(key, hist),
 					UpdateResult::Cleared(_) => self.db.remove(&key),
 					UpdateResult::Unchanged => break,
@@ -377,7 +377,7 @@ impl<
 		}
 	}
 
-	fn migrate(&mut self, mig: &mut Self::Migrate) {
+	fn migrate(&mut self, mig: &mut Self::Migrate, neutral: Option<&V>) {
 		// TODO this is from old gc but seems ok (as long as touched is complete).
 		// retain for btreemap missing here.
 		let mut states = Vec::new();
@@ -398,7 +398,7 @@ impl<
 		self.touched_keys.clear();
 		for key in keys {
 			if let Some(mut hist) = <DB as PlainDB<_, _>>::get(&self.db, &key) {
-				match hist.migrate(mig) {
+				match hist.migrate(mig, neutral) {
 					UpdateResult::Changed(_) => self.db.emplace(key, hist),
 					UpdateResult::Cleared(_) => self.db.remove(&key),
 					UpdateResult::Unchanged => break,

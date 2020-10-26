@@ -366,9 +366,9 @@ pub fn inmemory_forkable(data: &[u8], with_ser: bool, with_gc: bool) {
 		for key in 0..NUMBER_POSSIBLE_KEYS {
 			if let Some(value) = fuzz_state.in_memory_db.0.get_mut(&vec![key]) {
 				let mut value2 = value.clone();
-				value2.gc(gc_state.as_ref());
+				value2.gc(gc_state.as_ref(), None);
 				if let Some(gc_journal) = gc_journal.as_ref() {
-					value.gc(gc_journal.as_ref());
+					value.gc(gc_journal.as_ref(), None);
 				}
 				assert_eq!(value, &value2);
 			}

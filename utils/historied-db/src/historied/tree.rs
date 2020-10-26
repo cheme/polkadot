@@ -202,8 +202,8 @@ impl<
 > Value<V> for Tree<I, BI, V, D, BD> {
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
-	type GC = MultipleGc<I, BI, V>;
-	type Migrate = MultipleMigrate<I, BI, V>;
+	type GC = MultipleGc<I, BI>;
+	type Migrate = MultipleMigrate<I, BI>;
 
 	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init.0.clone());
@@ -287,10 +287,10 @@ impl<
 		UpdateResult::Unchanged
 	}
 
-	fn gc(&mut self, gc: &Self::GC) -> UpdateResult<()> {
+	fn gc(&mut self, gc: &Self::GC, neutral: Option<&V>) -> UpdateResult<()> {
 		match gc {
-			MultipleGc::Journaled(gc) => self.journaled_gc(gc),
-			MultipleGc::State(gc) => self.state_gc(gc),
+			MultipleGc::Journaled(gc) => self.journaled_gc(gc, neutral),
+			MultipleGc::State(gc) => self.state_gc(gc, neutral),
 		}
 	}
 
@@ -318,12 +318,12 @@ impl<
 		false
 	}
 
-	fn migrate(&mut self, mig: &Self::Migrate) -> UpdateResult<()> {
+	fn migrate(&mut self, mig: &Self::Migrate, neutral: Option<&V>) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
 
 		match mig {
 			MultipleMigrate::JournalGc(gc) => {
-				result = self.journaled_gc(gc);
+				result = self.journaled_gc(gc, neutral);
 				if let UpdateResult::Cleared(()) = result {
 					return UpdateResult::Cleared(());
 				}
@@ -385,8 +385,7 @@ impl<
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V, BI>,
 > Tree<I, BI, V, D, BD> {
-	fn state_gc(&mut self, gc: &TreeStateGc<I, BI, V>) -> UpdateResult<()> {
-		let neutral = &gc.neutral_element;
+	fn state_gc(&mut self, gc: &TreeStateGc<I, BI>, neutral: Option<&V>) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
 		let start_history = &gc.pruning_treshold;
 		let mut gc_iter = gc.storage.iter().rev();
@@ -407,11 +406,11 @@ impl<
 				let mut gc = LinearGC {
 					new_start: Some(start),
 					new_end:  Some(end),
-					neutral_element: neutral.clone(),
+					neutral_element: neutral.cloned(),
 				};
 
 				let mut branch = self.branches.get(index);
-				match branch.value.gc(&mut gc) {
+				match branch.value.gc(&mut gc, neutral) {
 					UpdateResult::Unchanged => (),
 					UpdateResult::Changed(_) => { 
 						self.branches.emplace(index, branch);
@@ -444,10 +443,9 @@ impl<
 		result
 	}
 
-	fn journaled_gc(&mut self, gc: &DeltaTreeStateGc<I, BI, V>) -> UpdateResult<()> {
+	fn journaled_gc(&mut self, gc: &DeltaTreeStateGc<I, BI>, neutral: Option<&V>) -> UpdateResult<()> {
 		// for all branch check if in deleted.
 		// Also apply new start on all.
-		let neutral = &gc.neutral_element;
 		let mut result = UpdateResult::Unchanged;
 		let start_history = gc.pruning_treshold.as_ref();
 		let mut first_new_start = false;
@@ -487,7 +485,7 @@ impl<
 					Some(LinearGC {
 						new_start,
 						new_end: change.0.clone(),
-						neutral_element: neutral.clone(),
+						neutral_element: neutral.cloned(),
 					})
 				}
 			} else {
@@ -495,13 +493,13 @@ impl<
 					Some(LinearGC {
 						new_start,
 						new_end: None,
-						neutral_element: neutral.clone(),
+						neutral_element: neutral.cloned(),
 					})
 				} else {
 					None
 				}
 			} {
-				match branch.value.gc(&mut gc) {
+				match branch.value.gc(&mut gc, neutral) {
 					UpdateResult::Unchanged => (),
 						UpdateResult::Changed(_) => { 
 						self.branches.emplace(branch_ix, branch);
@@ -912,8 +910,9 @@ mod test {
 			crate::historied::linear::Linear<u16, u32, BD>,
 			u32,
 		>;
-		let mut states = crate::test::fuzz::InMemoryMgmtSer::default()
-			.define_neutral_element(0);
+		let mut states = crate::test::fuzz::InMemoryMgmtSer::default();
+		let neutral_owned = Some(0u16);
+		let neutral = neutral_owned.as_ref();
 		let s0 = states.latest_state_fork();
 
 		let mut item1: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
@@ -991,10 +990,10 @@ mod test {
 		let mut gc_item4 = item4.clone();
 		{
 			let gc = states.get_gc().unwrap();
-			gc_item1.gc(gc.as_ref());
-			gc_item2.gc(gc.as_ref());
-			gc_item3.gc(gc.as_ref());
-			gc_item4.gc(gc.as_ref());
+			gc_item1.gc(gc.as_ref(), neutral);
+			gc_item2.gc(gc.as_ref(), neutral);
+			gc_item3.gc(gc.as_ref(), neutral);
+			gc_item4.gc(gc.as_ref(), neutral);
 			//panic!("{:?}", (gc.as_ref(), item4, gc_item4));
 		}
 		assert_eq!(gc_item1.nb_internal_history(), 8);
@@ -1032,10 +1031,10 @@ mod test {
 		let mut states = states;
 		{
 			let mut gc = states.get_migrate();
-			gc_item1.migrate(gc.migrate());
-			gc_item2.migrate(gc.migrate());
-			gc_item3.migrate(gc.migrate());
-			gc_item4.migrate(gc.migrate());
+			gc_item1.migrate(gc.migrate(), neutral);
+			gc_item2.migrate(gc.migrate(), neutral);
+			gc_item3.migrate(gc.migrate(), neutral);
+			gc_item4.migrate(gc.migrate(), neutral);
 			gc.applied_migrate();
 		}
 		for i in filter_in.iter() {
@@ -1065,10 +1064,10 @@ mod test {
 		states.canonicalize(fp, *s3tmp.latest(), Some(s3tmp.latest().1));
 		{
 			let mut gc = states.get_migrate();
-			gc_item1.migrate(gc.migrate());
-			gc_item2.migrate(gc.migrate());
-			gc_item3.migrate(gc.migrate());
-			gc_item4.migrate(gc.migrate());
+			gc_item1.migrate(gc.migrate(), neutral);
+			gc_item2.migrate(gc.migrate(), neutral);
+			gc_item3.migrate(gc.migrate(), neutral);
+			gc_item4.migrate(gc.migrate(), neutral);
 			gc.applied_migrate();
 			//panic!("{:?}", (gc, item3, gc_item3));
 		}

@@ -118,9 +118,9 @@ impl<K: Hash + Eq, V: Clone> StateDB<K, V> for Db<K, V> {
 			.remove(key);
 	}
 
-	fn gc(&mut self, _gc: &Self::GC) { }
+	fn gc(&mut self, _gc: &Self::GC, _neutral: Option<&V>) { }
 
-	fn migrate(&mut self, _mig: &mut Self::Migrate) { }
+	fn migrate(&mut self, _mig: &mut Self::Migrate, _neutral: Option<&V>) { }
 }
 
 impl<K: Eq + Hash, V> ManagementRef<StateInput> for Db<K, V> {
