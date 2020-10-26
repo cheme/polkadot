@@ -285,13 +285,13 @@ pub enum MultipleGc<I, BI, V> {
 	State(TreeStateGc<I, BI, V>),
 }
 
-impl<I: Clone, BI: Clone + Ord + AddAssign<u32>, V> MultipleGc<I, BI, V> {
+impl<I: Clone, BI: Clone + Ord + AddAssign<u32>, V> MultipleMigrate<I, BI, V> {
 	/// Return upper limit (all sate before it are touched),
 	/// and explicit touched state.
 	pub fn touched_state(&self) -> (Option<BI>, impl Iterator<Item = (I, BI)>) {
 
 		let (pruning, touched) = match self {
-			MultipleGc::Journaled(gc) => {
+			MultipleMigrate::JournalGc(gc) => {
 				let iter = Some(
 					gc.storage.clone().into_iter()
 						.map(|(index, (change, old))| {
@@ -317,7 +317,8 @@ impl<I: Clone, BI: Clone + Ord + AddAssign<u32>, V> MultipleGc<I, BI, V> {
 				);
 				(gc.pruning_treshold.clone(), iter)
 			},
-			MultipleGc::State(_gc) => {
+			MultipleMigrate::Rewrite(..)
+				| MultipleMigrate::Noops => {
 				(None, None)
 			},
 		};
