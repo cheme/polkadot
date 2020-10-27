@@ -228,7 +228,7 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		result: &mut sp_std::collections::btree_set::BTreeSet<K>,
 	) {
 		let mut handle = self.touched_keys.handle(db);
-		// TODO can be better with entry iterator (or key iterator at least)
+		// TODO can do better with entry iterator (or key iterator at least)
 		let mut to_remove = Vec::new();
 		for kv in handle.iter() {
 			if &kv.0 < state {
@@ -277,6 +277,7 @@ fn merge_keys<K: Ord>(origin: &mut Vec<K>, mut keys: Vec<K>) {
 #[cfg(test)]
 mod test {
 	use super::*;
+	use crate::test::InMemorySimpleDB5;
 	#[test]
 	fn test_merge_keys() {
 		let mut set1 = vec![b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"ab".to_vec()];
@@ -285,5 +286,39 @@ mod test {
 		let res = vec![b"ab".to_vec(), b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"rb".to_vec()];
 		merge_keys(&mut set1, set2);
 		assert_eq!(set1, res);
+	}
+
+	#[test]
+	fn test_journal_for_migration() {
+		#[derive(Default, Clone)]
+		struct Collection;
+		impl crate::simple_db::SerializeInstanceMap for Collection {
+			const STATIC_COL: &'static [u8] = &[0u8, 0, 0, 0];
+		}
+		let mut db = InMemorySimpleDB5::new();
+		{
+			let mut journal = JournalForMigrationBasis::<u32, u16, _, Collection>::from_db(&db);
+			journal.add_changes(&mut db, 1u32, vec![1u16], true);
+			journal.add_changes(&mut db, 2u32, vec![2u16], true);
+			journal.add_changes(&mut db, 3u32, vec![3u16], true);
+			journal.add_changes(&mut db, 3u32, vec![1u16], false);
+			journal.add_changes(&mut db, 8u32, vec![8u16], false);
+		}
+		{
+			let mut journal = JournalForMigrationBasis::<u32, u16, _, Collection>::from_db(&db);
+			assert_eq!(journal.remove_changes_at(&mut db, &8u32), Some(vec![8u16]));
+			assert_eq!(journal.remove_changes_at(&mut db, &8u32), None);
+			let mut set = std::collections::BTreeSet::new();
+			journal.remove_changes_before(&mut db, &3u32, &mut set);
+			assert_eq!(journal.remove_changes_at(&mut db, &2u32), None);
+			assert_eq!(journal.remove_changes_at(&mut db, &1u32), None);
+			let set: Vec<u16> = set.into_iter().collect();
+			assert_eq!(set, vec![1u16, 2]);
+			assert_eq!(journal.remove_changes_at(&mut db, &3u32), Some(vec![3u16, 1]));
+		}
+		{
+			let mut journal = JournalForMigrationBasis::<u32, u16, _, Collection>::from_db(&db);
+			assert_eq!(journal.remove_changes_at(&mut db, &8u32), None);
+		}
 	}
 }
