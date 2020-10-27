@@ -27,7 +27,6 @@ use sp_std::vec::Vec;
 use sp_std::boxed::Box;
 use sp_std::fmt::Debug;
 use num_traits::One;
-use crate::println;
 use crate::historied::linear::LinearGC;
 use crate::{Management, ManagementRef, Migrate, ForkableManagement, Latest};
 use codec::{Codec, Encode, Decode};
@@ -529,7 +528,6 @@ impl<
 		for h in branch.history.into_iter() {
 			//if h.state.end > switch_index.1 {
 			if h.state.start < switch_index.1 {
-				println!("ins {:?}", h.branch_index);
 				filter.insert(h.branch_index, h.state);
 			}
 		}
@@ -537,20 +535,18 @@ impl<
 		let mut to_change = Vec::new();
 		let mut to_remove = Vec::new();
 		for (branch_ix, mut branch) in self.state.tree.storage.handle(&mut self.state.tree.serialize).iter() {
-				println!("it {:?}", branch_ix);
 			if branch.state.start < switch_index.1 {
 				if let Some(ref_range) = filter.get(&branch_ix) {
 					debug_assert!(ref_range.start == branch.state.start);
 					debug_assert!(ref_range.end <= branch.state.end);
 					if ref_range.end < branch.state.end {
-						let old = ref_range.clone();
+						let old = branch.state.clone();
 						branch.state.end = ref_range.end.clone();
 						branch.can_append = false;
 						to_change.push((branch_ix, branch, old));
 						// TODO EMCH clean mapping for ends shifts
 					}
 				} else {
-					println!("rem {:?}", branch_ix);
 					to_remove.push((branch_ix.clone(), branch.state.clone()));
 				}
 			}
@@ -573,7 +569,6 @@ impl<
 
 		let mut handle = self.state.tree.meta.handle(&mut self.state.tree.serialize);
 		let tree_meta = handle.get();
-		println!("new ct: {:?}", switch_index);
 		if switch_index != tree_meta.composite_treshold || prune_index.is_some() {
 			let mut tree_meta = tree_meta.clone();
 			tree_meta.next_composite_treshold = Some(switch_index);

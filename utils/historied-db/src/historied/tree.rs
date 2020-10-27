@@ -908,6 +908,20 @@ mod test {
 			crate::historied::linear::Linear<u16, u32, BD>,
 			u32,
 		>;
+
+		let check_state = |states: &mut crate::test::fuzz::InMemoryMgmtSer, target: Vec<(u32, u32)>| {
+			let mut gc = states.get_migrate();
+			let (pruning, mut iter) = gc.migrate().touched_state();
+			assert_eq!(pruning, None);
+			let mut set = std::collections::BTreeSet::new();
+			for s in iter {
+				set.insert(s.clone());
+			}
+
+			let reference: std::collections::BTreeSet<_> = target.into_iter().collect();
+			assert_eq!(set, reference);
+		};
+
 		let mut states = crate::test::fuzz::InMemoryMgmtSer::default();
 		let neutral_owned = Some(0u16);
 		let neutral = neutral_owned.as_ref();
@@ -971,14 +985,18 @@ mod test {
 		let old_state = states.clone();
 		// Apply change of composite to 33
 		let filter_out = [101, 104, 2, 4, 5];
-		let mut filter_qp = vec![qp14];
+		let mut filter_qp = vec![qp14.latest_index()];
+		// dropped 14
+		check_state(&mut states, filter_qp.clone());
 		for i in filter_out.iter() {
 			let qp = states.get_db_state(&StateInput(*i)).unwrap();
-			filter_qp.push(qp);
+			filter_qp.push(qp.latest_index());
 		}
 
 		let fp = states.get_db_state(&StateInput(35)).unwrap();
 		states.canonicalize(fp, *s3tmp.latest(), None);
+		// other drops from filter_out
+		check_state(&mut states, filter_qp.clone());
 		let filter_in = [1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
 		let no_qp = [14];
 		//panic!("{:?} \n {:?}", old_state, states);
@@ -1002,14 +1020,6 @@ mod test {
 		assert_eq!(gc_item2.nb_internal_branch(), 3);
 		assert_eq!(gc_item3.nb_internal_branch(), 1);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
-		/* TODO only with new_start where we actually prune stuff
-		for fp in filter_qp.iter() {
-			assert_ne!(
-				gc_item1.get_ref(fp),
-				item1.get_ref(&fp),
-			);
-		}
-		*/
 
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
@@ -1035,6 +1045,9 @@ mod test {
 			gc_item4.migrate(gc.migrate(), neutral);
 			gc.applied_migrate();
 		}
+		// empty (applied_migrate ran)
+		check_state(&mut states, vec![]);
+
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
 			assert_eq!(gc_item1.get_ref(&fp), item1.get_ref(&fp));
