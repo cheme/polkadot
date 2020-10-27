@@ -253,7 +253,6 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 	}
 }
 
-// TODO test case or btreeset impl.
 fn merge_keys<K: Ord>(origin: &mut Vec<K>, mut keys: Vec<K>) {
 	origin.sort_unstable();
 	keys.sort_unstable();
@@ -272,5 +271,19 @@ fn merge_keys<K: Ord>(origin: &mut Vec<K>, mut keys: Vec<K>) {
 				origin.push(key);
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+	#[test]
+	fn test_merge_keys() {
+		let mut set1 = vec![b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"ab".to_vec()];
+		let mut set2 = vec![b"rb".to_vec(), b"bc".to_vec(), b"rb".to_vec(), b"ab".to_vec()];
+		// note that set1 should not have duplicate, so they are kept, while for set 2 they are removed.
+		let res = vec![b"ab".to_vec(), b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"rb".to_vec()];
+		merge_keys(&mut set1, set2);
+		assert_eq!(set1, res);
 	}
 }
