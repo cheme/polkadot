@@ -951,6 +951,55 @@ mod test {
 	}
 
 	#[test]
+	fn test_conditional_set_get() {
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+		let mut item2: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+
+		for i in 0..6 {
+			assert_eq!(item.get(&states.query_plan(i)), None);
+		}
+
+		// setting value not respecting branch build order
+		// set in past (latest is 1, 2) is fine
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(1, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(1, &(1, 2)));
+		// but not with another value
+		assert_eq!(None, item.set_if_possible(8, &(1, 0)));
+		assert_eq!(None, item2.set_if_possible(8, &(1, 1)));
+		// can overwrite
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(2, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(2, &(1, 2)));
+		// not if not allowed
+		assert_eq!(None, item.set_if_possible_no_overwrite(3, &(1, 1)));
+		assert_eq!(None, item2.set_if_possible_no_overwrite(3, &(1, 2)));
+		// unchanged is allowed
+		assert_eq!(Some(UpdateResult::Unchanged), item.set_if_possible(2, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Unchanged), item2.set_if_possible(2, &(1, 2)));
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&2));
+		states.drop_state(&1u32);
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), None);
+		assert_eq!(item2.get_ref(&states.query_plan(1)), None);
+		// no longer allowd to change the branch TODO we should be able to, but
+		// with blockchain tree use case with removal only on canonicalisation
+		// and pruning it should be fine.
+		assert_eq!(None, item2.set_if_possible(3, &(1, 1)));
+	}
+
+	#[test]
 	fn test_force_set_get() {
 		use crate::{Management, ManagementRef, ForkableManagement};
 		use crate::test::simple_impl::StateInput;
