@@ -712,6 +712,7 @@ impl<
 }
 
 
+#[cfg(feature = "need_implementation_changes")]
 // TODO current implementation is incorrect, we need an index that fails at first
 // branch that is parent to the dest (a tree path flattened into a ForkPlan like
 // struct). Element prior (I, BI) are not needed (only children).
@@ -724,6 +725,9 @@ impl<
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V, BI>,
 > ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
+	// TODO this would require to get all branch index that are children
+	// of this index, and also their current upper bound.
+	// That can be fairly costy.
 	type IndexConditional = Self::Index;
 
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
@@ -950,6 +954,7 @@ mod test {
 		}
 	}
 
+	#[cfg(feature = "need_implementation_changes")]
 	#[test]
 	fn test_conditional_set_get() {
 		use crate::{Management, ManagementRef, ForkableManagement};
