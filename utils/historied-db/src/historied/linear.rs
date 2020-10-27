@@ -24,7 +24,7 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
-	InMemoryValueSlice, InMemoryValue, ConditionalValueMut};
+	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, ForceValueMut};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
@@ -277,6 +277,34 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 		UpdateResult::Changed(None)
 	}
 
+	fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
+		let mut position = self.0.last();
+		let mut insert_index =  None;
+		while let Some(index) = position {
+			let last = self.0.get_state(index);
+			if at > &last {
+				break;
+			}
+			if at == &last {
+				let mut last = self.0.get(index);
+				if last.value == value {
+					return UpdateResult::Unchanged;
+				}
+				last.value = value;
+				self.0.emplace(index, last);
+				return UpdateResult::Changed(());
+			}
+			insert_index = Some(index);
+			position = self.0.previous_index(index);
+		}
+		if let Some(index) = insert_index {
+			self.0.insert(index, HistoriedValue {value, state: at.clone()});
+		} else {
+			self.0.push(HistoriedValue {value, state: at.clone()});
+		}
+		UpdateResult::Changed(())
+	}
+
 	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
 		if let Some(index) = self.0.last() {
 			let last = self.0.get_state(index);
@@ -498,6 +526,15 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Condi
 		self.set_if_inner(value, at, false)
 	}
 }
+
+impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> ForceValueMut<V> for Linear<V, S, D> {
+	type IndexForce = Self::Index;
+
+	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
+		self.force_set(value, at)
+	}
+}
+
 
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]

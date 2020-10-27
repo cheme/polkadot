@@ -20,7 +20,7 @@
 // TODO remove "previous code" expect.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue,
-	InMemoryValueSlice, InMemoryValueRange, UpdateResult, ConditionalValueMut};
+	InMemoryValueSlice, InMemoryValueRange, UpdateResult, ConditionalValueMut, ForceValueMut};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
@@ -661,6 +661,57 @@ impl<
 	}
 }
 
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Clone + Eq,
+	D: LinearStorage<Linear<V, BI, BD>, I>,
+	BD: LinearStorage<V, BI>,
+> ForceValueMut<V> for Tree<I, BI, V, D, BD> {
+	type IndexForce = Self::Index;
+
+	fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()> {
+		// Warn dup code, just different linear function call from fn set,
+		// and using directly index, TODO factor result handle at least.
+		let (branch_index, index) = at;
+		let mut insert_at = None;
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
+			if &iter_branch_index == branch_index {
+				let index = index.clone();
+				let mut branch = self.branches.get(branch_ix);
+				return match branch.value.force_set(value, &index) {
+					UpdateResult::Changed(_) => {
+						self.branches.emplace(branch_ix, branch);
+						UpdateResult::Changed(())
+					},
+					UpdateResult::Cleared(_) => {
+						self.branches.remove(branch_ix);
+						if self.branches.len() == 0 {
+							UpdateResult::Cleared(())
+						} else {
+							UpdateResult::Changed(())
+						}
+					},
+					UpdateResult::Unchanged => UpdateResult::Unchanged,
+				};
+			}
+			if &iter_branch_index < branch_index {
+				break;
+			}
+			insert_at = Some(branch_ix);
+		}
+		let branch = Branch::new(value, at, self.init_child.clone());
+		if let Some(index) = insert_at {
+			self.branches.insert(index, branch);
+		} else {
+			self.branches.push(branch);
+		}
+		UpdateResult::Changed(())
+	}
+}
+
+
 // TODO current implementation is incorrect, we need an index that fails at first
 // branch that is parent to the dest (a tree path flattened into a ForkPlan like
 // struct). Element prior (I, BI) are not needed (only children).
@@ -897,6 +948,44 @@ mod test {
 				assert_eq!(item.get_ref(&states.query_plan(*i)), Some(i));
 			}
 		}
+	}
+
+	#[test]
+	fn test_force_set_get() {
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+
+		for i in 0..6 {
+			assert_eq!(item.get(&states.query_plan(i)), None);
+		}
+
+		// setting value not respecting branch build order
+		assert_eq!(UpdateResult::Changed(()), item.force_set(0, &(1, 2)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(1, &(1, 1)));
+		// out of range
+		assert_eq!(UpdateResult::Changed(()), item.force_set(8, &(1, 0)));
+		// can set in invalid range too
+		assert_eq!(UpdateResult::Changed(()), item.force_set(3, &(2, 5)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(2, &(2, 1)));
+
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&0));
+		assert_eq!(item.get_ref(&states.query_plan(2)), Some(&2));
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&1));
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), None);
 	}
 
 	#[test]
