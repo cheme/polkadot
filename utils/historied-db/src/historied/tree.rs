@@ -202,8 +202,8 @@ impl<
 > Value<V> for Tree<I, BI, V, D, BD> {
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
-	type GC = MultipleGc<I, BI, V>;
-	type Migrate = MultipleMigrate<I, BI, V>;
+	type GC = MultipleGc<I, BI>;
+	type Migrate = MultipleMigrate<I, BI>;
 
 	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init.0.clone());
@@ -385,8 +385,7 @@ impl<
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V, BI>,
 > Tree<I, BI, V, D, BD> {
-	fn state_gc(&mut self, gc: &TreeStateGc<I, BI, V>) -> UpdateResult<()> {
-		let neutral = &gc.neutral_element;
+	fn state_gc(&mut self, gc: &TreeStateGc<I, BI>) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
 		let start_history = &gc.pruning_treshold;
 		let mut gc_iter = gc.storage.iter().rev();
@@ -407,7 +406,6 @@ impl<
 				let mut gc = LinearGC {
 					new_start: Some(start),
 					new_end:  Some(end),
-					neutral_element: neutral.clone(),
 				};
 
 				let mut branch = self.branches.get(index);
@@ -444,10 +442,9 @@ impl<
 		result
 	}
 
-	fn journaled_gc(&mut self, gc: &DeltaTreeStateGc<I, BI, V>) -> UpdateResult<()> {
+	fn journaled_gc(&mut self, gc: &DeltaTreeStateGc<I, BI>) -> UpdateResult<()> {
 		// for all branch check if in deleted.
 		// Also apply new start on all.
-		let neutral = &gc.neutral_element;
 		let mut result = UpdateResult::Unchanged;
 		let start_history = gc.pruning_treshold.as_ref();
 		let mut first_new_start = false;
@@ -487,7 +484,6 @@ impl<
 					Some(LinearGC {
 						new_start,
 						new_end: change.clone(),
-						neutral_element: neutral.clone(),
 					})
 				}
 			} else {
@@ -495,7 +491,6 @@ impl<
 					Some(LinearGC {
 						new_start,
 						new_end: None,
-						neutral_element: neutral.clone(),
 					})
 				} else {
 					None
@@ -912,8 +907,9 @@ mod test {
 			crate::historied::linear::Linear<u16, u32, BD>,
 			u32,
 		>;
-		let mut states = crate::test::fuzz::InMemoryMgmtSer::default()
-			.define_neutral_element(0);
+		let mut states = crate::test::fuzz::InMemoryMgmtSer::default();
+// TODO EMCH use a value with default element to 0
+//			.define_neutral_element(0);
 		let s0 = states.latest_state_fork();
 
 		let mut item1: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));

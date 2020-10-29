@@ -72,18 +72,47 @@ pub trait Item: Sized {
 	/// neutral.
 	/// If defined to `None`, there is no neutral element.
 	const NEUTRAL: Option<Self>;
+	/// The storage representation.
+	type Storage;
+
+	fn from_storage(storage: Self::Storage) -> Self;
+
+	fn into_storage(self) -> Self::Storage;
 }
 
 /// Default implementation of Item for `Option`, as this
 /// is a common use case.
-impl<X> Item for Option<X> {
+impl<X: Item> Item for Option<X> {
 	const NEUTRAL: Option<Self> = Some(None);
+	/// The storage representation.
+	type Storage = Option<X::Storage>;
+
+	#[inline(always)]
+	fn from_storage(storage: Self::Storage) -> Self {
+		storage.map(X::from_storage)
+	}
+
+	#[inline(always)]
+	fn into_storage(self) -> Self::Storage {
+		self.map(|item| item.into_storage())
+	}
 }
 
 macro_rules! default_item {
 	($name: ty) => {
 	impl Item for $name {
 		const NEUTRAL: Option<Self> = None;
+		type Storage = Self;
+
+		#[inline(always)]
+		fn from_storage(storage: Self::Storage) -> Self {
+			storage
+		}
+
+		#[inline(always)]
+		fn into_storage(self) -> Self::Storage {
+			self
+		}
 	}
 }}
 

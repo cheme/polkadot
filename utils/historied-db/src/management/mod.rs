@@ -28,41 +28,31 @@ pub mod linear {
 
 	// This is for small state as there is no double
 	// mapping an some operation goes through full scan.
-	pub struct LinearInMemoryManagement<H, S, V> {
+	pub struct LinearInMemoryManagement<H, S> {
 		mapping: sp_std::collections::btree_map::BTreeMap<H, S>,
 		start_treshold: S,
 		current_state: S,
-		neutral_element: Option<V>,
 		changed_treshold: bool,
 		can_append: bool,
 	}
 
-	impl<H, S, V> LinearInMemoryManagement<H, S, V> {
-		// TODO should use a builder but then we need
-		// to change Management trait
-		pub fn define_neutral_element(mut self, n: V) -> Self {
-			self.neutral_element = Some(n);
-			self
-		}
-	}
-
-	impl<H, S: AddAssign<u32>, V> LinearInMemoryManagement<H, S, V> {
+	impl<H, S: AddAssign<u32>> LinearInMemoryManagement<H, S> {
 		pub fn prune(&mut self, nb: usize) {
 			self.changed_treshold = true;
 			self.start_treshold += nb as u32
 		}
 	}
 
-	impl<H: Ord, S: Clone, V: Clone> ManagementRef<H> for LinearInMemoryManagement<H, S, V> {
+	impl<H: Ord, S: Clone> ManagementRef<H> for LinearInMemoryManagement<H, S> {
 		type S = S;
-		type GC = (S, Option<V>);
+		type GC = S;
 		type Migrate = (S, Self::GC);
 		fn get_db_state(&mut self, state: &H) -> Option<Self::S> {
 			self.mapping.get(state).cloned()
 		}
 		fn get_gc(&self) -> Option<crate::Ref<Self::GC>> {
 			if self.changed_treshold {
-				Some(crate::Ref::Owned((self.start_treshold.clone(), self.neutral_element.clone())))
+				Some(crate::Ref::Owned(self.start_treshold.clone()))
 			} else {
 				None
 			}
@@ -72,8 +62,7 @@ pub mod linear {
 	impl<
 	H: Ord + Clone,
 	S: Default + Clone + AddAssign<u32> + Ord,
-	V: Clone,
-	> Default for LinearInMemoryManagement<H, S, V> {
+	> Default for LinearInMemoryManagement<H, S> {
 		fn default() -> Self {
 			let state = S::default();
 			let current_state = S::default();
@@ -82,7 +71,6 @@ pub mod linear {
 				mapping,
 				start_treshold: state.clone(),
 				current_state,
-				neutral_element: None,
 				changed_treshold: false,
 				can_append: true,
 			}
@@ -92,8 +80,7 @@ pub mod linear {
 	impl<
 	H: Ord + Clone,
 	S: Default + Clone + AddAssign<u32> + Ord,
-	V: Clone,
-	> Management<H> for LinearInMemoryManagement<H, S, V> {
+	> Management<H> for LinearInMemoryManagement<H, S> {
 		type SE = Latest<S>;
 
 		fn get_db_state_mut(&mut self, state: &H) -> Option<Self::SE> {
@@ -141,8 +128,7 @@ pub mod linear {
 	impl<
 	H: Ord + Clone,
 	S: Default + Clone + SubAssign<S> + AddAssign<u32> + Ord,
-	V: Clone,
-	> LinearManagement<H> for LinearInMemoryManagement<H, S, V> {
+	> LinearManagement<H> for LinearInMemoryManagement<H, S> {
 		fn append_external_state(&mut self, state: H) -> Option<Self::S> {
 			if !self.can_append {
 				return None;
