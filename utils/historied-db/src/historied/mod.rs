@@ -31,7 +31,7 @@ pub mod linear;
 pub mod tree;
 
 /// Trait for historied value
-pub trait ValueRef<V> {
+pub trait ValueRef<V: Item> {
 	/// State to query for this value.
 	type S;
 
@@ -48,12 +48,12 @@ pub trait ValueRef<V> {
 // TODO EMCH refact with 'a for inner value
 // and a get value type (see test on rust playground).
 // So we only got ValueRef type.
-pub trait InMemoryValueRef<V>: ValueRef<V> {
+pub trait InMemoryValueRef<V: Item>: ValueRef<V> {
 	/// Get reference to the value at this state.
 	fn get_ref(&self, at: &Self::S) -> Option<&V>;
 }
 
-pub trait InMemoryValueSlice<V>: ValueRef<V> {
+pub trait InMemoryValueSlice<V: Item>: ValueRef<V> {
 	/// Get reference to the value at this state.
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
 }
@@ -63,8 +63,39 @@ pub trait InMemoryValueRange<S> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>>;
 }
 
+/// An item of historied value.
+pub trait Item: Sized {
+	/// The neutral item, this is the default
+	/// item and can be ommitted from storage.
+	/// eg for a value V that can be deleted, it will be
+	/// of type `Option<V>` and `None` will be
+	/// neutral.
+	/// If defined to `None`, there is no neutral element.
+	const NEUTRAL: Option<Self>;
+}
+
+/// Default implementation of Item for `Option`, as this
+/// is a common use case.
+impl<X> Item for Option<X> {
+	const NEUTRAL: Option<Self> = Some(None);
+}
+
+macro_rules! default_item {
+	($name: ty) => {
+	impl Item for $name {
+		const NEUTRAL: Option<Self> = None;
+	}
+}}
+
+default_item!(Vec<u8>);
+default_item!(u8);
+default_item!(u16);
+default_item!(u32);
+default_item!(u64);
+default_item!(u128);
+
 /// Trait for historied value.
-pub trait Value<V>: ValueRef<V> + Context {
+pub trait Value<V: Item>: ValueRef<V> + Context {
 	/// State to use for changing value.
 	/// We use a different state than
 	/// for querying as it can use different
@@ -106,7 +137,7 @@ pub trait Value<V>: ValueRef<V> + Context {
 }
 
 /// Returns pointer to in memory value.
-pub trait InMemoryValue<V>: Value<V> {
+pub trait InMemoryValue<V: Item>: Value<V> {
 	/// Get latest value, can apply updates.
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V>;
 
@@ -120,7 +151,7 @@ pub trait InMemoryValue<V>: Value<V> {
 /// It is also usefull when some asumption are not strong enough, for
 /// instance if `Value` is subject to concurrent access.
 /// TODO an entry api would be more proper (returning optional entry).
-pub trait ConditionalValueMut<V>: Value<V> {
+pub trait ConditionalValueMut<V: Item>: Value<V> {
 	/// Internal index.
 	type IndexConditional;
 
@@ -223,7 +254,7 @@ impl<K: Ord, V, H: Context> BTreeMap<K, V, H> {
 	}
 }
 
-impl<K: Ord, V: Clone, H: ValueRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, H> {
+impl<K: Ord, V: Item + Clone, H: ValueRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, H> {
 	type S = H::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -239,7 +270,7 @@ impl<K: Ord, V: Clone, H: ValueRef<V> + Context> StateDBRef<K, V> for BTreeMap<K
 }
 
 // note that the constraint on state db ref for the associated type is bad (forces V as clonable).
-impl<K: Ord, V, H: InMemoryValueRef<V> + Context> InMemoryStateDBRef<K, V> for BTreeMap<K, V, H> {
+impl<K: Ord, V: Item, H: InMemoryValueRef<V> + Context> InMemoryStateDBRef<K, V> for BTreeMap<K, V, H> {
 	type S = H::S;
 
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V> {
@@ -248,7 +279,7 @@ impl<K: Ord, V, H: InMemoryValueRef<V> + Context> InMemoryStateDBRef<K, V> for B
 	}
 }
 
-impl<K: Ord + Clone, V: Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeMap<K, V, H> {
+impl<K: Ord + Clone, V: Item + Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeMap<K, V, H> {
 	type SE = H::SE;
 	type GC = H::GC;
 	type Migrate = H::Migrate;
@@ -307,7 +338,7 @@ pub struct PlainDBState<K, DB, H, S> {
 	_ph: PhantomData<H>,
 }
 
-impl<K, V: Clone, H: ValueRef<V>, DB: PlainDBRef<K, H>, S> StateDBRef<K, V> for PlainDBState<K, DB, H, S> {
+impl<K, V: Item + Clone, H: ValueRef<V>, DB: PlainDBRef<K, H>, S> StateDBRef<K, V> for PlainDBState<K, DB, H, S> {
 	type S = H::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -324,7 +355,7 @@ impl<K, V: Clone, H: ValueRef<V>, DB: PlainDBRef<K, H>, S> StateDBRef<K, V> for 
 
 impl<
 	K: Ord + Clone,
-	V: Clone + Eq,
+	V: Item + Clone + Eq,
 	H: Value<V, Context = ()>,
 	DB: PlainDBRef<K, H> + PlainDB<K, H>,
 > StateDB<K, V> for PlainDBState<K, DB, H, H::Index>
