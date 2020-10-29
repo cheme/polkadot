@@ -898,13 +898,84 @@ mod test {
 		}
 	}
 
+	use ref_cast::RefCast;
+	#[derive(RefCast)]
+	#[repr(transparent)]
+	#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+	/// U16 with 0 as neutral item.
+	struct U16Neutral(u16); 
+
+	impl std::ops::Deref for U16Neutral {
+		type Target = u16;
+		fn deref(&self) -> &u16 {
+			&self.0
+		}
+	}
+
+	impl std::ops::DerefMut for U16Neutral {
+		fn deref_mut(&mut self) -> &mut u16 {
+			&mut self.0
+		}
+	}
+
+	impl From<u16> for U16Neutral {
+		#[inline(always)]
+		fn from(v: u16) -> Self {
+			U16Neutral(v)
+		}
+	}
+
+	impl Item for U16Neutral {
+		const NEUTRAL: bool = true;
+
+		type Storage = u16;
+
+		#[inline(always)]
+		fn is_neutral(&self) -> bool {
+			self.0 == 0
+		}
+
+		#[inline(always)]
+		fn is_storage_neutral(storage: &Self::Storage) -> bool {
+			storage == &0u16
+		}
+
+		#[inline(always)]
+		fn from_storage(storage: Self::Storage) -> Self {
+			U16Neutral(storage)
+		}
+
+		#[inline(always)]
+		fn into_storage(self) -> Self::Storage {
+			self.0
+		}
+	}
+
+	impl ItemRef for U16Neutral {
+		fn from_storage_ref(storage: &Self::Storage) -> &Self {
+			U16Neutral::ref_cast(storage)
+		}
+
+		fn into_storage_ref(&self) -> &Self::Storage {
+			&self.0
+		}
+
+		fn from_storage_ref_mut(storage: &mut Self::Storage) -> &mut Self {
+			U16Neutral::ref_cast_mut(storage)
+		}
+
+		fn into_storage_ref_mut(&mut self) -> &mut Self::Storage {
+			&mut self.0
+		}
+	}
+
 	#[test]
 	fn test_migrate() {
 		use crate::{Management, ManagementRef, ForkableManagement};
 		use crate::test::simple_impl::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u16, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
-			crate::historied::linear::Linear<u16, u32, BD>,
+			crate::historied::linear::Linear<U16Neutral, u32, BD>,
 			u32,
 		>;
 		let mut states = crate::test::fuzz::InMemoryMgmtSer::default();
@@ -912,24 +983,24 @@ mod test {
 //			.define_neutral_element(0);
 		let s0 = states.latest_state_fork();
 
-		let mut item1: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
-		let mut item2: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
+		let mut item1: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		let mut item2: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
 		let s1 = states.append_external_state(StateInput(1), &s0).unwrap();
-		item1.set(1, &states.get_db_state_mut(&StateInput(1)).unwrap());
-		item2.set(1, &states.get_db_state_mut(&StateInput(1)).unwrap());
+		item1.set(1.into(), &states.get_db_state_mut(&StateInput(1)).unwrap());
+		item2.set(1.into(), &states.get_db_state_mut(&StateInput(1)).unwrap());
 		// fusing cano
 		let _ = states.append_external_state(StateInput(101), s1.latest()).unwrap();
-		item1.set(2, &states.get_db_state_mut(&StateInput(101)).unwrap());
-		item2.set(2, &states.get_db_state_mut(&StateInput(101)).unwrap());
+		item1.set(2.into(), &states.get_db_state_mut(&StateInput(101)).unwrap());
+		item2.set(2.into(), &states.get_db_state_mut(&StateInput(101)).unwrap());
 		let s1 = states.append_external_state(StateInput(102), s1.latest()).unwrap();
-		item1.set(3, &states.get_db_state_mut(&StateInput(102)).unwrap());
+		item1.set(3.into(), &states.get_db_state_mut(&StateInput(102)).unwrap());
 		let s1 = states.append_external_state(StateInput(103), s1.latest()).unwrap();
-		item1.set(4, &states.get_db_state_mut(&StateInput(103)).unwrap());
+		item1.set(4.into(), &states.get_db_state_mut(&StateInput(103)).unwrap());
 		let _ = states.append_external_state(StateInput(104), s1.latest()).unwrap();
-		item1.set(5, &states.get_db_state_mut(&StateInput(104)).unwrap());
+		item1.set(5.into(), &states.get_db_state_mut(&StateInput(104)).unwrap());
 		let s1 = states.append_external_state(StateInput(105), s1.latest()).unwrap();
-		item1.set(6, &states.get_db_state_mut(&StateInput(105)).unwrap());
-		item2.set(6, &states.get_db_state_mut(&StateInput(105)).unwrap());
+		item1.set(6.into(), &states.get_db_state_mut(&StateInput(105)).unwrap());
+		item2.set(6.into(), &states.get_db_state_mut(&StateInput(105)).unwrap());
 		// end fusing (shift following branch index by 2)
 		let s2 = states.append_external_state(StateInput(2), &s0).unwrap();
 		let s1b = states.append_external_state(StateInput(12), s1.latest()).unwrap();
@@ -945,27 +1016,27 @@ mod test {
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _ _
-		let mut item3: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
-		let mut item4: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
-		item1.set(15, &states.get_db_state_mut(&StateInput(5)).unwrap());
-		item2.set(15, &states.get_db_state_mut(&StateInput(5)).unwrap());
-		item1.set(12, &states.get_db_state_mut(&StateInput(2)).unwrap());
+		let mut item3: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		let mut item4: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		item1.set(15.into(), &states.get_db_state_mut(&StateInput(5)).unwrap());
+		item2.set(15.into(), &states.get_db_state_mut(&StateInput(5)).unwrap());
+		item1.set(12.into(), &states.get_db_state_mut(&StateInput(2)).unwrap());
 
 		let s3head = states.append_external_state(StateInput(32), s3.latest()).unwrap();
-		item1.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
-		item2.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
-		item3.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
-		item4.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item1.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item2.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item3.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item4.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
 		let s3tmp = states.append_external_state(StateInput(33), s3head.latest()).unwrap();
-		item1.set(14, &states.get_db_state_mut(&StateInput(33)).unwrap());
-		item3.set(0, &states.get_db_state_mut(&StateInput(33)).unwrap());
+		item1.set(14.into(), &states.get_db_state_mut(&StateInput(33)).unwrap());
+		item3.set(0.into(), &states.get_db_state_mut(&StateInput(33)).unwrap());
 		let s3head = states.append_external_state(StateInput(34), s3tmp.latest()).unwrap();
 		let s6 = states.append_external_state(StateInput(6), s3tmp.latest()).unwrap();
 		let s3head = states.append_external_state(StateInput(35), s3head.latest()).unwrap();
-		item1.set(15, &states.get_db_state_mut(&StateInput(35)).unwrap());
-		item2.set(15, &states.get_db_state_mut(&StateInput(35)).unwrap());
-		item4.set(0, &states.get_db_state_mut(&StateInput(35)).unwrap());
-		item1.set(0, &states.get_db_state_mut(&StateInput(6)).unwrap());
+		item1.set(15.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
+		item2.set(15.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
+		item4.set(0.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
+		item1.set(0.into(), &states.get_db_state_mut(&StateInput(6)).unwrap());
 
 		let old_state = states.clone();
 		// Apply change of composite to 33

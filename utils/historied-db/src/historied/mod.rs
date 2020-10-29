@@ -65,15 +65,21 @@ pub trait InMemoryValueRange<S> {
 
 /// An item of historied value.
 pub trait Item: Sized {
-	/// The neutral item, this is the default
-	/// item and can be ommitted from storage.
+	/// This associeted constant defines if a neutral item
+	/// does exist.
+	const NEUTRAL: bool;
+
+	/// The storage representation.
+	type Storage: Eq + Clone;
+
+	/// The neutral item, is a default
+	/// item for undefined value.
 	/// eg for a value V that can be deleted, it will be
 	/// of type `Option<V>` and `None` will be
 	/// neutral.
-	/// If defined to `None`, there is no neutral element.
-	const NEUTRAL: Option<Self>;
-	/// The storage representation.
-	type Storage: Eq + Clone;
+	fn is_neutral(&self) -> bool;
+
+	fn is_storage_neutral(storage: &Self::Storage) -> bool;
 
 	fn from_storage(storage: Self::Storage) -> Self;
 
@@ -93,9 +99,19 @@ pub trait ItemRef: Item {
 /// Default implementation of Item for `Option`, as this
 /// is a common use case.
 impl<X: Item> Item for Option<X> {
-	const NEUTRAL: Option<Self> = Some(None);
-	/// The storage representation.
+	const NEUTRAL: bool = true;
+
 	type Storage = Option<X::Storage>;
+
+	#[inline(always)]
+	fn is_neutral(&self) -> bool {
+		self.is_none()
+	}
+
+	#[inline(always)]
+	fn is_storage_neutral(storage: &Self::Storage) -> bool {
+		storage.is_none()
+	}
 
 	#[inline(always)]
 	fn from_storage(storage: Self::Storage) -> Self {
@@ -111,8 +127,18 @@ impl<X: Item> Item for Option<X> {
 macro_rules! default_item {
 	($name: ty) => {
 	impl Item for $name {
-		const NEUTRAL: Option<Self> = None;
+		const NEUTRAL: bool = false;
 		type Storage = Self;
+
+		#[inline(always)]
+		fn is_neutral(&self) -> bool {
+			false
+		}
+
+		#[inline(always)]
+		fn is_storage_neutral(_storage: &Self::Storage) -> bool {
+			false
+		}
 
 		#[inline(always)]
 		fn from_storage(storage: Self::Storage) -> Self {

@@ -433,10 +433,8 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::St
 					// This does not handle consecutive neutral element, but
 					// it is considered marginal and bad usage (in theory one
 					// should not push two consecutive identical values).
-					if let Some(neutral) = V::NEUTRAL.as_ref() {
-						// TODO is_neutral function and associated bool to avoid clone
-						// then can remove ::Storage clone bound
-						if neutral == &V::from_storage(self.0.get(handle).value.clone()) {
+					if V::NEUTRAL {
+						if V::is_storage_neutral(&self.0.get(handle).value) {
 							index += 1;
 						}
 					}
@@ -540,6 +538,37 @@ mod test {
 	use super::*;
 	use crate::backend::{LinearStorage, in_memory::MemoryOnly};
 
+	#[repr(transparent)]
+	#[derive(Clone, PartialEq, Eq)]
+	/// Bytes with neutral item.
+	struct BytesNeutral(Vec<u8>); 
+
+	impl Item for BytesNeutral {
+		const NEUTRAL: bool = true;
+
+		type Storage = Vec<u8>;
+
+		#[inline(always)]
+		fn is_neutral(&self) -> bool {
+			self.0.as_slice() == &[0]
+		}
+
+		#[inline(always)]
+		fn is_storage_neutral(storage: &Self::Storage) -> bool {
+			storage.as_slice() == &[0]
+		}
+
+		#[inline(always)]
+		fn from_storage(storage: Self::Storage) -> Self {
+			BytesNeutral(storage)
+		}
+
+		#[inline(always)]
+		fn into_storage(self) -> Self::Storage {
+			self.0
+		}
+	}
+
 	#[test]
 	fn test_gc() {
 		// TODO non consecutive state.
@@ -565,28 +594,22 @@ mod test {
 			[Some(1), Some(2), Some(3), Some(4)],
 		];
 		for i in 1..5 {
-			let gc1 = LinearGC {
+			let gc = LinearGC {
 				new_start: None,
 				new_end: Some(i as u32),
-			};
-			let gc2 = LinearGC {
-				new_start: None,
-				new_end: Some(i as u32),
-//				neutral_element: Some(vec![0u8]), TODO need to test with a different type wrapping
-//				vec[u8]
 			};
 			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
-			first.gc(&gc1);
+			first.gc(&gc);
 			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
-			second.gc(&gc1);
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
-			first.gc(&gc2);
-			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
-			second.gc(&gc2);
+			let mut first = Linear::<BytesNeutral, _, _>(first_storage.clone(), Default::default());
+			first.gc(&gc);
+			let mut second = Linear::<BytesNeutral, _, _>(second_storage.clone(), Default::default());
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
@@ -607,27 +630,22 @@ mod test {
 			[None, None, None, None],
 		];
 		for i in 1..5 {
-			let gc1 = LinearGC {
+			let gc = LinearGC {
 				new_start: Some(i as u32),
 				new_end: None,
-			};
-			let gc2 = LinearGC {
-				new_start: Some(i as u32),
-				new_end: None,
-// TODO different test neutral_element: Some(vec![0u8]),
 			};
 			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
-			first.gc(&gc1);
+			first.gc(&gc);
 			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
-			second.gc(&gc1);
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
-			first.gc(&gc2);
-			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
-			second.gc(&gc2);
+			let mut first = Linear::<BytesNeutral, _, _>(first_storage.clone(), Default::default());
+			first.gc(&gc);
+			let mut second = Linear::<BytesNeutral, _, _>(second_storage.clone(), Default::default());
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_second[i - 1][j]);
