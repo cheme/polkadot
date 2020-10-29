@@ -19,12 +19,15 @@
 
 // TODO remove "previous code" expect.
 
-use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue,
-	InMemoryValueSlice, InMemoryValueRange, UpdateResult, ConditionalValueMut, Item, ItemRef};
+#[cfg(feature = "need_implementation_changes")]
+use super::ConditionalValueMut;
+use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue, ForceValueMut,
+	InMemoryValueSlice, InMemoryValueRange, UpdateResult, Item, ItemRef};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
 use sp_std::ops::SubAssign;
+use num_traits::One;
 use sp_std::vec::Vec;
 use sp_std::marker::PhantomData;
 use crate::Latest;
@@ -59,7 +62,7 @@ macro_rules! tree_get {
 				} else if branch_index == &state_branch_index {
 					// TODO add a lower bound check (maybe debug_assert it only).
 					let mut upper_bound = state_branch_range.end.clone();
-					upper_bound -= 1;
+					upper_bound -= BI::one();
 					let branch = self.branches.$branch_query(branch_ix).value;
 					if let Some(result) = $value_query(&branch, &upper_bound) {
 						return Some($post_process(result, branch))
@@ -164,7 +167,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32>, // TODO consider subassing usize or minus one trait...
+	BI: LinearState + SubAssign<BI> + One,
 	V: Item + Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 	BD: LinearStorage<V::Storage, BI>,
@@ -185,7 +188,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: ItemRef + Clone,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI>,
@@ -195,7 +198,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
@@ -304,7 +307,7 @@ impl<
 					}
 				}
 				if let Some(br) = gc.storage.get(&index) {
-					return if let Some(bi) = br.as_ref() {
+					return if let Some(bi) = br.0.as_ref() {
 						bi <= linear_index
 					} else {
 						true
@@ -380,7 +383,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI> + Clone,
+	BI: LinearState + SubAssign<BI> + Clone,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
@@ -476,14 +479,14 @@ impl<
 			};
 
 			if let Some(mut gc) = if let Some(change) = gc.storage.get(&branch.state) {
-				if change.is_none() {
+				if change.0.is_none() {
 					self.branches.remove(branch_ix);
 					result = UpdateResult::Changed(());
 					None
 				} else {
 					Some(LinearGC {
 						new_start,
-						new_end: change.clone(),
+						new_end: change.0.clone(),
 					})
 				}
 			} else {
@@ -538,7 +541,7 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: ItemRef + Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI, Context = D::Context>,
@@ -588,9 +591,10 @@ impl<
 	}
 }
 
+#[cfg(feature = "need_implementation_changes")]
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
@@ -660,6 +664,58 @@ impl<
 	}
 }
 
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Item + Clone + Eq,
+	D: LinearStorage<Linear<V, BI, BD>, I>,
+	BD: LinearStorage<V::Storage, BI>,
+> ForceValueMut<V> for Tree<I, BI, V, D, BD> {
+	type IndexForce = Self::Index;
+
+	fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()> {
+		// Warn dup code, just different linear function call from fn set,
+		// and using directly index, TODO factor result handle at least.
+		let (branch_index, index) = at;
+		let mut insert_at = None;
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
+			if &iter_branch_index == branch_index {
+				let index = index.clone();
+				let mut branch = self.branches.get(branch_ix);
+				return match branch.value.force_set(value, &index) {
+					UpdateResult::Changed(_) => {
+						self.branches.emplace(branch_ix, branch);
+						UpdateResult::Changed(())
+					},
+					UpdateResult::Cleared(_) => {
+						self.branches.remove(branch_ix);
+						if self.branches.len() == 0 {
+							UpdateResult::Cleared(())
+						} else {
+							UpdateResult::Changed(())
+						}
+					},
+					UpdateResult::Unchanged => UpdateResult::Unchanged,
+				};
+			}
+			if &iter_branch_index < branch_index {
+				break;
+			}
+			insert_at = Some(branch_ix);
+		}
+		let branch = Branch::new(value, at, self.init_child.clone());
+		if let Some(index) = insert_at {
+			self.branches.insert(index, branch);
+		} else {
+			self.branches.push(branch);
+		}
+		UpdateResult::Changed(())
+	}
+}
+
+
+#[cfg(feature = "need_implementation_changes")]
 // TODO current implementation is incorrect, we need an index that fails at first
 // branch that is parent to the dest (a tree path flattened into a ForkPlan like
 // struct). Element prior (I, BI) are not needed (only children).
@@ -667,11 +723,14 @@ impl<
 // skipped.
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
 > ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
+	// TODO this would require to get all branch index that are children
+	// of this index, and also their current upper bound.
+	// That can be fairly costy.
 	type IndexConditional = Self::Index;
 
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
@@ -706,7 +765,7 @@ impl Tree<u32, u32, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32>,
+	BI: LinearState + SubAssign<BI> + One,
 	V: Item + Clone + AsRef<[u8]> + AsMut<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
 	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V::Storage, BI>,
@@ -898,6 +957,94 @@ mod test {
 		}
 	}
 
+	#[cfg(feature = "need_implementation_changes")]
+	#[test]
+	fn test_conditional_set_get() {
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+		let mut item2: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+
+		for i in 0..6 {
+			assert_eq!(item.get(&states.query_plan(i)), None);
+		}
+
+		// setting value not respecting branch build order
+		// set in past (latest is 1, 2) is fine
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(1, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(1, &(1, 2)));
+		// but not with another value
+		assert_eq!(None, item.set_if_possible(8, &(1, 0)));
+		assert_eq!(None, item2.set_if_possible(8, &(1, 1)));
+		// can overwrite
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(2, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(2, &(1, 2)));
+		// not if not allowed
+		assert_eq!(None, item.set_if_possible_no_overwrite(3, &(1, 1)));
+		assert_eq!(None, item2.set_if_possible_no_overwrite(3, &(1, 2)));
+		// unchanged is allowed
+		assert_eq!(Some(UpdateResult::Unchanged), item.set_if_possible(2, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Unchanged), item2.set_if_possible(2, &(1, 2)));
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&2));
+		states.drop_state(&1u32);
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), None);
+		assert_eq!(item2.get_ref(&states.query_plan(1)), None);
+		// no longer allowd to change the branch TODO we should be able to, but
+		// with blockchain tree use case with removal only on canonicalisation
+		// and pruning it should be fine.
+		assert_eq!(None, item2.set_if_possible(3, &(1, 1)));
+	}
+
+	#[test]
+	fn test_force_set_get() {
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+
+		for i in 0..6 {
+			assert_eq!(item.get(&states.query_plan(i)), None);
+		}
+
+		// setting value not respecting branch build order
+		assert_eq!(UpdateResult::Changed(()), item.force_set(0, &(1, 2)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(1, &(1, 1)));
+		// out of range
+		assert_eq!(UpdateResult::Changed(()), item.force_set(8, &(1, 0)));
+		// can set in invalid range too
+		assert_eq!(UpdateResult::Changed(()), item.force_set(3, &(2, 5)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(2, &(2, 1)));
+
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&0));
+		assert_eq!(item.get_ref(&states.query_plan(2)), Some(&2));
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&1));
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), None);
+	}
+
 	use ref_cast::RefCast;
 	#[derive(RefCast)]
 	#[repr(transparent)]
@@ -978,9 +1125,21 @@ mod test {
 			crate::historied::linear::Linear<U16Neutral, u32, BD>,
 			u32,
 		>;
+
+		let check_state = |states: &mut crate::test::fuzz::InMemoryMgmtSer, target: Vec<(u32, u32)>| {
+			let mut gc = states.get_migrate();
+			let (pruning, mut iter) = gc.migrate().touched_state();
+			assert_eq!(pruning, None);
+			let mut set = std::collections::BTreeSet::new();
+			for s in iter {
+				set.insert(s.clone());
+			}
+
+			let reference: std::collections::BTreeSet<_> = target.into_iter().collect();
+			assert_eq!(set, reference);
+		};
+
 		let mut states = crate::test::fuzz::InMemoryMgmtSer::default();
-// TODO EMCH use a value with default element to 0
-//			.define_neutral_element(0);
 		let s0 = states.latest_state_fork();
 
 		let mut item1: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
@@ -1041,14 +1200,18 @@ mod test {
 		let old_state = states.clone();
 		// Apply change of composite to 33
 		let filter_out = [101, 104, 2, 4, 5];
-		let mut filter_qp = vec![qp14];
+		let mut filter_qp = vec![qp14.latest_index()];
+		// dropped 14
+		check_state(&mut states, filter_qp.clone());
 		for i in filter_out.iter() {
 			let qp = states.get_db_state(&StateInput(*i)).unwrap();
-			filter_qp.push(qp);
+			filter_qp.push(qp.latest_index());
 		}
 
 		let fp = states.get_db_state(&StateInput(35)).unwrap();
 		states.canonicalize(fp, *s3tmp.latest(), None);
+		// other drops from filter_out
+		check_state(&mut states, filter_qp.clone());
 		let filter_in = [1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
 		let no_qp = [14];
 		//panic!("{:?} \n {:?}", old_state, states);
@@ -1072,14 +1235,6 @@ mod test {
 		assert_eq!(gc_item2.nb_internal_branch(), 3);
 		assert_eq!(gc_item3.nb_internal_branch(), 1);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
-		/* TODO only with new_start where we actually prune stuff
-		for fp in filter_qp.iter() {
-			assert_ne!(
-				gc_item1.get_ref(fp),
-				item1.get_ref(&fp),
-			);
-		}
-		*/
 
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
@@ -1098,13 +1253,16 @@ mod test {
 		let mut gc_item4 = item4.clone();
 		let mut states = states;
 		{
-			let (mig, mut gc) = states.get_migrate();
-			gc_item1.migrate(&mut gc);
-			gc_item2.migrate(&mut gc);
-			gc_item3.migrate(&mut gc);
-			gc_item4.migrate(&mut gc);
-			states = mig.applied_migrate();
+			let mut gc = states.get_migrate();
+			gc_item1.migrate(gc.migrate());
+			gc_item2.migrate(gc.migrate());
+			gc_item3.migrate(gc.migrate());
+			gc_item4.migrate(gc.migrate());
+			gc.applied_migrate();
 		}
+		// empty (applied_migrate ran)
+		check_state(&mut states, vec![]);
+
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
 			assert_eq!(gc_item1.get_ref(&fp), item1.get_ref(&fp));
@@ -1131,12 +1289,12 @@ mod test {
 		let fp = states.get_db_state(&StateInput(35)).unwrap();
 		states.canonicalize(fp, *s3tmp.latest(), Some(s3tmp.latest().1));
 		{
-			let (mig, mut gc) = states.get_migrate();
-			gc_item1.migrate(&mut gc);
-			gc_item2.migrate(&mut gc);
-			gc_item3.migrate(&mut gc);
-			gc_item4.migrate(&mut gc);
-			states = mig.applied_migrate();
+			let mut gc = states.get_migrate();
+			gc_item1.migrate(gc.migrate());
+			gc_item2.migrate(gc.migrate());
+			gc_item3.migrate(gc.migrate());
+			gc_item4.migrate(gc.migrate());
+			gc.applied_migrate();
 			//panic!("{:?}", (gc, item3, gc_item3));
 		}
 		for i in filter_in.iter() {

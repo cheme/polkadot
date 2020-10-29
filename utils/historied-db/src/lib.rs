@@ -224,17 +224,25 @@ pub trait StateDB<K, V>: StateDBRef<K, V> {
 	fn migrate(&mut self, mig: &mut Self::Migrate);
 }
 
-/// Type holding a state db to lock the management.
-pub struct Migrate<H, M>(M, PhantomData<H>);
+/// Type holding a state db to lock the management, until applying migration.
+/// TODO consider removing applied migrate, since it is easier to use a transactional
+/// backend on historied management.
+pub struct Migrate<'a, H, M: Management<H>>(&'a mut M, M::Migrate, PhantomData<H>);
 
-impl<H, M: Management<H>> Migrate<H, M> {
-	pub fn capture(m: M) -> Self {
-		Migrate(m, PhantomData)
-	}
-	pub fn applied_migrate(mut self) -> M {
+impl<'a, H, M: Management<H>> Migrate<'a, H, M> {
+	pub fn applied_migrate(self) {
 		self.0.applied_migrate();
+	}
+	/// When using management from migrate,
+	/// please unsure that you are not modifying
+	/// management state in an incompatible way
+	/// with the migration.
+	pub fn management(&mut self) -> &mut M {
 		self.0
 	}
+	pub fn migrate(&mut self) -> &mut M::Migrate {
+		&mut self.1
+ 	}
 }
 
 pub enum Ref<'a, V> {
@@ -298,7 +306,7 @@ pub trait Management<H>: ManagementRef<H> + Sized {
 	/// see migrate. When running thes making a backup of this management
 	/// state is usually a good idea (this method does not manage
 	/// backup or rollback).
-	fn get_migrate(self) -> (Migrate<H, Self>, Self::Migrate);
+	fn get_migrate(&mut self) -> Migrate<H, Self>;
 
 	/// report a migration did run successfully, will update management state
 	/// accordingly.

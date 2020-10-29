@@ -24,11 +24,10 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
-	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef};
+	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
-use sp_std::convert::TryFrom;
 use sp_std::ops::{SubAssign, Range};
 use codec::{Encode, Decode, Input};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
@@ -46,8 +45,6 @@ pub trait LinearState:
 	+ Clone
 	+ Ord
 	+ PartialOrd
-	+ TryFrom<u32>
-	+ PartialEq<u32>
 {
 	// stored state and query state are
 	// the same for linear state.
@@ -65,8 +62,6 @@ impl<S> LinearState for S where S:
 	+ Clone
 	+ Ord
 	+ PartialOrd
-	+ TryFrom<u32>
-	+ PartialEq<u32>
 { }
 
 /// Implementation of linear value history storage.
@@ -282,6 +277,36 @@ impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S,
 		}
 		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
 		UpdateResult::Changed(None)
+	}
+
+	fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
+		let mut position = self.0.last();
+		let mut insert_index =  None;
+		while let Some(index) = position {
+			let last = self.0.get_state(index);
+			if at > &last {
+				break;
+			}
+			if at == &last {
+				let mut last = self.0.get(index);
+				let value = value.into_storage();
+				if last.value == value {
+					return UpdateResult::Unchanged;
+				}
+				last.value = value;
+				self.0.emplace(index, last);
+				return UpdateResult::Changed(());
+			}
+			insert_index = Some(index);
+			position = self.0.previous_index(index);
+		}
+		let value = value.into_storage();
+		if let Some(index) = insert_index {
+			self.0.insert(index, HistoriedValue {value, state: at.clone()});
+		} else {
+			self.0.push(HistoriedValue {value, state: at.clone()});
+		}
+		UpdateResult::Changed(())
 	}
 
 	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
@@ -509,6 +534,15 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::St
 		self.set_if_inner(value, at, false)
 	}
 }
+
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceValueMut<V> for Linear<V, S, D> {
+	type IndexForce = Self::Index;
+
+	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
+		self.force_set(value, at)
+	}
+}
+
 
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]

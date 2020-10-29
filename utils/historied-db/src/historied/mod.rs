@@ -253,6 +253,17 @@ pub trait ConditionalValueMut<V: Item>: Value<V> {
 	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
 }
 
+/// Setting value is usually done on latest state for an history.
+/// This trait allow setting values in the past, this is usually
+/// not a good idea to maintain state coherency.
+pub trait ForceValueMut<V: Item>: Value<V> {
+	/// Internal index.
+	type IndexForce;
+
+	/// Do update if state allows it, otherwhise return None.
+	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()>;
+}
+
 /// An entry at a given history index.
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct HistoriedValue<V, S> {
