@@ -70,7 +70,7 @@ pub trait Item: Sized {
 	const NEUTRAL: bool;
 
 	/// The storage representation.
-	type Storage: Eq + Clone;
+	type Storage: Eq;
 
 	/// The neutral item, is a default
 	/// item for undefined value.
@@ -98,10 +98,10 @@ pub trait ItemRef: Item {
 
 /// Default implementation of Item for `Option`, as this
 /// is a common use case.
-impl<X: Item> Item for Option<X> {
+impl<X: Eq> Item for Option<X> {
 	const NEUTRAL: bool = true;
 
-	type Storage = Option<X::Storage>;
+	type Storage = Option<X>;
 
 	#[inline(always)]
 	fn is_neutral(&self) -> bool {
@@ -115,12 +115,34 @@ impl<X: Item> Item for Option<X> {
 
 	#[inline(always)]
 	fn from_storage(storage: Self::Storage) -> Self {
-		storage.map(X::from_storage)
+		storage
 	}
 
 	#[inline(always)]
 	fn into_storage(self) -> Self::Storage {
-		self.map(|item| item.into_storage())
+		self
+	}
+}
+
+impl<X: Eq> ItemRef for Option<X> {
+	#[inline(always)]
+	fn from_storage_ref(storage: &Self::Storage) -> &Self {
+		storage
+	}
+
+	#[inline(always)]
+	fn into_storage_ref(&self) -> &Self::Storage {
+		self
+	}
+
+	#[inline(always)]
+	fn from_storage_ref_mut(storage: &mut Self::Storage) -> &mut Self {
+		storage
+	}
+
+	#[inline(always)]
+	fn into_storage_ref_mut(&mut self) -> &mut Self::Storage {
+		self
 	}
 }
 
