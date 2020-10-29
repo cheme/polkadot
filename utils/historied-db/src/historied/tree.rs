@@ -20,7 +20,7 @@
 // TODO remove "previous code" expect.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue,
-	InMemoryValueSlice, InMemoryValueRange, UpdateResult, ConditionalValueMut, Item};
+	InMemoryValueSlice, InMemoryValueRange, UpdateResult, ConditionalValueMut, Item, ItemRef};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
@@ -148,7 +148,7 @@ impl<
 	I: Clone,
 	BI: LinearState + SubAssign<BI>,
 	V: Item + Clone + Eq,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > Branch<I, BI, V, BD>
 {
 	pub fn new(value: V, state: &(I, BI), init: BD::Context) -> Self {
@@ -167,7 +167,7 @@ impl<
 	BI: LinearState + SubAssign<u32>, // TODO consider subassing usize or minus one trait...
 	V: Item + Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > ValueRef<V> for Tree<I, BI, V, D, BD> {
 	type S = ForkPlan<I, BI>;
 
@@ -186,9 +186,9 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<u32>,
-	V: Item + Clone,
+	V: ItemRef + Clone,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V, BI>,
+	BD: LinearStorageMem<V::Storage, BI>,
 > InMemoryValueRef<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _| r );
 }
@@ -198,7 +198,7 @@ impl<
 	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > Value<V> for Tree<I, BI, V, D, BD> {
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
@@ -383,7 +383,7 @@ impl<
 	BI: LinearState + SubAssign<u32> + SubAssign<BI> + Clone,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > Tree<I, BI, V, D, BD> {
 	fn state_gc(&mut self, gc: &TreeStateGc<I, BI>) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
@@ -539,9 +539,9 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
-	V: Item + Clone + Eq,
+	V: ItemRef + Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V, BI, Context = D::Context>,
+	BD: LinearStorageMem<V::Storage, BI, Context = D::Context>,
 > InMemoryValue<V> for Tree<I, BI, V, D, BD> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
@@ -593,7 +593,7 @@ impl<
 	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > Tree<I, BI, V, D, BD> {
 	fn set_if_inner(
 		&mut self,
@@ -670,7 +670,7 @@ impl<
 	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
 	type IndexConditional = Self::Index;
 
@@ -709,7 +709,7 @@ impl<
 	BI: LinearState + SubAssign<u32>,
 	V: Item + Clone + AsRef<[u8]> + AsMut<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
-	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V, BI>,
+	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V::Storage, BI>,
 > InMemoryValueSlice<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(
 		get_slice,

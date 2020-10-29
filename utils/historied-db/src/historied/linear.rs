@@ -24,7 +24,7 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
-	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item};
+	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
@@ -200,11 +200,11 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	}
 }
 
-impl<V: Item + Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V, S, D> {
+impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> ValueRef<V> for Linear<V, S, D> {
 	type S = S;
 
 	fn get(&self, at: &Self::S) -> Option<V> {
-		self.get_adapt::<_, ValueVecAdapter>(at)
+		self.get_adapt::<_, ValueVecAdapter>(at).map(V::from_storage)
 	}
 
 	fn contains(&self, at: &Self::S) -> bool {
@@ -216,7 +216,8 @@ impl<V: Item + Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Li
 	}
 }
 
-impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for Linear<V, S, D> {
+// TODO should it be ItemRef?
+impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> InMemoryValueRange<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
 			for index in inner.rev_index_iter() {
@@ -231,7 +232,7 @@ impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for L
 	}
 }
 
-impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
+impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
 		for index in self.0.rev_index_iter() {
 			let HistoriedValue { value, state } = A::get_adapt(&self.0, index);
@@ -256,7 +257,7 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
+impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
@@ -268,17 +269,18 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 				}
 				if at == &last {
 					let mut last = self.0.get(index);
+					let value = value.into_storage();
 					if last.value == value {
 						return UpdateResult::Unchanged;
 					}
 					let result = sp_std::mem::replace(&mut last.value, value);
 					self.0.emplace(index, last);
-					return UpdateResult::Changed(Some(result));
+					return UpdateResult::Changed(Some(V::from_storage(result)));
 				}
 			}
 			break;
 		}
-		self.0.push(HistoriedValue {value, state: at.clone()});
+		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
 		UpdateResult::Changed(None)
 	}
 
@@ -290,6 +292,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 			}
 			if at == &last {
 				let mut last = self.0.get(index);
+				let value = value.into_storage();
 				if last.value == value {
 					return Some(UpdateResult::Unchanged);
 				}
@@ -301,7 +304,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 				return Some(UpdateResult::Changed(()));
 			}
 		}
-		self.0.push(HistoriedValue {value, state: at.clone()});
+		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
 		Some(UpdateResult::Changed(()))
 	}
 	fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
@@ -313,7 +316,10 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 			if at == &last {
 				if let Some(overwrite) = value {
 					let last = self.0.get(index);
-					if overwrite != &last.value {
+					// Non negligeable cost in some case: TODO consider skipping this test.
+					// Or use ItemRef
+					let last_value = V::from_storage(last.value);
+					if overwrite != &last_value {
 						return false;
 					}
 				}
@@ -323,7 +329,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
+impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn pos_index(&self, at: &S) -> Option<D::Index> {
 		let mut pos = None;
 		for index in self.0.rev_index_iter() {
@@ -337,9 +343,9 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: Item + Clone, S: LinearState, D: LinearStorageMem<V, S>> InMemoryValueRef<V> for Linear<V, S, D> {
+impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> InMemoryValueRef<V> for Linear<V, S, D> {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
-		self.get_adapt::<_, RefVecAdapter>(at)
+		self.get_adapt::<_, RefVecAdapter>(at).map(ItemRef::from_storage_ref)
 	}
 }
 
@@ -349,7 +355,7 @@ impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> InMemoryValueSlice<Vec<u
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value<V> for Linear<V, S, D> {
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> Value<V> for Linear<V, S, D> {
 	type SE = Latest<S>;
 	type Index = S;
 	type GC = LinearGC<S>;
@@ -361,7 +367,7 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>
 	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init);
 		let state = at.latest().clone();
-		v.push(HistoriedValue{ value, state });
+		v.push(HistoriedValue{ value: value.into_storage(), state });
 		Linear(v, PhantomData)
 	}
 
@@ -378,9 +384,9 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>
 			debug_assert!(&last.state <= at); 
 			if at == &last.state {
 				if self.0.len() == 1 {
-					return UpdateResult::Cleared(self.0.pop().map(|v| v.value));
+					return UpdateResult::Cleared(self.0.pop().map(|v| V::from_storage(v.value)));
 				} else {
-					return UpdateResult::Changed(self.0.pop().map(|v| v.value));
+					return UpdateResult::Changed(self.0.pop().map(|v| V::from_storage(v.value)));
 				}
 			}
 		}
@@ -428,7 +434,9 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>
 					// it is considered marginal and bad usage (in theory one
 					// should not push two consecutive identical values).
 					if let Some(neutral) = V::NEUTRAL.as_ref() {
-						if neutral == &self.0.get(handle).value {
+						// TODO is_neutral function and associated bool to avoid clone
+						// then can remove ::Storage clone bound
+						if neutral == &V::from_storage(self.0.get(handle).value.clone()) {
 							index += 1;
 						}
 					}
@@ -479,10 +487,10 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V, S>> InMemoryValue<V> for Linear<V, S, D> {
+impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> InMemoryValue<V> for Linear<V, S, D> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
-		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| h.value)
+		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| V::from_storage_ref_mut(h.value))
 	}
 
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>> {
@@ -490,7 +498,7 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V,
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> ConditionalValueMut<V> for Linear<V, S, D> {
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalValueMut<V> for Linear<V, S, D> {
 	type IndexConditional = Self::Index;
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
 		self.can_if_inner(no_overwrite, at)
@@ -567,17 +575,17 @@ mod test {
 //				neutral_element: Some(vec![0u8]), TODO need to test with a different type wrapping
 //				vec[u8]
 			};
-			let mut first = Linear(first_storage.clone(), Default::default());
+			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
 			first.gc(&gc1);
-			let mut second = Linear(second_storage.clone(), Default::default());
+			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
 			second.gc(&gc1);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first_storage.clone(), Default::default());
+			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
 			first.gc(&gc2);
-			let mut second = Linear(second_storage.clone(), Default::default());
+			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
@@ -608,17 +616,17 @@ mod test {
 				new_end: None,
 // TODO different test neutral_element: Some(vec![0u8]),
 			};
-			let mut first = Linear(first_storage.clone(), Default::default());
+			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
 			first.gc(&gc1);
-			let mut second = Linear(second_storage.clone(), Default::default());
+			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
 			second.gc(&gc1);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first_storage.clone(), Default::default());
+			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
 			first.gc(&gc2);
-			let mut second = Linear(second_storage.clone(), Default::default());
+			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
 			second.gc(&gc2);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);

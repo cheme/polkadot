@@ -73,11 +73,21 @@ pub trait Item: Sized {
 	/// If defined to `None`, there is no neutral element.
 	const NEUTRAL: Option<Self>;
 	/// The storage representation.
-	type Storage;
+	type Storage: Eq + Clone;
 
 	fn from_storage(storage: Self::Storage) -> Self;
 
 	fn into_storage(self) -> Self::Storage;
+}
+
+pub trait ItemRef: Item {
+	fn from_storage_ref(storage: &Self::Storage) -> &Self;
+
+	fn into_storage_ref(&self) -> &Self::Storage;
+
+	fn from_storage_ref_mut(storage: &mut Self::Storage) -> &mut Self;
+
+	fn into_storage_ref_mut(&mut self) -> &mut Self::Storage;
 }
 
 /// Default implementation of Item for `Option`, as this
@@ -111,6 +121,28 @@ macro_rules! default_item {
 
 		#[inline(always)]
 		fn into_storage(self) -> Self::Storage {
+			self
+		}
+	}
+
+	impl ItemRef for $name {
+		#[inline(always)]
+		fn from_storage_ref(storage: &Self::Storage) -> &Self {
+			storage
+		}
+
+		#[inline(always)]
+		fn into_storage_ref(&self) -> &Self::Storage {
+			self
+		}
+
+		#[inline(always)]
+		fn from_storage_ref_mut(storage: &mut Self::Storage) -> &mut Self {
+			storage
+		}
+
+		#[inline(always)]
+		fn into_storage_ref_mut(&mut self) -> &mut Self::Storage {
 			self
 		}
 	}
