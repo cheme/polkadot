@@ -1024,6 +1024,29 @@ impl<I: Clone, BI: Clone + SubAssign<BI> + One> ForkPlan<I, BI> {
 	}
 }
 
+impl<I, BI: Clone + Eq + SubAssign<BI> + One + Default + Ord> ForkPlan<I, BI> {
+	/// Calculate forkplan that does not include current state,
+	/// very usefull to produce diff of value at a given state
+	/// (we make the diff against the previous, not the current).
+	pub fn previous_forkplan(mut self) -> Option<ForkPlan<I, BI>> {
+		if self.history.len() > 0 {
+			debug_assert!(self.history[0].state.start > self.composite_treshold.1);
+			if let Some(branch) = self.history.last_mut() {
+				branch.state.end -= One::one();
+				if branch.state.end != branch.state.start {
+					return Some(self);
+				}
+			}
+			self.history.pop();
+		} else if self.composite_treshold.1 == Default::default() {
+			return None;
+		} else {
+			self.composite_treshold.1 -= One::one();
+		}
+		Some(self)
+	}
+}
+
 impl<I: Default, BI: Default> Default for ForkPlan<I, BI> {
 	fn default() -> Self {
 		ForkPlan {

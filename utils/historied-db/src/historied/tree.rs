@@ -1359,6 +1359,12 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
+/* TODO
+		let item: TreeDiff<_, _, BytesDelta, _, _> = item.into();
+		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
+		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
+		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
+*/
 	}
 
 	#[test]
@@ -1402,7 +1408,11 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
+/* TODO
+		let item: TreeDiff<_, _, MapDelta<u8, u8>, _, _> = item.into();
+		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
+		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
+		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
+*/
 	}
-
-
 }
