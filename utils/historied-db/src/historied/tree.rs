@@ -1313,4 +1313,96 @@ mod test {
 		assert_eq!(gc_item3.nb_internal_branch(), 0);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
 	}
+
+	#[test]
+	fn test_diff1() {
+		use crate::historied::{DiffBuilder};
+		use crate::historied::xdelta::{BytesDelta, BytesDiff, BytesDiffBuilder}; 
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<BytesDiff, u32, BD>,
+			u32,
+		>;
+
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, BytesDiff, D, BD> = InitFrom::init_from(((), ()));
+
+		let successive_values: Vec<BytesDelta> = vec![
+			[0u8, 1, 2, 3][..].into(), // (1, 1)
+			[1, 1, 2, 3][..].into(), // (1,2)
+			[1, 3][..].into(), // (3, 3)
+			[][..].into(), // 4, 3 (follow) (1, 2)
+		];
+
+		let mut successive_deltas: Vec<BytesDiff> = Vec::with_capacity(successive_values.len());
+
+		let mut builder = BytesDiffBuilder::new_diff_builder();
+		successive_deltas.push(builder.calculate_diff(&Default::default(), &successive_values[0]));
+		successive_deltas.push(builder.calculate_diff(&successive_values[0], &successive_values[1]));
+		successive_deltas.push(builder.calculate_diff(&successive_values[1], &successive_values[2]));
+		successive_deltas.push(builder.calculate_diff(&successive_values[1], &successive_values[3]));
+
+		let successive_deltas = successive_deltas;
+
+		item.set(successive_deltas[0].clone(), &Latest::unchecked_latest((1, 1)));
+		item.set(successive_deltas[1].clone(), &Latest::unchecked_latest((1, 2)));
+		item.set(successive_deltas[2].clone(), &Latest::unchecked_latest((3, 3)));
+		item.set(successive_deltas[3].clone(), &Latest::unchecked_latest((4, 3)));
+
+		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
+		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
+		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
+	}
+
+	#[test]
+	fn test_diff2() {
+		use crate::historied::map_delta::{MapDelta, MapDiff}; 
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<MapDiff<u8, u8>, u32, BD>,
+			u32,
+		>;
+
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, MapDiff<u8, u8>, D, BD> = InitFrom::init_from(((), ()));
+
+		let successive_values: Vec<MapDelta<u8, u8>> = vec![
+			MapDelta::default(), // (1, 1)
+			MapDelta([(0u8, 1u8)][..].iter().cloned().collect()), // (1,2)
+			MapDelta([(1u8, 3u8)][..].iter().cloned().collect()), // (3, 3)
+			MapDelta::default(), // (1, 1)
+		];
+
+		let successive_deltas: Vec<MapDiff<u8, u8>> = vec![
+			MapDiff::Reset,
+			MapDiff::Insert(0, 1),
+			MapDiff::Insert(1, 3),
+			MapDiff::Remove(0),
+		];
+
+		item.set(successive_deltas[0].clone(), &Latest::unchecked_latest((1, 1)));
+		item.set(successive_deltas[1].clone(), &Latest::unchecked_latest((1, 2)));
+		item.set(successive_deltas[2].clone(), &Latest::unchecked_latest((3, 3)));
+		item.set(successive_deltas[3].clone(), &Latest::unchecked_latest((4, 3)));
+
+		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
+		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
+		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
+	}
+
+
 }
