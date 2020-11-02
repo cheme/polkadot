@@ -151,12 +151,10 @@ impl<K: Eq + Hash, V> ManagementRef<StateInput> for Db<K, V> {
 	}
 }
 
-impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
-	type SE = Latest<StateIndex>;
-
-	fn init() -> (Self, Self::S) {
+impl<K: Eq + Hash, V> Default for Db<K, V> {
+	fn default() -> Self {
 		// 0 is defined
-		(Db {
+		Db {
 			db: vec![
 				Some(DbElt {
 					values: Default::default(),
@@ -165,8 +163,12 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 				})
 			],
 			latest_state: Latest::unchecked_latest(0),
-		}, vec![0])
+		}
 	}
+}
+
+impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
+	type SE = Latest<StateIndex>;
 
 	fn get_db_state_mut(&mut self, state: &StateInput) -> Option<Self::SE> {
 //		if let Some(s) = self.get_state(state) {
@@ -188,10 +190,6 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 
 	fn force_latest_external_state(&mut self, _state: StateInput) { }
 
-	fn init_state(&mut self) -> Self::SE {
-		Latest::unchecked_latest(0)
-	}
-
 	fn reverse_lookup(&mut self, state: &Self::S) -> Option<StateInput> {
 		if let Some(state) = state.first() {
 			// TODO wrong cast.
@@ -206,8 +204,8 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 		}
 	}
 
-	fn get_migrate(self) -> (Migrate<StateInput, Self>, Self::Migrate) {
-		(Migrate::capture(self), ())
+	fn get_migrate(&mut self) -> Migrate<StateInput, Self> {
+		Migrate(self, (), sp_std::marker::PhantomData)
 	}
 
 	fn applied_migrate(&mut self) { }
@@ -224,6 +222,11 @@ impl<K: Eq + Hash, V> ForkableManagement<StateInput> for Db<K, V> {
 
 	fn ref_state_fork(&self, s: &Self::S) -> Self::SF {
 		s.first().cloned().unwrap_or_default()
+	}
+
+	fn init_state_fork(&mut self) -> Self::SF {
+		let se = Latest::unchecked_latest(0);
+		self.inner_fork_state(se)
 	}
 
 	fn get_db_state_for_fork(&mut self, state: &StateInput) -> Option<Self::SF> {

@@ -18,10 +18,10 @@
 //! In memory backend structure.
 
 use crate::historied::HistoriedValue;
-use codec::{Encode, Decode, Input as CodecInput};
+use codec::{Encode, Decode, Input as Input};
 use super::{LinearStorage, LinearStorageMem};
 use sp_std::mem::replace;
-use crate::InitFrom;
+use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use sp_std::vec::Vec;
 
 /// Size of preallocated history per element.
@@ -52,10 +52,34 @@ impl<V: Encode, S: Encode> Encode for MemoryOnly<V, S> {
 }
 
 impl<V: Decode, S: Decode> Decode for MemoryOnly<V, S> {
-	fn decode<I: CodecInput>(value: &mut I) -> Result<Self, codec::Error> {
+	fn decode<I: Input>(value: &mut I) -> Result<Self, codec::Error> {
 		// TODO make a variant when len < ALLOCATED_HISTORY
 		let v = Vec::decode(value)?;
 		Ok(MemoryOnly(smallvec::SmallVec::from_vec(v)))
+	}
+}
+
+impl<V, S> DecodeWithContext for MemoryOnly<V, S>
+	where
+		V: DecodeWithContext,
+		S: Decode,
+{
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+		// this align on scale codec inner implementation (DecodeWithContext trait
+		// could be a scale trait).
+		<codec::Compact<u32>>::decode(input).ok().and_then(|len| {
+			// TODO allocate with capacity
+			let len = len.0 as usize;
+			let mut result = smallvec::SmallVec::new();
+			for _ in 0..len {
+				if let Some(value) = HistoriedValue::decode_with_context(input, init) {
+					result.push(value);
+				} else {
+					return None;
+				}
+			}
+			Some(MemoryOnly(result))
+		})
 	}
 }
 
@@ -65,7 +89,7 @@ impl<V, S> Default for MemoryOnly<V, S> {
 	}
 }
 
-impl<V: Clone, S: Clone> LinearStorageMem<V, S> for MemoryOnly<V, S> {
+impl<V: Clone + Context, S: Clone> LinearStorageMem<V, S> for MemoryOnly<V, S> {
 	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S> {
 		let HistoriedValue { value, state } = &self.0[index];
 		HistoriedValue { value: &value, state: state.clone() }
@@ -76,14 +100,29 @@ impl<V: Clone, S: Clone> LinearStorageMem<V, S> for MemoryOnly<V, S> {
 	}
 }
 
-impl<V, S> InitFrom for MemoryOnly<V, S> {
-	type Init = ();
-	fn init_from(_init: Self::Init) -> Self {
+impl<V: Clone + Context + Trigger, S: Clone> Trigger for MemoryOnly<V, S> {
+	const TRIGGER: bool = <V as Trigger>::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if Self::TRIGGER {
+			for i in 0 .. self.len() {
+				self.get(i).trigger_flush()
+			}
+		}
+	}
+}
+
+impl<V: Context, S> Context for MemoryOnly<V, S> {
+	type Context = V::Context;
+}
+
+impl<V: Context, S> InitFrom for MemoryOnly<V, S> {
+	fn init_from(_init: Self::Context) -> Self {
 		Self::default()
 	}
 }
 
-impl<V: Clone, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
+impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 	// Index position in array.
 	type Index = usize;
 	fn last(&self) -> Option<Self::Index> {

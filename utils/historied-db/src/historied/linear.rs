@@ -24,16 +24,16 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
-	InMemoryValueSlice, InMemoryValue, ConditionalValueMut};
+	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut,
+	ValueDiff, ItemDiff};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
-use sp_std::convert::TryFrom;
 use sp_std::ops::{SubAssign, Range};
-use codec::{Encode, Decode};
+use codec::{Encode, Decode, Input};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
 use crate::backend::encoded_array::EncodedArrayValue;
-use crate::InitFrom;
+use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use derivative::Derivative;
 use crate::backend::nodes::EstimateSize;
 
@@ -46,8 +46,6 @@ pub trait LinearState:
 	+ Clone
 	+ Ord
 	+ PartialOrd
-	+ TryFrom<u32>
-	+ PartialEq<u32>
 {
 	// stored state and query state are
 	// the same for linear state.
@@ -65,14 +63,38 @@ impl<S> LinearState for S where S:
 	+ Clone
 	+ Ord
 	+ PartialOrd
-	+ TryFrom<u32>
-	+ PartialEq<u32>
 { }
 
 /// Implementation of linear value history storage.
 #[derive(Derivative, Debug, Encode, Decode)]
 #[derivative(PartialEq(bound="D: PartialEq"))]
 pub struct Linear<V, S, D>(D, PhantomData<(V, S)>);
+
+impl<V, S, D: Trigger> Trigger for Linear<V, S, D> {
+	const TRIGGER: bool = <D as Trigger>::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if Self::TRIGGER {
+			self.0.trigger_flush();
+		}
+	}
+}
+
+impl<V, S, D: Context> Context for Linear<V, S, D> {
+	type Context = <D as Context>::Context;
+}
+
+impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
+	fn init_from(init: Self::Context) -> Self {
+		Linear(<D as InitFrom>::init_from(init), PhantomData)
+	}
+}
+
+impl<V, S, D: DecodeWithContext> DecodeWithContext for Linear<V, S, D> {
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+		D::decode_with_context(input, init).map(|d| Linear(d, Default::default()))
+	}
+}
 
 impl<V, S, D> Linear<V, S, D> {
 	/// Access inner `LinearStorage`.
@@ -113,20 +135,6 @@ impl<V, S, D: EncodedArrayValue> EncodedArrayValue for Linear<V, S, D> {
 	fn from_slice(slice: &[u8]) -> Self {
 		let v = D::from_slice(slice);
 		Linear(v, PhantomData)
-	}
-}
-
-/*impl<V, S, D: Default> Default for Linear<V, S, D> {
-	fn default() -> Self {
-		let v = D::default();
-		Linear(v, PhantomData)
-	}
-}*/
-
-impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
-	type Init = <D as InitFrom>::Init;
-	fn init_from(init: Self::Init) -> Self {
-		Linear(<D as InitFrom>::init_from(init), PhantomData)
 	}
 }
 
@@ -188,11 +196,11 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	}
 }
 
-impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V, S, D> {
+impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> ValueRef<V> for Linear<V, S, D> {
 	type S = S;
 
 	fn get(&self, at: &Self::S) -> Option<V> {
-		self.get_adapt::<_, ValueVecAdapter>(at)
+		self.get_adapt::<_, ValueVecAdapter>(at).map(V::from_storage)
 	}
 
 	fn contains(&self, at: &Self::S) -> bool {
@@ -204,7 +212,72 @@ impl<V: Clone, S: LinearState, D: LinearStorage<V, S>> ValueRef<V> for Linear<V,
 	}
 }
 
-impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for Linear<V, S, D> {
+/// Use linear as linear diff. TODO put in its own module?
+///
+/// If at some point `ItemDiff` and `Item` get merged, this would not be needed.
+/// (there is already need to have some const related to `ItemDiff` in `Item`
+/// to forbid some operations (gc and migrate)).
+pub struct LinearDiff<'a, V: ItemDiff, S, D>(pub &'a Linear<V::Diff, S, D>);
+
+impl<'a, V: ItemDiff, S, D> sp_std::ops::Deref for LinearDiff<'a, V, S, D> {
+	type Target = Linear<V::Diff, S, D>;
+
+	fn deref(&self) -> &Linear<V::Diff, S, D> {
+		&self.0
+	}
+}
+
+impl<'a, V, S, D> ValueRef<V::Diff> for LinearDiff<'a, V, S, D>
+	where
+		V: ItemDiff,
+		V::Diff: Clone,
+		S: LinearState,
+		D: LinearStorage<<V::Diff as Item>::Storage, S>,
+{
+	type S = S;
+
+	fn get(&self, at: &Self::S) -> Option<V::Diff> {
+		self.0.get(at)
+	}
+
+	fn contains(&self, at: &Self::S) -> bool {
+		self.0.contains(at)
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+}
+
+impl<'a, V, S, D> ValueDiff<V> for LinearDiff<'a, V, S, D>
+	where
+		V: ItemDiff,
+		V::Diff: Clone,
+		S: LinearState,
+		D: LinearStorage<<V::Diff as Item>::Storage, S>,
+{
+	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool {
+		for index in self.0.0.rev_index_iter() {
+			// TODO could really use get_ref here (would need trait variant,
+			// so keep up with copy for now). Also would need builder from
+			// ref (which is usefull for some impl).
+			let HistoriedValue { value, state } = self.0.0.get(index)
+				.map(V::Diff::from_storage);
+			if state.exists(at) {
+				if V::is_complete(&value) {
+					changes.push(value);
+					return true;
+				} else {
+					changes.push(value);
+				}
+			}
+		}
+		false
+	}
+}
+
+// TODO should it be ItemRef?
+impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> InMemoryValueRange<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
 			for index in inner.rev_index_iter() {
@@ -219,7 +292,7 @@ impl<V, S: LinearState, D: LinearStorageRange<V, S>> InMemoryValueRange<S> for L
 	}
 }
 
-impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
+impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
 		for index in self.0.rev_index_iter() {
 			let HistoriedValue { value, state } = A::get_adapt(&self.0, index);
@@ -244,7 +317,7 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
+impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
@@ -256,18 +329,49 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 				}
 				if at == &last {
 					let mut last = self.0.get(index);
+					let value = value.into_storage();
 					if last.value == value {
 						return UpdateResult::Unchanged;
 					}
 					let result = sp_std::mem::replace(&mut last.value, value);
 					self.0.emplace(index, last);
-					return UpdateResult::Changed(Some(result));
+					return UpdateResult::Changed(Some(V::from_storage(result)));
 				}
 			}
 			break;
 		}
-		self.0.push(HistoriedValue {value, state: at.clone()});
+		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
 		UpdateResult::Changed(None)
+	}
+
+	fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
+		let mut position = self.0.last();
+		let mut insert_index =  None;
+		while let Some(index) = position {
+			let last = self.0.get_state(index);
+			if at > &last {
+				break;
+			}
+			if at == &last {
+				let mut last = self.0.get(index);
+				let value = value.into_storage();
+				if last.value == value {
+					return UpdateResult::Unchanged;
+				}
+				last.value = value;
+				self.0.emplace(index, last);
+				return UpdateResult::Changed(());
+			}
+			insert_index = Some(index);
+			position = self.0.previous_index(index);
+		}
+		let value = value.into_storage();
+		if let Some(index) = insert_index {
+			self.0.insert(index, HistoriedValue {value, state: at.clone()});
+		} else {
+			self.0.push(HistoriedValue {value, state: at.clone()});
+		}
+		UpdateResult::Changed(())
 	}
 
 	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
@@ -278,6 +382,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 			}
 			if at == &last {
 				let mut last = self.0.get(index);
+				let value = value.into_storage();
 				if last.value == value {
 					return Some(UpdateResult::Unchanged);
 				}
@@ -289,7 +394,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 				return Some(UpdateResult::Changed(()));
 			}
 		}
-		self.0.push(HistoriedValue {value, state: at.clone()});
+		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
 		Some(UpdateResult::Changed(()))
 	}
 	fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
@@ -301,7 +406,10 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 			if at == &last {
 				if let Some(overwrite) = value {
 					let last = self.0.get(index);
-					if overwrite != &last.value {
+					// Non negligeable cost in some case: TODO consider skipping this test.
+					// Or use ItemRef
+					let last_value = V::from_storage(last.value);
+					if overwrite != &last_value {
 						return false;
 					}
 				}
@@ -311,7 +419,7 @@ impl<V: Eq, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
+impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn pos_index(&self, at: &S) -> Option<D::Index> {
 		let mut pos = None;
 		for index in self.0.rev_index_iter() {
@@ -325,9 +433,9 @@ impl<V, S: LinearState, D: LinearStorage<V, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: Clone, S: LinearState, D: LinearStorageMem<V, S>> InMemoryValueRef<V> for Linear<V, S, D> {
+impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> InMemoryValueRef<V> for Linear<V, S, D> {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
-		self.get_adapt::<_, RefVecAdapter>(at)
+		self.get_adapt::<_, RefVecAdapter>(at).map(ItemRef::from_storage_ref)
 	}
 }
 
@@ -337,19 +445,19 @@ impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> InMemoryValueSlice<Vec<u
 	}
 }
 
-impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value<V> for Linear<V, S, D> {
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> Value<V> for Linear<V, S, D> {
 	type SE = Latest<S>;
 	type Index = S;
-	type GC = LinearGC<S, V>;
+	type GC = LinearGC<S>;
 	/// Migrate will act as GC but also align state to 0.
 	/// The index index in second position is the old start state
 	/// number that is now 0 (usually the state as gc new_start).
 	type Migrate = (Self::GC, Self::S);
 
-	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
+	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init);
 		let state = at.latest().clone();
-		v.push(HistoriedValue{ value, state });
+		v.push(HistoriedValue{ value: value.into_storage(), state });
 		Linear(v, PhantomData)
 	}
 
@@ -366,9 +474,9 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 			debug_assert!(&last.state <= at); 
 			if at == &last.state {
 				if self.0.len() == 1 {
-					return UpdateResult::Cleared(self.0.pop().map(|v| v.value));
+					return UpdateResult::Cleared(self.0.pop().map(|v| V::from_storage(v.value)));
 				} else {
-					return UpdateResult::Changed(self.0.pop().map(|v| v.value));
+					return UpdateResult::Changed(self.0.pop().map(|v| V::from_storage(v.value)));
 				}
 			}
 		}
@@ -415,8 +523,8 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 					// This does not handle consecutive neutral element, but
 					// it is considered marginal and bad usage (in theory one
 					// should not push two consecutive identical values).
-					if let Some(neutral) = gc.neutral_element.as_ref() {
-						if neutral == &self.0.get(handle).value {
+					if V::NEUTRAL {
+						if V::is_storage_neutral(&self.0.get(handle).value) {
 							index += 1;
 						}
 					}
@@ -467,10 +575,10 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Value
 	}
 }
 
-impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V, S>> InMemoryValue<V> for Linear<V, S, D> {
+impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> InMemoryValue<V> for Linear<V, S, D> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
-		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| h.value)
+		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| V::from_storage_ref_mut(h.value))
 	}
 
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>> {
@@ -478,7 +586,7 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V, S>> In
 	}
 }
 
-impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> ConditionalValueMut<V> for Linear<V, S, D> {
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalValueMut<V> for Linear<V, S, D> {
 	type IndexConditional = Self::Index;
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
 		self.can_if_inner(no_overwrite, at)
@@ -492,17 +600,22 @@ impl<V: Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V, S>> Condi
 	}
 }
 
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceValueMut<V> for Linear<V, S, D> {
+	type IndexForce = Self::Index;
+
+	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
+		self.force_set(value, at)
+	}
+}
+
+
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct LinearGC<S, V> {
+pub struct LinearGC<S> {
 	// inclusive
 	pub(crate) new_start: Option<S>,
 	// exclusive
 	pub(crate) new_end: Option<S>,
-	// Element that do not need to be kept
-	// if at start (no value returns is the
-	// same as this value).
-	pub(crate) neutral_element: Option<V>,
 }
 
 impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u32>> {
@@ -523,6 +636,37 @@ impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<V
 mod test {
 	use super::*;
 	use crate::backend::{LinearStorage, in_memory::MemoryOnly};
+
+	#[repr(transparent)]
+	#[derive(Clone, PartialEq, Eq)]
+	/// Bytes with neutral item.
+	struct BytesNeutral(Vec<u8>); 
+
+	impl Item for BytesNeutral {
+		const NEUTRAL: bool = true;
+
+		type Storage = Vec<u8>;
+
+		#[inline(always)]
+		fn is_neutral(&self) -> bool {
+			self.0.as_slice() == &[0]
+		}
+
+		#[inline(always)]
+		fn is_storage_neutral(storage: &Self::Storage) -> bool {
+			storage.as_slice() == &[0]
+		}
+
+		#[inline(always)]
+		fn from_storage(storage: Self::Storage) -> Self {
+			BytesNeutral(storage)
+		}
+
+		#[inline(always)]
+		fn into_storage(self) -> Self::Storage {
+			self.0
+		}
+	}
 
 	#[test]
 	fn test_gc() {
@@ -549,28 +693,22 @@ mod test {
 			[Some(1), Some(2), Some(3), Some(4)],
 		];
 		for i in 1..5 {
-			let gc1 = LinearGC {
+			let gc = LinearGC {
 				new_start: None,
 				new_end: Some(i as u32),
-				neutral_element: None,
 			};
-			let gc2 = LinearGC {
-				new_start: None,
-				new_end: Some(i as u32),
-				neutral_element: Some(vec![0u8]),
-			};
-			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc1);
-			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc1);
+			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
+			first.gc(&gc);
+			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc2);
-			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc2);
+			let mut first = Linear::<BytesNeutral, _, _>(first_storage.clone(), Default::default());
+			first.gc(&gc);
+			let mut second = Linear::<BytesNeutral, _, _>(second_storage.clone(), Default::default());
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
@@ -591,28 +729,22 @@ mod test {
 			[None, None, None, None],
 		];
 		for i in 1..5 {
-			let gc1 = LinearGC {
+			let gc = LinearGC {
 				new_start: Some(i as u32),
 				new_end: None,
-				neutral_element: None,
 			};
-			let gc2 = LinearGC {
-				new_start: Some(i as u32),
-				new_end: None,
-				neutral_element: Some(vec![0u8]),
-			};
-			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc1);
-			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc1);
+			let mut first = Linear::<Vec<u8>, _, _>(first_storage.clone(), Default::default());
+			first.gc(&gc);
+			let mut second = Linear::<Vec<u8>, _, _>(second_storage.clone(), Default::default());
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_first[i - 1][j]);
 			}
-			let mut first = Linear(first_storage.clone(), Default::default());
-			first.gc(&gc2);
-			let mut second = Linear(second_storage.clone(), Default::default());
-			second.gc(&gc2);
+			let mut first = Linear::<BytesNeutral, _, _>(first_storage.clone(), Default::default());
+			first.gc(&gc);
+			let mut second = Linear::<BytesNeutral, _, _>(second_storage.clone(), Default::default());
+			second.gc(&gc);
 			for j in 0..4 {
 				assert_eq!(first.0.get_state_lookup(j), result_first[i - 1][j]);
 				assert_eq!(second.0.get_state_lookup(j), result_second[i - 1][j]);

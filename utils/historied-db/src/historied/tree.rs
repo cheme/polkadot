@@ -19,19 +19,24 @@
 
 // TODO remove "previous code" expect.
 
-use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue,
-	InMemoryValueSlice, InMemoryValueRange, UpdateResult, ConditionalValueMut};
+#[cfg(feature = "need_implementation_changes")]
+use super::ConditionalValueMut;
+use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue, ForceValueMut,
+	InMemoryValueSlice, InMemoryValueRange, UpdateResult, Item, ItemRef,
+	ValueDiff, ItemDiff};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
-use crate::historied::linear::{Linear, LinearState, LinearGC};
+use crate::historied::linear::{Linear, LinearState, LinearGC, LinearDiff};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
 use sp_std::ops::SubAssign;
+use num_traits::One;
 use sp_std::vec::Vec;
 use sp_std::marker::PhantomData;
 use crate::Latest;
-use crate::InitFrom;
-use codec::{Encode, Decode};
+use crate::{Context, InitFrom, DecodeWithContext, Trigger};
+use codec::{Encode, Input};
 use derivative::Derivative;
 use core::default::Default;
+
 // TODO for not in memory we need some direct or indexed api, returning value
 // and the info if there can be lower value index (not just a direct index).
 // -> then similar to those reverse iteration with possible early exit.
@@ -58,7 +63,7 @@ macro_rules! tree_get {
 				} else if branch_index == &state_branch_index {
 					// TODO add a lower bound check (maybe debug_assert it only).
 					let mut upper_bound = state_branch_range.end.clone();
-					upper_bound -= 1;
+					upper_bound -= BI::one();
 					let branch = self.branches.$branch_query(branch_ix).value;
 					if let Some(result) = $value_query(&branch, &upper_bound) {
 						return Some($post_process(result, branch))
@@ -85,21 +90,53 @@ macro_rules! tree_get {
 	}
 }
 
-#[derive(Derivative, Debug, Clone, Encode, Decode)]
+#[derive(Derivative, Debug, Clone, Encode)]
 #[derivative(PartialEq(bound="D: PartialEq"))]
-pub struct Tree<I, BI, V, D: InitFrom, BD: InitFrom> {
+pub struct Tree<I, BI, V, D: Context, BD: Context> {
 	branches: D,
+	#[codec(skip)]
 	#[derivative(PartialEq="ignore" )]
-	init: D::Init,
+	init: D::Context,
+	#[codec(skip)]
 	#[derivative(PartialEq="ignore" )]
-	init_child: BD::Init,
+	init_child: BD::Context,
+	#[codec(skip)]
 	_ph: PhantomData<(I, BI, V, BD)>,
 }
 
-impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
-	type Init = (D::Init, BD::Init);
+impl<I, BI, V, D, BD> DecodeWithContext for Tree<I, BI, V, D, BD>
+	where
+		D: DecodeWithContext,
+		BD: DecodeWithContext,
+{
+	fn decode_with_context<IN: Input>(input: &mut IN, init: &Self::Context) -> Option<Self> {
+		D::decode_with_context(input, &init.0).map(|branches|
+			Tree {
+				branches,
+				init: init.0.clone(),
+				init_child: init.1.clone(),
+				_ph: PhantomData,
+			}
+		)
+	}
+}
 
-	fn init_from(init: Self::Init) -> Self {
+impl<I, BI, V, D: Context, BD: Context> Context for Tree<I, BI, V, D, BD> {
+	type Context = (D::Context, BD::Context);
+}
+
+impl<I, BI, V, D: Context + Trigger, BD: Context> Trigger for Tree<I, BI, V, D, BD> {
+	const TRIGGER: bool = <D as Trigger>::TRIGGER;
+
+	fn trigger_flush(&mut self) {
+		if Self::TRIGGER {
+			self.branches.trigger_flush();
+		}
+	}
+}
+
+impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
+	fn init_from(init: Self::Context) -> Self {
 		Tree {
 			branches: D::init_from(init.0.clone()),
 			init: init.0,
@@ -114,11 +151,11 @@ type Branch<I, BI, V, BD> = HistoriedValue<Linear<V, BI, BD>, I>;
 impl<
 	I: Clone,
 	BI: LinearState + SubAssign<BI>,
-	V: Clone + Eq,
-	BD: LinearStorage<V, BI>,
+	V: Item + Clone + Eq,
+	BD: LinearStorage<V::Storage, BI>,
 > Branch<I, BI, V, BD>
 {
-	pub fn new(value: V, state: &(I, BI), init: BD::Init) -> Self {
+	pub fn new(value: V, state: &(I, BI), init: BD::Context) -> Self {
 		let (branch_index, index) = state.clone();
 		let index = Latest::unchecked_latest(index); // TODO cast ptr?
 		let history = Linear::new(value, &index, init);
@@ -131,10 +168,10 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32>, // TODO consider subassing usize or minus one trait...
-	V: Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Item + Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > ValueRef<V> for Tree<I, BI, V, D, BD> {
 	type S = ForkPlan<I, BI>;
 
@@ -150,29 +187,116 @@ impl<
 	}
 }
 
+/// Tree access to Diff structure.
+///
+/// TODO put in its own module?
+pub struct TreeDiff<'a, I, BI, V: ItemDiff, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Diff, D, BD>);
+
+impl<'a, I, BI, V: ItemDiff, D: Context, BD: Context> sp_std::ops::Deref for TreeDiff<'a, I, BI, V, D, BD> {
+	type Target = Tree<I, BI, V::Diff, D, BD>;
+
+	fn deref(&self) -> &Tree<I, BI, V::Diff, D, BD> {
+		&self.0
+	}
+}
+
+impl<'a, I, BI, V, D, BD> ValueRef<V::Diff> for TreeDiff<'a, I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState + SubAssign<BI> + One,
+		V: ItemDiff,
+		V::Diff: Item + Clone,
+		D: LinearStorage<Linear<V::Diff, BI, BD>, I>,
+		BD: LinearStorage<<V::Diff as Item>::Storage, BI>,
+{
+	type S = ForkPlan<I, BI>;
+
+	fn get(&self, at: &Self::S) -> Option<V::Diff> {
+		self.0.get(at)
+	}
+
+	fn contains(&self, at: &Self::S) -> bool {
+		self.0.contains(at)
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+}
+
+impl<'a, I, BI, V, D, BD> ValueDiff<V> for TreeDiff<'a, I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState + SubAssign<BI> + One,
+		V: ItemDiff,
+		V::Diff: Item + Clone,
+		D: LinearStorage<Linear<V::Diff, BI, BD>, I>,
+		BD: LinearStorage<<V::Diff as Item>::Storage, BI>,
+{
+	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool {
+		// could also exten tree_get macro but it will end up being hard to read,
+		// so copying loop here.
+		let mut next_branch_index = self.branches.last();
+		for (state_branch_range, state_branch_index) in at.iter() {
+			while let Some(branch_ix) = next_branch_index {
+				let branch_index = &self.branches.get_state(branch_ix);
+				if branch_index < &state_branch_index {
+					break;
+				} else if branch_index == &state_branch_index {
+					// TODO add a lower bound check (maybe debug_assert it only).
+					let mut upper_bound = state_branch_range.end.clone();
+					upper_bound -= BI::one();
+					// TODO get_ref variant?
+					let branch = self.branches.get(branch_ix).value;
+					if LinearDiff::<V, _, _>(&branch).get_diffs(&upper_bound, changes) {
+						return true;
+					}
+				}
+				next_branch_index = self.branches.previous_index(branch_ix);
+			}
+		}
+
+		// composite part.
+		while let Some(branch_ix) = next_branch_index {
+			let branch_index = &self.branches.get_state(branch_ix);
+			if branch_index <= &at.composite_treshold.0 {
+				let branch = self.branches.get(branch_ix).value;
+				if LinearDiff::<V, _, _>(&branch).get_diffs(&at.composite_treshold.1, changes) {
+					return true;
+				}
+			}
+			next_branch_index = self.branches.previous_index(branch_ix);
+		}
+	
+		false
+	}
+}
+	
+
+
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32>,
-	V: Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: ItemRef + Clone,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V, BI>,
+	BD: LinearStorageMem<V::Storage, BI>,
 > InMemoryValueRef<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _| r );
 }
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
-	V: Clone + Eq,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > Value<V> for Tree<I, BI, V, D, BD> {
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
-	type GC = MultipleGc<I, BI, V>;
-	type Migrate = MultipleMigrate<I, BI, V>;
+	type GC = MultipleGc<I, BI>;
+	type Migrate = MultipleMigrate<I, BI>;
 
-	fn new(value: V, at: &Self::SE, init: Self::Init) -> Self {
+	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init.0.clone());
 		v.push(Branch::new(value, at.latest(), init.1.clone()));
 		Tree {
@@ -265,13 +389,13 @@ impl<
 		match gc {
 			MultipleMigrate::Noops => (),
 			MultipleMigrate::JournalGc(gc) => {
-				if let Some(new_start) = gc.composite_treshold_new_start.as_ref() {
+				if let Some(new_start) = gc.pruning_treshold.as_ref() {
 					if linear_index <= &new_start {
 						return true;
 					}
 				}
 				if let Some(br) = gc.storage.get(&index) {
-					return if let Some(bi) = br.as_ref() {
+					return if let Some(bi) = br.0.as_ref() {
 						bi <= linear_index
 					} else {
 						true
@@ -347,15 +471,14 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI> + Clone,
-	V: Clone + Eq,
+	BI: LinearState + SubAssign<BI> + Clone,
+	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > Tree<I, BI, V, D, BD> {
-	fn state_gc(&mut self, gc: &TreeStateGc<I, BI, V>) -> UpdateResult<()> {
-		let neutral = &gc.neutral_element;
+	fn state_gc(&mut self, gc: &TreeStateGc<I, BI>) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
-		let start_composite = &gc.composite_treshold_new_start;
+		let start_history = &gc.pruning_treshold;
 		let mut gc_iter = gc.storage.iter().rev();
 		let mut next_branch_index = self.branches.last();
 	
@@ -366,15 +489,14 @@ impl<
 			next_branch_index = self.branches.previous_index(index);
 			if gc.0 == branch_index {
 				let (start, end) = gc.1.range();
-				let start = start_composite.as_ref().and_then(|start_composite| if &start < start_composite {
-					Some(start_composite.clone())
+				let start = start_history.as_ref().and_then(|start_history| if &start < start_history {
+					Some(start_history.clone())
 				} else {
 					None
 				}).unwrap_or(start);
 				let mut gc = LinearGC {
 					new_start: Some(start),
 					new_end:  Some(end),
-					neutral_element: neutral.clone(),
 				};
 
 				let mut branch = self.branches.get(index);
@@ -411,18 +533,17 @@ impl<
 		result
 	}
 
-	fn journaled_gc(&mut self, gc: &DeltaTreeStateGc<I, BI, V>) -> UpdateResult<()> {
+	fn journaled_gc(&mut self, gc: &DeltaTreeStateGc<I, BI>) -> UpdateResult<()> {
 		// for all branch check if in deleted.
 		// Also apply new start on all.
-		let neutral = &gc.neutral_element;
 		let mut result = UpdateResult::Unchanged;
-		let start_composite = gc.composite_treshold_new_start.as_ref();
+		let start_history = gc.pruning_treshold.as_ref();
 		let mut first_new_start = false;
 		let mut next_branch_index = self.branches.last();
 		while let Some(branch_ix) = next_branch_index {
 			let mut branch = self.branches.get(branch_ix);
 			let new_start = if branch.state <= gc.composite_treshold.0 {
-				match start_composite.as_ref() {
+				match start_history.as_ref() {
 					None => None,
 					Some(n_start) => {
 						if first_new_start {
@@ -437,7 +558,7 @@ impl<
 									first_new_start = true;
 								}
 							}
-							start_composite.cloned()
+							start_history.cloned()
 						}
 					},
 				}
@@ -446,15 +567,14 @@ impl<
 			};
 
 			if let Some(mut gc) = if let Some(change) = gc.storage.get(&branch.state) {
-				if change.is_none() {
+				if change.0.is_none() {
 					self.branches.remove(branch_ix);
 					result = UpdateResult::Changed(());
 					None
 				} else {
 					Some(LinearGC {
 						new_start,
-						new_end: change.clone(),
-						neutral_element: neutral.clone(),
+						new_end: change.0.clone(),
 					})
 				}
 			} else {
@@ -462,7 +582,6 @@ impl<
 					Some(LinearGC {
 						new_start,
 						new_end: None,
-						neutral_element: neutral.clone(),
 					})
 				} else {
 					None
@@ -510,10 +629,10 @@ impl<
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
-	V: Clone + Eq,
+	BI: LinearState + SubAssign<BI> + One,
+	V: ItemRef + Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V, BI, Init = D::Init>,
+	BD: LinearStorageMem<V::Storage, BI, Context = D::Context>,
 > InMemoryValue<V> for Tree<I, BI, V, D, BD> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
@@ -560,12 +679,13 @@ impl<
 	}
 }
 
+#[cfg(feature = "need_implementation_changes")]
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
-	V: Clone + Eq,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > Tree<I, BI, V, D, BD> {
 	fn set_if_inner(
 		&mut self,
@@ -632,6 +752,58 @@ impl<
 	}
 }
 
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Item + Clone + Eq,
+	D: LinearStorage<Linear<V, BI, BD>, I>,
+	BD: LinearStorage<V::Storage, BI>,
+> ForceValueMut<V> for Tree<I, BI, V, D, BD> {
+	type IndexForce = Self::Index;
+
+	fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()> {
+		// Warn dup code, just different linear function call from fn set,
+		// and using directly index, TODO factor result handle at least.
+		let (branch_index, index) = at;
+		let mut insert_at = None;
+		for branch_ix in self.branches.rev_index_iter() {
+			let iter_branch_index = self.branches.get_state(branch_ix);
+			if &iter_branch_index == branch_index {
+				let index = index.clone();
+				let mut branch = self.branches.get(branch_ix);
+				return match branch.value.force_set(value, &index) {
+					UpdateResult::Changed(_) => {
+						self.branches.emplace(branch_ix, branch);
+						UpdateResult::Changed(())
+					},
+					UpdateResult::Cleared(_) => {
+						self.branches.remove(branch_ix);
+						if self.branches.len() == 0 {
+							UpdateResult::Cleared(())
+						} else {
+							UpdateResult::Changed(())
+						}
+					},
+					UpdateResult::Unchanged => UpdateResult::Unchanged,
+				};
+			}
+			if &iter_branch_index < branch_index {
+				break;
+			}
+			insert_at = Some(branch_ix);
+		}
+		let branch = Branch::new(value, at, self.init_child.clone());
+		if let Some(index) = insert_at {
+			self.branches.insert(index, branch);
+		} else {
+			self.branches.push(branch);
+		}
+		UpdateResult::Changed(())
+	}
+}
+
+
+#[cfg(feature = "need_implementation_changes")]
 // TODO current implementation is incorrect, we need an index that fails at first
 // branch that is parent to the dest (a tree path flattened into a ForkPlan like
 // struct). Element prior (I, BI) are not needed (only children).
@@ -639,11 +811,14 @@ impl<
 // skipped.
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32> + SubAssign<BI>,
-	V: Clone + Eq,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V, BI>,
+	BD: LinearStorage<V::Storage, BI>,
 > ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
+	// TODO this would require to get all branch index that are children
+	// of this index, and also their current upper bound.
+	// That can be fairly costy.
 	type IndexConditional = Self::Index;
 
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
@@ -678,10 +853,10 @@ impl Tree<u32, u32, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 
 impl<
 	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<u32>,
-	V: Clone + AsRef<[u8]> + AsMut<[u8]>,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Item + Clone + AsRef<[u8]> + AsMut<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
-	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V, BI>,
+	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V::Storage, BI>,
 > InMemoryValueSlice<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(
 		get_slice,
@@ -729,27 +904,29 @@ mod test {
 	#[test]
 	fn compile_double_encoded_node() {
 		use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
-		use crate::backend::nodes::{Head, Node, InitHead};
+		use crate::backend::nodes::{Head, Node, ContextHead};
 		use crate::backend::nodes::test::{MetaNb, MetaSize};
 		use crate::historied::ValueRef;
 		use sp_std::collections::btree_map::BTreeMap;
 
 		type EncArray<'a> = EncodedArray<'a, Vec<u8>, DefaultVersion>;
 		type Backend<'a> = BTreeMap<Vec<u8>, Node<Vec<u8>, u32, EncArray<'a>, MetaSize>>;
-		type BD<'a> = Head<Vec<u8>, u32, EncArray<'a>, MetaSize, Backend<'a>>;
+		type BD<'a> = Head<Vec<u8>, u32, EncArray<'a>, MetaSize, Backend<'a>, ()>;
 
 		type V2<'a> = crate::historied::linear::Linear<Vec<u8>, u32, BD<'a>>;
 		type EncArray2<'a> = EncodedArray<'a, V2<'a>, DefaultVersion>;
 		type Backend2<'a> = BTreeMap<Vec<u8>, Node<V2<'a>, u32, EncArray2<'a>, MetaSize>>;
 //		type D<'a> = crate::historied::linear::MemoryOnly<
-		type D<'a> = Head<V2<'a>, u32, EncArray2<'a>, MetaSize, Backend2<'a>>;
-		let init_head = InitHead {
-			backend: Backend2::new(),
-			key: b"any".to_vec(),
-		};
-		let init_head_child = InitHead {
+		type D<'a> = Head<V2<'a>, u32, EncArray2<'a>, MetaSize, Backend2<'a>, ContextHead<Backend<'a>, ()>>;
+		let init_head_child = ContextHead {
 			backend: Backend::new(),
 			key: b"any".to_vec(),
+			node_init_from: (),
+		};
+		let init_head = ContextHead {
+			backend: Backend2::new(),
+			key: b"any".to_vec(),
+			node_init_from: init_head_child.clone(),
 		};
 		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
 		let at: ForkPlan<u32, u32> = Default::default();
@@ -772,6 +949,41 @@ mod test {
 		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
 	}
 
+
+	#[test]
+	fn compile_double_encoded_node_2() {
+		use crate::backend::in_memory::MemoryOnly;
+		use crate::backend::nodes::{Head, Node, ContextHead};
+		use crate::backend::nodes::test::{MetaNb, MetaSize};
+		use crate::historied::ValueRef;
+		use sp_std::collections::btree_map::BTreeMap;
+
+		type MemOnly = MemoryOnly<Vec<u8>, u32>;
+		type Backend = BTreeMap<Vec<u8>, Node<Vec<u8>, u32, MemOnly, MetaSize>>;
+		type BD = Head<Vec<u8>, u32, MemOnly, MetaSize, Backend, ()>;
+
+		type V2 = crate::historied::linear::Linear<Vec<u8>, u32, BD>;
+		type MemOnly2 = MemoryOnly<V2, u32>;
+		type Backend2 = BTreeMap<Vec<u8>, Node<V2, u32, MemOnly2, MetaSize>>;
+		type D = Head<V2, u32, MemOnly2, MetaSize, Backend2, ContextHead<Backend, ()>>;
+		let init_head_child = ContextHead {
+			backend: Backend::new(),
+			key: b"any".to_vec(),
+			node_init_from: (),
+		};
+		let init_head = ContextHead {
+			backend: Backend2::new(),
+			key: b"any".to_vec(),
+			node_init_from: init_head_child.clone(),
+		};
+		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
+		let at: ForkPlan<u32, u32> = Default::default();
+		item.get(&at);
+
+		let bd = D::init_from(init_head);
+		use crate::backend::LinearStorage;
+		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
+	}
 
 	#[test]
 	fn test_set_get() {
@@ -833,37 +1045,209 @@ mod test {
 		}
 	}
 
+	#[cfg(feature = "need_implementation_changes")]
+	#[test]
+	fn test_conditional_set_get() {
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+		let mut item2: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+
+		for i in 0..6 {
+			assert_eq!(item.get(&states.query_plan(i)), None);
+		}
+
+		// setting value not respecting branch build order
+		// set in past (latest is 1, 2) is fine
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(1, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(1, &(1, 2)));
+		// but not with another value
+		assert_eq!(None, item.set_if_possible(8, &(1, 0)));
+		assert_eq!(None, item2.set_if_possible(8, &(1, 1)));
+		// can overwrite
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(2, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(2, &(1, 2)));
+		// not if not allowed
+		assert_eq!(None, item.set_if_possible_no_overwrite(3, &(1, 1)));
+		assert_eq!(None, item2.set_if_possible_no_overwrite(3, &(1, 2)));
+		// unchanged is allowed
+		assert_eq!(Some(UpdateResult::Unchanged), item.set_if_possible(2, &(1, 1)));
+		assert_eq!(Some(UpdateResult::Unchanged), item2.set_if_possible(2, &(1, 2)));
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&2));
+		states.drop_state(&1u32);
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), None);
+		assert_eq!(item2.get_ref(&states.query_plan(1)), None);
+		// no longer allowd to change the branch TODO we should be able to, but
+		// with blockchain tree use case with removal only on canonicalisation
+		// and pruning it should be fine.
+		assert_eq!(None, item2.set_if_possible(3, &(1, 1)));
+	}
+
+	#[test]
+	fn test_force_set_get() {
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+
+		for i in 0..6 {
+			assert_eq!(item.get(&states.query_plan(i)), None);
+		}
+
+		// setting value not respecting branch build order
+		assert_eq!(UpdateResult::Changed(()), item.force_set(0, &(1, 2)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(1, &(1, 1)));
+		// out of range
+		assert_eq!(UpdateResult::Changed(()), item.force_set(8, &(1, 0)));
+		// can set in invalid range too
+		assert_eq!(UpdateResult::Changed(()), item.force_set(3, &(2, 5)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(2, &(2, 1)));
+
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&0));
+		assert_eq!(item.get_ref(&states.query_plan(2)), Some(&2));
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&1));
+		states.drop_state(&1u32);
+		assert_eq!(item.get_ref(&states.query_plan(1)), None);
+	}
+
+	use ref_cast::RefCast;
+	#[derive(RefCast)]
+	#[repr(transparent)]
+	#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+	/// U16 with 0 as neutral item.
+	struct U16Neutral(u16); 
+
+	impl std::ops::Deref for U16Neutral {
+		type Target = u16;
+		fn deref(&self) -> &u16 {
+			&self.0
+		}
+	}
+
+	impl std::ops::DerefMut for U16Neutral {
+		fn deref_mut(&mut self) -> &mut u16 {
+			&mut self.0
+		}
+	}
+
+	impl From<u16> for U16Neutral {
+		#[inline(always)]
+		fn from(v: u16) -> Self {
+			U16Neutral(v)
+		}
+	}
+
+	impl Item for U16Neutral {
+		const NEUTRAL: bool = true;
+
+		type Storage = u16;
+
+		#[inline(always)]
+		fn is_neutral(&self) -> bool {
+			self.0 == 0
+		}
+
+		#[inline(always)]
+		fn is_storage_neutral(storage: &Self::Storage) -> bool {
+			storage == &0u16
+		}
+
+		#[inline(always)]
+		fn from_storage(storage: Self::Storage) -> Self {
+			U16Neutral(storage)
+		}
+
+		#[inline(always)]
+		fn into_storage(self) -> Self::Storage {
+			self.0
+		}
+	}
+
+	impl ItemRef for U16Neutral {
+		fn from_storage_ref(storage: &Self::Storage) -> &Self {
+			U16Neutral::ref_cast(storage)
+		}
+
+		fn into_storage_ref(&self) -> &Self::Storage {
+			&self.0
+		}
+
+		fn from_storage_ref_mut(storage: &mut Self::Storage) -> &mut Self {
+			U16Neutral::ref_cast_mut(storage)
+		}
+
+		fn into_storage_ref_mut(&mut self) -> &mut Self::Storage {
+			&mut self.0
+		}
+	}
+
 	#[test]
 	fn test_migrate() {
 		use crate::{Management, ManagementRef, ForkableManagement};
 		use crate::test::simple_impl::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u16, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
-			crate::historied::linear::Linear<u16, u32, BD>,
+			crate::historied::linear::Linear<U16Neutral, u32, BD>,
 			u32,
 		>;
-		let mut states = crate::test::fuzz::InMemoryMgmtSer::default()
-			.define_neutral_element(0);
+
+		let check_state = |states: &mut crate::test::fuzz::InMemoryMgmtSer, target: Vec<(u32, u32)>| {
+			let mut gc = states.get_migrate();
+			let (pruning, mut iter) = gc.migrate().touched_state();
+			assert_eq!(pruning, None);
+			let mut set = std::collections::BTreeSet::new();
+			for s in iter {
+				set.insert(s.clone());
+			}
+
+			let reference: std::collections::BTreeSet<_> = target.into_iter().collect();
+			assert_eq!(set, reference);
+		};
+
+		let mut states = crate::test::fuzz::InMemoryMgmtSer::default();
 		let s0 = states.latest_state_fork();
 
-		let mut item1: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
-		let mut item2: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
+		let mut item1: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		let mut item2: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
 		let s1 = states.append_external_state(StateInput(1), &s0).unwrap();
-		item1.set(1, &states.get_db_state_mut(&StateInput(1)).unwrap());
-		item2.set(1, &states.get_db_state_mut(&StateInput(1)).unwrap());
+		item1.set(1.into(), &states.get_db_state_mut(&StateInput(1)).unwrap());
+		item2.set(1.into(), &states.get_db_state_mut(&StateInput(1)).unwrap());
 		// fusing cano
 		let _ = states.append_external_state(StateInput(101), s1.latest()).unwrap();
-		item1.set(2, &states.get_db_state_mut(&StateInput(101)).unwrap());
-		item2.set(2, &states.get_db_state_mut(&StateInput(101)).unwrap());
+		item1.set(2.into(), &states.get_db_state_mut(&StateInput(101)).unwrap());
+		item2.set(2.into(), &states.get_db_state_mut(&StateInput(101)).unwrap());
 		let s1 = states.append_external_state(StateInput(102), s1.latest()).unwrap();
-		item1.set(3, &states.get_db_state_mut(&StateInput(102)).unwrap());
+		item1.set(3.into(), &states.get_db_state_mut(&StateInput(102)).unwrap());
 		let s1 = states.append_external_state(StateInput(103), s1.latest()).unwrap();
-		item1.set(4, &states.get_db_state_mut(&StateInput(103)).unwrap());
+		item1.set(4.into(), &states.get_db_state_mut(&StateInput(103)).unwrap());
 		let _ = states.append_external_state(StateInput(104), s1.latest()).unwrap();
-		item1.set(5, &states.get_db_state_mut(&StateInput(104)).unwrap());
+		item1.set(5.into(), &states.get_db_state_mut(&StateInput(104)).unwrap());
 		let s1 = states.append_external_state(StateInput(105), s1.latest()).unwrap();
-		item1.set(6, &states.get_db_state_mut(&StateInput(105)).unwrap());
-		item2.set(6, &states.get_db_state_mut(&StateInput(105)).unwrap());
+		item1.set(6.into(), &states.get_db_state_mut(&StateInput(105)).unwrap());
+		item2.set(6.into(), &states.get_db_state_mut(&StateInput(105)).unwrap());
 		// end fusing (shift following branch index by 2)
 		let s2 = states.append_external_state(StateInput(2), &s0).unwrap();
 		let s1b = states.append_external_state(StateInput(12), s1.latest()).unwrap();
@@ -879,39 +1263,43 @@ mod test {
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _ _
-		let mut item3: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
-		let mut item4: Tree<u32, u32, u16, D, BD> = InitFrom::init_from(((), ()));
-		item1.set(15, &states.get_db_state_mut(&StateInput(5)).unwrap());
-		item2.set(15, &states.get_db_state_mut(&StateInput(5)).unwrap());
-		item1.set(12, &states.get_db_state_mut(&StateInput(2)).unwrap());
+		let mut item3: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		let mut item4: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		item1.set(15.into(), &states.get_db_state_mut(&StateInput(5)).unwrap());
+		item2.set(15.into(), &states.get_db_state_mut(&StateInput(5)).unwrap());
+		item1.set(12.into(), &states.get_db_state_mut(&StateInput(2)).unwrap());
 
 		let s3head = states.append_external_state(StateInput(32), s3.latest()).unwrap();
-		item1.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
-		item2.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
-		item3.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
-		item4.set(13, &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item1.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item2.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item3.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
+		item4.set(13.into(), &states.get_db_state_mut(&StateInput(32)).unwrap());
 		let s3tmp = states.append_external_state(StateInput(33), s3head.latest()).unwrap();
-		item1.set(14, &states.get_db_state_mut(&StateInput(33)).unwrap());
-		item3.set(0, &states.get_db_state_mut(&StateInput(33)).unwrap());
+		item1.set(14.into(), &states.get_db_state_mut(&StateInput(33)).unwrap());
+		item3.set(0.into(), &states.get_db_state_mut(&StateInput(33)).unwrap());
 		let s3head = states.append_external_state(StateInput(34), s3tmp.latest()).unwrap();
 		let s6 = states.append_external_state(StateInput(6), s3tmp.latest()).unwrap();
 		let s3head = states.append_external_state(StateInput(35), s3head.latest()).unwrap();
-		item1.set(15, &states.get_db_state_mut(&StateInput(35)).unwrap());
-		item2.set(15, &states.get_db_state_mut(&StateInput(35)).unwrap());
-		item4.set(0, &states.get_db_state_mut(&StateInput(35)).unwrap());
-		item1.set(0, &states.get_db_state_mut(&StateInput(6)).unwrap());
+		item1.set(15.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
+		item2.set(15.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
+		item4.set(0.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
+		item1.set(0.into(), &states.get_db_state_mut(&StateInput(6)).unwrap());
 
 		let old_state = states.clone();
 		// Apply change of composite to 33
 		let filter_out = [101, 104, 2, 4, 5];
-		let mut filter_qp = vec![qp14];
+		let mut filter_qp = vec![qp14.latest_index()];
+		// dropped 14
+		check_state(&mut states, filter_qp.clone());
 		for i in filter_out.iter() {
 			let qp = states.get_db_state(&StateInput(*i)).unwrap();
-			filter_qp.push(qp);
+			filter_qp.push(qp.latest_index());
 		}
 
 		let fp = states.get_db_state(&StateInput(35)).unwrap();
 		states.canonicalize(fp, *s3tmp.latest(), None);
+		// other drops from filter_out
+		check_state(&mut states, filter_qp.clone());
 		let filter_in = [1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
 		let no_qp = [14];
 		//panic!("{:?} \n {:?}", old_state, states);
@@ -935,14 +1323,6 @@ mod test {
 		assert_eq!(gc_item2.nb_internal_branch(), 3);
 		assert_eq!(gc_item3.nb_internal_branch(), 1);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
-		/* TODO only with new_start where we actually prune stuff
-		for fp in filter_qp.iter() {
-			assert_ne!(
-				gc_item1.get_ref(fp),
-				item1.get_ref(&fp),
-			);
-		}
-		*/
 
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
@@ -961,13 +1341,16 @@ mod test {
 		let mut gc_item4 = item4.clone();
 		let mut states = states;
 		{
-			let (mig, mut gc) = states.get_migrate();
-			gc_item1.migrate(&mut gc);
-			gc_item2.migrate(&mut gc);
-			gc_item3.migrate(&mut gc);
-			gc_item4.migrate(&mut gc);
-			states = mig.applied_migrate();
+			let mut gc = states.get_migrate();
+			gc_item1.migrate(gc.migrate());
+			gc_item2.migrate(gc.migrate());
+			gc_item3.migrate(gc.migrate());
+			gc_item4.migrate(gc.migrate());
+			gc.applied_migrate();
 		}
+		// empty (applied_migrate ran)
+		check_state(&mut states, vec![]);
+
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
 			assert_eq!(gc_item1.get_ref(&fp), item1.get_ref(&fp));
@@ -984,7 +1367,7 @@ mod test {
 		assert_eq!(gc_item3.nb_internal_branch(), 1);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
 
-		// on previous state set migrate with composite_treshold_new_start 
+		// on previous state set migrate with pruning_treshold 
 		let filter_in = [33, 34, 35, 6];
 		let mut gc_item1 = item1.clone();
 		let mut gc_item2 = item2.clone();
@@ -994,12 +1377,12 @@ mod test {
 		let fp = states.get_db_state(&StateInput(35)).unwrap();
 		states.canonicalize(fp, *s3tmp.latest(), Some(s3tmp.latest().1));
 		{
-			let (mig, mut gc) = states.get_migrate();
-			gc_item1.migrate(&mut gc);
-			gc_item2.migrate(&mut gc);
-			gc_item3.migrate(&mut gc);
-			gc_item4.migrate(&mut gc);
-			states = mig.applied_migrate();
+			let mut gc = states.get_migrate();
+			gc_item1.migrate(gc.migrate());
+			gc_item2.migrate(gc.migrate());
+			gc_item3.migrate(gc.migrate());
+			gc_item4.migrate(gc.migrate());
+			gc.applied_migrate();
 			//panic!("{:?}", (gc, item3, gc_item3));
 		}
 		for i in filter_in.iter() {
@@ -1017,5 +1400,105 @@ mod test {
 		assert_eq!(gc_item2.nb_internal_branch(), 1);
 		assert_eq!(gc_item3.nb_internal_branch(), 0);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
+	}
+
+	#[test]
+	fn test_diff1() {
+		use crate::historied::{DiffBuilder};
+		use crate::historied::xdelta::{BytesDelta, BytesDiff, BytesDiffBuilder}; 
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<BytesDiff, u32, BD>,
+			u32,
+		>;
+
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, BytesDiff, D, BD> = InitFrom::init_from(((), ()));
+
+		let successive_values: Vec<BytesDelta> = vec![
+			[0u8, 1, 2, 3][..].into(), // (1, 1)
+			[1, 1, 2, 3][..].into(), // (1,2)
+			[1, 3][..].into(), // (3, 3)
+			[][..].into(), // 4, 3 (follow) (1, 2)
+		];
+
+		let mut successive_deltas: Vec<BytesDiff> = Vec::with_capacity(successive_values.len());
+
+		let mut builder = BytesDiffBuilder::new_diff_builder();
+		successive_deltas.push(builder.calculate_diff(&Default::default(), &successive_values[0]));
+		successive_deltas.push(builder.calculate_diff(&successive_values[0], &successive_values[1]));
+		successive_deltas.push(builder.calculate_diff(&successive_values[1], &successive_values[2]));
+		successive_deltas.push(builder.calculate_diff(&successive_values[1], &successive_values[3]));
+
+		let successive_deltas = successive_deltas;
+
+		item.set(successive_deltas[0].clone(), &Latest::unchecked_latest((1, 1)));
+		item.set(successive_deltas[1].clone(), &Latest::unchecked_latest((1, 2)));
+		item.set(successive_deltas[2].clone(), &Latest::unchecked_latest((3, 3)));
+		item.set(successive_deltas[3].clone(), &Latest::unchecked_latest((4, 3)));
+
+		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
+		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
+		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
+
+		let item = TreeDiff::<_, _, BytesDelta, _, _>(&item);
+		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
+		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
+		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
+	}
+
+	#[test]
+	fn test_diff2() {
+		use crate::historied::map_delta::{MapDelta, MapDiff}; 
+		use crate::{Management, ManagementRef, ForkableManagement};
+		use crate::test::simple_impl::StateInput;
+		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<MapDiff<u8, u8>, u32, BD>,
+			u32,
+		>;
+
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		let mut item: Tree<u32, u32, MapDiff<u8, u8>, D, BD> = InitFrom::init_from(((), ()));
+
+		let successive_values: Vec<MapDelta<u8, u8>> = vec![
+			MapDelta::default(), // (1, 1)
+			MapDelta([(0, 1)][..].iter().cloned().collect()), // (1,2)
+			MapDelta([(0, 1), (1, 3)][..].iter().cloned().collect()), // (3, 3)
+			MapDelta::default(), // (1, 1)
+		];
+
+		let successive_deltas: Vec<MapDiff<u8, u8>> = vec![
+			MapDiff::Reset,
+			MapDiff::Insert(0, 1),
+			MapDiff::Insert(1, 3),
+			MapDiff::Remove(0),
+		];
+
+		item.set(successive_deltas[0].clone(), &Latest::unchecked_latest((1, 1)));
+		item.set(successive_deltas[1].clone(), &Latest::unchecked_latest((1, 2)));
+		item.set(successive_deltas[2].clone(), &Latest::unchecked_latest((3, 3)));
+		item.set(successive_deltas[3].clone(), &Latest::unchecked_latest((4, 3)));
+
+		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
+		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
+		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
+
+		let item = TreeDiff::<_, _, MapDelta<u8, u8>, _, _>(&item);
+		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
+		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
+		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
 	}
 }

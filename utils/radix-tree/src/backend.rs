@@ -18,19 +18,19 @@
 //! Use a backend for existing nodes.
 
 use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
-	Position, MaskKeyByte, NodeIndex, Node, NodeBackend, RadixConf,
-	PrefixKeyConf, BackendFor, Children};
+	Position, MaskKeyByte, NodeIndex, NodeBox, NodeBackend, RadixConf,
+	PrefixKeyConf, BackendFor, Children, Node, Key};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
+use alloc::boxed::Box;
 use hashbrown::HashMap;
-use codec::{Encode, Decode, Error as CodecError, Input};
+use codec::{Codec, Encode, Decode, Error as CodecError, Input};
 use core::cell::RefCell;
 use derivative::Derivative;
 #[cfg(feature = "std")]
 pub use arc_backend::ArcBackend;
 
-pub type Key = Vec<u8>;
-pub type MapBackend = HashMap<Vec<u8>, Vec<u8>>;
+pub type MapBackend = HashMap<Key, Vec<u8>>;
 
 /// Read only backend to use with a tree.
 pub trait ReadBackend {
@@ -45,7 +45,7 @@ impl<'a, B: ReadBackend> ReadBackend for &'a B {
 
 /// The backend to use for a tree.
 pub trait BackendInner: ReadBackend {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>);
+	fn write(&mut self, k: Key, v: Vec<u8>);
 	fn remove(&mut self, k: &[u8]);
 }
 
@@ -59,7 +59,7 @@ impl ReadBackend for MapBackend {
 }
 
 impl BackendInner for MapBackend {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+	fn write(&mut self, k: Key, v: Vec<u8>) {
 		self.insert(k, v);
 	}
 	fn remove(&mut self, k: &[u8]) {
@@ -81,16 +81,16 @@ impl<B> RcBackend<B> {
 fn key_addressed<N: NodeConf>(
 	key: &[u8],
 	start_postion: PositionFor<N>,
-) -> Vec<u8> {
+) -> Key {
 	if <N::Radix as RadixConf>::Alignment::ALIGNED {
-		key[..start_postion.index].to_vec()
+		key[..start_postion.index].into()
 	} else {
 		if start_postion.mask == MaskFor::<N::Radix>::first() {
-			let mut result = key[..start_postion.index - 1].to_vec();
+			let mut result: Key = key[..start_postion.index - 1].into();
 			result.push(255);
 			result
 		} else {
-			let mut result = key[..start_postion.index].to_vec();
+			let mut result: Key = key[..start_postion.index].into();
 			if start_postion.index != 0 {
 				result[start_postion.index - 1] = start_postion.mask.mask_end(result[start_postion.index - 1]);
 			};
@@ -131,9 +131,10 @@ fn decode_node<N>(
 ) -> core::result::Result<Node<N>, CodecError>
 	where
 		N: NodeConf,
+		N::Value: Decode,
 		BackendFor<N>: Backend,
 {
-	let node_key = N::NodeBackend::backend_key::<N>(&key[..], start);
+	let node_key = N::NodeBackend::backend_key(&key[..], start);
 	let encoded = if let Some(encoded) = backend.read(node_key.as_slice()) {
 		encoded
 	} else {
@@ -169,7 +170,7 @@ fn decode_node<N>(
 		}
 	};
 
-	let value: Option<Vec<u8>> = Decode::decode(input)?;
+	let value: Option<N::Value> = Decode::decode(input)?;
 	let mut node = Node::<N>::new(
 		prefix.as_slice(),
 		PositionFor::<N> {
@@ -186,7 +187,7 @@ fn decode_node<N>(
 	let mut key_index = KeyIndexFor::<N>::zero();
 	let mut byte_index = 0;
 	let mut input_index = 0;
-	let mut child_key = key.to_vec();
+	let mut child_key = key.into();
 	node.new_end(&mut child_key, start);
 	let child_position = end.next::<N::Radix>();
 	loop {
@@ -216,9 +217,11 @@ fn decode_node<N>(
 	Ok(node)
 }
 
-fn encode_node<N: NodeConf>(
-	node: &Node<N>,
-) -> Vec<u8> {
+fn encode_node<N>(node: &Node<N>) -> Vec<u8>
+	where
+		N: NodeConf,
+		N::Value: Encode,
+{
 	let mut result = Vec::new();
 	/*if <N::Radix as RadixConf>::Alignment::DEFAULT.is_none() {
 		let mask = <N::Radix as RadixConf>::Alignment::encode_mask(node.key.start);
@@ -263,7 +266,7 @@ impl<B: BackendInner> ReadBackend for RcBackend<B> {
 }
 
 impl<B: BackendInner> BackendInner for RcBackend<B> {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+	fn write(&mut self, k: Key, v: Vec<u8>) {
 		self.0.borrow_mut().write(k, v)
 	}
 	fn remove(&mut self, k: &[u8]) {
@@ -277,7 +280,7 @@ impl<B: BackendInner> Backend for RcBackend<B> { }
 /// The backend to use for a tree.
 pub struct TransactionBackend<B> {
 	inner: B,
-	changes: HashMap<Vec<u8>, Option<Vec<u8>>>,
+	changes: HashMap<Key, Option<Vec<u8>>>,
 }
 
 impl<B> TransactionBackend<B> {
@@ -287,7 +290,7 @@ impl<B> TransactionBackend<B> {
 			changes: Default::default(),
 		}
 	}
-	pub fn drain_changes(&mut self) -> HashMap<Vec<u8>, Option<Vec<u8>>> {
+	pub fn drain_changes(&mut self) -> HashMap<Key, Option<Vec<u8>>> {
 		core::mem::replace(&mut self.changes, Default::default())
 	}
 }
@@ -301,11 +304,11 @@ impl<B: ReadBackend> ReadBackend for TransactionBackend<B> {
 }
 
 impl<B: ReadBackend> BackendInner for TransactionBackend<B> {
-	fn write(&mut self, k: Vec<u8>, v: Vec<u8>) {
+	fn write(&mut self, k: Key, v: Vec<u8>) {
 		self.changes.insert(k, Some(v));
 	}
 	fn remove(&mut self, k: &[u8]) {
-		self.changes.insert(k.to_vec(), None);
+		self.changes.insert(k.into(), None);
 	}
 }
 
@@ -331,7 +334,11 @@ pub struct DirectExt<B> {
 	changed: bool,
 }
 
-impl<B: Backend> NodeBackend for LazyExt<B> {
+impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
+	where
+		N: NodeConf<NodeBackend = Self>,
+		N::Value: Codec,
+{
 	/// Debug would trigger non mutable node resolution,
 	/// which is not doable here.
 	const DO_DEBUG: bool = false;
@@ -339,8 +346,8 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 	fn existing_node(init: &Self::Backend, key: Key) -> Self {
 		LazyExt::Resolved(key, init.clone(), false)
 	}
-	fn new_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Self {
-		let key = Self::backend_key::<N>(&[], PositionFor::<N>::zero());
+	fn new_root(init: &Self::Backend) -> Self {
+		let key = <Self as NodeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
 		LazyExt::Resolved(key, init.clone(), true)
 	}
 	fn new_node(&self, key: Key) -> Self {
@@ -351,15 +358,15 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			},
 		}
 	}
-	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<Node<N>> {
-		decode_node(&[], PositionFor::<N>::zero(), init).ok()
+	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>> {
+		decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
 	}
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
+	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N> {
 		match self {
 			LazyExt::Unresolved(_, _, _, backend)
 				| LazyExt::Resolved(_, backend, ..) => {
 				let mask = <N::Radix as RadixConf>::Alignment::encode_mask(position.mask); 
-				Node::<N>::new(
+				Node::<N>::new_box(
 					key,
 					position,
 					position,
@@ -370,19 +377,19 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			},
 		}
 	}
-	fn backend_key<N: NodeConf<NodeBackend = Self>>(key: &[u8], position: PositionFor<N>) -> Key {
+	fn backend_key(key: &[u8], position: PositionFor<N>) -> Key {
 		key_addressed::<N>(key, position)
 	}
-	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(key: &Key) -> (&[u8], PositionFor<N>) {
+	fn from_backend_key(key: &Key) -> (&[u8], PositionFor<N>) {
 		key_from_addressed::<N>(key)
 	}
-	fn resolve<N: NodeConf<NodeBackend = Self>>(node: &Node<N>) {
+	fn resolve(node: &Node<N>) {
 		match node.ext() {
 			LazyExt::Resolved(..) => (),
 			_ => unimplemented!("Backend must be use as mutable due to lazy nature"),
 		}
 	}
-	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>) {
+	fn resolve_mut(node: &mut Node<N>) {
 		if let Some(new_node) = match node.ext_mut() {
 			LazyExt::Resolved(..) => None,
 			LazyExt::Unresolved(key, start_index, start_mask, backend) => {
@@ -405,7 +412,7 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 			LazyExt::Unresolved(..) => panic!("Node need to be resolved first"),
 		}
 	}
-	fn delete<N: NodeConf<NodeBackend = Self>>(mut node: Node<N>) {
+	fn delete(mut node: NodeBox<N>) {
 		match node.ext_mut() {
 			LazyExt::Resolved(key, backend, ..) => {
 				backend.remove(key.as_slice());
@@ -416,12 +423,12 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 					index: *start_index,
 					mask
 				};
-				let key = Self::backend_key::<N>(&key[..], start);
+				let key = <Self as NodeBackend<N>>::backend_key(&key[..], start);
 				backend.remove(key.as_slice());
 			},
 		}
 	}
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
+	fn commit_change(node: &mut Node<N>, recursive: bool) {
 		match node.ext() {
 			LazyExt::Resolved(_, _, false)
 			| LazyExt::Unresolved(..) => (),
@@ -453,7 +460,11 @@ impl<B: Backend> NodeBackend for LazyExt<B> {
 	}
 }
 
-impl<B: Backend> NodeBackend for DirectExt<B> {
+impl<N, B: Backend> NodeBackend<N> for DirectExt<B>
+	where
+		N: NodeConf<NodeBackend = Self>,
+		N::Value: Codec,
+{
 	type Backend = B;
 	fn existing_node(init: &Self::Backend, key: Key) -> Self {
 		DirectExt {
@@ -462,8 +473,8 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 			changed: false,
 		}
 	}
-	fn new_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Self {
-		let key = Self::backend_key::<N>(&[], PositionFor::<N>::zero());
+	fn new_root(init: &Self::Backend) -> Self {
+		let key = <Self as NodeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
 		DirectExt {
 			inner: init.clone(),
 			key,
@@ -477,32 +488,33 @@ impl<B: Backend> NodeBackend for DirectExt<B> {
 			changed: true,
 		}
 	}
-	fn get_root<N: NodeConf<NodeBackend = Self>>(init: &Self::Backend) -> Option<Node<N>> {
-		decode_node(&[], PositionFor::<N>::zero(), init).ok()
+	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>> {
+		decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
 	}
-	fn fetch_node<N: NodeConf<NodeBackend = Self>>(&self, key: &[u8], position: PositionFor<N>) -> Node<N> {
+	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N> {
 		decode_node(&key, position, &self.inner)
+			.map(Box::new)
 			.expect("Corrupted backend, missing node")
 	}
 
-	fn backend_key<N: NodeConf<NodeBackend = Self>>(key: &[u8], position: PositionFor<N>) -> Key {
+	fn backend_key(key: &[u8], position: PositionFor<N>) -> Key {
 		key_addressed::<N>(key, position)
 	}
-	fn from_backend_key<N: NodeConf<NodeBackend = Self>>(key: &Key) -> (&[u8], PositionFor<N>) {
+	fn from_backend_key(key: &Key) -> (&[u8], PositionFor<N>) {
 		key_from_addressed::<N>(key)
 	}
-	fn resolve<N: NodeConf<NodeBackend = Self>>(_node: &Node<N>) {
+	fn resolve(_node: &Node<N>) {
 	}
-	fn resolve_mut<N: NodeConf<NodeBackend = Self>>(_node: &mut Node<N>) {
+	fn resolve_mut(_node: &mut Node<N>) {
 	}
 	fn set_change(&mut self) {
 		self.changed = true;
 	}
-	fn delete<N: NodeConf<NodeBackend = Self>>(mut node: Node<N>) {
+	fn delete(mut node: NodeBox<N>) {
 		let ext = node.ext_mut();
 		ext.inner.remove(ext.key.as_slice());
 	}
-	fn commit_change<N: NodeConf<NodeBackend = Self>>(node: &mut Node<N>, recursive: bool) {
+	fn commit_change(node: &mut Node<N>, recursive: bool) {
 		if node.ext().changed == true {
 			if recursive && node.children.number_child() > 0 {
 				let mut key_index = KeyIndexFor::<N>::zero();
