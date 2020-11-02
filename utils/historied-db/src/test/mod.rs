@@ -26,7 +26,7 @@ macro_rules! InMemSimpleDB {
 
 	pub use $inner_module::InMemory as $name;
 	mod $inner_module {
-		use crate::simple_db::SerializeDB;
+		use crate::mapped_db::MappedDB;
 		use sp_std::collections::btree_map::BTreeMap;
 		const NB_COL: usize = $size;
 
@@ -76,7 +76,7 @@ macro_rules! InMemSimpleDB {
 			}
 		}
 
-		impl SerializeDB for InMemory {
+		impl MappedDB for InMemory {
 			#[inline(always)]
 			fn is_active(&self) -> bool {
 				true
@@ -103,7 +103,7 @@ macro_rules! InMemSimpleDB {
 				})
 			}
 
-			fn iter<'a>(&'a self, c: &'static [u8]) -> crate::simple_db::SerializeDBIter<'a> {
+			fn iter<'a>(&'a self, c: &'static [u8]) -> crate::mapped_db::MappedDBIter<'a> {
 				Box::new(if let Some(ix) = Self::resolve_collection(c) {
 					self.0[ix].clone().into_iter()
 				} else {

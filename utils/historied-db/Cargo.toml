@@ -20,7 +20,11 @@ xdelta3 = { version = "0.1.5", optional = true, default-features = false, git = 
 ref-cast = { version = "1.0" }
 
 [features]
-default = ["std", "test-helpers"] # TODO remove test-helpers
+default = ["std"] # TODO remove test-helpers
+
+# Traits for managing dbs of historied value,
+# currently not really, so putting behind a feature.
+db-traits = []
 std = [
   "codec/std",
 	"sp-std/std",

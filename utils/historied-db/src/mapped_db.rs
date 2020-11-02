@@ -23,10 +23,11 @@ use sp_std::fmt::Debug;
 use sp_std::boxed::Box;
 
 /// Iterator could be associated serializeDB type but dynamic type make things simplier.
-pub type SerializeDBIter<'a> = Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
+pub type MappedDBIter<'a> = Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
 
-/// simple serialize trait, could be a noop.
-pub trait SerializeDB {
+/// Simple db for mapping data trait, could be a noop when we only
+/// keep data in memory.
+pub trait MappedDB {
 	#[inline(always)]
 	/// When false, the trait implementation
 	/// do not need to actually manage a db
@@ -41,31 +42,31 @@ pub trait SerializeDB {
 	fn remove(&mut self, c: &'static [u8], k: &[u8]);
 	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>>;
 	fn clear(&mut self, c: &'static [u8]);
-	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a>;
+	fn iter<'a>(&'a self, c: &'static [u8]) -> MappedDBIter<'a>;
 
 	fn contains_collection(&self, collection: &'static [u8]) -> bool;
 }
 
-pub struct Collection<'a, DB, Instance> {
+struct Collection<'a, DB, Instance> {
 	db: &'a DB,
 	instance: &'a Instance,
 }
 
-pub struct CollectionMut<'a, DB, Instance> {
+struct CollectionMut<'a, DB, Instance> {
 	db: &'a mut DB,
 	instance: &'a Instance,
 }
 
-impl<'a, DB: SerializeDB, Instance: SerializeInstanceMap> Collection<'a, DB, Instance> {
+impl<'a, DB: MappedDB, Instance: MapInfo> Collection<'a, DB, Instance> {
 	pub fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
 		self.db.read(Instance::STATIC_COL, k)
 	}
-	pub fn iter(&self) -> SerializeDBIter<'a> {
+	pub fn iter(&self) -> MappedDBIter<'a> {
 		self.db.iter(Instance::STATIC_COL)
 	}
 }
 
-impl<'a, DB: SerializeDB, Instance: SerializeInstanceMap> CollectionMut<'a, DB, Instance> {
+impl<'a, DB: MappedDB, Instance: MapInfo> CollectionMut<'a, DB, Instance> {
 	pub fn write(&mut self, k: &[u8], v: &[u8]) {
 		self.db.write(Instance::STATIC_COL, k, v)
 	}
@@ -75,7 +76,7 @@ impl<'a, DB: SerializeDB, Instance: SerializeInstanceMap> CollectionMut<'a, DB, 
 	pub fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
 		self.db.read(Instance::STATIC_COL, k)
 	}
-	pub fn iter<'b>(&'b self) -> SerializeDBIter<'b> {
+	pub fn iter<'b>(&'b self) -> MappedDBIter<'b> {
 		self.db.iter(Instance::STATIC_COL)
 	}
 	pub fn clear(&mut self) {
@@ -83,9 +84,8 @@ impl<'a, DB: SerializeDB, Instance: SerializeInstanceMap> CollectionMut<'a, DB, 
 	}
 }
 
-/// Serialize trait, when dynamic collection
-/// are allowed.
-pub trait DynSerializeDB: SerializeDB {
+/// MappedDb dynamic trait.
+pub trait DynMappedDB: MappedDB {
 
 	/// Create a new collection and return its identifier.
 	fn new_dyn_collection(&mut self) -> Vec<u8>;
@@ -93,12 +93,12 @@ pub trait DynSerializeDB: SerializeDB {
 	fn dyn_write(&mut self, c: &[u8], k: &[u8], v: &[u8]);
 	fn dyn_remove(&mut self, c: &[u8], k: &[u8]);
 	fn dyn_read(&self, c: &[u8], k: &[u8]) -> Option<Vec<u8>>;
-	fn dyn_iter<'a>(&'a self, c: &[u8]) -> SerializeDBIter<'a>;
+	fn dyn_iter<'a>(&'a self, c: &[u8]) -> MappedDBIter<'a>;
 
 	fn dyn_contains_collection(collection: &[u8]) -> bool;
 }
 
-impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> Collection<'a, DB, Instance> {
+impl<'a, DB: DynMappedDB, Instance: DynMapInfo> Collection<'a, DB, Instance> {
 	pub fn dyn_read(&self, k: &[u8]) -> Option<Vec<u8>> {
 		if let Some(c) = self.instance.dyn_collection() {
 			self.db.dyn_read(c, k)
@@ -106,7 +106,7 @@ impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> Collection<'a, D
 			self.db.read(Instance::STATIC_COL, k)
 		}
 	}
-	pub fn dyn_iter(&self) -> SerializeDBIter<'a> {
+	pub fn dyn_iter(&self) -> MappedDBIter<'a> {
 		if let Some(c) = self.instance.dyn_collection() {
 			self.db.dyn_iter(c)
 		} else {
@@ -115,7 +115,7 @@ impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> Collection<'a, D
 	}
 }
 
-impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> CollectionMut<'a, DB, Instance> {
+impl<'a, DB: DynMappedDB, Instance: DynMapInfo> CollectionMut<'a, DB, Instance> {
 	pub fn dyn_write(&mut self, k: &[u8], v: &[u8]) {
 		if let Some(c) = self.instance.dyn_collection() {
 			self.db.dyn_write(c, k, v)
@@ -137,7 +137,7 @@ impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> CollectionMut<'a
 			self.db.read(Instance::STATIC_COL, k)
 		}
 	}
-	pub fn dyn_iter<'b>(&'b self) -> SerializeDBIter<'b> {
+	pub fn dyn_iter<'b>(&'b self) -> MappedDBIter<'b> {
 		if let Some(c) = self.instance.dyn_collection() {
 			self.db.dyn_iter(c)
 		} else {
@@ -149,26 +149,26 @@ impl<'a, DB: DynSerializeDB, Instance: DynSerializeInstanceMap> CollectionMut<'a
 /// Info for serialize usage.
 ///
 /// Static collection are using a know identifier that never change.
-pub trait SerializeInstanceMap: Default + Clone {
+pub trait MapInfo: Default + Clone {
 	/// If collection is static this contains its
 	/// unique identifier.
 	const STATIC_COL: &'static [u8];
 }
 
-impl SerializeInstanceMap for () {
+impl MapInfo for () {
 	const STATIC_COL: &'static [u8] = &[];
 }
 
 /// Dynamic collection can be change.
 /// Static and dynamic collection are mutually exclusive, yet instance using both trait should run
 /// dynamic first.
-pub trait DynSerializeInstanceMap: SerializeInstanceMap {
+pub trait DynMapInfo: MapInfo {
 	/// If collection is dynamic this returns the
 	/// current collection unique identifier.
 	fn dyn_collection(&self) -> Option<&[u8]>;
 }
 
-pub trait SerializeInstanceVariable: SerializeInstanceMap {
+pub trait VariableInfo: MapInfo {
 	/// Location of the variable in its collection.
 	const PATH: &'static [u8];
 	/// Indicate if we load lazilly.
@@ -176,12 +176,12 @@ pub trait SerializeInstanceVariable: SerializeInstanceMap {
 }
 
 /// Noop implementation.
-impl SerializeInstanceVariable for () {
+impl VariableInfo for () {
 	const PATH: &'static [u8] = &[];
 	const LAZY: bool = false;
 }
 
-impl SerializeDB for () {
+impl MappedDB for () {
 	#[inline(always)]
 	fn is_active(&self) -> bool {
 		false	
@@ -192,7 +192,7 @@ impl SerializeDB for () {
 	fn read(&self, _c: &[u8], _k: &[u8]) -> Option<Vec<u8>> {
 		None
 	}
-	fn iter<'a>(&'a self, _collection: &[u8]) -> SerializeDBIter<'a> {
+	fn iter<'a>(&'a self, _collection: &[u8]) -> MappedDBIter<'a> {
 		Box::new(sp_std::iter::empty())
 	}
 	fn contains_collection(&self, _collection: &[u8]) -> bool {
@@ -200,10 +200,10 @@ impl SerializeDB for () {
 	}
 }
 
-/// Serialize db as a boxed dynamic pointer.
-pub type SerializeDBDyn = Box<dyn SerializeDB + Send + Sync>;
+/// Mapped db as a boxed dynamic pointer.
+pub type MappedDBDyn = Box<dyn MappedDB + Send + Sync>;
 
-impl SerializeDB for SerializeDBDyn {
+impl MappedDB for MappedDBDyn {
 	#[inline(always)]
 	fn is_active(&self) -> bool {
 		self.as_ref().is_active()	
@@ -220,7 +220,7 @@ impl SerializeDB for SerializeDBDyn {
 	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
 		self.as_ref().read(c, k)
 	}
-	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a> {
+	fn iter<'a>(&'a self, c: &'static [u8]) -> MappedDBIter<'a> {
 		self.as_ref().iter(c)
 	}
 	fn contains_collection(&self, c: &'static [u8]) -> bool {
@@ -236,7 +236,7 @@ use codec::{Codec, Encode};
 #[cfg_attr(test, derivative(PartialEq(bound="K: PartialEq, V: PartialEq")))]
 /// Lazy loading serialized map with cache.
 /// Updates happens without delay.
-pub struct SerializeMap<K: Ord, V, S, I> {
+pub struct Map<K: Ord, V, S, I> {
 	inner: BTreeMap<K, Option<V>>,
 	is_active: bool,
 	#[derivative(Debug="ignore")]
@@ -247,11 +247,11 @@ pub struct SerializeMap<K: Ord, V, S, I> {
 	_ph: PhantomData<S>,
 }
 
-impl<'a, K: Ord, V, S: SerializeDB, I: Default> SerializeMap<K, V, S, I> {
-	/// Default but using a `SerializeDB` as parameter
+impl<'a, K: Ord, V, S: MappedDB, I: Default> Map<K, V, S, I> {
+	/// Default but using a `MappedDB` as parameter
 	/// to resolve if the db is active.
 	pub fn default_from_db(db: &S) -> Self {
-		SerializeMap {
+		Map {
 			inner: Default::default(),
 			is_active: db.is_active(),
 			instance: I::default(),
@@ -260,37 +260,38 @@ impl<'a, K: Ord, V, S: SerializeDB, I: Default> SerializeMap<K, V, S, I> {
 	}
 }
 
-impl<'a, K: Ord, V, S, I> SerializeMap<K, V, S, I> {
-	pub fn handle(&'a mut self, db: &'a mut S) -> SerializeMapHandle<'a, K, V, S, I> {
-		SerializeMapHandle {
+impl<'a, K: Ord, V, S, I> Map<K, V, S, I> {
+	pub fn mapping(&'a mut self, db: &'a mut S) -> MapMapping<'a, K, V, S, I> {
+		MapMapping {
 			cache: &mut self.inner,
 			collection: CollectionMut { db, instance: &self.instance },
 		}
 	}
 }
 
-impl<'a, K, V, S, I> SerializeMap<K, V, S, I> 
+impl<'a, K, V, S, I> Map<K, V, S, I> 
 	where
 		K: Codec + Ord + Clone,
 		V: Codec + Clone,
-		S: SerializeDB,
-		I: SerializeInstanceMap,
+		S: MappedDB,
+		I: MapInfo,
 {
-	pub fn iter(&'a self, db: &'a S) -> SerializeMapIter<'a, K, V> {
+	pub fn iter(&'a self, db: &'a S) -> MapIter<'a, K, V> {
 		if !self.is_active {
 			// There is no backing db, so all is in cache.
-			SerializeMapIter::Cache(self.inner.iter())
+			MapIter::Cache(self.inner.iter())
 		} else {
 			// Updates happens instantanously to db, so we iterate on
 			// the db.
 			// We ignore cache: iter is not a fast operation.
 			let collection = Collection { db, instance: &self.instance };
-			SerializeMapIter::Collection(collection.iter())
+			MapIter::Collection(collection.iter())
 		}
 	}
 }
 
-pub struct SerializeMapHandle<'a, K, V, S, I> {
+/// Key value map, mapped over a DB.
+pub struct MapMapping<'a, K, V, S, I> {
 	cache: &'a mut BTreeMap<K, Option<V>>,
 	collection: CollectionMut<'a, S, I>,
 }
@@ -301,8 +302,8 @@ pub struct EntryMap<'a, K, V, S, I>
 	where
 		K: Encode + Ord,
 		V: Codec,
-		S: SerializeDB,
-		I: SerializeInstanceMap,
+		S: MappedDB,
+		I: MapInfo,
 {
 	entry: sp_std::collections::btree_map::OccupiedEntry<'a, K, Option<V>>,
 	collection: CollectionMut<'a, S, I>,
@@ -310,12 +311,12 @@ pub struct EntryMap<'a, K, V, S, I>
 	is_fetch: bool,
 }
 
-impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
+impl<'a, K, V, S, I> MapMapping<'a, K, V, S, I>
 	where
 		K: Encode + Clone + Ord,
 		V: Codec + Clone,
-		S: SerializeDB,
-		I: SerializeInstanceMap,
+		S: MappedDB,
+		I: MapInfo,
 {
 	pub fn get(&mut self, k: &K) -> Option<&V> {
 		if self.collection.db.is_active() {
@@ -389,32 +390,32 @@ impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
 	}
 }
 
-impl<'a, K, V, S, I> SerializeMapHandle<'a, K, V, S, I>
+impl<'a, K, V, S, I> MapMapping<'a, K, V, S, I>
 	where
 		K: Codec + Clone + Ord,
 		V: Codec + Clone,
-		S: SerializeDB,
-		I: SerializeInstanceMap,
+		S: MappedDB,
+		I: MapInfo,
 {
-	pub fn iter(&'a self) -> SerializeMapIter<'a, K, V> {
+	pub fn iter(&'a self) -> MapIter<'a, K, V> {
 		if !self.collection.db.is_active() {
-			SerializeMapIter::Cache(self.cache.iter())
+			MapIter::Cache(self.cache.iter())
 		} else {
-			SerializeMapIter::Collection(self.collection.iter())
+			MapIter::Collection(self.collection.iter())
 		}
 	}
 }
 
-pub enum SerializeMapIter<'a, K, V>
+pub enum MapIter<'a, K, V>
 	where
 		K: Codec + Ord + Clone,
 		V: Codec + Clone,
 {
 	Cache(sp_std::collections::btree_map::Iter<'a, K, Option<V>>),
-	Collection(SerializeDBIter<'a>),
+	Collection(MappedDBIter<'a>),
 }
 
-impl<'a, K, V> Iterator for SerializeMapIter<'a, K, V>
+impl<'a, K, V> Iterator for MapIter<'a, K, V>
 	where
 		K: Codec + Ord + Clone,
 		V: Codec + Clone,
@@ -423,14 +424,14 @@ impl<'a, K, V> Iterator for SerializeMapIter<'a, K, V>
 
 	fn next(&mut self) -> Option<Self::Item> {
 		match self {
-			SerializeMapIter::Cache(i) => loop {
+			MapIter::Cache(i) => loop {
 				match i.next() {
 					Some((k, Some(v))) => return Some((k.clone(), v.clone())),
 					Some((_k, None)) => (),
 					None => return None,
 				}
 			},
-			SerializeMapIter::Collection(i) => loop {
+			MapIter::Collection(i) => loop {
 				match i.next() {
 					Some((k, v)) => {
 						match (K::decode(&mut k.as_slice()), V::decode(&mut v.as_slice())) {
@@ -451,8 +452,8 @@ impl<'a, K, V, S, I> EntryMap<'a, K, V, S, I>
 	where
 		K: Encode + Clone + Ord,
 		V: Codec + Clone,
-		S: SerializeDB,
-		I: SerializeInstanceMap,
+		S: MappedDB,
+		I: MapInfo,
 {
 	pub fn key(&self) -> &K {
 		self.entry.key()
@@ -501,8 +502,8 @@ impl<'a, K, V, S, I> EntryMap<'a, K, V, S, I>
 	where
 		K: Encode + Ord,
 		V: Codec,
-		S: SerializeDB,
-		I: SerializeInstanceMap,
+		S: MappedDB,
+		I: MapInfo,
 {
 	pub fn fetch(&mut self) {
 		if self.collection.db.is_active() && !self.is_fetch {
@@ -541,8 +542,8 @@ impl<'a, K, V, S, I> Drop for EntryMap<'a, K, V, S, I>
 	where
 		K: Encode + Ord,
 		V: Codec,
-		S: SerializeDB,
-		I: SerializeInstanceMap,
+		S: MappedDB,
+		I: MapInfo,
 {
 	fn drop(&mut self) {
 		self.flush()
@@ -555,7 +556,7 @@ impl<'a, K, V, S, I> Drop for EntryMap<'a, K, V, S, I>
 #[derivative(Default(bound="V: Default, I: Default"))]
 #[cfg_attr(test, derivative(PartialEq(bound="V: PartialEq")))]
 /// Is db variable or default if undefined.
-pub struct SerializeVariable<V, S, I> {
+pub struct Variable<V, S, I> {
 	// None indicate we did not fetch.
 	inner: V,
 	#[derivative(Debug="ignore")]
@@ -573,7 +574,7 @@ pub struct SerializeVariable<V, S, I> {
 #[derivative(Default(bound="V: Default, I: Default"))]
 #[cfg_attr(test, derivative(PartialEq(bound="V: PartialEq")))]
 /// Is db variable or default if undefined.
-pub struct SerializeVariableLazy<V, S, I> {
+pub struct VariableLazy<V, S, I> {
 	// None indicate we did not fetch.
 	inner: Option<V>,
 	#[derivative(Debug="ignore")]
@@ -584,10 +585,10 @@ pub struct SerializeVariableLazy<V, S, I> {
 	_ph: PhantomData<S>,
 }
 
-pub struct SerializeVariableHandleLazy<'a, V, S, I>
+pub struct VariableLazyMapping<'a, V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
 	inner: &'a mut Option<V>,
@@ -595,10 +596,10 @@ pub struct SerializeVariableHandleLazy<'a, V, S, I>
 	need_write: bool,
 }
 
-pub struct SerializeVariableHandle<'a, V, S, I>
+pub struct VariableMapping<'a, V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
 	inner: &'a mut V,
@@ -606,15 +607,15 @@ pub struct SerializeVariableHandle<'a, V, S, I>
 	need_write: bool,
 }
 
-impl<'a, V, S, I> SerializeVariableLazy<V, S, I>
+impl<'a, V, S, I> VariableLazy<V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
-	pub fn handle(&'a mut self, db: &'a mut S) -> SerializeVariableHandleLazy<'a, V, S, I> {
+	pub fn mapping(&'a mut self, db: &'a mut S) -> VariableLazyMapping<'a, V, S, I> {
 		let collection = CollectionMut { db, instance: &self.instance };
-		SerializeVariableHandleLazy {
+		VariableLazyMapping {
 			inner: &mut self.inner,
 			collection,
 			need_write: false,
@@ -622,22 +623,22 @@ impl<'a, V, S, I> SerializeVariableLazy<V, S, I>
 	}
 }
 
-impl<'a, V, S, I> SerializeVariable<V, S, I>
+impl<'a, V, S, I> Variable<V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
 	pub fn from_ser(db: &S) -> Self {
 		let instance: I = Default::default();
 		let collection = Collection { db, instance: &instance };
 		let inner = collection.read(I::PATH).and_then(|v| V::decode(&mut v.as_slice()).ok()).unwrap_or_default();
-		SerializeVariable { inner, instance: Default::default(), _ph: PhantomData }
+		Variable { inner, instance: Default::default(), _ph: PhantomData }
 	}
 
-	pub fn handle(&'a mut self, db: &'a mut S) -> SerializeVariableHandle<'a, V, S, I> {
+	pub fn mapping(&'a mut self, db: &'a mut S) -> VariableMapping<'a, V, S, I> {
 		let collection = CollectionMut { db, instance: &self.instance };
-		SerializeVariableHandle {
+		VariableMapping {
 			inner: &mut self.inner,
 			collection,
 			need_write: false,
@@ -649,10 +650,10 @@ impl<'a, V, S, I> SerializeVariable<V, S, I>
 	}
 }
 
-impl<'a, V, S, I> SerializeVariableHandle<'a, V, S, I>
+impl<'a, V, S, I> VariableMapping<'a, V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
 	pub fn get(&mut self) -> &V {
@@ -671,10 +672,10 @@ impl<'a, V, S, I> SerializeVariableHandle<'a, V, S, I>
 	}
 }
 
-impl<'a, V, S, I> Drop for SerializeVariableHandle<'a, V, S, I>
+impl<'a, V, S, I> Drop for VariableMapping<'a, V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
 	fn drop(&mut self) {
@@ -682,10 +683,10 @@ impl<'a, V, S, I> Drop for SerializeVariableHandle<'a, V, S, I>
 	}
 }
 
-impl<'a, V, S, I> SerializeVariableHandleLazy<'a, V, S, I>
+impl<'a, V, S, I> VariableLazyMapping<'a, V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
 	pub fn get(&mut self) -> &V {
@@ -707,10 +708,10 @@ impl<'a, V, S, I> SerializeVariableHandleLazy<'a, V, S, I>
 	}
 }
 
-impl<'a, V, S, I> Drop for SerializeVariableHandleLazy<'a, V, S, I>
+impl<'a, V, S, I> Drop for VariableLazyMapping<'a, V, S, I>
 	where
-		I: SerializeInstanceVariable,
-		S: SerializeDB,
+		I: VariableInfo,
+		S: MappedDB,
 		V: Default + Codec,
 {
 	fn drop(&mut self) {
@@ -718,20 +719,20 @@ impl<'a, V, S, I> Drop for SerializeVariableHandleLazy<'a, V, S, I>
 	}
 }
 
-/// `SerializeDB` with transaction layer.
+/// `MappedDB` with transaction layer.
 ///
 /// The change are not written into the DB but into `pending` struct.
 /// `pending` content should be written into the db (or transaction)
 /// before commit only.
 /// On revert, pending content should simply be cleared.
-pub struct TransactionalSerializeDB<DB> {
+pub struct TransactionalMappedDB<DB> {
 	/// The pending changes and wether we need to clear collection first.
 	pub pending: BTreeMap<&'static [u8], (BTreeMap<Vec<u8>, Option<Vec<u8>>>, bool)>,
 	/// The inner db implementation to use.
 	pub db: DB,
 }
 
-impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
+impl<DB: MappedDB> MappedDB for TransactionalMappedDB<DB> {
 	// Using on non active do not make much sense here.
 	#[inline(always)]
 	fn is_active(&self) -> bool {
@@ -760,7 +761,7 @@ impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
 			.or_else(|| Some(self.db.read(c, k)))
 			.flatten()
 	}
-	fn iter<'a>(&'a self, c: &'static [u8]) -> SerializeDBIter<'a> {
+	fn iter<'a>(&'a self, c: &'static [u8]) -> MappedDBIter<'a> {
 		let mut clear = false;
 		let mut cache = self.pending.get(c).map(|c| {
 			clear = c.1;
@@ -790,7 +791,7 @@ impl<DB: SerializeDB> SerializeDB for TransactionalSerializeDB<DB> {
 pub struct TransactionalIter<'a> {
 	cache: Option<sp_std::collections::btree_map::Iter<'a, Vec<u8>, Option<Vec<u8>>>>,
 	next_cache: Option<(Vec<u8>, Option<Vec<u8>>)>,
-	db: Option<SerializeDBIter<'a>>,
+	db: Option<MappedDBIter<'a>>,
 	next_db: Option<(Vec<u8>, Vec<u8>)>,
 }
 

@@ -42,11 +42,15 @@ pub mod historied;
 pub mod backend;
 
 /// Tools to work with simple key value
-/// collection based dbs (non historied).
-pub mod simple_db;
+/// collection mapped over dbs location (non historied).
+pub mod mapped_db;
 
 /// Management for state of historied data.
 pub mod management;
+
+#[cfg(feature = "db-traits")]
+/// Traits for Db containing historied value.
+pub mod db_traits;
 
 /// Context associated with item.
 /// Main use case here is a backend to fetch
@@ -431,9 +435,9 @@ pub trait MultipleDB {
 }
 
 pub struct Collection {
-	// static handle
+	/// Static mapping.
 	pub top: &'static [u8],
-	// dynamic handle
+	/// Dynamic mapping. 
 	pub child: Vec<u8>,
 }
 

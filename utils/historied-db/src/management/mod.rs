@@ -186,25 +186,25 @@ impl<X: ManagementConsumer + Send + Sync> ManagementConsumerSync for X { }
 */
 /// Management consumer base implementation.
 pub struct JournalForMigrationBasis<S: Ord, K, Db, DbConf> {
-	touched_keys: crate::simple_db::SerializeMap<S, Vec<K>, Db, DbConf>,
+	touched_keys: crate::mapped_db::Map<S, Vec<K>, Db, DbConf>,
 }
 
 impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 	where
 		S: codec::Codec + Clone + Ord,
 		K: codec::Codec + Clone + Ord,
-		Db: crate::simple_db::SerializeDB,
-		DbConf: crate::simple_db::SerializeInstanceMap,
+		Db: crate::mapped_db::MappedDB,
+		DbConf: crate::mapped_db::MapInfo,
 {
 	/// Note that if we got no information of the state, using `is_new` as
 	/// false is always safe.
 	pub fn add_changes(&mut self, db: &mut Db, state: S, mut changes: Vec<K>, is_new: bool) {
-		let mut handle = self.touched_keys.handle(db);
+		let mut mapping = self.touched_keys.mapping(db);
 		let changes = if is_new {
 			changes.dedup();
 			changes
 		} else {
-			if let Some(existing) = handle.get(&state) {
+			if let Some(existing) = mapping.get(&state) {
 				let mut existing = existing.clone();
 				merge_keys(&mut existing, changes);
 				existing
@@ -213,12 +213,12 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 				changes
 			}
 		};
-		handle.insert(state, changes);
+		mapping.insert(state, changes);
 	}
 
 	pub fn remove_changes_at(&mut self, db: &mut Db, state: &S) -> Option<Vec<K>> {
-		let mut handle = self.touched_keys.handle(db);
-		handle.remove(state)
+		let mut mapping = self.touched_keys.mapping(db);
+		mapping.remove(state)
 	}
 
 	pub fn remove_changes_before(
@@ -227,10 +227,10 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		state: &S,
 		result: &mut sp_std::collections::btree_set::BTreeSet<K>,
 	) {
-		let mut handle = self.touched_keys.handle(db);
+		let mut mapping = self.touched_keys.mapping(db);
 		// TODO can do better with entry iterator (or key iterator at least)
 		let mut to_remove = Vec::new();
-		for kv in handle.iter() {
+		for kv in mapping.iter() {
 			if &kv.0 < state {
 				to_remove.push(kv.0);
 			} else {
@@ -238,7 +238,7 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 			}
 		}
 		for state in to_remove.into_iter() {
-			if let Some(v) = handle.remove(&state) {
+			if let Some(v) = mapping.remove(&state) {
 				for k in v {
 					result.insert(k);
 				}
@@ -248,7 +248,7 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 
 	pub fn from_db(db: &Db) -> Self {
 		JournalForMigrationBasis {
-			touched_keys: crate::simple_db::SerializeMap::default_from_db(&db),
+			touched_keys: crate::mapped_db::Map::default_from_db(&db),
 		}
 	}
 }
@@ -292,7 +292,7 @@ mod test {
 	fn test_journal_for_migration() {
 		#[derive(Default, Clone)]
 		struct Collection;
-		impl crate::simple_db::SerializeInstanceMap for Collection {
+		impl crate::mapped_db::MapInfo for Collection {
 			const STATIC_COL: &'static [u8] = &[0u8, 0, 0, 0];
 		}
 		let mut db = InMemorySimpleDB5::new();

@@ -38,7 +38,7 @@ mod bindings {
 
 		#[derive(Default, Clone)]
 		pub struct $name;
-		impl crate::simple_db::SerializeInstanceMap for $name {
+		impl crate::mapped_db::MapInfo for $name {
 			const STATIC_COL: &'static [u8] = $col;
 		}
 		
@@ -46,7 +46,7 @@ mod bindings {
 	macro_rules! static_instance_variable {
 		($name: ident, $col: expr, $path: expr, $lazy: expr) => {
 			static_instance!($name, $col);
-			impl crate::simple_db::SerializeInstanceVariable for $name {
+			impl crate::mapped_db::VariableInfo for $name {
 				const PATH: &'static [u8] = $path;
 				const LAZY: bool = $lazy;
 			}
