@@ -25,6 +25,8 @@ default = ["std"] # TODO remove test-helpers
 # Traits for managing dbs of historied value,
 # currently not really, so putting behind a feature.
 db-traits = []
+# Dyn mapped db are not use or tested.
+dyn-mappeddb = []
 std = [
   "codec/std",
 	"sp-std/std",
