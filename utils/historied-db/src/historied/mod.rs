@@ -49,7 +49,25 @@ pub trait ValueRef<V: Item> {
 /// storage.
 pub trait ValueDiff<V: ItemDiff>: ValueRef<V::Diff> {
 	/// Get value at this state.
-	fn get_diff(&self, at: &Self::S) -> Option<V>;
+	fn get_diff(&self, at: &Self::S) -> Option<V> {
+		let mut builder = V::new_item_builder();
+		let mut changes = Vec::new();
+		if !self.get_diffs(at, &mut changes) {
+			debug_assert!(changes.len() == 0); // Incoherent state no origin for diff
+		}
+		if changes.len() == 0 {
+			return None;
+		}
+		for change in changes.into_iter().rev() {
+			builder.apply_diff(change);
+		}
+		Some(builder.extract_item())
+	}
+
+	/// Accumulate all changes for this state.
+	/// Changes are written in reverse order into `changes`.
+	/// Return `true` if a complete change was written.
+	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool;
 }
 
 // TODO EMCH refact with 'a for inner value

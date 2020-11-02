@@ -25,7 +25,7 @@
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
 	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut,
-	ValueDiff, ItemDiff, ItemBuilder};
+	ValueDiff, ItemDiff};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
@@ -256,9 +256,7 @@ impl<'a, V, S, D> ValueDiff<V> for LinearDiff<'a, V, S, D>
 		S: LinearState,
 		D: LinearStorage<<V::Diff as Item>::Storage, S>,
 {
-	fn get_diff(&self, at: &Self::S) -> Option<V> {
-		let mut builder = V::new_item_builder();
-		let mut changes = Vec::new();
+	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool {
 		for index in self.0.0.rev_index_iter() {
 			// TODO could really use get_ref here (would need trait variant,
 			// so keep up with copy for now). Also would need builder from
@@ -267,25 +265,14 @@ impl<'a, V, S, D> ValueDiff<V> for LinearDiff<'a, V, S, D>
 				.map(V::Diff::from_storage);
 			if state.exists(at) {
 				if V::is_complete(&value) {
-					if changes.len() == 0 {
-						// skip vec alloc
-						builder.apply_diff(value);
-						return Some(builder.extract_item());
-					}
 					changes.push(value);
-					break;
+					return true;
 				} else {
 					changes.push(value);
 				}
 			}
 		}
-		if changes.len() == 0 {
-			return None;
-		}
-		for change in changes.into_iter().rev() {
-			builder.apply_diff(change);
-		}
-		Some(builder.extract_item())
+		false
 	}
 }
 

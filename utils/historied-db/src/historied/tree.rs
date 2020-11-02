@@ -22,9 +22,10 @@
 #[cfg(feature = "need_implementation_changes")]
 use super::ConditionalValueMut;
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue, ForceValueMut,
-	InMemoryValueSlice, InMemoryValueRange, UpdateResult, Item, ItemRef};
+	InMemoryValueSlice, InMemoryValueRange, UpdateResult, Item, ItemRef,
+	ValueDiff, ItemDiff};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
-use crate::historied::linear::{Linear, LinearState, LinearGC};
+use crate::historied::linear::{Linear, LinearState, LinearGC, LinearDiff};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
 use sp_std::ops::SubAssign;
 use num_traits::One;
@@ -185,6 +186,93 @@ impl<
 		self.branches.len() == 0
 	}
 }
+
+/// Tree access to Diff structure.
+///
+/// TODO put in its own module?
+pub struct TreeDiff<'a, I, BI, V: ItemDiff, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Diff, D, BD>);
+
+impl<'a, I, BI, V: ItemDiff, D: Context, BD: Context> sp_std::ops::Deref for TreeDiff<'a, I, BI, V, D, BD> {
+	type Target = Tree<I, BI, V::Diff, D, BD>;
+
+	fn deref(&self) -> &Tree<I, BI, V::Diff, D, BD> {
+		&self.0
+	}
+}
+
+impl<'a, I, BI, V, D, BD> ValueRef<V::Diff> for TreeDiff<'a, I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState + SubAssign<BI> + One,
+		V: ItemDiff,
+		V::Diff: Item + Clone,
+		D: LinearStorage<Linear<V::Diff, BI, BD>, I>,
+		BD: LinearStorage<<V::Diff as Item>::Storage, BI>,
+{
+	type S = ForkPlan<I, BI>;
+
+	fn get(&self, at: &Self::S) -> Option<V::Diff> {
+		self.0.get(at)
+	}
+
+	fn contains(&self, at: &Self::S) -> bool {
+		self.0.contains(at)
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+}
+
+impl<'a, I, BI, V, D, BD> ValueDiff<V> for TreeDiff<'a, I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState + SubAssign<BI> + One,
+		V: ItemDiff,
+		V::Diff: Item + Clone,
+		D: LinearStorage<Linear<V::Diff, BI, BD>, I>,
+		BD: LinearStorage<<V::Diff as Item>::Storage, BI>,
+{
+	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool {
+		// could also exten tree_get macro but it will end up being hard to read,
+		// so copying loop here.
+		let mut next_branch_index = self.branches.last();
+		for (state_branch_range, state_branch_index) in at.iter() {
+			while let Some(branch_ix) = next_branch_index {
+				let branch_index = &self.branches.get_state(branch_ix);
+				if branch_index < &state_branch_index {
+					break;
+				} else if branch_index == &state_branch_index {
+					// TODO add a lower bound check (maybe debug_assert it only).
+					let mut upper_bound = state_branch_range.end.clone();
+					upper_bound -= BI::one();
+					// TODO get_ref variant?
+					let branch = self.branches.get(branch_ix).value;
+					if LinearDiff::<V, _, _>(&branch).get_diffs(&upper_bound, changes) {
+						return true;
+					}
+				}
+				next_branch_index = self.branches.previous_index(branch_ix);
+			}
+		}
+
+		// composite part.
+		while let Some(branch_ix) = next_branch_index {
+			let branch_index = &self.branches.get_state(branch_ix);
+			if branch_index <= &at.composite_treshold.0 {
+				let branch = self.branches.get(branch_ix).value;
+				if LinearDiff::<V, _, _>(&branch).get_diffs(&at.composite_treshold.1, changes) {
+					return true;
+				}
+			}
+			next_branch_index = self.branches.previous_index(branch_ix);
+		}
+	
+		false
+	}
+}
+	
+
 
 impl<
 	I: Default + Eq + Ord + Clone,
