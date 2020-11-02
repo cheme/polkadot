@@ -49,12 +49,13 @@ pub trait MappedDB {
 
 struct Collection<'a, DB, Info> {
 	db: &'a DB,
-	info: &'a Info,
+	_ph: PhantomData<Info>,
 }
 
 struct CollectionMut<'a, DB, Info> {
 	db: &'a mut DB,
-	info: &'a Info,
+	_ph: PhantomData<Info>,
+	//info: &'a Info,
 }
 
 impl<'a, DB: MappedDB, Info: MapInfo> Collection<'a, DB, Info> {
@@ -193,7 +194,7 @@ impl<'a, K: Ord, V, S, I> Map<K, V, S, I> {
 	pub fn mapping(&'a mut self, db: &'a mut S) -> MapMapping<'a, K, V, S, I> {
 		MapMapping {
 			cache: &mut self.inner,
-			collection: CollectionMut { db, info: &self.info },
+			collection: CollectionMut { db, _ph: PhantomData },
 		}
 	}
 }
@@ -213,7 +214,7 @@ impl<'a, K, V, S, I> Map<K, V, S, I>
 			// Updates happens instantanously to db, so we iterate on
 			// the db.
 			// We ignore cache: iter is not a fast operation.
-			let collection = Collection { db, info: &self.info };
+			let collection = Collection { db, _ph: PhantomData::<I> };
 			MapIter::Collection(collection.iter())
 		}
 	}
@@ -310,8 +311,8 @@ impl<'a, K, V, S, I> MapMapping<'a, K, V, S, I>
 		EntryMap {
 			entry,
 			collection: CollectionMut {
-				info: &self.collection.info,
 				db: &mut self.collection.db,
+				_ph: PhantomData,
 			},
 			need_write: false,
 			is_fetch,
@@ -543,7 +544,7 @@ impl<'a, V, S, I> VariableLazy<V, S, I>
 		V: Default + Codec,
 {
 	pub fn mapping(&'a mut self, db: &'a mut S) -> VariableLazyMapping<'a, V, S, I> {
-		let collection = CollectionMut { db, info: &self.info };
+		let collection = CollectionMut { db, _ph: PhantomData };
 		VariableLazyMapping {
 			inner: &mut self.inner,
 			collection,
@@ -559,14 +560,13 @@ impl<'a, V, S, I> Variable<V, S, I>
 		V: Default + Codec,
 {
 	pub fn from_ser(db: &S) -> Self {
-		let info: I = Default::default();
-		let collection = Collection { db, info: &info };
+		let collection = Collection { db, _ph: PhantomData::<I> };
 		let inner = collection.read(I::PATH).and_then(|v| V::decode(&mut v.as_slice()).ok()).unwrap_or_default();
 		Variable { inner, info: Default::default(), _ph: PhantomData }
 	}
 
 	pub fn mapping(&'a mut self, db: &'a mut S) -> VariableMapping<'a, V, S, I> {
-		let collection = CollectionMut { db, info: &self.info };
+		let collection = CollectionMut { db, _ph: PhantomData };
 		VariableMapping {
 			inner: &mut self.inner,
 			collection,
@@ -773,84 +773,5 @@ impl<'a> Iterator for TransactionalIter<'a> {
 				None
 			},
 		}
-	}
-}
-
-#[cfg(feature = "dyn-mappeddb")]
-/// Mapped db that can use dynamic collection definition.
-/// TODO consider removal (currently we use the db name to
-/// be split depending on implementation.
-pub mod dynamic {
-	use super::*;
-
-	/// MappedDb dynamic trait.
-	pub trait DynMappedDB: MappedDB {
-
-		/// Create a new collection and return its identifier.
-		fn new_dyn_collection(&mut self) -> Vec<u8>;
-
-		fn dyn_write(&mut self, c: &[u8], k: &[u8], v: &[u8]);
-		fn dyn_remove(&mut self, c: &[u8], k: &[u8]);
-		fn dyn_read(&self, c: &[u8], k: &[u8]) -> Option<Vec<u8>>;
-		fn dyn_iter<'a>(&'a self, c: &[u8]) -> MappedDBIter<'a>;
-
-		fn dyn_contains_collection(collection: &[u8]) -> bool;
-	}
-
-	impl<'a, DB: DynMappedDB, Info: DynMapInfo> Collection<'a, DB, Info> {
-		pub fn dyn_read(&self, k: &[u8]) -> Option<Vec<u8>> {
-			if let Some(c) = self.info.dyn_collection() {
-				self.db.dyn_read(c, k)
-			} else {
-				self.db.read(Info::STATIC_COL, k)
-			}
-		}
-		pub fn dyn_iter(&self) -> MappedDBIter<'a> {
-			if let Some(c) = self.info.dyn_collection() {
-				self.db.dyn_iter(c)
-			} else {
-				self.db.iter(Info::STATIC_COL)
-			}
-		}
-	}
-
-	impl<'a, DB: DynMappedDB, Info: DynMapInfo> CollectionMut<'a, DB, Info> {
-		pub fn dyn_write(&mut self, k: &[u8], v: &[u8]) {
-			if let Some(c) = self.info.dyn_collection() {
-				self.db.dyn_write(c, k, v)
-			} else {
-				self.db.write(Info::STATIC_COL, k, v)
-			}
-		}
-		pub fn dyn_remove(&mut self, k: &[u8]) {
-			if let Some(c) = self.info.dyn_collection() {
-				self.db.dyn_remove(c, k)
-			} else {
-				self.db.remove(Info::STATIC_COL, k)
-			}
-		}
-		pub fn dyn_read(&self, k: &[u8]) -> Option<Vec<u8>> {
-			if let Some(c) = self.info.dyn_collection() {
-				self.db.dyn_read(c, k)
-			} else {
-				self.db.read(Info::STATIC_COL, k)
-			}
-		}
-		pub fn dyn_iter<'b>(&'b self) -> MappedDBIter<'b> {
-			if let Some(c) = self.info.dyn_collection() {
-				self.db.dyn_iter(c)
-			} else {
-				self.db.iter(Info::STATIC_COL)
-			}
-		}
-	}
-
-	/// Dynamic collection can be change.
-	/// Static and dynamic collection are mutually exclusive, yet info using both trait should run
-	/// dynamic first.
-	pub trait DynMapInfo: MapInfo {
-		/// If collection is dynamic this returns the
-		/// current collection unique identifier.
-		fn dyn_collection(&self) -> Option<&[u8]>;
 	}
 }
