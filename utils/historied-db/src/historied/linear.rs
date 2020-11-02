@@ -24,7 +24,8 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
-	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut};
+	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut,
+	ValueDiff, ItemDiff, ItemBuilder};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
@@ -208,6 +209,83 @@ impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> ValueRef<
 
 	fn is_empty(&self) -> bool {
 		self.0.len() == 0
+	}
+}
+
+/// Use linear as linear diff. TODO put in its own module?
+///
+/// If at some point `ItemDiff` and `Item` get merged, this would not be needed.
+/// (there is already need to have some const related to `ItemDiff` in `Item`
+/// to forbid some operations (gc and migrate)).
+pub struct LinearDiff<'a, V: ItemDiff, S, D>(pub &'a Linear<V::Diff, S, D>);
+
+impl<'a, V: ItemDiff, S, D> sp_std::ops::Deref for LinearDiff<'a, V, S, D> {
+	type Target = Linear<V::Diff, S, D>;
+
+	fn deref(&self) -> &Linear<V::Diff, S, D> {
+		&self.0
+	}
+}
+
+impl<'a, V, S, D> ValueRef<V::Diff> for LinearDiff<'a, V, S, D>
+	where
+		V: ItemDiff,
+		V::Diff: Clone,
+		S: LinearState,
+		D: LinearStorage<<V::Diff as Item>::Storage, S>,
+{
+	type S = S;
+
+	fn get(&self, at: &Self::S) -> Option<V::Diff> {
+		self.0.get(at)
+	}
+
+	fn contains(&self, at: &Self::S) -> bool {
+		self.0.contains(at)
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+}
+
+impl<'a, V, S, D> ValueDiff<V> for LinearDiff<'a, V, S, D>
+	where
+		V: ItemDiff,
+		V::Diff: Clone,
+		S: LinearState,
+		D: LinearStorage<<V::Diff as Item>::Storage, S>,
+{
+	fn get_diff(&self, at: &Self::S) -> Option<V> {
+		let mut builder = V::new_item_builder();
+		let mut changes = Vec::new();
+		for index in self.0.0.rev_index_iter() {
+			// TODO could really use get_ref here (would need trait variant,
+			// so keep up with copy for now). Also would need builder from
+			// ref (which is usefull for some impl).
+			let HistoriedValue { value, state } = self.0.0.get(index)
+				.map(V::Diff::from_storage);
+			if state.exists(at) {
+				if V::is_complete(&value) {
+					if changes.len() == 0 {
+						// skip vec alloc
+						builder.apply_diff(value);
+						return Some(builder.extract_item());
+					}
+					changes.push(value);
+					break;
+				} else {
+					changes.push(value);
+				}
+			}
+		}
+		if changes.len() == 0 {
+			return None;
+		}
+		for change in changes.into_iter().rev() {
+			builder.apply_diff(change);
+		}
+		Some(builder.extract_item())
 	}
 }
 

@@ -104,7 +104,7 @@ pub trait ItemRef: Item {
 }
 
 /// An item that can be build from consecutives
-/// diffs.
+/// diffs. TODO rename (itemDiff should be the inner type)
 pub trait ItemDiff: Sized {
 	/// Internal Diff stored.
 	/// Default is the empty value (a neutral value
@@ -113,6 +113,14 @@ pub trait ItemDiff: Sized {
 
 	/// Internal type to build items.
 	type ItemBuilder: ItemBuilder<ItemDiff = Self>;
+
+	fn new_item_builder() -> Self::ItemBuilder {
+		Self::ItemBuilder::new_item_builder()
+	}
+
+	/// Check if the item can be a building source for 
+	/// TODO consider a trait specific to diff inner item.
+	fn is_complete(diff: &Self::Diff) -> bool;
 }
 
 pub trait ItemBuilder {
@@ -304,6 +312,14 @@ pub mod xdelta {
 	impl ItemDiff for BytesDelta {
 		type Diff = BytesDiff;
 		type ItemBuilder = BytesItemBuilder;
+
+		fn is_complete(diff: &Self::Diff) -> bool {
+			match diff {
+				BytesDiff::VcDiff(_) => false,
+				BytesDiff::Value(_)
+				| BytesDiff::None => true,
+			}
+		}
 	}
 }
 
@@ -404,6 +420,14 @@ pub mod map_delta{
 	impl<K: Ord + Codec, V: Codec> ItemDiff for MapDelta<K, V> {
 		type Diff = MapDiff<K, V>;
 		type ItemBuilder = MapItemBuilder<K, V>;
+
+		fn is_complete(diff: &Self::Diff) -> bool {
+			match diff {
+				MapDiff::Reset => true,
+				MapDiff::Insert(..)
+				| MapDiff::Remove(_) => false,
+			}
+		}
 	}
 }
 /// Default implementation of Item for `Option`, as this
