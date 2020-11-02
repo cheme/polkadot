@@ -1049,7 +1049,7 @@ mod test {
 	#[test]
 	fn test_conditional_set_get() {
 		use crate::{Management, ManagementRef, ForkableManagement};
-		use crate::test::simple_impl::StateInput;
+		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
 			crate::historied::linear::Linear<u32, u32, BD>,
@@ -1097,8 +1097,8 @@ mod test {
 
 	#[test]
 	fn test_force_set_get() {
-		use crate::{Management, ManagementRef, ForkableManagement};
-		use crate::test::simple_impl::StateInput;
+		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
 			crate::historied::linear::Linear<u32, u32, BD>,
@@ -1206,15 +1206,15 @@ mod test {
 
 	#[test]
 	fn test_migrate() {
-		use crate::{Management, ManagementRef, ForkableManagement};
-		use crate::test::simple_impl::StateInput;
+		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u16, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
 			crate::historied::linear::Linear<U16Neutral, u32, BD>,
 			u32,
 		>;
 
-		let check_state = |states: &mut crate::test::fuzz::InMemoryMgmtSer, target: Vec<(u32, u32)>| {
+		let check_state = |states: &mut crate::test::InMemoryMgmtSer, target: Vec<(u32, u32)>| {
 			let mut gc = states.get_migrate();
 			let (pruning, mut iter) = gc.migrate().touched_state();
 			assert_eq!(pruning, None);
@@ -1227,7 +1227,7 @@ mod test {
 			assert_eq!(set, reference);
 		};
 
-		let mut states = crate::test::fuzz::InMemoryMgmtSer::default();
+		let mut states = crate::test::InMemoryMgmtSer::default();
 		let s0 = states.latest_state_fork();
 
 		let mut item1: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
@@ -1402,12 +1402,13 @@ mod test {
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
 	}
 
+	#[cfg(feature = "xdelta3-diff")]
 	#[test]
 	fn test_diff1() {
 		use crate::historied::{DiffBuilder};
 		use crate::historied::xdelta::{BytesDelta, BytesDiff, BytesDiffBuilder}; 
-		use crate::{Management, ManagementRef, ForkableManagement};
-		use crate::test::simple_impl::StateInput;
+		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
 			crate::historied::linear::Linear<BytesDiff, u32, BD>,
@@ -1457,8 +1458,8 @@ mod test {
 	#[test]
 	fn test_diff2() {
 		use crate::historied::map_delta::{MapDelta, MapDiff}; 
-		use crate::{Management, ManagementRef, ForkableManagement};
-		use crate::test::simple_impl::StateInput;
+		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
 			crate::historied::linear::Linear<MapDiff<u8, u8>, u32, BD>,

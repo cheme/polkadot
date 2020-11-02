@@ -28,7 +28,8 @@ use sp_std::boxed::Box;
 use sp_std::fmt::Debug;
 use num_traits::One;
 use crate::historied::linear::LinearGC;
-use crate::{Management, ManagementRef, Migrate, ForkableManagement, Latest};
+use crate::Latest;
+use crate::management::{Management, ManagementRef, Migrate, ForkableManagement};
 use codec::{Codec, Encode, Decode};
 use crate::mapped_db::{MappedDB, Map as MappedDbMap, Variable as MappedDbVariable, MapInfo, VariableInfo};
 use derivative::Derivative;
@@ -1511,7 +1512,7 @@ pub(crate) mod test {
 	pub(crate) fn test_states() -> Tree<u32, u32, ()> {
 		test_states_inner()
 	}
-	pub(crate) fn test_states_st() -> Tree<u32, u32, crate::test::fuzz::SerFuzz> {
+	pub(crate) fn test_states_st() -> Tree<u32, u32, crate::test::MappingTests> {
 		test_states_inner()
 	}
 	

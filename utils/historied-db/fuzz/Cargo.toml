@@ -14,7 +14,7 @@ libfuzzer-sys = "0.3"
 
 [dependencies.historied-db]
 path = ".."
-features = ["test-helpers"]
+features = ["fuzzer"]
 
 # Prevent this from interfering with workspaces
 [workspace]

@@ -17,8 +17,79 @@
 
 //! Test module.
 
+#[cfg(feature = "db-traits")]
 pub mod simple_impl;
+
+/// Base code for fuzzer.
+/// Also contains non regression test.
+#[cfg(feature = "fuzzer")]
 pub mod fuzz;
+
+use codec::{Encode, Decode};
+
+/// state index.
+type StateIndex = u32;
+
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Encode, Decode)]
+/// State Input (aka hash).
+pub struct StateInput(pub u32);
+
+impl StateInput {
+	fn to_index(&self) -> StateIndex {
+		self.0
+	}
+}
+
+pub type InMemoryMgmt = crate::management::tree::TreeManagement<StateInput, u32, u32, ()>;
+pub type InMemoryMgmtSer = crate::management::tree::TreeManagement<StateInput, u32, u32, MappingTests>;
+
+#[derive(Default)]
+/// Mapping for test.
+pub struct MappingTests;
+
+mod bindings {
+	macro_rules! static_instance {
+		($name: ident, $col: expr) => {
+
+		#[derive(Default, Clone)]
+		pub struct $name;
+		impl crate::mapped_db::MapInfo for $name {
+			const STATIC_COL: &'static [u8] = $col;
+		}
+		
+	}}
+	macro_rules! static_instance_variable {
+		($name: ident, $col: expr, $path: expr, $lazy: expr) => {
+			static_instance!($name, $col);
+			impl crate::mapped_db::VariableInfo for $name {
+				const PATH: &'static [u8] = $path;
+				const LAZY: bool = $lazy;
+			}
+	}}
+
+	static_instance!(Mapping, &[0u8, 0, 0, 0]);
+	static_instance!(TreeState, &[1u8, 0, 0, 0]);
+	const CST: &'static[u8] = &[2u8, 0, 0, 0];
+	static_instance!(JournalDelete, &[3u8, 0, 0, 0]);
+	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
+	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
+	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
+	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
+	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
+}
+
+impl crate::management::tree::TreeManagementStorage for MappingTests {
+	const JOURNAL_DELETE: bool = true;
+	type Storage = crate::test::InMemorySimpleDB5;
+	type Mapping = bindings::Mapping;
+	type JournalDelete = bindings::JournalDelete;
+	type TouchedGC = bindings::TouchedGC;
+	type CurrentGC = bindings::CurrentGC;
+	type LastIndex = bindings::LastIndex;
+	type NeutralElt = bindings::NeutralElt;
+	type TreeMeta = bindings::TreeMeta;
+	type TreeState = bindings::TreeState;
+}
 
 macro_rules! InMemSimpleDB {
 	($name: ident, $size: expr, $inner_module: ident) => {

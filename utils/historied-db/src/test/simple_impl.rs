@@ -21,10 +21,12 @@
 //! The unique state representation must be sequential (index of an array)
 //! and their corresponding mapped internal state is the same index.
 
-use crate::*;
 use std::collections::HashMap;
 use std::hash::Hash;
-use codec::{Encode, Decode};
+use crate::{Latest, Ref};
+use crate::management::{Management, ManagementRef, ForkableManagement, Migrate};
+use crate::db_traits::{StateDB, InMemoryStateDBRef, StateDBRef};
+use super::{StateInput, StateIndex};
 
 struct DbElt<K, V> {
 	values: HashMap<K, V>,
@@ -36,19 +38,6 @@ struct DbElt<K, V> {
 pub struct Db<K, V> {
 	db: Vec<Option<DbElt<K, V>>>,
 	latest_state: Latest<StateIndex>,
-}
-
-/// state index.
-type StateIndex = u32;
-
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Encode, Decode)]
-/// State Input (aka hash).
-pub struct StateInput(pub u32);
-
-impl StateInput {
-	fn to_index(&self) -> StateIndex {
-		self.0
-	}
 }
 
 impl<K, V> Db<K, V> {
@@ -205,7 +194,7 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 	}
 
 	fn get_migrate(&mut self) -> Migrate<StateInput, Self> {
-		Migrate(self, (), sp_std::marker::PhantomData)
+		Migrate::new(self, ())
 	}
 
 	fn applied_migrate(&mut self) { }

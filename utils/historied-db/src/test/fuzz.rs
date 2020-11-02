@@ -20,61 +20,11 @@
 //! problematic fuzzer inputs.
 
 use crate::{
-	Management, StateDB, ForkableManagement, ManagementRef, StateDBRef,
+	management::{Management, ForkableManagement, ManagementRef},
+	db_traits::{StateDBRef, StateDB},
 	historied::Value,
 };
-use crate::test::simple_impl::StateInput;
-
-pub type InMemoryMgmt = crate::management::tree::TreeManagement<StateInput, u32, u32, ()>;
-pub type InMemoryMgmtSer = crate::management::tree::TreeManagement<StateInput, u32, u32, SerFuzz>;
-
-#[derive(Default)]
-/// Serialize for fuzzer.
-pub struct SerFuzz;
-
-mod bindings {
-	macro_rules! static_instance {
-		($name: ident, $col: expr) => {
-
-		#[derive(Default, Clone)]
-		pub struct $name;
-		impl crate::mapped_db::MapInfo for $name {
-			const STATIC_COL: &'static [u8] = $col;
-		}
-		
-	}}
-	macro_rules! static_instance_variable {
-		($name: ident, $col: expr, $path: expr, $lazy: expr) => {
-			static_instance!($name, $col);
-			impl crate::mapped_db::VariableInfo for $name {
-				const PATH: &'static [u8] = $path;
-				const LAZY: bool = $lazy;
-			}
-	}}
-
-	static_instance!(Mapping, &[0u8, 0, 0, 0]);
-	static_instance!(TreeState, &[1u8, 0, 0, 0]);
-	const CST: &'static[u8] = &[2u8, 0, 0, 0];
-	static_instance!(JournalDelete, &[3u8, 0, 0, 0]);
-	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
-	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
-	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
-	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
-	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
-}
-
-impl crate::management::tree::TreeManagementStorage for SerFuzz {
-	const JOURNAL_DELETE: bool = true;
-	type Storage = crate::test::InMemorySimpleDB5;
-	type Mapping = bindings::Mapping;
-	type JournalDelete = bindings::JournalDelete;
-	type TouchedGC = bindings::TouchedGC;
-	type CurrentGC = bindings::CurrentGC;
-	type LastIndex = bindings::LastIndex;
-	type NeutralElt = bindings::NeutralElt;
-	type TreeMeta = bindings::TreeMeta;
-	type TreeState = bindings::TreeState;
-}
+use crate::test::{StateInput, InMemoryMgmtSer, InMemoryMgmt};
 
 type LinearBackend = crate::backend::in_memory::MemoryOnly<u16, u32>;
 type TreeBackend = crate::backend::in_memory::MemoryOnly<
@@ -83,7 +33,7 @@ type TreeBackend = crate::backend::in_memory::MemoryOnly<
 >;
 struct FuzzerState {
 	/// in memory historied datas to test
-	in_memory_db: crate::historied::BTreeMap<
+	in_memory_db: crate::db_traits::BTreeMap<
 		Vec<u8>, u16,
 		crate::historied::tree::Tree<u32, u32, u16, TreeBackend, LinearBackend>,
 	>,
@@ -106,7 +56,7 @@ impl FuzzerState {
 		in_memory_mgmt.map_root_state(StateInput(0));
 		in_memory_mgmt_ser.map_root_state(StateInput(0));
 		FuzzerState {
-			in_memory_db: crate::historied::BTreeMap::new(((), ())),
+			in_memory_db: crate::db_traits::BTreeMap::new(((), ())),
 			in_memory_mgmt,
 			in_memory_mgmt_ser,
 			with_ser: false,
