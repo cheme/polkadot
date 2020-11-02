@@ -1447,12 +1447,11 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
-/* TODO
-		let item: TreeDiff<_, _, BytesDelta, _, _> = item.into();
+
+		let item = TreeDiff::<_, _, BytesDelta, _, _>(&item);
 		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
 		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
 		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
-*/
 	}
 
 	#[test]
@@ -1476,8 +1475,8 @@ mod test {
 
 		let successive_values: Vec<MapDelta<u8, u8>> = vec![
 			MapDelta::default(), // (1, 1)
-			MapDelta([(0u8, 1u8)][..].iter().cloned().collect()), // (1,2)
-			MapDelta([(1u8, 3u8)][..].iter().cloned().collect()), // (3, 3)
+			MapDelta([(0, 1)][..].iter().cloned().collect()), // (1,2)
+			MapDelta([(0, 1), (1, 3)][..].iter().cloned().collect()), // (3, 3)
 			MapDelta::default(), // (1, 1)
 		];
 
@@ -1496,11 +1495,10 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(1)).as_ref(), Some(&successive_deltas[1]));
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
-/* TODO
-		let item: TreeDiff<_, _, MapDelta<u8, u8>, _, _> = item.into();
+
+		let item = TreeDiff::<_, _, MapDelta<u8, u8>, _, _>(&item);
 		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
 		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
 		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
-*/
 	}
 }
