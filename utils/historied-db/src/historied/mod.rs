@@ -18,7 +18,7 @@
 //! Linear historied data.
 
 #[cfg(not(feature = "std"))]
-use sp_std::{vec::Vec, vec};
+use sp_std::vec::Vec;
 use sp_std::marker::PhantomData;
 use crate::{StateDBRef, UpdateResult, InMemoryStateDBRef, StateDB};
 use hash_db::{PlainDB, PlainDBRef};
@@ -351,14 +351,14 @@ pub mod map_delta{
 	#[derive(Clone, PartialEq, Eq, Debug, Default)]
 	pub struct MapDelta<K: Ord, V>(pub BTreeMap<K, V>);
 
-	impl<K: Ord, V> std::ops::Deref for MapDelta<K, V> {
+	impl<K: Ord, V> sp_std::ops::Deref for MapDelta<K, V> {
 		type Target = BTreeMap<K, V>;
 		fn deref(&self) -> &Self::Target {
 			&self.0
 		}
 	}
 
-	impl<K: Ord, V> std::ops::DerefMut for MapDelta<K, V> {
+	impl<K: Ord, V> sp_std::ops::DerefMut for MapDelta<K, V> {
 		fn deref_mut(&mut self) -> &mut Self::Target {
 			&mut self.0
 		}
