@@ -38,6 +38,7 @@ use historied_db::{
 use codec::{Decode, Encode};
 use kvdb::KeyValueDB;
 use std::io;
+use sp_database::{Database, OrderedDatabase};
 
 use std::sync::Arc;
 
@@ -194,7 +195,7 @@ fn inject_non_canonical<Block: BlockT>(
 		u32,
 		Vec<u8>,
 		crate::TreeManagementPersistenceNoTx,
-	>::from_ser(historied_persistence);
+	>::from_ser(historied_persistence.clone());
 	
 	let mut last_hash = Default::default();
 		for journal in journals {
@@ -203,9 +204,10 @@ fn inject_non_canonical<Block: BlockT>(
 				last_hash = journal.hash;
 				let state = management.latest_state();
 				println!("adding journal: {:?} parent {:?}, at {:?}", journal.hash, journal.parent_hash, state);
+				let db_histo: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
 				let mut historied_db = crate::HistoriedDBMut {
 					current_state: state,
-					db: db_histo.clone(),
+					db: db_histo,
 				};
 				let mut tx = historied_db.transaction();
 				let mut nb_ins = 0;
@@ -218,7 +220,7 @@ fn inject_non_canonical<Block: BlockT>(
 					nb_del += 1;
 					historied_db.update_single(k.as_slice(), None, &mut tx);
 				}
-				historied_db.write_change_set(tx);
+				historied_db.db.commit(tx);
 				println!("added, ins: {}, del: {}", nb_ins, nb_del);
 				break; // TODO for test remove
 			} else {
@@ -253,6 +255,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	let db = Arc::new(db);
 	let now = Instant::now();
 	let historied_persistence = crate::RocksdbStorage(db.clone());
+	let db: Arc<dyn OrderedDatabase<_>> = Arc::new(historied_persistence.clone());
 	let mut management = TreeManagement::<
 		<HashFor<Block> as hash_db::Hasher>::Out,
 		u32,
@@ -275,7 +278,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
 	let _state = management.get_db_state(&hash_for_root).expect("just added");
-	let iter_kv = historied_db.iter();
+	let iter_kv = historied_db.iter(crate::columns::StateValues);
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 	let hash = root_callback.root;
@@ -283,8 +286,6 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 
 	Ok(())
 }
-
-
 
 /// Hacky migrate to trigger action on db.
 /// Here drop historied state content.
@@ -398,7 +399,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		u32,
 		Vec<u8>,
 		crate::TreeManagementPersistenceNoTx,
-	>::from_ser(historied_persistence);
+	>::from_ser(historied_persistence.clone());
 	let state = management.latest_state_fork();
 	let test = management.get_db_state_for_fork(&Default::default());
 	println!("test: {:?}", test);
@@ -407,9 +408,10 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let mut count_tx = 0;
 	let mut count = 0;
 
+	let db_tmp: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
 	let mut kv_db = crate::HistoriedDBMut {
 		current_state: state,
-		db: db_read.clone(),
+		db: db_tmp,
 	};
 	let mut tx = kv_db.transaction();
 	let mut longest_key = 0;
@@ -420,12 +422,12 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		if count_tx == 1000 {
 			count += 1;
 			warn!("write a thousand {} {:?}", count, &k[..20]);
-			kv_db.write_change_set(tx).expect("write_tx");
+			kv_db.db.commit(tx).expect("write_tx");
 			tx = kv_db.transaction();
 			count_tx = 0;
 		}
 	}
-	kv_db.write_change_set(tx).expect("write_tx last");
+	kv_db.db.commit(tx).expect("write_tx last");
 	println!("longest key is {} byte", longest_key);
 
 	let now = Instant::now();
@@ -438,13 +440,14 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let now = Instant::now();
 
 	let current_state = management.get_db_state(&block_hash).expect("just added");
+	let db_tmp: Arc<dyn OrderedDatabase<_>> = Arc::new(historied_persistence.clone());
 	let historied_db = crate::HistoriedDB {
 		current_state,
-		db: db_read.clone(),
+		db: db_tmp,
 		do_assert: false,
 	};
 	let mut count = 0;
-	for (_k, _v) in historied_db.iter() {
+	for (_k, _v) in historied_db.iter(crate::columns::StateValues) {
 		count += 1;
 	}
 	println!("iter kvstate {} state in : {}", count, now.elapsed().as_millis());
@@ -453,7 +456,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
 	let _state = management.get_db_state(&block_hash).expect("just added");
-	let iter_kv = historied_db.iter();
+	let iter_kv = historied_db.iter(crate::columns::StateValues);
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 	let hash = root_callback.root;
@@ -466,31 +469,33 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		let indexes_conf = trie_db::partial_db::DepthIndexes::new(indexes_conf);
 		let mut indexes = std::collections::BTreeMap::new();
 		let mut root_callback = trie_db::TrieRootIndexes::<HashFor<Block>, _, _>::new(&mut indexes, &indexes_conf);
-		let iter_kv = historied_db.iter();
+		let iter_kv = historied_db.iter(crate::columns::StateValues);
 		trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 		println!("in mem index calculated {:?} : {}", indexes.len(), now.elapsed().as_millis());
 		if do_write {
 			let now = Instant::now();
 			let state = management.latest_state();
+			let db_tmp: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
 			let mut historied_db = crate::HistoriedDBMut {
 				current_state: state,
-				db: db_read.clone(),
+				db: db_tmp,
 			};
 			let mut tx = historied_db.transaction();
 			let indexes_check = indexes.clone();
 			for (k, v) in indexes {
 				historied_db.unchecked_new_single_index(k.as_slice(), crate::encode_index(v), &mut tx);
 			}
-			historied_db.write_change_set(tx);
+			historied_db.db.commit(tx);
 			println!("in mem index calculated rocksdb write : {}", now.elapsed().as_millis());
 
 			let now = Instant::now();
 			// TODO put depth indexes in trait: here need copy with upgrade client static def.
 			let mut result_indexes = std::collections::BTreeMap::new();
 			let state = management.get_db_state(&block_hash).expect("just added");
+			let db_tmp: Arc<dyn OrderedDatabase<_>> = Arc::new(historied_persistence.clone());
 			let historied_db = 	crate::HistoriedDB {
 				current_state: state,
-				db: db_read.clone(),
+				db: db_tmp,
 				do_assert: false,
 			};
 			let root_new: <HashFor<Block> as hash_db::Hasher>::Out = {

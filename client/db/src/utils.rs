@@ -32,7 +32,7 @@ use sp_runtime::traits::{
 	Block as BlockT, Header as HeaderT, Zero,
 	UniqueSaturatedFrom, UniqueSaturatedInto,
 };
-use crate::{DatabaseSettings, DatabaseSettingsSrc, Database, DbHash};
+use crate::{DatabaseSettings, DatabaseSettingsSrc, Database, OrderedDatabase, DbHash};
 
 /// Number of columns in the db. Must be the same for both full && light dbs.
 /// Otherwise RocksDb will fail to open database && check its type.
@@ -218,8 +218,8 @@ pub fn open_database_and_historied<Block: BlockT>(
 	db_type: DatabaseType,
 ) -> sp_blockchain::Result<(
 	Arc<dyn Database<DbHash>>,
+	Arc<dyn OrderedDatabase<DbHash>>,
 	historied_db::simple_db::SerializeDBDyn,
-	Arc<kvdb_rocksdb::Database>,
 )> {
 	#[allow(unused)]
 	fn db_open_error(feat: &'static str) -> sp_blockchain::Error {
@@ -227,96 +227,89 @@ pub fn open_database_and_historied<Block: BlockT>(
 			format!("`{}` feature not enabled, database can not be opened", feat),
 		)
 	}
-	let (path, cache_size) = match &config.source {
+
+	let db: (
+		Arc<dyn Database<DbHash>>,
+		Arc<dyn OrderedDatabase<DbHash>>,
+		historied_db::simple_db::SerializeDBDyn,
+	) = match &config.source {
+		#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 		DatabaseSettingsSrc::RocksDb { path, cache_size } => {
-			println!("rocksdb cache size: {:?}", cache_size);
-			(path.clone(), *cache_size)
-		},
-		DatabaseSettingsSrc::ParityDb { path } => {
-			let mut path = path.clone();
-			path.push("historieddb");
-			(path, DEFAULT_CACHE_SIZE)
-		},
-		DatabaseSettingsSrc::Custom(db) => {
-			// TODO need historied path and cache from option -> two field in custom
-			// would look better and run on keyvaluedb for historied.
-			// (this is notably use for tests that should rather run on in
-			// memory kvdb)
-			let db_dir = tempfile::TempDir::new().unwrap();
-			(db_dir.path().into(), DEFAULT_CACHE_SIZE)
-		},
-	};
+			// first upgrade database to required version
+			crate::upgrade::upgrade_db::<Block>(&path, db_type)?;
 
-	// first upgrade database to required version
-	crate::upgrade::upgrade_db::<Block>(&path, db_type)?;
+			// and now open database assuming that it has the latest version
+			let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(NUM_COLUMNS);
+			let path = path.to_str()
+				.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 
-	// and now open database assuming that it has the latest version
-	// TODO make a conf for historied db.
-	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(NUM_COLUMNS);
-	let path = path.to_str()
-		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+			let mut memory_budget = std::collections::HashMap::new();
+			match db_type {
+				DatabaseType::Full => {
+					let state_col_budget = (*cache_size as f64 * 0.9) as usize;
+					let other_col_budget = (cache_size - state_col_budget) / (NUM_COLUMNS as usize - 1);
 
-	let mut memory_budget = std::collections::HashMap::new();
-	match db_type {
-		DatabaseType::Full => {
-			let state_col_budget = (cache_size as f64 * 0.9) as usize;
-			let other_col_budget = (cache_size - state_col_budget) / (NUM_COLUMNS as usize - 1);
-
-			for i in 0..NUM_COLUMNS {
-				if i == crate::columns::STATE {
-					memory_budget.insert(i, state_col_budget);
-				} else {
-					memory_budget.insert(i, other_col_budget);
+					for i in 0..NUM_COLUMNS {
+						if i == crate::columns::STATE {
+							memory_budget.insert(i, state_col_budget);
+						} else {
+							memory_budget.insert(i, other_col_budget);
+						}
+					}
+					log::trace!(
+						target: "db",
+						"Open RocksDB database at {}, state column budget: {} MiB, others({}) column cache: {} MiB",
+						path,
+						state_col_budget,
+						NUM_COLUMNS,
+						other_col_budget,
+					);
+				},
+				DatabaseType::Light => {
+					let col_budget = cache_size / (NUM_COLUMNS as usize);
+					for i in 0..NUM_COLUMNS {
+						memory_budget.insert(i, col_budget);
+					}
+					log::trace!(
+						target: "db",
+						"Open RocksDB light database at {}, column cache: {} MiB",
+						path,
+						col_budget,
+					);
 				}
 			}
-			log::trace!(
-				target: "db",
-				"Open RocksDB database at {}, state column budget: {} MiB, others({}) column cache: {} MiB",
-				path,
-				state_col_budget,
-				NUM_COLUMNS,
-				other_col_budget,
-			);
+			db_config.memory_budget = memory_budget;
+
+			let db = kvdb_rocksdb::Database::open(&db_config, &path)
+				.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+
+			let rocks_db = Arc::new(db);
+			let ordered = Arc::new(crate::RocksdbStorage(rocks_db.clone()));
+			let management = Box::new(crate::RocksdbStorage(rocks_db.clone()));
+			(sp_database::arc_as_database(rocks_db), ordered, management)
 		},
-		DatabaseType::Light => {
-			let col_budget = cache_size / (NUM_COLUMNS as usize);
-			for i in 0..NUM_COLUMNS {
-				memory_budget.insert(i, col_budget);
-			}
-			log::trace!(
-				target: "db",
-				"Open RocksDB light database at {}, column cache: {} MiB",
-				path,
-				col_budget,
-			);
-		}
-	}
-	db_config.memory_budget = memory_budget;
-
-	let rocks_db = Arc::new(kvdb_rocksdb::Database::open(&db_config, &path)
-		.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?);
-
-	let db: (Arc<dyn Database<DbHash>>, historied_db::simple_db::SerializeDBDyn, _) = match &config.source {
-		DatabaseSettingsSrc::RocksDb { path, cache_size } => {
-			let ordered = Box::new(crate::RocksdbStorage(rocks_db.clone()));
-			(sp_database::as_database2(rocks_db.clone()), ordered, rocks_db)
+		#[cfg(not(any(feature = "with-kvdb-rocksdb", test)))]
+		DatabaseSettingsSrc::RocksDb { .. } => {
+			return Err(db_open_error("with-kvdb-rocksdb"));
 		},
 		#[cfg(feature = "with-parity-db")]
 		DatabaseSettingsSrc::ParityDb { path } => {
 			let parity_db = crate::parity_db::open(&path, db_type)
 				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
-			let ordered = sp_database::RadixTreeDatabase::new(parity_db.clone());
-			let ordered = Box::new(crate::DatabaseStorage(ordered));
-			(parity_db, ordered, rocks_db)
+			let inner = sp_database::RadixTreeDatabase::new(parity_db.clone());
+			let ordered = Arc::new(inner.clone());
+			let management = Box::new(crate::DatabaseStorage(inner));
+			(parity_db, ordered, management)
 		},
 		#[cfg(not(feature = "with-parity-db"))]
 		DatabaseSettingsSrc::ParityDb { .. } => {
 			return Err(db_open_error("with-parity-db"))
 		},
 		DatabaseSettingsSrc::Custom(db) => {
-			let ordered = sp_database::RadixTreeDatabase::new(db.clone());
-			let ordered = Box::new(crate::DatabaseStorage(ordered));
-			(db.clone(), ordered, rocks_db)
+			let inner = sp_database::RadixTreeDatabase::new(db.clone());
+			let ordered = Arc::new(inner.clone());
+			let management = Box::new(crate::DatabaseStorage(inner));
+			(db.clone(), ordered, management)
 		},
 	};
 

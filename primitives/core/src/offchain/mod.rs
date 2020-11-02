@@ -41,6 +41,14 @@ pub trait OffchainStorage: Clone + Send + Sync {
 	/// Persist a value in storage under given key and prefix.
 	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]);
 
+	/// Variant of `set` that returns false when state does not allow
+	/// update.
+	/// Should be implemented and use for local storage when we some concurrency issue can happen.
+	fn set_if_possible(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) -> bool {
+		self.set(prefix, key, value);
+		true
+	}
+
 	/// Clear a storage entry under given key and prefix.
 	fn remove(&mut self, prefix: &[u8], key: &[u8]);
 
@@ -81,7 +89,7 @@ pub trait BlockChainOffchainStorage: Clone + Send + Sync {
 	/// and got no concurrent write, all writes are therefore guaranted to succeed.
 	fn at_new(&self, id: Self::BlockId) -> Option<Self::OffchainStorageNew>;
 
-	/// Get latest added state. 
+	/// Get latest added state.
 	fn latest(&self) -> Option<Self::BlockId>;
 }
 
