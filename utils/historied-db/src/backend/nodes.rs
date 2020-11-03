@@ -829,7 +829,7 @@ impl<V: EstimateSize, S: EstimateSize> EstimateSize for crate::backend::in_memor
 	}
 }
 
-impl<D, M, B, NI> AsRef<[u8]> for Head<Vec<u8>, u32, D, M, B, NI>
+impl<D, M, B, NI> AsRef<[u8]> for Head<Vec<u8>, u64, D, M, B, NI>
 	where
 		D: AsRef<[u8]>,
 {
@@ -838,7 +838,7 @@ impl<D, M, B, NI> AsRef<[u8]> for Head<Vec<u8>, u32, D, M, B, NI>
 	}
 }
 
-impl<D, M, B, NI> AsMut<[u8]> for Head<Vec<u8>, u32, D, M, B, NI>
+impl<D, M, B, NI> AsMut<[u8]> for Head<Vec<u8>, u64, D, M, B, NI>
 	where
 		D: AsMut<[u8]>,
 {
@@ -861,8 +861,8 @@ impl<V, S, D, M> EstimateSize for Node<V, S, D, M> {
 
 #[cfg(feature = "encoded-array-backend")]
 //D is backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>
-// B is std::collections::BTreeMap<std::vec::Vec<u8>, backend::nodes::Node<std::vec::Vec<u8>, u32, backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>, backend::nodes::test::MetaSize>>
-impl<D, M, B, NI> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B, NI>
+// B is std::collections::BTreeMap<std::vec::Vec<u8>, backend::nodes::Node<std::vec::Vec<u8>, u64, backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>, backend::nodes::test::MetaSize>>
+impl<D, M, B, NI> EncodedArrayValue for Head<Vec<u8>, u64, D, M, B, NI>
 	where
 		D: EncodedArrayValue,
 {
@@ -902,8 +902,8 @@ pub(crate) mod test {
 
 	#[test]
 	fn nodes_push_and_query() {
-		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u32>, MetaSize>();
-		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u32>, MetaNb>();
+		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u64>, MetaSize>();
+		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb>();
 		#[cfg(feature = "encoded-array-backend")]
 		nodes_push_and_query_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
 		#[cfg(feature = "encoded-array-backend")]
@@ -912,24 +912,24 @@ pub(crate) mod test {
 
 	fn nodes_push_and_query_inner<D, M>()
 		where
-			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u32> + Clone,
+			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone,
 			M: NodesMeta + Clone,
 	{
 		let init_head = ContextHead {
-			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u32, D, M>>::new(),
+			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u64, D, M>>::new(),
 			key: b"any".to_vec(),
 			node_init_from: (),
 		};
-		let mut head = Head::<Vec<u8>, u32, D, M, _, _>::init_from(init_head);
+		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head);
 		assert_eq!(head.get_state_lookup(0), None);
 		for i in 0usize..30 {
 			let modu = i % 3;
 			head.push(HistoriedValue {
 				value: vec![i as u8; 2 + modu],
-				state: i as u32,
+				state: i as u64,
 			});
 			for j in 0..i + 1 {
-				assert_eq!(head.get_state_lookup(j), Some(j as u32));
+				assert_eq!(head.get_state_lookup(j), Some(j as u64));
 			}
 			assert_eq!(head.get_state_lookup(i + 1), None);
 		}
@@ -937,8 +937,8 @@ pub(crate) mod test {
 
 	#[test]
 	fn test_linear_storage() {
-		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaSize>();
-		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaNb>();
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u64>, MetaSize>();
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb>();
 		#[cfg(feature = "encoded-array-backend")]
 		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
 		#[cfg(feature = "encoded-array-backend")]
@@ -946,16 +946,16 @@ pub(crate) mod test {
 	}
 	fn test_linear_storage_inner<D, M>()
 		where
-			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u32> + Clone,
+			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone,
 			M: NodesMeta + Clone,
 	{
 		use crate::backend::test::{Value, State};
 		let init_head = ContextHead {
-			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u32, D, M>>::new(),
+			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u64, D, M>>::new(),
 			key: b"any".to_vec(),
 			node_init_from: (),
 		};
-		let mut head = Head::<Vec<u8>, u32, D, M, _, _>::init_from(init_head);
+		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head);
 		crate::backend::test::test_linear_storage(&mut head);
 	}
 }

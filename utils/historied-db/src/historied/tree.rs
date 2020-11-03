@@ -903,19 +903,19 @@ mod test {
 		type BD<'a> = EncodedArray<'a, Vec<u8>, NoVersion>;
 //		type D<'a> = crate::historied::linear::MemoryOnly<
 		type D<'a> = EncodedArray<'a,
-			crate::historied::linear::Linear<Vec<u8>, u32, BD<'a>>,
+			crate::historied::linear::Linear<Vec<u8>, u64, BD<'a>>,
 			NoVersion,
-//			u32
+//			u64
 		>;
-		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from(((), ()));
-		let at: ForkPlan<u32, u32> = Default::default();
+		let item: Tree<u64, u64, Vec<u8>, D, BD> = InitFrom::init_from(((), ()));
+		let at: ForkPlan<u64, u64> = Default::default();
 		item.get(&at);
 		item.get_slice(&at);
 		let latest = Latest::unchecked_latest((0, 0));
-		let _item: Tree<u32, u32, Vec<u8>, D, BD> = Tree::new(b"dtd".to_vec(), &latest, ((), ()));
+		let _item: Tree<u64, u64, Vec<u8>, D, BD> = Tree::new(b"dtd".to_vec(), &latest, ((), ()));
 //		let slice = &b"dtdt"[..];
 //		use crate::backend::encoded_array::{EncodedArrayValue};
-//		let bd = crate::historied::linear::Linear::<Vec<u8>, u32, BD>::from_slice(slice);
+//		let bd = crate::historied::linear::Linear::<Vec<u8>, u64, BD>::from_slice(slice);
 //		let bd = BD::from_slice(slice);
 		let bd = D::default();
 		use crate::backend::LinearStorage;
@@ -932,14 +932,14 @@ mod test {
 		use sp_std::collections::btree_map::BTreeMap;
 
 		type EncArray<'a> = EncodedArray<'a, Vec<u8>, DefaultVersion>;
-		type Backend<'a> = BTreeMap<Vec<u8>, Node<Vec<u8>, u32, EncArray<'a>, MetaSize>>;
-		type BD<'a> = Head<Vec<u8>, u32, EncArray<'a>, MetaSize, Backend<'a>, ()>;
+		type Backend<'a> = BTreeMap<Vec<u8>, Node<Vec<u8>, u64, EncArray<'a>, MetaSize>>;
+		type BD<'a> = Head<Vec<u8>, u64, EncArray<'a>, MetaSize, Backend<'a>, ()>;
 
-		type V2<'a> = crate::historied::linear::Linear<Vec<u8>, u32, BD<'a>>;
+		type V2<'a> = crate::historied::linear::Linear<Vec<u8>, u64, BD<'a>>;
 		type EncArray2<'a> = EncodedArray<'a, V2<'a>, DefaultVersion>;
-		type Backend2<'a> = BTreeMap<Vec<u8>, Node<V2<'a>, u32, EncArray2<'a>, MetaSize>>;
+		type Backend2<'a> = BTreeMap<Vec<u8>, Node<V2<'a>, u64, EncArray2<'a>, MetaSize>>;
 //		type D<'a> = crate::historied::linear::MemoryOnly<
-		type D<'a> = Head<V2<'a>, u32, EncArray2<'a>, MetaSize, Backend2<'a>, ContextHead<Backend<'a>, ()>>;
+		type D<'a> = Head<V2<'a>, u64, EncArray2<'a>, MetaSize, Backend2<'a>, ContextHead<Backend<'a>, ()>>;
 		let init_head_child = ContextHead {
 			backend: Backend::new(),
 			key: b"any".to_vec(),
@@ -950,8 +950,8 @@ mod test {
 			key: b"any".to_vec(),
 			node_init_from: init_head_child.clone(),
 		};
-		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
-		let at: ForkPlan<u32, u32> = Default::default();
+		let item: Tree<u64, u64, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
+		let at: ForkPlan<u64, u64> = Default::default();
 		item.get(&at);
 
 //	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
@@ -960,15 +960,15 @@ mod test {
 /*
 //		item.get_slice(&at);
 		let latest = Latest::unchecked_latest((0, 0));
-		let _item: Tree<u32, u32, Vec<u8>, D, BD> = Tree::new(b"dtd".to_vec(), &latest, init_head.clone());
+		let _item: Tree<u64, u64, Vec<u8>, D, BD> = Tree::new(b"dtd".to_vec(), &latest, init_head.clone());
 */
 //		let slice = &b"dtdt"[..];
 //		use crate::backend::encoded_array::{EncodedArrayValue};
-//		let bd = crate::historied::linear::Linear::<Vec<u8>, u32, BD>::from_slice(slice);
+//		let bd = crate::historied::linear::Linear::<Vec<u8>, u64, BD>::from_slice(slice);
 //		let bd = BD::from_slice(slice);
 		let bd = D::init_from(init_head);
 		use crate::backend::LinearStorage;
-		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
+		let _a: Option<HistoriedValue<V2, u64>> = bd.get_lookup(1usize);
 	}
 
 	#[cfg(feature = "encoded-array-backend")]
