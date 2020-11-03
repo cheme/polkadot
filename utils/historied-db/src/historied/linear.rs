@@ -23,15 +23,16 @@
 //!
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
-use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
-	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut,
-	ValueDiff, ItemDiff};
+use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
+	DataSlices, DataRefMut, Value, ValueRef,
+	aggregate::{Sum as DataSum, SumValue}};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
 use sp_std::ops::{SubAssign, Range};
 use codec::{Encode, Decode, Input};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
+#[cfg(feature = "encoded-array-backend")]
 use crate::backend::encoded_array::EncodedArrayValue;
 use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use derivative::Derivative;
@@ -131,13 +132,6 @@ impl<V, S, D: Clone> Clone for Linear<V, S, D> {
 	}
 }
 
-impl<V, S, D: EncodedArrayValue> EncodedArrayValue for Linear<V, S, D> {
-	fn from_slice(slice: &[u8]) -> Self {
-		let v = D::from_slice(slice);
-		Linear(v, PhantomData)
-	}
-}
-
 /// Adapter for storage (allows to factor code while keeping simple types).
 /// VR is the reference to value that is used, and I the initial state.
 pub trait StorageAdapter<'a, S, V, D, H> {
@@ -196,7 +190,7 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	}
 }
 
-impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> ValueRef<V> for Linear<V, S, D> {
+impl<V: Value + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> for Linear<V, S, D> {
 	type S = S;
 
 	fn get(&self, at: &Self::S) -> Option<V> {
@@ -212,72 +206,8 @@ impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> ValueRef<
 	}
 }
 
-/// Use linear as linear diff. TODO put in its own module?
-///
-/// If at some point `ItemDiff` and `Item` get merged, this would not be needed.
-/// (there is already need to have some const related to `ItemDiff` in `Item`
-/// to forbid some operations (gc and migrate)).
-pub struct LinearDiff<'a, V: ItemDiff, S, D>(pub &'a Linear<V::Diff, S, D>);
-
-impl<'a, V: ItemDiff, S, D> sp_std::ops::Deref for LinearDiff<'a, V, S, D> {
-	type Target = Linear<V::Diff, S, D>;
-
-	fn deref(&self) -> &Linear<V::Diff, S, D> {
-		&self.0
-	}
-}
-
-impl<'a, V, S, D> ValueRef<V::Diff> for LinearDiff<'a, V, S, D>
-	where
-		V: ItemDiff,
-		V::Diff: Clone,
-		S: LinearState,
-		D: LinearStorage<<V::Diff as Item>::Storage, S>,
-{
-	type S = S;
-
-	fn get(&self, at: &Self::S) -> Option<V::Diff> {
-		self.0.get(at)
-	}
-
-	fn contains(&self, at: &Self::S) -> bool {
-		self.0.contains(at)
-	}
-
-	fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
-impl<'a, V, S, D> ValueDiff<V> for LinearDiff<'a, V, S, D>
-	where
-		V: ItemDiff,
-		V::Diff: Clone,
-		S: LinearState,
-		D: LinearStorage<<V::Diff as Item>::Storage, S>,
-{
-	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool {
-		for index in self.0.0.rev_index_iter() {
-			// TODO could really use get_ref here (would need trait variant,
-			// so keep up with copy for now). Also would need builder from
-			// ref (which is usefull for some impl).
-			let HistoriedValue { value, state } = self.0.0.get(index)
-				.map(V::Diff::from_storage);
-			if state.exists(at) {
-				if V::is_complete(&value) {
-					changes.push(value);
-					return true;
-				} else {
-					changes.push(value);
-				}
-			}
-		}
-		false
-	}
-}
-
-// TODO should it be ItemRef?
-impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> InMemoryValueRange<S> for Linear<V, S, D> {
+// TODO should it be ValueRef?
+impl<V: Value, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRanges<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
 			for index in inner.rev_index_iter() {
@@ -292,7 +222,7 @@ impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> InMemoryValu
 	}
 }
 
-impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
 		for index in self.0.rev_index_iter() {
 			let HistoriedValue { value, state } = A::get_adapt(&self.0, index);
@@ -317,7 +247,7 @@ impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
@@ -344,82 +274,9 @@ impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S,
 		UpdateResult::Changed(None)
 	}
 
-	fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
-		let mut position = self.0.last();
-		let mut insert_index =  None;
-		while let Some(index) = position {
-			let last = self.0.get_state(index);
-			if at > &last {
-				break;
-			}
-			if at == &last {
-				let mut last = self.0.get(index);
-				let value = value.into_storage();
-				if last.value == value {
-					return UpdateResult::Unchanged;
-				}
-				last.value = value;
-				self.0.emplace(index, last);
-				return UpdateResult::Changed(());
-			}
-			insert_index = Some(index);
-			position = self.0.previous_index(index);
-		}
-		let value = value.into_storage();
-		if let Some(index) = insert_index {
-			self.0.insert(index, HistoriedValue {value, state: at.clone()});
-		} else {
-			self.0.push(HistoriedValue {value, state: at.clone()});
-		}
-		UpdateResult::Changed(())
-	}
-
-	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
-		if let Some(index) = self.0.last() {
-			let last = self.0.get_state(index);
-			if &last > at {
-				return None;
-			}
-			if at == &last {
-				let mut last = self.0.get(index);
-				let value = value.into_storage();
-				if last.value == value {
-					return Some(UpdateResult::Unchanged);
-				}
-				if !allow_overwrite {
-					return None;
-				}
-				last.value = value;
-				self.0.emplace(index, last);
-				return Some(UpdateResult::Changed(()));
-			}
-		}
-		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
-		Some(UpdateResult::Changed(()))
-	}
-	fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
-		if let Some(index) = self.0.last() {
-			let last = self.0.get_state(index);
-			if &last > at {
-				return false;
-			}
-			if at == &last {
-				if let Some(overwrite) = value {
-					let last = self.0.get(index);
-					// Non negligeable cost in some case: TODO consider skipping this test.
-					// Or use ItemRef
-					let last_value = V::from_storage(last.value);
-					if overwrite != &last_value {
-						return false;
-					}
-				}
-			}
-		}
-		true
-	}
 }
 
-impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn pos_index(&self, at: &S) -> Option<D::Index> {
 		let mut pos = None;
 		for index in self.0.rev_index_iter() {
@@ -433,19 +290,19 @@ impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> InMemoryValueRef<V> for Linear<V, S, D> {
+impl<V: ValueRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> DataRef<V> for Linear<V, S, D> {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
-		self.get_adapt::<_, RefVecAdapter>(at).map(ItemRef::from_storage_ref)
+		self.get_adapt::<_, RefVecAdapter>(at).map(ValueRef::from_storage_ref)
 	}
 }
 
-impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> InMemoryValueSlice<Vec<u8>> for Linear<Vec<u8>, S, D> {
+impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> DataSlices<Vec<u8>> for Linear<Vec<u8>, S, D> {
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]> {
 		self.get_adapt::<_, SliceAdapter>(at)
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> Value<V> for Linear<V, S, D> {
+impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> DataMut<V> for Linear<V, S, D> {
 	type SE = Latest<S>;
 	type Index = S;
 	type GC = LinearGC<S>;
@@ -575,7 +432,7 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::St
 	}
 }
 
-impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> InMemoryValue<V> for Linear<V, S, D> {
+impl<V: ValueRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> DataRefMut<V> for Linear<V, S, D> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
 		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| V::from_storage_ref_mut(h.value))
@@ -583,28 +440,6 @@ impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem
 
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>> {
 		self.set_inner(value, at)
-	}
-}
-
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalValueMut<V> for Linear<V, S, D> {
-	type IndexConditional = Self::Index;
-	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
-		self.can_if_inner(no_overwrite, at)
-	}
-	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
-		self.set_if_inner(value, at, true)
-	}
-
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
-		self.set_if_inner(value, at, false)
-	}
-}
-
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceValueMut<V> for Linear<V, S, D> {
-	type IndexForce = Self::Index;
-
-	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
-		self.force_set(value, at)
 	}
 }
 
@@ -632,6 +467,196 @@ impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<V
 	}
 }
 
+
+pub mod aggregate {
+	use super::*;
+
+	/// Use linear as linear diff. TODO put in its own module?
+	///
+	/// If at some point `SumValue` and `Value` get merged, this would not be needed.
+	/// (there is already need to have some const related to `SumValue` in `Value`
+	/// to forbid some operations (gc and migrate)).
+	pub struct Sum<'a, V: SumValue, S, D>(pub &'a Linear<V::Value, S, D>);
+
+	impl<'a, V: SumValue, S, D> sp_std::ops::Deref for Sum<'a, V, S, D> {
+		type Target = Linear<V::Value, S, D>;
+
+		fn deref(&self) -> &Linear<V::Value, S, D> {
+			&self.0
+		}
+	}
+
+	impl<'a, V, S, D> Data<V::Value> for Sum<'a, V, S, D>
+		where
+			V: SumValue,
+			V::Value: Clone,
+			S: LinearState,
+			D: LinearStorage<<V::Value as Value>::Storage, S>,
+	{
+		type S = S;
+
+		fn get(&self, at: &Self::S) -> Option<V::Value> {
+			self.0.get(at)
+		}
+
+		fn contains(&self, at: &Self::S) -> bool {
+			self.0.contains(at)
+		}
+
+		fn is_empty(&self) -> bool {
+			self.0.is_empty()
+		}
+	}
+
+	impl<'a, V, S, D> DataSum<V> for Sum<'a, V, S, D>
+		where
+			V: SumValue,
+			V::Value: Clone,
+			S: LinearState,
+			D: LinearStorage<<V::Value as Value>::Storage, S>,
+	{
+		fn get_sum_values(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
+			for index in self.0.0.rev_index_iter() {
+				// TODO could really use get_ref here (would need trait variant,
+				// so keep up with copy for now). Also would need builder from
+				// ref (which is usefull for some impl).
+				let HistoriedValue { value, state } = self.0.0.get(index)
+					.map(V::Value::from_storage);
+				if state.exists(at) {
+					if V::is_complete(&value) {
+						changes.push(value);
+						return true;
+					} else {
+						changes.push(value);
+					}
+				}
+			}
+			false
+		}
+	}
+}
+
+#[cfg(feature = "conditional-data")]
+pub mod conditional {
+	use super::*;
+	use crate::historied::conditional::ConditionalDataMut;
+
+	impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalDataMut<V> for Linear<V, S, D> {
+		type IndexConditional = Self::Index;
+		fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
+			self.can_if_inner(no_overwrite, at)
+		}
+		fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
+			self.set_if_inner(value, at, true)
+		}
+
+		fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
+			self.set_if_inner(value, at, false)
+		}
+	}
+
+	impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+		fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
+			if let Some(index) = self.0.last() {
+				let last = self.0.get_state(index);
+				if &last > at {
+					return None;
+				}
+				if at == &last {
+					let mut last = self.0.get(index);
+					let value = value.into_storage();
+					if last.value == value {
+						return Some(UpdateResult::Unchanged);
+					}
+					if !allow_overwrite {
+						return None;
+					}
+					last.value = value;
+					self.0.emplace(index, last);
+					return Some(UpdateResult::Changed(()));
+				}
+			}
+			self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
+			Some(UpdateResult::Changed(()))
+		}
+
+		fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
+			if let Some(index) = self.0.last() {
+				let last = self.0.get_state(index);
+				if &last > at {
+					return false;
+				}
+				if at == &last {
+					if let Some(overwrite) = value {
+						let last = self.0.get(index);
+						// Non negligeable cost in some case: TODO consider skipping this test.
+						// Or use ValueRef
+						let last_value = V::from_storage(last.value);
+						if overwrite != &last_value {
+							return false;
+						}
+					}
+				}
+			}
+			true
+		}
+	}
+}
+
+#[cfg(feature = "force-data")]
+pub mod force {
+	use super::*;
+	use crate::historied::force::ForceDataMut;
+
+	impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceDataMut<V> for Linear<V, S, D> {
+		type IndexForce = Self::Index;
+
+		fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
+			self.force_set(value, at)
+		}
+	}
+
+	impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+		fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
+			let mut position = self.0.last();
+			let mut insert_index =  None;
+			while let Some(index) = position {
+				let last = self.0.get_state(index);
+				if at > &last {
+					break;
+				}
+				if at == &last {
+					let mut last = self.0.get(index);
+					let value = value.into_storage();
+					if last.value == value {
+						return UpdateResult::Unchanged;
+					}
+					last.value = value;
+					self.0.emplace(index, last);
+					return UpdateResult::Changed(());
+				}
+				insert_index = Some(index);
+				position = self.0.previous_index(index);
+			}
+			let value = value.into_storage();
+			if let Some(index) = insert_index {
+				self.0.insert(index, HistoriedValue {value, state: at.clone()});
+			} else {
+				self.0.push(HistoriedValue {value, state: at.clone()});
+			}
+			UpdateResult::Changed(())
+		}
+	}
+}
+
+#[cfg(feature = "encoded-array-backend")]
+impl<V, S, D: EncodedArrayValue> EncodedArrayValue for Linear<V, S, D> {
+	fn from_slice(slice: &[u8]) -> Self {
+		let v = D::from_slice(slice);
+		Linear(v, PhantomData)
+	}
+}
+
 #[cfg(test)]
 mod test {
 	use super::*;
@@ -642,7 +667,7 @@ mod test {
 	/// Bytes with neutral item.
 	struct BytesNeutral(Vec<u8>); 
 
-	impl Item for BytesNeutral {
+	impl Value for BytesNeutral {
 		const NEUTRAL: bool = true;
 
 		type Storage = Vec<u8>;

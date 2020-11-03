@@ -28,9 +28,10 @@ use sp_std::boxed::Box;
 use sp_std::fmt::Debug;
 use num_traits::One;
 use crate::historied::linear::LinearGC;
-use crate::{Management, ManagementRef, Migrate, ForkableManagement, Latest};
+use crate::Latest;
+use crate::management::{ManagementMut, Management, Migrate, ForkableManagement};
 use codec::{Codec, Encode, Decode};
-use crate::simple_db::{SerializeDB, SerializeMap, SerializeVariable, SerializeInstanceMap, SerializeInstanceVariable};
+use crate::mapped_db::{MappedDB, Map as MappedDbMap, Variable as MappedDbVariable, MapInfo, VariableInfo};
 use derivative::Derivative;
 /*#[cfg(feature = "std")]
 use std::sync::Arc;
@@ -42,15 +43,15 @@ use alloc::sync::Arc;
 pub trait TreeManagementStorage: Sized {
 	/// Do we keep trace of changes. TODO rename JOURNAL_CHANGES
 	const JOURNAL_DELETE: bool;
-	type Storage: SerializeDB + Send + Sync;
-	type Mapping: SerializeInstanceMap + Send + Sync;
-	type JournalDelete: SerializeInstanceMap + Send + Sync;
-	type TouchedGC: SerializeInstanceVariable + Send + Sync;
-	type CurrentGC: SerializeInstanceVariable + Send + Sync;
-	type LastIndex: SerializeInstanceVariable + Send + Sync;
-	type NeutralElt: SerializeInstanceVariable + Send + Sync;
-	type TreeMeta: SerializeInstanceVariable + Send + Sync;
-	type TreeState: SerializeInstanceMap + Send + Sync;
+	type Storage: MappedDB + Send + Sync;
+	type Mapping: MapInfo + Send + Sync;
+	type JournalDelete: MapInfo + Send + Sync;
+	type TouchedGC: VariableInfo + Send + Sync;
+	type CurrentGC: VariableInfo + Send + Sync;
+	type LastIndex: VariableInfo + Send + Sync;
+	type NeutralElt: VariableInfo + Send + Sync;
+	type TreeMeta: VariableInfo + Send + Sync;
+	type TreeState: MapInfo + Send + Sync;
 
 	//fn init() -> Self::Storage;
 }
@@ -152,8 +153,9 @@ pub struct BranchRange<I> {
 pub struct Tree<I: Ord, BI, S: TreeManagementStorage> {
 	// TODO this could probably be cleared depending on S::ACTIVE.
 	// -> on gc ?
-	pub(crate) storage: SerializeMap<I, BranchState<I, BI>, S::Storage, S::TreeState>,
-	pub(crate) meta: SerializeVariable<TreeMeta<I, BI>, S::Storage, S::TreeMeta>,
+	/// Maps the different branches with their index.
+	pub(crate) storage: MappedDbMap<I, BranchState<I, BI>, S::Storage, S::TreeState>,
+	pub(crate) meta: MappedDbVariable<TreeMeta<I, BI>, S::Storage, S::TreeMeta>,
 	/// serialize implementation
 	pub(crate) serialize: S::Storage,
 	// TODO some strategie to close a long branch that gets
@@ -165,7 +167,7 @@ pub struct Tree<I: Ord, BI, S: TreeManagementStorage> {
 	// strategy and avoid fragmenting the history to much.
 	//
 	// First optional BI is new end or delete, second is the previous range value.
-	pub(crate) journal_delete: SerializeMap<I, (Option<BI>, BranchRange<BI>), S::Storage, S::JournalDelete>,
+	pub(crate) journal_delete: MappedDbMap<I, (Option<BI>, BranchRange<BI>), S::Storage, S::JournalDelete>,
 }
 
 #[derive(Derivative, Encode, Decode)]
@@ -173,7 +175,7 @@ pub struct Tree<I: Ord, BI, S: TreeManagementStorage> {
 #[derivative(Clone(bound="I: Clone, BI: Clone"))]
 #[cfg_attr(test, derivative(PartialEq(bound="I: PartialEq, BI: PartialEq")))]
 pub(crate) struct TreeMeta<I, BI> {
-	// TODO pub(crate) storage: SerializeMap<I, BranchState<I, BI>>,
+	// TODO pub(crate) storage: MappedDbMap<I, BranchState<I, BI>>,
 	pub(crate) last_index: I,
 	/// treshold for possible node value, correspond
 	/// roughly to last cannonical block branch index.
@@ -213,8 +215,8 @@ impl<I: Ord + Default, BI: Default, S: TreeManagementStorage> Default for Tree<I
 {
 	fn default() -> Self {
 		let serialize = S::Storage::default();
-		let storage = SerializeMap::default_from_db(&serialize);
-		let journal_delete = SerializeMap::default_from_db(&serialize);
+		let storage = MappedDbMap::default_from_db(&serialize);
+		let journal_delete = MappedDbMap::default_from_db(&serialize);
 		Tree {
 			storage,
 			journal_delete,
@@ -226,12 +228,12 @@ impl<I: Ord + Default, BI: Default, S: TreeManagementStorage> Default for Tree<I
 
 impl<I: Ord + Default + Codec, BI: Default + Codec, S: TreeManagementStorage> Tree<I, BI, S> {
 	pub fn from_ser(mut serialize: S::Storage) -> Self {
-		let storage = SerializeMap::default_from_db(&serialize);
-		let journal_delete = SerializeMap::default_from_db(&serialize);
+		let storage = MappedDbMap::default_from_db(&serialize);
+		let journal_delete = MappedDbMap::default_from_db(&serialize);
 		Tree {
 			storage,
 			journal_delete,
-			meta: SerializeVariable::from_ser(&mut serialize),
+			meta: MappedDbVariable::from_ser(&mut serialize),
 			serialize,
 		}
 	}
@@ -329,13 +331,13 @@ impl<I: Ord, BI, S: TreeManagementStorage> Tree<I, BI, S> {
 #[derivative(Debug(bound="H: Debug, I: Debug, BI: Debug, S::Storage: Debug"))]
 #[derivative(Clone(bound="H: Clone, I: Clone, BI: Clone, S::Storage: Clone"))]
 #[cfg_attr(test, derivative(PartialEq(bound="H: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
-// TODO EMCH !!! remove V, and make neutral element a trait constant of Value.
 pub struct TreeManagement<H: Ord, I: Ord, BI, S: TreeManagementStorage> {
 	state: Tree<I, BI, S>,
-	mapping: SerializeMap<H, (I, BI), S::Storage, S::Mapping>,
-	touched_gc: SerializeVariable<bool, S::Storage, S::TouchedGC>, // TODO currently damned unused thing??
-	current_gc: SerializeVariable<TreeMigrate<I, BI>, S::Storage, S::CurrentGC>, // TODO currently unused??
-	last_in_use_index: SerializeVariable<((I, BI), Option<H>), S::Storage, S::LastIndex>, // TODO rename to last inserted as we do not rebase on query
+	/// Map a given tag to its state index.
+	ext_states: MappedDbMap<H, (I, BI), S::Storage, S::Mapping>,
+	touched_gc: MappedDbVariable<bool, S::Storage, S::TouchedGC>, // TODO currently damned unused thing??
+	current_gc: MappedDbVariable<TreeMigrate<I, BI>, S::Storage, S::CurrentGC>, // TODO currently unused??
+	last_in_use_index: MappedDbVariable<((I, BI), Option<H>), S::Storage, S::LastIndex>, // TODO rename to last inserted as we do not rebase on query
 }
 
 #[derive(Derivative)]
@@ -395,10 +397,10 @@ impl<H, I, BI, S> Default for TreeManagement<H, I, BI, S>
 {
 	fn default() -> Self {
 		let tree = Tree::default();
-		let mapping = SerializeMap::default_from_db(&tree.serialize);
+		let ext_states = MappedDbMap::default_from_db(&tree.serialize);
 		TreeManagement {
 			state: tree,
-			mapping,
+			ext_states,
 			touched_gc: Default::default(),
 			current_gc: Default::default(),
 			last_in_use_index: Default::default(),
@@ -409,12 +411,12 @@ impl<H, I, BI, S> Default for TreeManagement<H, I, BI, S>
 impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManagementStorage> TreeManagement<H, I, BI, S> {
 	/// Initialize from a default ser
 	pub fn from_ser(serialize: S::Storage) -> Self {
-		let mapping = SerializeMap::default_from_db(&serialize);
+		let ext_states = MappedDbMap::default_from_db(&serialize);
 		TreeManagement {
-			mapping,
-			touched_gc: SerializeVariable::from_ser(&serialize),
-			current_gc: SerializeVariable::from_ser(&serialize),
-			last_in_use_index: SerializeVariable::from_ser(&serialize),
+			ext_states,
+			touched_gc: MappedDbVariable::from_ser(&serialize),
+			current_gc: MappedDbVariable::from_ser(&serialize),
+			last_in_use_index: MappedDbVariable::from_ser(&serialize),
 			state: Tree::from_ser(serialize),
 		}
 	}
@@ -442,35 +444,35 @@ impl<
 > TreeManagement<H, I, BI, S> {
 	/// Associate a state for the initial root (default index).
 	pub fn map_root_state(&mut self, root: H) {
-		self.mapping.handle(self.state.ser()).insert(root, Default::default());
+		self.ext_states.mapping(self.state.ser()).insert(root, Default::default());
 	}
 
-	// TODO consider removing drop_mapping argument (is probably default)
+	// TODO consider removing drop_ext_states argument (is probably default)
 	pub fn apply_drop_state(
 		&mut self,
 		state: &(I, BI),
-		mut drop_mapping: bool,
+		mut drop_ext_states: bool,
 		collect_dropped: Option<&mut Vec<H>>,
 	) {
-		drop_mapping |= collect_dropped.is_some();
-		let mut tree_meta = self.state.meta.handle(&mut self.state.serialize).get().clone();
+		drop_ext_states |= collect_dropped.is_some();
+		let mut tree_meta = self.state.meta.mapping(&mut self.state.serialize).get().clone();
 		// TODO optimized drop from I, BI == 0, 0 and ignore x, 0
-		let mapping = &mut self.mapping;
+		let ext_states = &mut self.ext_states;
 		let mut no_collect = Vec::new();
 		let collect_dropped = collect_dropped.unwrap_or(&mut no_collect);
 		let mut call_back = move |i: &I, bi: &BI, ser: &mut S::Storage| {
-			let mut mapping = mapping.handle(ser);
-			if drop_mapping {
+			let mut ext_states = ext_states.mapping(ser);
+			if drop_ext_states {
 				let state = (i.clone(), bi.clone());
 				let start = collect_dropped.len();
-				// TODO again cost of reverse lookup: consider double mapping
-				if let Some(h) = mapping.iter()
+				// TODO again cost of reverse lookup: consider double ext_states
+				if let Some(h) = ext_states.iter()
 					.find(|(_k, v)| v == &state)
 					.map(|(k, _v)| k.clone()) {
 					collect_dropped.push(h);
 				}
 				for h in &collect_dropped[start..] {
-					mapping.remove(h);
+					ext_states.remove(h);
 				}
 			}
 		};
@@ -479,11 +481,11 @@ impl<
 			// No branch delete (the implementation guaranty branch 0 is a single element)
 			self.state.apply_drop_state_rec_call(&state.0, &state.1, &mut call_back, true);
 			let treshold = tree_meta.composite_treshold.clone();
-			self.last_in_use_index.handle(self.state.ser()).set((treshold, None));
+			self.last_in_use_index.mapping(self.state.ser()).set((treshold, None));
 
 			if tree_meta.composite_latest == false {
 				tree_meta.composite_latest = true;
-				self.state.meta.handle(&mut self.state.serialize).set(tree_meta);
+				self.state.meta.mapping(&mut self.state.serialize).set(tree_meta);
 			}
 			return;
 		}
@@ -503,18 +505,18 @@ impl<
 			}
 			call_back(&state.0, &state.1, self.state.ser());
 			self.state.apply_drop_state(&state.0, &state.1, &mut call_back);
-			self.last_in_use_index.handle(self.state.ser()).set((parent, None));
+			self.last_in_use_index.mapping(self.state.ser()).set((parent, None));
 		}
 	}
 
 /*	// TODO rename to canonicalize or similar naming
 	// TOdO update last_in_use_index
 	pub fn apply_drop_from_latest(&mut self, back: usize) -> bool {
-		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
+		let latest = self.last_in_use_index.mapping(self.state.ser()).get().clone();
 		let mut switch_index = (latest.0).1.clone();
 		switch_index -= back as u32;
 		let qp = self.state.tree.query_plan_at(latest.0);
-		let mut branch_index = self.state.tree.meta.handle(&mut self.state.tree.serialize).get().composite_treshold.0.clone();
+		let mut branch_index = self.state.tree.meta.mapping(&mut self.state.tree.serialize).get().composite_treshold.0.clone();
 		for b in qp.iter() {
 			if b.0.end <= switch_index {
 				branch_index = b.1;
@@ -554,7 +556,7 @@ impl<
 		let mut change = false;
 		let mut to_change = Vec::new();
 		let mut to_remove = Vec::new();
-		for (branch_ix, mut branch) in self.state.storage.handle(&mut self.state.serialize).iter() {
+		for (branch_ix, mut branch) in self.state.storage.mapping(&mut self.state.serialize).iter() {
 			if branch.state.start < switch_index.1 {
 				if let Some(ref_range) = filter.get(&branch_ix) {
 					debug_assert!(ref_range.start == branch.state.start);
@@ -564,7 +566,7 @@ impl<
 						branch.state.end = ref_range.end.clone();
 						branch.can_append = false;
 						to_change.push((branch_ix, branch, old));
-						// TODO EMCH clean mapping for ends shifts
+						// TODO EMCH clean ext_states for ends shifts
 					}
 				} else {
 					to_remove.push((branch_ix.clone(), branch.state.clone()));
@@ -575,25 +577,25 @@ impl<
 			change = true;
 			for to_remove in to_remove {
 				self.state.register_drop(&to_remove.0, to_remove.1, None);
-				self.state.storage.handle(&mut self.state.serialize).remove(&to_remove.0);
-				// TODO EMCH clean mapping for range -> in applied_migrate
+				self.state.storage.mapping(&mut self.state.serialize).remove(&to_remove.0);
+				// TODO EMCH clean ext_states for range -> in applied_migrate
 			}
 		}
 		if to_change.len() > 0 {
 			change = true;
 			for (branch_ix, branch, old_branch) in to_change {
 				self.state.register_drop(&branch_ix, old_branch, Some(branch.state.end.clone()));
-				self.state.storage.handle(&mut self.state.serialize).insert(branch_ix, branch);
+				self.state.storage.mapping(&mut self.state.serialize).insert(branch_ix, branch);
 			}
 		}
 
-		let mut handle = self.state.meta.handle(&mut self.state.serialize);
-		let tree_meta = handle.get();
+		let mut mapping = self.state.meta.mapping(&mut self.state.serialize);
+		let tree_meta = mapping.get();
 		if switch_index != tree_meta.composite_treshold || prune_index.is_some() {
 			let mut tree_meta = tree_meta.clone();
 			tree_meta.next_composite_treshold = Some(switch_index);
 			tree_meta.pruning_treshold = prune_index;
-			handle.set(tree_meta);
+			mapping.set(tree_meta);
 			change = true;
 		}
 		change
@@ -660,7 +662,7 @@ impl<
 		branch_index: I,
 		number: BI,
 	) -> Option<I> {
-		let mut meta = self.meta.handle(&mut self.serialize).get().clone();
+		let mut meta = self.meta.mapping(&mut self.serialize).get().clone();
 		if number < meta.composite_treshold.1 {
 			return None;
 		}
@@ -678,14 +680,14 @@ impl<
 				return None;
 			}
 		} else {
-			let mut handle = self.storage.handle(&mut self.serialize);
-			assert!(handle.get(&branch_index).is_some(),
+			let mut mapping = self.storage.mapping(&mut self.serialize);
+			assert!(mapping.get(&branch_index).is_some(),
 				"Inconsistent state on new block: {:?} {:?}, {:?}",
 				branch_index,
 				number,
 				meta.composite_treshold,
 			);
-			let branch_state = handle.entry(&branch_index);
+			let branch_state = mapping.entry(&branch_index);
 
 			let mut can_fork = true;
 			branch_state.and_modify(|branch_state| {
@@ -709,10 +711,10 @@ impl<
 		Some(if create_new {
 			meta.last_index += I::one();
 			let state = BranchState::new(number, branch_index);
-			self.storage.handle(&mut self.serialize).insert(meta.last_index.clone(), state);
+			self.storage.mapping(&mut self.serialize).insert(meta.last_index.clone(), state);
 			let result = meta.last_index.clone();
 
-			self.meta.handle(&mut self.serialize).set(meta);
+			self.meta.mapping(&mut self.serialize).set(meta);
 			result
 		} else {
 			branch_index
@@ -722,8 +724,8 @@ impl<
 	#[cfg(test)]
 	pub fn unchecked_latest_at(&mut self, branch_index : I) -> Option<Latest<(I, BI)>> {
 		{
-			let mut handle = self.meta.handle(&mut self.serialize);
-			let meta = handle.get();
+			let mut mapping = self.meta.mapping(&mut self.serialize);
+			let meta = mapping.get();
 			if meta.composite_latest {
 				// composite
 				if branch_index <= meta.composite_treshold.0 {
@@ -733,7 +735,7 @@ impl<
 				}
 			}
 		}
-		self.storage.handle(&mut self.serialize).get(&branch_index).map(|branch| {
+		self.storage.mapping(&mut self.serialize).get(&branch_index).map(|branch| {
 			let mut end = branch.state.end.clone();
 			end -= BI::one();
 			Latest::unchecked_latest((branch_index, end))
@@ -743,8 +745,8 @@ impl<
 	// TODO this and is_latest is borderline useless, for management implementation only.
 	pub fn if_latest_at(&mut self, branch_index: I, seq_index: BI) -> Option<Latest<(I, BI)>> {
 		{
-			let mut handle = self.meta.handle(&mut self.serialize);
-			let meta = handle.get();
+			let mut mapping = self.meta.mapping(&mut self.serialize);
+			let meta = mapping.get();
 			if meta.composite_latest {
 				// composite
 				if branch_index <= meta.composite_treshold.0 && seq_index == meta.composite_treshold.1 {
@@ -754,7 +756,7 @@ impl<
 				}
 			}
 		}
-		self.storage.handle(&mut self.serialize).get(&branch_index).and_then(|branch| {
+		self.storage.mapping(&mut self.serialize).get(&branch_index).and_then(|branch| {
 			if !branch.is_latest {
 				None
 			} else {
@@ -781,10 +783,10 @@ impl<
 	}
 
 	fn query_plan_inner(&mut self, mut branch_index: I, mut parent_fork_branch_index: Option<BI>) -> ForkPlan<I, BI> {
-		let composite_treshold = self.meta.handle(&mut self.serialize).get().composite_treshold.clone();
+		let composite_treshold = self.meta.mapping(&mut self.serialize).get().composite_treshold.clone();
 		let mut history = Vec::new();
 		while branch_index >= composite_treshold.0 {
-			if let Some(branch) = self.storage.handle(&mut self.serialize).get(&branch_index) {
+			if let Some(branch) = self.storage.mapping(&mut self.serialize).get(&branch_index) {
 				let branch_ref = if let Some(end) = parent_fork_branch_index.take() {
 					branch.query_plan_to(end)
 				} else {
@@ -819,9 +821,9 @@ impl<
 	) -> Option<I> {
 		let mut do_remove = None;
 		{
-			let mut handle = self.storage.handle(&mut self.serialize);
+			let mut mapping = self.storage.mapping(&mut self.serialize);
 			let mut has_state = false;
-			handle.entry(branch_index).and_modify(|branch_state| {
+			mapping.entry(branch_index).and_modify(|branch_state| {
 				has_state = true;
 				if branch_state.drop_state() {
 					do_remove = Some(branch_state.parent_branch_index.clone());
@@ -833,7 +835,7 @@ impl<
 		}
 
 		Some(if let Some(parent_index) = do_remove {
-			self.storage.handle(&mut self.serialize).remove(branch_index);
+			self.storage.mapping(&mut self.serialize).remove(branch_index);
 			parent_index
 		} else {
 			branch_index.clone()
@@ -841,12 +843,12 @@ impl<
 	}
 
 	pub fn branch_state(&mut self, branch_index: &I) -> Option<BranchState<I, BI>> {
-		self.storage.handle(&mut self.serialize).get(branch_index).cloned()
+		self.storage.mapping(&mut self.serialize).get(branch_index).cloned()
 	}
 
 	pub fn branch_state_mut<R, F: FnOnce(&mut BranchState<I, BI>) -> R>(&mut self, branch_index: &I, f: F) -> Option<R> {
 		let mut result: Option<R> = None;
-		self.storage.handle(&mut self.serialize)
+		self.storage.mapping(&mut self.serialize)
 			.entry(branch_index)
 			.and_modify(|s: &mut BranchState<I, BI>| {
 				result = Some(f(s));
@@ -867,8 +869,8 @@ impl<
 		let mut register = None;
 		let mut last = Default::default();
 		let mut has_branch = false;
-		let mut handle = self.storage.handle(&mut self.serialize);
-		let branch_entry = handle.entry(branch_index);
+		let mut mapping = self.storage.mapping(&mut self.serialize);
+		let branch_entry = mapping.entry(branch_index);
 		branch_entry.and_modify(|branch| {
 			has_branch = true;
 			branch.is_latest = true;
@@ -889,7 +891,7 @@ impl<
 			return;
 		}
 		if remove {
-			self.storage.handle(&mut self.serialize).remove(branch_index);
+			self.storage.mapping(&mut self.serialize).remove(branch_index);
 		}
 		if let Some(register) = register {
 			self.register_drop(branch_index, last.clone(), register);
@@ -908,13 +910,13 @@ impl<
 	) {
 		let mut to_delete = Vec::new();
 		if composite {
-			for (i, s) in self.storage.handle(&mut self.serialize).iter() {
+			for (i, s) in self.storage.mapping(&mut self.serialize).iter() {
 				if &s.state.start >= node_index {
 					to_delete.push((i, s));
 				}
 			}
 		} else {
-			for (i, s) in self.storage.handle(&mut self.serialize).iter() {
+			for (i, s) in self.storage.mapping(&mut self.serialize).iter() {
 				if &s.parent_branch_index == branch_index && &s.state.start > node_index {
 					to_delete.push((i, s));
 				}
@@ -929,7 +931,7 @@ impl<
 				call_back(&i, &bi, &mut self.serialize);
 				bi += BI::one();
 			}
-			self.storage.handle(&mut self.serialize).remove(&i);
+			self.storage.mapping(&mut self.serialize).remove(&i);
 			// composite to false, as no in composite branch are stored.
 			self.apply_drop_state_rec_call(&i, &s.state.start, call_back, false);
 		}
@@ -941,7 +943,7 @@ impl<
 		new_node_index: Option<BI>, // if none this is a delete
 	) {
 		if S::JOURNAL_DELETE {
-			let mut journal_delete = self.journal_delete.handle(&mut self.serialize);
+			let mut journal_delete = self.journal_delete.mapping(&mut self.serialize);
 			if let Some(new_node_index) = new_node_index {
 				if let Some((to_insert, old_range)) = match journal_delete.get(branch_index) {
 					Some((Some(old), old_range)) => if &new_node_index < old {
@@ -963,8 +965,8 @@ impl<
 	}
 
 	fn clear_journal_delete(&mut self) {
-		let mut journal_delete = self.journal_delete.handle(&mut self.serialize);
-		// TODO remove mapping for all delete!!
+		let mut journal_delete = self.journal_delete.mapping(&mut self.serialize);
+		// TODO remove ext_states for all delete!!
 		journal_delete.clear()
 	}
 
@@ -979,7 +981,7 @@ impl<
 			}
 		}
 
-		let mut storage = self.storage.handle(&mut self.serialize);
+		let mut storage = self.storage.mapping(&mut self.serialize);
 		for i in to_remove {
 			storage.remove(&i);
 		}
@@ -1343,18 +1345,18 @@ impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
 	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
-> ManagementRef<H> for TreeManagement<H, I, BI, S> {
+> Management<H> for TreeManagement<H, I, BI, S> {
 	type S = ForkPlan<I, BI>;
 	/// Garbage collect over current
 	/// state or registered changes.
 	/// Choice is related to `TreeManagementStorage::JOURNAL_DELETE`.
 	type GC = MultipleGc<I, BI>;
-	/// TODO this needs some branch index mappings.
+	/// TODO this needs some branch index ext_statess.
 	type Migrate = MultipleMigrate<I, BI>;
 	//type Migrate = TreeMigrate<I, BI, V>;
 
 	fn get_db_state(&mut self, state: &H) -> Option<Self::S> {
-		self.mapping.handle(self.state.ser()).get(state).cloned().map(|i| self.state.query_plan_at(i))
+		self.ext_states.mapping(self.state.ser()).get(state).cloned().map(|i| self.state.query_plan_at(i))
 	}
 
 	fn get_gc(&self) -> Option<crate::Ref<Self::GC>> {
@@ -1367,32 +1369,32 @@ impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
 	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
-> Management<H> for TreeManagement<H, I, BI, S> {
+> ManagementMut<H> for TreeManagement<H, I, BI, S> {
 	// TODO attach gc infos to allow some lazy cleanup (make it optional)
 	// on set and on get_mut
 	type SE = Latest<(I, BI)>;
 
 	fn get_db_state_mut(&mut self, state: &H) -> Option<Self::SE> {
-		self.mapping.handle(self.state.ser()).get(state).cloned().and_then(|(i, bi)| {
+		self.ext_states.mapping(self.state.ser()).get(state).cloned().and_then(|(i, bi)| {
 			// enforce only latest
 			self.state.if_latest_at(i, bi)
 		})
 	}
 	
 	fn latest_state(&mut self) -> Self::SE {
-		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
+		let latest = self.last_in_use_index.mapping(self.state.ser()).get().clone();
 		Latest::unchecked_latest(latest.0)
 	}
 
 	fn latest_external_state(&mut self) -> Option<H> {
-		let latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
+		let latest = self.last_in_use_index.mapping(self.state.ser()).get().clone();
 		latest.1
 	}
 
 	fn force_latest_external_state(&mut self, state: H) {
-		let mut latest = self.last_in_use_index.handle(self.state.ser()).get().clone();
+		let mut latest = self.last_in_use_index.mapping(self.state.ser()).get().clone();
 		latest.1 = Some(state);
-		self.last_in_use_index.handle(self.state.ser()).set(latest);
+		self.last_in_use_index.mapping(self.state.ser()).set(latest);
 	}
 
 	// TODO the state parameter may not be the correct one.
@@ -1405,7 +1407,7 @@ impl<
 				b
 			})
 			.unwrap_or((Default::default(), Default::default()));
-		self.mapping.handle(self.state.ser()).iter()
+		self.ext_states.mapping(self.state.ser()).iter()
 			.find(|(_k, v)| v == &state)
 			.map(|(k, _v)| k.clone())
 	}
@@ -1430,8 +1432,8 @@ impl<
 			self.state.clear_journal_delete();
 			self.state.clear_composite();
 			let mut meta_change = false;
-			let mut handle = self.state.meta.handle(&mut self.state.serialize);
-			let mut tree_meta = handle.get().clone();
+			let mut mapping = self.state.meta.mapping(&mut self.state.serialize);
+			let mut tree_meta = mapping.get().clone();
 			if let Some(treshold) = tree_meta.next_composite_treshold.take() {
 				tree_meta.composite_treshold = treshold;
 				meta_change = true;
@@ -1440,13 +1442,13 @@ impl<
 				meta_change = true;
 			}
 			if meta_change {
-				handle.set(tree_meta);
+				mapping.set(tree_meta);
 			}
 		}
 		
 	//	self.current_gc.applied(gc); TODO pass back this reference: put it in buf more likely
 	//	(remove the associated type)
-		self.touched_gc.handle(self.state.ser()).set(false);
+		self.touched_gc.mapping(self.state.ser()).set(false);
 	}
 }
 
@@ -1474,7 +1476,7 @@ impl<
 	}
 
 	fn get_db_state_for_fork(&mut self, state: &H) -> Option<Self::SF> {
-		self.mapping.handle(self.state.ser()).get(state).cloned()
+		self.ext_states.mapping(self.state.ser()).get(state).cloned()
 	}
 
 	// note that se must be valid.
@@ -1484,9 +1486,9 @@ impl<
 		index += BI::one();
 		if let Some(branch_index) = self.state.add_state(branch_index.clone(), index.clone()) {
 			let last_in_use_index = (branch_index.clone(), index);
-			self.last_in_use_index.handle(self.state.ser())
+			self.last_in_use_index.mapping(self.state.ser())
 				.set((last_in_use_index.clone(), Some(state.clone())));
-			self.mapping.handle(self.state.ser()).insert(state, last_in_use_index.clone());
+			self.ext_states.mapping(self.state.ser()).insert(state, last_in_use_index.clone());
 			Some(Latest::unchecked_latest(last_in_use_index))
 		} else {
 			None
@@ -1511,7 +1513,7 @@ pub(crate) mod test {
 	pub(crate) fn test_states() -> Tree<u32, u32, ()> {
 		test_states_inner()
 	}
-	pub(crate) fn test_states_st() -> Tree<u32, u32, crate::test::fuzz::SerFuzz> {
+	pub(crate) fn test_states_st() -> Tree<u32, u32, crate::test::MappingTests> {
 		test_states_inner()
 	}
 	
@@ -1591,9 +1593,9 @@ pub(crate) mod test {
 		];
 		assert_eq!(states.query_plan(6).history, ref_6);
 
-		let mut meta = states.meta.handle(&mut states.serialize).get().clone();
+		let mut meta = states.meta.mapping(&mut states.serialize).get().clone();
 		meta.composite_treshold = (2, 1);
-		states.meta.handle(&mut states.serialize).set(meta);
+		states.meta.mapping(&mut states.serialize).set(meta);
 
 		let mut ref_6 = ref_6;
 		ref_6.remove(0);

@@ -20,11 +20,26 @@ xdelta3 = { version = "0.1.5", optional = true, default-features = false, git = 
 ref-cast = { version = "1.0" }
 
 [features]
-default = ["std", "test-helpers"] # TODO remove test-helpers
+default = ["std"]
+#default = ["std", "test-helpers", "db-traits"]
+
+# Do we include fuzzer code.
+fuzzer = ["db-traits", "test-helpers"]
+# Traits for managing dbs of historied value,
+# currently not really, so putting behind a feature.
+db-traits = []
+# Diff using xdelta3, forces std.
+xdelta3-diff = ["std", "xdelta3"]
+# Conditional is currently not correct
+conditional-data = []
+# Force set could be unused and
+# is not compatible with aggregate
+force-data = []
+# Would need benches to be use with confidence.
+encoded-array-backend = []
 std = [
   "codec/std",
 	"sp-std/std",
 	"num-traits/std",
-	"xdelta3",
 ]
 test-helpers = []

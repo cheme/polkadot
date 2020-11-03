@@ -25,6 +25,7 @@ use super::{LinearStorage};
 use crate::historied::HistoriedValue;
 use derivative::Derivative;
 use crate::{Context, InitFrom, DecodeWithContext, Trigger};
+#[cfg(feature = "encoded-array-backend")]
 use crate::backend::encoded_array::EncodedArrayValue;
 use codec::{Encode, Decode, Input};
 
@@ -828,21 +829,6 @@ impl<V: EstimateSize, S: EstimateSize> EstimateSize for crate::backend::in_memor
 	}
 }
 
-//D is backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>
-// B is std::collections::BTreeMap<std::vec::Vec<u8>, backend::nodes::Node<std::vec::Vec<u8>, u32, backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>, backend::nodes::test::MetaSize>>
-impl<D, M, B, NI> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B, NI>
-	where
-		D: EncodedArrayValue,
-{
-	fn from_slice(_slice: &[u8]) -> Self {
-		// requires passing around the init item (the key need to be derived): this implementation is needed when we
-		// EncodeArrayValue a head that refers to multiple head (those one needs to be instantiated)
-		// from_slice & backend + base key. TODO start  by changing from_slice to use a init from
-		// param.
-		unimplemented!("Require a backend : similar to switch from default to init from, also required to parse meta: using specific size of version would allow fix length meta encode")
-	}
-}
-
 impl<D, M, B, NI> AsRef<[u8]> for Head<Vec<u8>, u32, D, M, B, NI>
 	where
 		D: AsRef<[u8]>,
@@ -873,11 +859,28 @@ impl<V, S, D, M> EstimateSize for Node<V, S, D, M> {
 	}
 }
 
+#[cfg(feature = "encoded-array-backend")]
+//D is backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>
+// B is std::collections::BTreeMap<std::vec::Vec<u8>, backend::nodes::Node<std::vec::Vec<u8>, u32, backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>, backend::nodes::test::MetaSize>>
+impl<D, M, B, NI> EncodedArrayValue for Head<Vec<u8>, u32, D, M, B, NI>
+	where
+		D: EncodedArrayValue,
+{
+	fn from_slice(_slice: &[u8]) -> Self {
+		// requires passing around the init item (the key need to be derived): this implementation is needed when we
+		// EncodeArrayValue a head that refers to multiple head (those one needs to be instantiated)
+		// from_slice & backend + base key. TODO start  by changing from_slice to use a init from
+		// param.
+		unimplemented!("Require a backend : similar to switch from default to init from, also required to parse meta: using specific size of version would allow fix length meta encode")
+	}
+}
+
 #[cfg(test)]
 pub(crate) mod test {
 	use super::*;
 
 	use crate::backend::in_memory::MemoryOnly;
+	#[cfg(feature = "encoded-array-backend")]
 	use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
 
 	#[derive(Clone)]
@@ -901,7 +904,9 @@ pub(crate) mod test {
 	fn nodes_push_and_query() {
 		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u32>, MetaSize>();
 		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u32>, MetaNb>();
+		#[cfg(feature = "encoded-array-backend")]
 		nodes_push_and_query_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
+		#[cfg(feature = "encoded-array-backend")]
 		nodes_push_and_query_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb>();
 	}
 
@@ -934,7 +939,9 @@ pub(crate) mod test {
 	fn test_linear_storage() {
 		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaSize>();
 		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u32>, MetaNb>();
+		#[cfg(feature = "encoded-array-backend")]
 		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
+		#[cfg(feature = "encoded-array-backend")]
 		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb>();
 	}
 	fn test_linear_storage_inner<D, M>()

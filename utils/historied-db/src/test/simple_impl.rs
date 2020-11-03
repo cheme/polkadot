@@ -21,10 +21,12 @@
 //! The unique state representation must be sequential (index of an array)
 //! and their corresponding mapped internal state is the same index.
 
-use crate::*;
 use std::collections::HashMap;
 use std::hash::Hash;
-use codec::{Encode, Decode};
+use crate::{Latest, Ref};
+use crate::management::{ManagementMut, Management, ForkableManagement, Migrate};
+use crate::db_traits::{StateDBMut, StateDBRef, StateDB};
+use super::{StateInput, StateIndex};
 
 struct DbElt<K, V> {
 	values: HashMap<K, V>,
@@ -36,19 +38,6 @@ struct DbElt<K, V> {
 pub struct Db<K, V> {
 	db: Vec<Option<DbElt<K, V>>>,
 	latest_state: Latest<StateIndex>,
-}
-
-/// state index.
-type StateIndex = u32;
-
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Encode, Decode)]
-/// State Input (aka hash).
-pub struct StateInput(pub u32);
-
-impl StateInput {
-	fn to_index(&self) -> StateIndex {
-		self.0
-	}
 }
 
 impl<K, V> Db<K, V> {
@@ -73,7 +62,7 @@ impl<K, V> Db<K, V> {
 /// Note that this could be simplified to just the index.
 type Query = Vec<StateIndex>;
 
-impl<K: Hash + Eq, V: Clone> StateDBRef<K, V> for Db<K, V> {
+impl<K: Hash + Eq, V: Clone> StateDB<K, V> for Db<K, V> {
 	type S = Query;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -85,7 +74,7 @@ impl<K: Hash + Eq, V: Clone> StateDBRef<K, V> for Db<K, V> {
 	}
 }
 
-impl<K: Hash + Eq, V> InMemoryStateDBRef<K, V> for Db<K, V> {
+impl<K: Hash + Eq, V> StateDBRef<K, V> for Db<K, V> {
 	type S = Query;
 
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V> {
@@ -99,7 +88,7 @@ impl<K: Hash + Eq, V> InMemoryStateDBRef<K, V> for Db<K, V> {
 	}
 }
 
-impl<K: Hash + Eq, V: Clone> StateDB<K, V> for Db<K, V> {
+impl<K: Hash + Eq, V: Clone> StateDBMut<K, V> for Db<K, V> {
 	type SE = Latest<StateIndex>;
 	type GC = ();
 	type Migrate = ();
@@ -123,7 +112,7 @@ impl<K: Hash + Eq, V: Clone> StateDB<K, V> for Db<K, V> {
 	fn migrate(&mut self, _mig: &mut Self::Migrate) { }
 }
 
-impl<K: Eq + Hash, V> ManagementRef<StateInput> for Db<K, V> {
+impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 	type S = Query;
 	type GC = ();
 	type Migrate = ();
@@ -167,7 +156,7 @@ impl<K: Eq + Hash, V> Default for Db<K, V> {
 	}
 }
 
-impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
+impl<K: Eq + Hash, V> ManagementMut<StateInput> for Db<K, V> {
 	type SE = Latest<StateIndex>;
 
 	fn get_db_state_mut(&mut self, state: &StateInput) -> Option<Self::SE> {
@@ -205,7 +194,7 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 	}
 
 	fn get_migrate(&mut self) -> Migrate<StateInput, Self> {
-		Migrate(self, (), sp_std::marker::PhantomData)
+		Migrate::new(self, ())
 	}
 
 	fn applied_migrate(&mut self) { }

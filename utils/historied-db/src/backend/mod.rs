@@ -24,6 +24,7 @@ use crate::InitFrom;
 /// Data stored as rust structs in memory.
 pub mod in_memory;
 
+#[cfg(feature = "encoded-array-backend")]
 /// Data encoded in a byte buffer, no unserialized
 /// stractures.
 pub mod encoded_array;
