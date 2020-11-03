@@ -231,7 +231,7 @@ pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
 #[cfg(test)]
 mod test {
 	use super::*;
-	pub(crate) type State = u32;
+	pub(crate) type State = u64;
 	pub(crate) type Value = Vec<u8>;
 
 	// basic test for linear storage usage

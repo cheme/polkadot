@@ -19,7 +19,7 @@
 //! Can be use to replace an array and skip serializing
 //! deserializing step for persistent storage.
 
-// TODO parameterized u32 (historied value) state (put it in config).
+// TODO parameterized u64 (historied value) state (put it in config).
 
 // TODO next split between consecutive indexed values (replace write length by generic write meta)
 // TODO next split consecutive with range indexing
@@ -207,8 +207,8 @@ impl EncodedArrayConfig for DefaultVersion {
 	}
 }
 
-// encoding size as u32
-const SIZE_BYTE_LEN: usize = 4;
+// encoding size as u64
+const SIZE_BYTE_LEN: usize = 8;
 
 // Basis implementation to be on par with implementation using
 // vec like container. Those method could be move to a trait
@@ -224,12 +224,12 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
     self.0.into_owned()
   }
 
-	pub fn push_slice(&mut self, val: HistoriedValue<&[u8], u32>) {
+	pub fn push_slice(&mut self, val: HistoriedValue<&[u8], u64>) {
 		self.push_extra(val, &[])
 	}
 
 	/// variant of push where part of the value is in a second slice.
-	pub(crate) fn push_extra(&mut self, val: HistoriedValue<&[u8], u32>, extra: &[u8]) {
+	pub(crate) fn push_extra(&mut self, val: HistoriedValue<&[u8], u64>, extra: &[u8]) {
 		let len = self.len();
 		let start_ix = self.index_start();
 		let end_ix = self.0.len();
@@ -237,7 +237,7 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 		let mut new_ix = self.0[start_ix..end_ix].to_vec();
 		// truncate here can be bad
 		self.0.to_mut().truncate(start_ix + SIZE_BYTE_LEN);
-		self.write_le_u32(start_ix, val.state);
+		self.write_le_u64(start_ix, val.state);
 		self.0.to_mut().extend_from_slice(val.value);
 		self.0.to_mut().extend_from_slice(extra);
 		self.0.to_mut().append(&mut new_ix);
@@ -286,7 +286,7 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 		self.0.to_mut().truncate(end_index);
 	}
 
-	fn get_range(&self, index: usize) -> (usize, usize, u32) {
+	fn get_range(&self, index: usize) -> (usize, usize, u64) {
 		let start_ix = self.index_element(index);
 		let len = self.len();
 		let end_ix = if index == len - 1 {
@@ -294,27 +294,27 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 		} else {
 			self.index_element(index + 1)
 		};
-		let state = self.read_le_u32(start_ix);
+		let state = self.read_le_u64(start_ix);
 		(start_ix, end_ix, state)
 
 	}
-	fn get_state(&self, index: usize) -> HistoriedValue<&[u8], u32> {
+	fn get_state(&self, index: usize) -> HistoriedValue<&[u8], u64> {
 		let (start_ix, end_ix, state) = self.get_range(index);
 		HistoriedValue {
 			value: &self.0[start_ix + SIZE_BYTE_LEN..end_ix],
 			state,
 		}
 	}
-	fn get_state_mut(&mut self, index: usize) -> HistoriedValue<&mut [u8], u32> {
+	fn get_state_mut(&mut self, index: usize) -> HistoriedValue<&mut [u8], u64> {
 		let (start_ix, end_ix, state) = self.get_range(index);
 		HistoriedValue {
 			value: &mut self.0[start_ix + SIZE_BYTE_LEN..end_ix],
 			state,
 		}
 	}
-	fn get_state_only(&self, index: usize) -> u32 {
+	fn get_state_only(&self, index: usize) -> u64 {
 		let start_ix = self.index_element(index);
-		self.read_le_u32(start_ix)
+		self.read_le_u64(start_ix)
 	}
 }
 
@@ -377,35 +377,35 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 		self.0.to_mut()[start_to..start_to + size].copy_from_slice(&buffer[..]);
 	}
 
-	// Usize encoded as le u32 (for historied value).
-	fn read_le_u32(&self, pos: usize) -> u32 {
+	// Usize encoded as le u64 (for historied value).
+	fn read_le_u64(&self, pos: usize) -> u64 {
 		let mut buffer = [0u8; SIZE_BYTE_LEN];
 		buffer.copy_from_slice(&self.0[pos..pos + SIZE_BYTE_LEN]);
-		u32::from_le_bytes(buffer)
+		u64::from_le_bytes(buffer)
 	}
 
-	// Usize encoded as le u32 (only for internal indexing).
+	// Usize encoded as le u64 (only for internal indexing).
 	fn read_le_usize(&self, pos: usize) -> usize {
 		let mut buffer = [0u8; SIZE_BYTE_LEN];
 		buffer.copy_from_slice(&self.0[pos..pos + SIZE_BYTE_LEN]);
-		u32::from_le_bytes(buffer) as usize
+		u64::from_le_bytes(buffer) as usize
 	}
 
-	// Usize encoded as le u32.
+	// Usize encoded as le u64.
 	fn write_le_usize(&mut self, pos: usize, value: usize) {
-		let buffer = (value as u32).to_le_bytes();
+		let buffer = (value as u64).to_le_bytes();
 		self.0.to_mut()[pos..pos + SIZE_BYTE_LEN].copy_from_slice(&buffer[..]);
 	}
 
-	// Usize encoded as le u32.
+	// Usize encoded as le u64.
 	fn append_le_usize(&mut self, value: usize) {
-		let buffer = (value as u32).to_le_bytes();
+		let buffer = (value as u64).to_le_bytes();
 		self.0.to_mut().extend_from_slice(&buffer[..]);
 	}
 
-	// Usize encoded as le u32.
-	fn write_le_u32(&mut self, pos: usize, value: u32) {
-		let buffer = (value as u32).to_le_bytes();
+	// Usize encoded as le u64.
+	fn write_le_u64(&mut self, pos: usize, value: u64) {
+		let buffer = (value as u64).to_le_bytes();
 		self.0.to_mut()[pos..pos + SIZE_BYTE_LEN].copy_from_slice(&buffer[..]);
 	}
 
@@ -435,7 +435,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> InitFrom for EncodedArray<'a, V, F> 
 	}
 }
 
-impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArray<'a, V, F>
+impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
 	// Node index.
@@ -470,27 +470,27 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 		self.read_le_usize(len - SIZE_BYTE_LEN) as usize
 	}
 
-	fn get(&self, index: Self::Index) -> HistoriedValue<V, u32> {
+	fn get(&self, index: Self::Index) -> HistoriedValue<V, u64> {
 		self.get_state(index).map(|v| V::from_slice(v.as_ref()))
 	}
-	fn get_state(&self, index: Self::Index) -> u32 {
+	fn get_state(&self, index: Self::Index) -> u64 {
 		self.get_state_only(index)
 	}
-	//fn push(&mut self, value: HistoriedValue<&'a[u8], u32>) {
-	fn push(&mut self, value: HistoriedValue<V, u32>) {
+	//fn push(&mut self, value: HistoriedValue<&'a[u8], u64>) {
+	fn push(&mut self, value: HistoriedValue<V, u64>) {
 		let val = value.map_ref(|v| v.as_ref());
 		self.push_extra(val, &[])
 	}
 
-	//fn pop(&mut self) -> Option<HistoriedValue<&'a[u8], u32>> {
-	fn pop(&mut self) -> Option<HistoriedValue<V, u32>> {
+	//fn pop(&mut self) -> Option<HistoriedValue<&'a[u8], u64>> {
+	fn pop(&mut self) -> Option<HistoriedValue<V, u64>> {
 		let len = self.len();
 		if len == 0 {
 			return None;
 		}
 		let start_ix = self.index_element(len - 1);
 		let end_ix = self.index_start();
-		let state = self.read_le_u32(start_ix);
+		let state = self.read_le_u64(start_ix);
 		let value = V::from_slice(&self.0[start_ix + SIZE_BYTE_LEN..end_ix]);
 		if len - 1 == 0 {
 			self.clear();
@@ -526,7 +526,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 		self.0.to_mut().truncate(new_start + len_ix);
 	}
 
-	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, u32>) {
+	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, u64>) {
 		let len = self.len();
 		debug_assert!(len > index);
 		let elt_start = self.index_element(index);
@@ -538,7 +538,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 		};
 		let previous_size = elt_end - elt_start - SIZE_BYTE_LEN;
 		if previous_size == value.value.as_ref().len() {
-			self.write_le_u32(elt_start, value.state);
+			self.write_le_u64(elt_start, value.state);
 			self.0[elt_start + SIZE_BYTE_LEN..elt_end].copy_from_slice(value.value.as_ref());
 			return;
 		}
@@ -547,7 +547,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 		if previous_size > value.value.as_ref().len() {
 			let delete_size = previous_size - value.value.as_ref().len();
 			let new_elt_end = elt_end - delete_size; // TODO this var is awkward
-			self.write_le_u32(elt_start, value.state);
+			self.write_le_u64(elt_start, value.state);
 			self.0[elt_start + SIZE_BYTE_LEN..new_elt_end].copy_from_slice(value.value.as_ref());
 			for _ in 0..delete_size {
 				let _ = self.0.to_mut().remove(new_elt_end);
@@ -563,7 +563,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 			self.0.to_mut().resize(new_len, 0);
 			let new_elt_end = elt_end + additional_size;
 			self.0.copy_within(elt_end..end_ix, new_elt_end);
-			self.write_le_u32(elt_start, value.state);
+			self.write_le_u64(elt_start, value.state);
 			self.0[elt_start + SIZE_BYTE_LEN..new_elt_end].copy_from_slice(value.value.as_ref());
 			let start_ix = start_ix + additional_size;
 			for pos in index..len - 1 {
@@ -573,7 +573,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 		}
 	}
 
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, u32>) {
+	fn insert(&mut self, index: usize, value: HistoriedValue<V, u64>) {
 		let len = self.len();
 		debug_assert!(len >= index);
 		let end_ix = self.0.len();
@@ -585,7 +585,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 		let new_len = end_ix + additional_size + if len != 0 { SIZE_BYTE_LEN } else { 0 };
 		self.0.to_mut().resize(new_len, 0);
 		self.0.copy_within(elt_start..end_ix, elt_end);
-		self.write_le_u32(elt_start, value.state);
+		self.write_le_u64(elt_start, value.state);
 		self.0[elt_start + SIZE_BYTE_LEN..elt_end].copy_from_slice(value.value.as_ref());
 		let start_ix = start_ix + additional_size;
 		let mut old_value = elt_end;
@@ -601,21 +601,21 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u32> for EncodedArr
 	}
 }
 
-impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageSlice<V, u32> for EncodedArray<'a, V, F>
+impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageSlice<V, u64> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], u32> {
+	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], u64> {
 		self.get_state(index)
 	}
-	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], u32> {
+	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], u64> {
 		self.get_state_mut(index)
 	}
 }
 
-impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<V, u32> for EncodedArray<'a, V, F>
+impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<V, u64> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
-	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, u32> {
+	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, u64> {
 		let (start, end, state) = self.get_range(index);
 		HistoriedValue {
 			state,

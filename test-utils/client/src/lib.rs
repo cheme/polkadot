@@ -91,7 +91,7 @@ impl<Block: BlockT, Executor, G: GenesisInit> Default
 impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block>, G> {
 	/// Create new `TestClientBuilder` with default backend.
 	pub fn with_default_backend() -> Self {
-		let backend = Arc::new(Backend::new_test(
+		let backend = Arc::new(Backend::new_test_with_experimental_cache(
 			std::u32::MAX,
 			std::u64::MAX,
 			// TODO EMCH ExpCacheConf::Retracted??
@@ -102,7 +102,7 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 
 	/// Create new `TestClientBuilder` with default backend and pruning window size
 	pub fn with_pruning_window(keep_blocks: u32) -> Self {
-		let backend = Arc::new(Backend::new_test(
+		let backend = Arc::new(Backend::new_test_with_experimental_cache(
 			keep_blocks,
 			0,
 			ExpCacheConf::GCRange(keep_blocks as usize),

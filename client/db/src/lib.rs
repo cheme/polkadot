@@ -153,7 +153,7 @@ impl HistoriedDB {
 		if let Some(v) = self.db.get(column, key) {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
-			use historied_db::historied::ValueRef;
+			use historied_db::historied::Data;
 			let v = v.get(&self.current_state);
 			Ok(v.and_then(|mut v| {
 				match v.pop() {
@@ -1604,9 +1604,8 @@ impl<Block: BlockT> Backend<Block> {
 		Self::from_database(db as Arc<_>, ordered, management, management2, canonicalization_delay, &config)
 	}
 
-	/// Create new memory-backed client backend for tests.
 	#[cfg(any(test, feature = "test-helpers"))]
-	pub fn new_test(
+	pub fn new_test_with_experimental_cache(
 		keep_blocks: u32,
 		canonicalization_delay: u64,
 		experimental_cache: ExpCacheConf,
@@ -1624,6 +1623,15 @@ impl<Block: BlockT> Backend<Block> {
 		Self::new(db_setting, canonicalization_delay).expect("failed to create test-db")
 	}
 
+	/// Create new memory-backed client backend for tests.
+	#[cfg(any(test, feature = "test-helpers"))]
+	pub fn new_test(
+		keep_blocks: u32,
+		canonicalization_delay: u64,
+	) -> Self {
+		Self::new_test_with_experimental_cache(keep_blocks, canonicalization_delay, Default::default())
+	}
+	
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
