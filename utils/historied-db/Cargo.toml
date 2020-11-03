@@ -37,6 +37,8 @@ conditional-data = []
 force-data = []
 # Would need benches to be use with confidence.
 encoded-array-backend = []
+# temp size implementation specific to a use case
+temp-size-impl = []
 std = [
   "codec/std",
 	"sp-std/std",

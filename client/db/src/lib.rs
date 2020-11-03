@@ -304,7 +304,7 @@ impl HistoriedDB {
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
-			use historied_db::historied::ValueRef;
+			use historied_db::historied::Data;
 			if let Some(mut v) = v.get(&current_state) {
 				match v.pop() {
 					Some(0u8) => None,
@@ -853,7 +853,7 @@ impl historied_db::mapped_db::MappedDB for RocksdbStorage {
 		let iter = resolve_collection(c).map(|(c, p)| {
 			use kvdb::KeyValueDB;
 			if let Some(p) = p {
-				self.0.iter_with_prefix(c, p)
+				<kvdb_rocksdb::Database as KeyValueDB>::iter_with_prefix(&*self.0, c, p)
 			} else {
 				<kvdb_rocksdb::Database as KeyValueDB>::iter(&*self.0, c)
 			}.map(|(k, v)| (Vec::<u8>::from(k), Vec::<u8>::from(v)))
@@ -1000,12 +1000,13 @@ pub mod historied_tree_bindings {
 	static_instance!(Mapping, &[11u8, 0, 0, 0]);
 	static_instance!(TreeState, &[12u8, 0, 0, 0]);
 	static_instance!(JournalDelete, &[15u8, 0, 0, 0]);
-	const CST: &'static[u8] = &[2u8, 0, 0, 0]; // STATE_META collection
+	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
 	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
 	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
 	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
 	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
 	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
+	static_instance!(LocalOffchainDelete, b"\x08\x00\x00\x00offchain/journal_delete");
 }
 
 struct PendingBlock<Block: BlockT> {
@@ -1711,6 +1712,9 @@ impl<Block: BlockT> Backend<Block> {
 			historied_management,
 			historied_next_finalizable: Arc::new(RwLock::new(None)),
 			historied_state_do_assert: false,
+			historied_management_consumer,
+			historied_pruning_window,
+			historied_management_consumer_transaction,
 		})
 	}
 
@@ -2065,7 +2069,7 @@ impl<Block: BlockT> Backend<Block> {
 				let mut bytes: u64 = 0;
 				let mut removal: u64 = 0;
 				let mut bytes_removal: u64 = 0;
-				for (mut key, (val, rc)) in operation.db_updates.drain() {
+				for (mut key, (val, rc)) in operation.db_updates.db.drain() {
 					if !self.storage.prefix_keys {
 						// Strip prefix
 						key.drain(0 .. key.len() - DB_HASH_LEN);

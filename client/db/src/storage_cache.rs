@@ -106,7 +106,7 @@ impl<B: BlockT> StateDBMut<StorageKey, Option<StorageValue>> for ExperimentalCac
 	type Migrate = ();
 
 	fn emplace(&mut self, key: StorageKey, value: Option<StorageValue>, at: &Self::SE) {
-		use historied_db::historied::DataMut;
+		use historied_db::historied::DataRefMut;
 		if let Some(history) = self.lru_storage.get(&key) {
 			let mut additional_size = value.as_ref().map(|v| v.estimate_size());
 			match history.set_mut(value, at) {
@@ -186,6 +186,7 @@ impl<B: BlockT> StateDBMut<StorageKey, Option<StorageValue>> for ExperimentalCac
 				}
 			},
 			ExpCacheConf::GCRange(width) => {
+				let latest = self.management.latest_state();
 				if self.management.apply_drop_from_latest(width) {
 					let mut to_rem = Vec::new();
 					let mut decrease = 0;
