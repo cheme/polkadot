@@ -30,6 +30,11 @@ fuzzer = ["db-traits", "test-helpers"]
 db-traits = []
 # Diff using xdelta3, forces std.
 xdelta3-diff = ["std", "xdelta3"]
+# Conditional is currently not correct
+conditional-data = []
+# Force set could be unused and
+# is not compatible with aggregate
+force-data = []
 std = [
   "codec/std",
 	"sp-std/std",

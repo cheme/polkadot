@@ -24,7 +24,7 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
-	DataSlices, DataRefMut, ConditionalDataMut, Value, ValueRef, ForceDataMut,
+	DataSlices, DataRefMut, Value, ValueRef,
 	aggregate::{Sum as DataSum, SumValue}};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
@@ -280,79 +280,6 @@ impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S
 		UpdateResult::Changed(None)
 	}
 
-	fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
-		let mut position = self.0.last();
-		let mut insert_index =  None;
-		while let Some(index) = position {
-			let last = self.0.get_state(index);
-			if at > &last {
-				break;
-			}
-			if at == &last {
-				let mut last = self.0.get(index);
-				let value = value.into_storage();
-				if last.value == value {
-					return UpdateResult::Unchanged;
-				}
-				last.value = value;
-				self.0.emplace(index, last);
-				return UpdateResult::Changed(());
-			}
-			insert_index = Some(index);
-			position = self.0.previous_index(index);
-		}
-		let value = value.into_storage();
-		if let Some(index) = insert_index {
-			self.0.insert(index, HistoriedValue {value, state: at.clone()});
-		} else {
-			self.0.push(HistoriedValue {value, state: at.clone()});
-		}
-		UpdateResult::Changed(())
-	}
-
-	fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
-		if let Some(index) = self.0.last() {
-			let last = self.0.get_state(index);
-			if &last > at {
-				return None;
-			}
-			if at == &last {
-				let mut last = self.0.get(index);
-				let value = value.into_storage();
-				if last.value == value {
-					return Some(UpdateResult::Unchanged);
-				}
-				if !allow_overwrite {
-					return None;
-				}
-				last.value = value;
-				self.0.emplace(index, last);
-				return Some(UpdateResult::Changed(()));
-			}
-		}
-		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
-		Some(UpdateResult::Changed(()))
-	}
-	fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
-		if let Some(index) = self.0.last() {
-			let last = self.0.get_state(index);
-			if &last > at {
-				return false;
-			}
-			if at == &last {
-				if let Some(overwrite) = value {
-					let last = self.0.get(index);
-					// Non negligeable cost in some case: TODO consider skipping this test.
-					// Or use ValueRef
-					let last_value = V::from_storage(last.value);
-					if overwrite != &last_value {
-						return false;
-					}
-				}
-			}
-		}
-		true
-	}
 }
 
 impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
@@ -522,28 +449,6 @@ impl<V: ValueRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMe
 	}
 }
 
-impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalDataMut<V> for Linear<V, S, D> {
-	type IndexConditional = Self::Index;
-	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
-		self.can_if_inner(no_overwrite, at)
-	}
-	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
-		self.set_if_inner(value, at, true)
-	}
-
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
-		self.set_if_inner(value, at, false)
-	}
-}
-
-impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceDataMut<V> for Linear<V, S, D> {
-	type IndexForce = Self::Index;
-
-	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
-		self.force_set(value, at)
-	}
-}
-
 
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -636,6 +541,120 @@ pub mod aggregate {
 		}
 	}
 }
+
+#[cfg(feature = "conditional-data")]
+pub mod conditional {
+	use super::*;
+	use crate::historied::conditional::ConditionalDataMut;
+
+	impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalDataMut<V> for Linear<V, S, D> {
+		type IndexConditional = Self::Index;
+		fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
+			self.can_if_inner(no_overwrite, at)
+		}
+		fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
+			self.set_if_inner(value, at, true)
+		}
+
+		fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>> {
+			self.set_if_inner(value, at, false)
+		}
+	}
+
+	impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+		fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
+			if let Some(index) = self.0.last() {
+				let last = self.0.get_state(index);
+				if &last > at {
+					return None;
+				}
+				if at == &last {
+					let mut last = self.0.get(index);
+					let value = value.into_storage();
+					if last.value == value {
+						return Some(UpdateResult::Unchanged);
+					}
+					if !allow_overwrite {
+						return None;
+					}
+					last.value = value;
+					self.0.emplace(index, last);
+					return Some(UpdateResult::Changed(()));
+				}
+			}
+			self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
+			Some(UpdateResult::Changed(()))
+		}
+
+		fn can_if_inner(&self, value: Option<&V>, at: &S) -> bool {
+			if let Some(index) = self.0.last() {
+				let last = self.0.get_state(index);
+				if &last > at {
+					return false;
+				}
+				if at == &last {
+					if let Some(overwrite) = value {
+						let last = self.0.get(index);
+						// Non negligeable cost in some case: TODO consider skipping this test.
+						// Or use ValueRef
+						let last_value = V::from_storage(last.value);
+						if overwrite != &last_value {
+							return false;
+						}
+					}
+				}
+			}
+			true
+		}
+	}
+}
+
+#[cfg(feature = "force-data")]
+pub mod force {
+	use super::*;
+	use crate::historied::force::ForceDataMut;
+
+	impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceDataMut<V> for Linear<V, S, D> {
+		type IndexForce = Self::Index;
+
+		fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
+			self.force_set(value, at)
+		}
+	}
+
+	impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+		fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
+			let mut position = self.0.last();
+			let mut insert_index =  None;
+			while let Some(index) = position {
+				let last = self.0.get_state(index);
+				if at > &last {
+					break;
+				}
+				if at == &last {
+					let mut last = self.0.get(index);
+					let value = value.into_storage();
+					if last.value == value {
+						return UpdateResult::Unchanged;
+					}
+					last.value = value;
+					self.0.emplace(index, last);
+					return UpdateResult::Changed(());
+				}
+				insert_index = Some(index);
+				position = self.0.previous_index(index);
+			}
+			let value = value.into_storage();
+			if let Some(index) = insert_index {
+				self.0.insert(index, HistoriedValue {value, state: at.clone()});
+			} else {
+				self.0.push(HistoriedValue {value, state: at.clone()});
+			}
+			UpdateResult::Changed(())
+		}
+	}
+}
+
 #[cfg(test)]
 mod test {
 	use super::*;

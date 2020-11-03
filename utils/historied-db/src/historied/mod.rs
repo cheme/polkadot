@@ -211,6 +211,7 @@ pub trait DataMut<V: Value>: Data<V> + Context {
 
 	/// Index a single history item.
 	/// TODO this type and trait StateIndex are not very relevant.
+	/// TODO move to Data?
 	type Index;
 
 	/// GC strategy that can be applied.
@@ -251,37 +252,6 @@ pub trait DataRefMut<V: Value>: DataMut<V> {
 	/// Similar to value set but returning a pointer on replaced or deleted value.
 	/// If the value is change but history is kept (new state), no pointer is returned.
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>>;
-}
-
-/// Same as `DataMut` but allows using unsafe index and failing if incorrect.
-/// This involves some additional computation to check correctness.
-/// It is also usefull when some asumption are not strong enough, for
-/// instance if `DataMut` is subject to concurrent access.
-/// TODO an entry api would be more proper (returning optional entry).
-pub trait ConditionalDataMut<V: Value>: DataMut<V> {
-	/// Internal index.
-	type IndexConditional;
-
-	/// Does state allow modifying this value.
-	/// If value is added as parameter, we do not allow overwrite.
-	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool;
-
-	/// Do update if state allows it, otherwhise return None.
-	fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
-
-	/// Do update if state allows it and we are not erasing an existing value, otherwhise return None.
-	fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
-}
-
-/// Setting value is usually done on latest state for an history.
-/// This trait allow setting values in the past, this is usually
-/// not a good idea to maintain state coherency.
-pub trait ForceDataMut<V: Value>: DataMut<V> {
-	/// Internal index.
-	type IndexForce;
-
-	/// Do update if state allows it, otherwhise return None.
-	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()>;
 }
 
 /// An entry at a given history index.
@@ -360,5 +330,46 @@ impl<'a, V: 'a, S: Clone> HistoriedValue<V, S> {
 impl<V, S> From<(V, S)> for HistoriedValue<V, S> {
 	fn from(input: (V, S)) -> HistoriedValue<V, S> {
 		HistoriedValue { value: input.0, state: input.1 }
+	}
+}
+
+#[cfg(feature = "conditional-data")]
+pub mod conditional {
+	use super::*;
+
+	/// Same as `DataMut` but allows using unsafe index and failing if incorrect.
+	/// This involves some additional computation to check correctness.
+	/// It is also usefull when some asumption are not strong enough, for
+	/// instance if `DataMut` is subject to concurrent access.
+	/// TODO an entry api would be more proper (returning optional entry).
+	pub trait ConditionalDataMut<V: Value>: DataMut<V> {
+		/// Internal index.
+		type IndexConditional;
+
+		/// Does state allow modifying this value.
+		/// If value is added as parameter, we do not allow overwrite.
+		fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool;
+
+		/// Do update if state allows it, otherwhise return None.
+		fn set_if_possible(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
+
+		/// Do update if state allows it and we are not erasing an existing value, otherwhise return None.
+		fn set_if_possible_no_overwrite(&mut self, value: V, at: &Self::IndexConditional) -> Option<UpdateResult<()>>;
+	}
+}
+
+#[cfg(feature = "force-data")]
+pub mod force {
+	use super::*;
+
+	/// Setting value is usually done on latest state for an history.
+	/// This trait allow setting values in the past, this is usually
+	/// not a good idea to maintain state coherency.
+	pub trait ForceDataMut<V: Value>: DataMut<V> {
+		/// Internal index.
+		type IndexForce;
+
+		/// Do update if state allows it, otherwhise return None.
+		fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()>;
 	}
 }
