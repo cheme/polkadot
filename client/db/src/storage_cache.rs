@@ -187,7 +187,7 @@ impl<B: BlockT> StateDBMut<StorageKey, Option<StorageValue>> for ExperimentalCac
 			},
 			ExpCacheConf::GCRange(width) => {
 				let latest = self.management.latest_state();
-				if self.management.apply_drop_from_latest(width) {
+				if self.management.apply_drop_from_latest(width as u64, true) {
 					let mut to_rem = Vec::new();
 					let mut decrease = 0;
 					if let Some(gc) = self.management.get_gc() {
