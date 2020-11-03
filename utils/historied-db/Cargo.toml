@@ -35,6 +35,8 @@ conditional-data = []
 # Force set could be unused and
 # is not compatible with aggregate
 force-data = []
+# Would need benches to be use with confidence.
+encoded-array-backend = []
 std = [
   "codec/std",
 	"sp-std/std",

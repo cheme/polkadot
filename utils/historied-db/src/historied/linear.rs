@@ -32,6 +32,7 @@ use sp_std::vec::Vec;
 use sp_std::ops::{SubAssign, Range};
 use codec::{Encode, Decode, Input};
 use crate::backend::{LinearStorage, LinearStorageMem, LinearStorageSlice, LinearStorageRange};
+#[cfg(feature = "encoded-array-backend")]
 use crate::backend::encoded_array::EncodedArrayValue;
 use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use derivative::Derivative;
@@ -128,13 +129,6 @@ impl<V, S, D: AsMut<[u8]>> AsMut<[u8]> for Linear<V, S, D> {
 impl<V, S, D: Clone> Clone for Linear<V, S, D> {
 	fn clone(&self) -> Self {
 		Linear(self.0.clone(), PhantomData)
-	}
-}
-
-impl<V, S, D: EncodedArrayValue> EncodedArrayValue for Linear<V, S, D> {
-	fn from_slice(slice: &[u8]) -> Self {
-		let v = D::from_slice(slice);
-		Linear(v, PhantomData)
 	}
 }
 
@@ -652,6 +646,14 @@ pub mod force {
 			}
 			UpdateResult::Changed(())
 		}
+	}
+}
+
+#[cfg(feature = "encoded-array-backend")]
+impl<V, S, D: EncodedArrayValue> EncodedArrayValue for Linear<V, S, D> {
+	fn from_slice(slice: &[u8]) -> Self {
+		let v = D::from_slice(slice);
+		Linear(v, PhantomData)
 	}
 }
 

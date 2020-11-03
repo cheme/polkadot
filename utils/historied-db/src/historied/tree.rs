@@ -891,6 +891,7 @@ mod test {
 	use crate::InitFrom;
 	use super::aggregate::Sum as TreeSum;
 
+	#[cfg(feature = "encoded-array-backend")]
 	#[test]
 	fn compile_double_encoded_single() {
 		use crate::backend::encoded_array::{EncodedArray, NoVersion};
@@ -918,6 +919,7 @@ mod test {
 		bd.get_lookup(1usize);
 	}
 
+	#[cfg(feature = "encoded-array-backend")]
 	#[test]
 	fn compile_double_encoded_node() {
 		use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
@@ -966,7 +968,7 @@ mod test {
 		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
 	}
 
-
+	#[cfg(feature = "encoded-array-backend")]
 	#[test]
 	fn compile_double_encoded_node_2() {
 		use crate::backend::in_memory::MemoryOnly;
