@@ -29,7 +29,7 @@ pub trait Sum<V: SumValue>: Data<V::Value> {
 	fn get_sum(&self, at: &Self::S) -> Option<V> {
 		let mut builder = V::new();
 		let mut changes = Vec::new();
-		if !self.get_sums(at, &mut changes) {
+		if !self.get_sum_values(at, &mut changes) {
 			debug_assert!(changes.len() == 0); // Incoherent state no origin for diff
 		}
 		if changes.len() == 0 {
@@ -44,7 +44,7 @@ pub trait Sum<V: SumValue>: Data<V::Value> {
 	/// Accumulate all changes for this state.
 	/// Changes are written in reverse order into `changes`.
 	/// Return `true` if a complete change was written.
-	fn get_sums(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool;
+	fn get_sum_values(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool;
 }
 
 /// An item that can be build from consecutives

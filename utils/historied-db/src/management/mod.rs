@@ -16,6 +16,13 @@
 // limitations under the License.
 
 //! History state storage and management.
+//!
+//! This associate a tag (for instance a block hash),
+//! with historical state index.
+//! Tags are usually associated with the generic parameter `H`.
+//!
+//! It allows building different states from state index
+//! for different operation on historical data.
 
 /// Forkable state management implementations.
 pub mod tree;

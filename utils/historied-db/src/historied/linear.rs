@@ -23,8 +23,8 @@
 //!
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
-use super::{HistoriedValue, Data, Value, InMemoryValueRange, InMemoryData,
-	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut,
+use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
+	DataSlices, DataRefMut, ConditionalDataMut, Item, ItemRef, ForceDataMut,
 	aggregate::{Sum as DataSum, SumValue}};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
@@ -212,72 +212,8 @@ impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> f
 	}
 }
 
-/// Use linear as linear diff. TODO put in its own module?
-///
-/// If at some point `SumValue` and `Item` get merged, this would not be needed.
-/// (there is already need to have some const related to `SumValue` in `Item`
-/// to forbid some operations (gc and migrate)).
-pub struct LinearLeftSum<'a, V: SumValue, S, D>(pub &'a Linear<V::Value, S, D>);
-
-impl<'a, V: SumValue, S, D> sp_std::ops::Deref for LinearLeftSum<'a, V, S, D> {
-	type Target = Linear<V::Value, S, D>;
-
-	fn deref(&self) -> &Linear<V::Value, S, D> {
-		&self.0
-	}
-}
-
-impl<'a, V, S, D> Data<V::Value> for LinearLeftSum<'a, V, S, D>
-	where
-		V: SumValue,
-		V::Value: Clone,
-		S: LinearState,
-		D: LinearStorage<<V::Value as Item>::Storage, S>,
-{
-	type S = S;
-
-	fn get(&self, at: &Self::S) -> Option<V::Value> {
-		self.0.get(at)
-	}
-
-	fn contains(&self, at: &Self::S) -> bool {
-		self.0.contains(at)
-	}
-
-	fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
-impl<'a, V, S, D> DataSum<V> for LinearLeftSum<'a, V, S, D>
-	where
-		V: SumValue,
-		V::Value: Clone,
-		S: LinearState,
-		D: LinearStorage<<V::Value as Item>::Storage, S>,
-{
-	fn get_sums(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
-		for index in self.0.0.rev_index_iter() {
-			// TODO could really use get_ref here (would need trait variant,
-			// so keep up with copy for now). Also would need builder from
-			// ref (which is usefull for some impl).
-			let HistoriedValue { value, state } = self.0.0.get(index)
-				.map(V::Value::from_storage);
-			if state.exists(at) {
-				if V::is_complete(&value) {
-					changes.push(value);
-					return true;
-				} else {
-					changes.push(value);
-				}
-			}
-		}
-		false
-	}
-}
-
 // TODO should it be ItemRef?
-impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> InMemoryValueRange<S> for Linear<V, S, D> {
+impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRanges<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
 			for index in inner.rev_index_iter() {
@@ -433,19 +369,19 @@ impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> InMemoryData<V> for Linear<V, S, D> {
+impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> DataRef<V> for Linear<V, S, D> {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
 		self.get_adapt::<_, RefVecAdapter>(at).map(ItemRef::from_storage_ref)
 	}
 }
 
-impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> InMemoryValueSlice<Vec<u8>> for Linear<Vec<u8>, S, D> {
+impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> DataSlices<Vec<u8>> for Linear<Vec<u8>, S, D> {
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]> {
 		self.get_adapt::<_, SliceAdapter>(at)
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> Value<V> for Linear<V, S, D> {
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> DataMut<V> for Linear<V, S, D> {
 	type SE = Latest<S>;
 	type Index = S;
 	type GC = LinearGC<S>;
@@ -575,7 +511,7 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::St
 	}
 }
 
-impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> InMemoryValue<V> for Linear<V, S, D> {
+impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> DataRefMut<V> for Linear<V, S, D> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
 		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| V::from_storage_ref_mut(h.value))
@@ -586,7 +522,7 @@ impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalValueMut<V> for Linear<V, S, D> {
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalDataMut<V> for Linear<V, S, D> {
 	type IndexConditional = Self::Index;
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
 		self.can_if_inner(no_overwrite, at)
@@ -600,7 +536,7 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::St
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceValueMut<V> for Linear<V, S, D> {
+impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceDataMut<V> for Linear<V, S, D> {
 	type IndexForce = Self::Index;
 
 	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
@@ -632,6 +568,74 @@ impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<V
 	}
 }
 
+
+pub mod aggregate {
+	use super::*;
+
+	/// Use linear as linear diff. TODO put in its own module?
+	///
+	/// If at some point `SumValue` and `Item` get merged, this would not be needed.
+	/// (there is already need to have some const related to `SumValue` in `Item`
+	/// to forbid some operations (gc and migrate)).
+	pub struct Sum<'a, V: SumValue, S, D>(pub &'a Linear<V::Value, S, D>);
+
+	impl<'a, V: SumValue, S, D> sp_std::ops::Deref for Sum<'a, V, S, D> {
+		type Target = Linear<V::Value, S, D>;
+
+		fn deref(&self) -> &Linear<V::Value, S, D> {
+			&self.0
+		}
+	}
+
+	impl<'a, V, S, D> Data<V::Value> for Sum<'a, V, S, D>
+		where
+			V: SumValue,
+			V::Value: Clone,
+			S: LinearState,
+			D: LinearStorage<<V::Value as Item>::Storage, S>,
+	{
+		type S = S;
+
+		fn get(&self, at: &Self::S) -> Option<V::Value> {
+			self.0.get(at)
+		}
+
+		fn contains(&self, at: &Self::S) -> bool {
+			self.0.contains(at)
+		}
+
+		fn is_empty(&self) -> bool {
+			self.0.is_empty()
+		}
+	}
+
+	impl<'a, V, S, D> DataSum<V> for Sum<'a, V, S, D>
+		where
+			V: SumValue,
+			V::Value: Clone,
+			S: LinearState,
+			D: LinearStorage<<V::Value as Item>::Storage, S>,
+	{
+		fn get_sum_values(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
+			for index in self.0.0.rev_index_iter() {
+				// TODO could really use get_ref here (would need trait variant,
+				// so keep up with copy for now). Also would need builder from
+				// ref (which is usefull for some impl).
+				let HistoriedValue { value, state } = self.0.0.get(index)
+					.map(V::Value::from_storage);
+				if state.exists(at) {
+					if V::is_complete(&value) {
+						changes.push(value);
+						return true;
+					} else {
+						changes.push(value);
+					}
+				}
+			}
+			false
+		}
+	}
+}
 #[cfg(test)]
 mod test {
 	use super::*;

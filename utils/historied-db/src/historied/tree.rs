@@ -20,12 +20,12 @@
 // TODO remove "previous code" expect.
 
 #[cfg(feature = "need_implementation_changes")]
-use super::ConditionalValueMut;
-use super::{HistoriedValue, Data, Value, InMemoryData, InMemoryValue, ForceValueMut,
-	InMemoryValueSlice, InMemoryValueRange, UpdateResult, Item, ItemRef,
+use super::ConditionalDataMut;
+use super::{HistoriedValue, Data, DataMut, DataRef, DataRefMut, ForceDataMut,
+	DataSlices, DataSliceRanges, UpdateResult, Item, ItemRef,
 	aggregate::{Sum as DataSum, SumValue}};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
-use crate::historied::linear::{Linear, LinearState, LinearGC, LinearLeftSum};
+use crate::historied::linear::{Linear, LinearState, LinearGC, aggregate::Sum as LinearSum};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
 use sp_std::ops::SubAssign;
 use num_traits::One;
@@ -187,95 +187,7 @@ impl<
 	}
 }
 
-/// Tree access to Sum structure.
-///
-/// The aggregate must be applied in a non associative
-/// non commutative way (operations only apply
-/// from oldest zero item to the target state).
-/// Good for diff, but can be use for other use case
-/// with simple implementation (eg list). 
-pub struct TreeLeftSum<'a, I, BI, V: SumValue, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Value, D, BD>);
 
-impl<'a, I, BI, V: SumValue, D: Context, BD: Context> sp_std::ops::Deref for TreeLeftSum<'a, I, BI, V, D, BD> {
-	type Target = Tree<I, BI, V::Value, D, BD>;
-
-	fn deref(&self) -> &Tree<I, BI, V::Value, D, BD> {
-		&self.0
-	}
-}
-
-impl<'a, I, BI, V, D, BD> Data<V::Value> for TreeLeftSum<'a, I, BI, V, D, BD>
-	where
-		I: Default + Eq + Ord + Clone,
-		BI: LinearState + SubAssign<BI> + One,
-		V: SumValue,
-		V::Value: Item + Clone,
-		D: LinearStorage<Linear<V::Value, BI, BD>, I>,
-		BD: LinearStorage<<V::Value as Item>::Storage, BI>,
-{
-	type S = ForkPlan<I, BI>;
-
-	fn get(&self, at: &Self::S) -> Option<V::Value> {
-		self.0.get(at)
-	}
-
-	fn contains(&self, at: &Self::S) -> bool {
-		self.0.contains(at)
-	}
-
-	fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
-impl<'a, I, BI, V, D, BD> DataSum<V> for TreeLeftSum<'a, I, BI, V, D, BD>
-	where
-		I: Default + Eq + Ord + Clone,
-		BI: LinearState + SubAssign<BI> + One,
-		V: SumValue,
-		V::Value: Item + Clone,
-		D: LinearStorage<Linear<V::Value, BI, BD>, I>,
-		BD: LinearStorage<<V::Value as Item>::Storage, BI>,
-{
-	fn get_sums(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
-		// could also exten tree_get macro but it will end up being hard to read,
-		// so copying loop here.
-		let mut next_branch_index = self.branches.last();
-		for (state_branch_range, state_branch_index) in at.iter() {
-			while let Some(branch_ix) = next_branch_index {
-				let branch_index = &self.branches.get_state(branch_ix);
-				if branch_index < &state_branch_index {
-					break;
-				} else if branch_index == &state_branch_index {
-					// TODO add a lower bound check (maybe debug_assert it only).
-					let mut upper_bound = state_branch_range.end.clone();
-					upper_bound -= BI::one();
-					// TODO get_ref variant?
-					let branch = self.branches.get(branch_ix).value;
-					if LinearLeftSum::<V, _, _>(&branch).get_sums(&upper_bound, changes) {
-						return true;
-					}
-				}
-				next_branch_index = self.branches.previous_index(branch_ix);
-			}
-		}
-
-		// composite part.
-		while let Some(branch_ix) = next_branch_index {
-			let branch_index = &self.branches.get_state(branch_ix);
-			if branch_index <= &at.composite_treshold.0 {
-				let branch = self.branches.get(branch_ix).value;
-				if LinearLeftSum::<V, _, _>(&branch).get_sums(&at.composite_treshold.1, changes) {
-					return true;
-				}
-			}
-			next_branch_index = self.branches.previous_index(branch_ix);
-		}
-	
-		false
-	}
-}
-	
 
 
 impl<
@@ -284,7 +196,7 @@ impl<
 	V: ItemRef + Clone,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI>,
-> InMemoryData<V> for Tree<I, BI, V, D, BD> {
+> DataRef<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _| r );
 }
 
@@ -294,7 +206,7 @@ impl<
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
-> Value<V> for Tree<I, BI, V, D, BD> {
+> DataMut<V> for Tree<I, BI, V, D, BD> {
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
 	type GC = MultipleGc<I, BI>;
@@ -637,7 +549,7 @@ impl<
 	V: ItemRef + Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI, Context = D::Context>,
-> InMemoryValue<V> for Tree<I, BI, V, D, BD> {
+> DataRefMut<V> for Tree<I, BI, V, D, BD> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
 		for branch_ix in self.branches.rev_index_iter() {
@@ -762,7 +674,7 @@ impl<
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
-> ForceValueMut<V> for Tree<I, BI, V, D, BD> {
+> ForceDataMut<V> for Tree<I, BI, V, D, BD> {
 	type IndexForce = Self::Index;
 
 	fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()> {
@@ -819,7 +731,7 @@ impl<
 	V: Item + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
-> ConditionalValueMut<V> for Tree<I, BI, V, D, BD> {
+> ConditionalDataMut<V> for Tree<I, BI, V, D, BD> {
 	// TODO this would require to get all branch index that are children
 	// of this index, and also their current upper bound.
 	// That can be fairly costy.
@@ -861,7 +773,7 @@ impl<
 	V: Item + Clone + AsRef<[u8]> + AsMut<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
 	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V::Storage, BI>,
-> InMemoryValueSlice<V> for Tree<I, BI, V, D, BD> {
+> DataSlices<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(
 		get_slice,
 		&[u8],
@@ -871,12 +783,105 @@ impl<
 	);
 }
 
+pub mod aggregate {
+	use super::*;
+
+	/// Tree access to Sum structure.
+	///
+	/// The aggregate must be applied in a non associative
+	/// non commutative way (operations only apply
+	/// from oldest zero item to the target state).
+	/// Good for diff, but can be use for other use case
+	/// with simple implementation (eg list). 
+	pub struct Sum<'a, I, BI, V: SumValue, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Value, D, BD>);
+
+	impl<'a, I, BI, V: SumValue, D: Context, BD: Context> sp_std::ops::Deref for Sum<'a, I, BI, V, D, BD> {
+		type Target = Tree<I, BI, V::Value, D, BD>;
+
+		fn deref(&self) -> &Tree<I, BI, V::Value, D, BD> {
+			&self.0
+		}
+	}
+
+	impl<'a, I, BI, V, D, BD> Data<V::Value> for Sum<'a, I, BI, V, D, BD>
+		where
+			I: Default + Eq + Ord + Clone,
+			BI: LinearState + SubAssign<BI> + One,
+			V: SumValue,
+			V::Value: Item + Clone,
+			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
+			BD: LinearStorage<<V::Value as Item>::Storage, BI>,
+	{
+		type S = ForkPlan<I, BI>;
+
+		fn get(&self, at: &Self::S) -> Option<V::Value> {
+			self.0.get(at)
+		}
+
+		fn contains(&self, at: &Self::S) -> bool {
+			self.0.contains(at)
+		}
+
+		fn is_empty(&self) -> bool {
+			self.0.is_empty()
+		}
+	}
+
+	impl<'a, I, BI, V, D, BD> DataSum<V> for Sum<'a, I, BI, V, D, BD>
+		where
+			I: Default + Eq + Ord + Clone,
+			BI: LinearState + SubAssign<BI> + One,
+			V: SumValue,
+			V::Value: Item + Clone,
+			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
+			BD: LinearStorage<<V::Value as Item>::Storage, BI>,
+	{
+		fn get_sum_values(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
+			// could also exten tree_get macro but it will end up being hard to read,
+			// so copying loop here.
+			let mut next_branch_index = self.branches.last();
+			for (state_branch_range, state_branch_index) in at.iter() {
+				while let Some(branch_ix) = next_branch_index {
+					let branch_index = &self.branches.get_state(branch_ix);
+					if branch_index < &state_branch_index {
+						break;
+					} else if branch_index == &state_branch_index {
+						// TODO add a lower bound check (maybe debug_assert it only).
+						let mut upper_bound = state_branch_range.end.clone();
+						upper_bound -= BI::one();
+						// TODO get_ref variant?
+						let branch = self.branches.get(branch_ix).value;
+						if LinearSum::<V, _, _>(&branch).get_sum_values(&upper_bound, changes) {
+							return true;
+						}
+					}
+					next_branch_index = self.branches.previous_index(branch_ix);
+				}
+			}
+
+			// composite part.
+			while let Some(branch_ix) = next_branch_index {
+				let branch_index = &self.branches.get_state(branch_ix);
+				if branch_index <= &at.composite_treshold.0 {
+					let branch = self.branches.get(branch_ix).value;
+					if LinearSum::<V, _, _>(&branch).get_sum_values(&at.composite_treshold.1, changes) {
+						return true;
+					}
+				}
+				next_branch_index = self.branches.previous_index(branch_ix);
+			}
+		
+			false
+		}
+	}
+}
 
 #[cfg(test)]
 mod test {
 	use super::*;
 	use crate::management::tree::test::{test_states, test_states_st};
 	use crate::InitFrom;
+	use super::aggregate::Sum as TreeSum;
 
 	#[test]
 	fn compile_double_encoded_single() {
@@ -1453,7 +1458,7 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
 
-		let item = TreeLeftSum::<_, _, BytesDelta, _, _>(&item);
+		let item = TreeSum::<_, _, BytesDelta, _, _>(&item);
 		assert_eq!(item.get_sum(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
 		assert_eq!(item.get_sum(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
 		assert_eq!(item.get_sum(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
@@ -1501,7 +1506,7 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
 
-		let item = TreeLeftSum::<_, _, MapDelta<u8, u8>, _, _>(&item);
+		let item = TreeSum::<_, _, MapDelta<u8, u8>, _, _>(&item);
 		assert_eq!(item.get_sum(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
 		assert_eq!(item.get_sum(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
 		assert_eq!(item.get_sum(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));

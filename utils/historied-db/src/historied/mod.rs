@@ -19,8 +19,7 @@
 
 #[cfg(not(feature = "std"))]
 use sp_std::vec::Vec;
-use crate::UpdateResult;
-use crate::Latest;
+use crate::{UpdateResult, StateIndex};
 use codec::{Encode, Decode, Input};
 use sp_std::ops::Range;
 use crate::{Context, DecodeWithContext, Trigger};
@@ -47,17 +46,17 @@ pub trait Data<V: Item> {
 // TODO EMCH refact with 'a for inner value
 // and a get value type (see test on rust playground).
 // So we only got Data type.
-pub trait InMemoryData<V: Item>: Data<V> {
+pub trait DataRef<V: Item>: Data<V> {
 	/// Get reference to the value at this state.
 	fn get_ref(&self, at: &Self::S) -> Option<&V>;
 }
 
-pub trait InMemoryValueSlice<V: Item>: Data<V> {
+pub trait DataSlices<V: Item>: Data<V> {
 	/// Get reference to the value at this state.
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
 }
 
-pub trait InMemoryValueRange<S> {
+pub trait DataSliceRanges<S> {
 	/// Get reference to the value from which this slice can be build.
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>>;
 }
@@ -202,8 +201,8 @@ default_item!(u32);
 default_item!(u64);
 default_item!(u128);
 
-/// Trait for historied value.
-pub trait Value<V: Item>: Data<V> + Context {
+/// Trait for mutable historied data.
+pub trait DataMut<V: Item>: Data<V> + Context {
 	/// State to use for changing value.
 	/// We use a different state than
 	/// for querying as it can use different
@@ -245,7 +244,7 @@ pub trait Value<V: Item>: Data<V> + Context {
 }
 
 /// Returns pointer to in memory value.
-pub trait InMemoryValue<V: Item>: Value<V> {
+pub trait DataRefMut<V: Item>: DataMut<V> {
 	/// Get latest value, can apply updates.
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V>;
 
@@ -254,12 +253,12 @@ pub trait InMemoryValue<V: Item>: Value<V> {
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>>;
 }
 
-/// Same as `Value` but allows using unsafe index and failing if incorrect.
+/// Same as `DataMut` but allows using unsafe index and failing if incorrect.
 /// This involves some additional computation to check correctness.
 /// It is also usefull when some asumption are not strong enough, for
-/// instance if `Value` is subject to concurrent access.
+/// instance if `DataMut` is subject to concurrent access.
 /// TODO an entry api would be more proper (returning optional entry).
-pub trait ConditionalValueMut<V: Item>: Value<V> {
+pub trait ConditionalDataMut<V: Item>: DataMut<V> {
 	/// Internal index.
 	type IndexConditional;
 
@@ -277,7 +276,7 @@ pub trait ConditionalValueMut<V: Item>: Value<V> {
 /// Setting value is usually done on latest state for an history.
 /// This trait allow setting values in the past, this is usually
 /// not a good idea to maintain state coherency.
-pub trait ForceValueMut<V: Item>: Value<V> {
+pub trait ForceDataMut<V: Item>: DataMut<V> {
 	/// Internal index.
 	type IndexForce;
 
@@ -361,23 +360,5 @@ impl<'a, V: 'a, S: Clone> HistoriedValue<V, S> {
 impl<V, S> From<(V, S)> for HistoriedValue<V, S> {
 	fn from(input: (V, S)) -> HistoriedValue<V, S> {
 		HistoriedValue { value: input.0, state: input.1 }
-	}
-}
-
-
-/// Associate a state index for a given state reference
-pub trait StateIndex<I> {
-	/// Get individal state index.
-	fn index(&self) -> I;
-	/// Get reference to individal state index.
-	fn index_ref(&self) -> &I;
-}
-
-impl<S: Clone> StateIndex<S> for Latest<S> {
-	fn index(&self) -> S {
-		self.latest().clone()
-	}
-	fn index_ref(&self) -> &S {
-		self.latest()
 	}
 }

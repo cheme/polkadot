@@ -153,6 +153,7 @@ pub struct BranchRange<I> {
 pub struct Tree<I: Ord, BI, S: TreeManagementStorage> {
 	// TODO this could probably be cleared depending on S::ACTIVE.
 	// -> on gc ?
+	/// Maps the different branches with their index.
 	pub(crate) storage: MappedDbMap<I, BranchState<I, BI>, S::Storage, S::TreeState>,
 	pub(crate) meta: MappedDbVariable<TreeMeta<I, BI>, S::Storage, S::TreeMeta>,
 	/// serialize implementation
@@ -332,7 +333,7 @@ impl<I: Ord, BI, S: TreeManagementStorage> Tree<I, BI, S> {
 #[cfg_attr(test, derivative(PartialEq(bound="H: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
 pub struct TreeManagement<H: Ord, I: Ord, BI, S: TreeManagementStorage> {
 	state: Tree<I, BI, S>,
-	/// Map a given external state to its internal state representation.
+	/// Map a given tag to its state index.
 	ext_states: MappedDbMap<H, (I, BI), S::Storage, S::Mapping>,
 	touched_gc: MappedDbVariable<bool, S::Storage, S::TouchedGC>, // TODO currently damned unused thing??
 	current_gc: MappedDbVariable<TreeMigrate<I, BI>, S::Storage, S::CurrentGC>, // TODO currently unused??

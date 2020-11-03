@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use crate::{Latest, Ref};
 use crate::management::{Management, ManagementRef, ForkableManagement, Migrate};
-use crate::db_traits::{StateDB, InMemoryStateDBRef, StateDBRef};
+use crate::db_traits::{StateDBMut, StateDBRef, StateDB};
 use super::{StateInput, StateIndex};
 
 struct DbElt<K, V> {
@@ -62,7 +62,7 @@ impl<K, V> Db<K, V> {
 /// Note that this could be simplified to just the index.
 type Query = Vec<StateIndex>;
 
-impl<K: Hash + Eq, V: Clone> StateDBRef<K, V> for Db<K, V> {
+impl<K: Hash + Eq, V: Clone> StateDB<K, V> for Db<K, V> {
 	type S = Query;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -74,7 +74,7 @@ impl<K: Hash + Eq, V: Clone> StateDBRef<K, V> for Db<K, V> {
 	}
 }
 
-impl<K: Hash + Eq, V> InMemoryStateDBRef<K, V> for Db<K, V> {
+impl<K: Hash + Eq, V> StateDBRef<K, V> for Db<K, V> {
 	type S = Query;
 
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V> {
@@ -88,7 +88,7 @@ impl<K: Hash + Eq, V> InMemoryStateDBRef<K, V> for Db<K, V> {
 	}
 }
 
-impl<K: Hash + Eq, V: Clone> StateDB<K, V> for Db<K, V> {
+impl<K: Hash + Eq, V: Clone> StateDBMut<K, V> for Db<K, V> {
 	type SE = Latest<StateIndex>;
 	type GC = ();
 	type Migrate = ();

@@ -18,12 +18,12 @@
 //! Traits for Db containing historied value.
 
 use hash_db::{PlainDBRef, PlainDB};
-use crate::{UpdateResult, Context,
-	historied::{Value, Data, InMemoryData, Item, StateIndex}};
+use crate::{UpdateResult, Context, StateIndex,
+	historied::{DataMut, Data, DataRef, Item}};
 use sp_std::marker::PhantomData;
 
 /// Trait for immutable reference of a plain key value db.
-pub trait StateDBRef<K, V> {
+pub trait StateDB<K, V> {
 	/// State for this db.
 	type S;
 
@@ -35,8 +35,8 @@ pub trait StateDBRef<K, V> {
 	fn contains(&self, key: &K, at: &Self::S) -> bool;
 }
 
-/// Variant of `StateDBRef` to return value without copy.
-pub trait InMemoryStateDBRef<K, V> {
+/// Variant of `StateDB` to return value without copy.
+pub trait StateDBRef<K, V> {
 	/// State for this db.
 	type S;
 
@@ -45,8 +45,8 @@ pub trait InMemoryStateDBRef<K, V> {
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V>;
 }
 
-pub trait StateDB<K, V>: StateDBRef<K, V> {
-		// TODO associated type from Value??
+pub trait StateDBMut<K, V>: StateDB<K, V> {
+		// TODO associated type from DataMut??
 	/// State to use here.
 	/// We use a different state than
 	/// for the ref as it can use different
@@ -84,7 +84,7 @@ impl<K: Ord, V, D: Context> BTreeMap<K, V, D> {
 	}
 }
 
-impl<K: Ord, V: Item + Clone, D: Data<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, D> {
+impl<K: Ord, V: Item + Clone, D: Data<V> + Context> StateDB<K, V> for BTreeMap<K, V, D> {
 	type S = D::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -100,7 +100,7 @@ impl<K: Ord, V: Item + Clone, D: Data<V> + Context> StateDBRef<K, V> for BTreeMa
 }
 
 // note that the constraint on state db ref for the associated type is bad (forces V as clonable).
-impl<K: Ord, V: Item, D: InMemoryData<V> + Context> InMemoryStateDBRef<K, V> for BTreeMap<K, V, D> {
+impl<K: Ord, V: Item, D: DataRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, D> {
 	type S = D::S;
 
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V> {
@@ -109,7 +109,7 @@ impl<K: Ord, V: Item, D: InMemoryData<V> + Context> InMemoryStateDBRef<K, V> for
 	}
 }
 
-impl<K: Ord + Clone, V: Item + Clone + Eq, D: Value<V>> StateDB<K, V> for BTreeMap<K, V, D> {
+impl<K: Ord + Clone, V: Item + Clone + Eq, D: DataMut<V>> StateDBMut<K, V> for BTreeMap<K, V, D> {
 	type SE = D::SE;
 	type GC = D::GC;
 	type Migrate = D::Migrate;
@@ -168,7 +168,7 @@ pub struct PlainDBState<K, DB, D, S> {
 	_ph: PhantomData<D>,
 }
 
-impl<K, V: Item + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDBRef<K, V> for PlainDBState<K, DB, D, S> {
+impl<K, V: Item + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for PlainDBState<K, DB, D, S> {
 	type S = D::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -186,9 +186,9 @@ impl<K, V: Item + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDBRef<K, V> f
 impl<
 	K: Ord + Clone,
 	V: Item + Clone + Eq,
-	D: Value<V, Context = ()>,
+	D: DataMut<V, Context = ()>,
 	DB: PlainDBRef<K, D> + PlainDB<K, D>,
-> StateDB<K, V> for PlainDBState<K, DB, D, D::Index>
+> StateDBMut<K, V> for PlainDBState<K, DB, D, D::Index>
 	where
 			D::Index: Clone + Ord,
 {
@@ -268,4 +268,3 @@ impl<
 		}
 	}
 }
-

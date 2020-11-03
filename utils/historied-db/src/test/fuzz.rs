@@ -21,8 +21,8 @@
 
 use crate::{
 	management::{Management, ForkableManagement, ManagementRef},
-	db_traits::{StateDBRef, StateDB},
-	historied::Value,
+	db_traits::{StateDB, StateDBMut},
+	historied::DataMut,
 };
 use crate::test::{StateInput, InMemoryMgmtSer, InMemoryMgmt};
 

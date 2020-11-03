@@ -195,12 +195,16 @@ impl<'a, V: Clone> Ref<'a, V> {
 	}
 }
 
-/// This is a rather simple way of managing state, as state should not be
-/// invalidated at all (can be change at latest state, also drop but not at 
-/// random state).
+/// State using this struct are seen as latest state.
+///
+/// A latest state is the current last state of a sequence.
 ///
 /// Note that it is only informational and does not guaranty the state
 /// is the latest.
+///
+/// This is a rather simple way of managing state, but relatively
+/// good when working in non concurrent environment.
+///
 /// TODO repr Transparent and cast ptr for tree?
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Latest<S>(S);
@@ -215,5 +219,26 @@ impl<S> Latest<S> {
 	/// Reference to inner state.
 	pub fn latest(&self) -> &S {
 		&self.0
+	}
+}
+
+/// Associate a state index with a given state.
+/// The index is the base unit for a state.
+/// It is the historical position.
+/// When use with a management, it is the value
+/// associated with a tag.
+pub trait StateIndex<I> {
+	/// Get individal state index.
+	fn index(&self) -> I;
+	/// Get reference to individal state index.
+	fn index_ref(&self) -> &I;
+}
+
+impl<S: Clone> StateIndex<S> for Latest<S> {
+	fn index(&self) -> S {
+		self.latest().clone()
+	}
+	fn index_ref(&self) -> &S {
+		self.latest()
 	}
 }
