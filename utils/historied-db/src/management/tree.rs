@@ -509,25 +509,26 @@ impl<
 		}
 	}
 
-/*	// TODO rename to canonicalize or similar naming
-	// TOdO update last_in_use_index
-	pub fn apply_drop_from_latest(&mut self, back: usize) -> bool {
+	pub fn apply_drop_from_latest(&mut self, back: BI, do_prune: bool) -> bool {
 		let latest = self.last_in_use_index.mapping(self.state.ser()).get().clone();
 		let mut switch_index = (latest.0).1.clone();
-		switch_index -= back as u32;
-		let qp = self.state.tree.query_plan_at(latest.0);
-		let mut branch_index = self.state.tree.meta.mapping(&mut self.state.tree.serialize).get().composite_treshold.0.clone();
+		switch_index -= back;
+		let qp = self.state.query_plan_at(latest.0);
+		let mut branch_index = self.state.meta.mapping(&mut self.state.serialize).get().composite_treshold.0.clone();
 		for b in qp.iter() {
 			if b.0.end <= switch_index {
 				branch_index = b.1;
 				break;
 			}
 		}
-		let prune_index = Some(switch_index.clone());
-		// this is the actual operation that should go in a trait TODO EMCH
+		let prune_index = if do_prune {
+			Some(switch_index.clone())
+		} else {
+			None
+		};
 		self.canonicalize(qp, (branch_index, switch_index.clone()), prune_index)
 	}
-*/
+
 	// TODO subfunction in tree (more tree related)? This is a migrate (we change
 	// composite_treshold).
 	pub fn canonicalize(&mut self, branch: ForkPlan<I, BI>, switch_index: (I, BI), prune_index: Option<BI>) -> bool {
