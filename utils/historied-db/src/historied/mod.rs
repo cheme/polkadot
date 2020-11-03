@@ -29,7 +29,7 @@ pub mod tree;
 pub mod aggregate;
 
 /// Trait for historied data.
-pub trait Data<V: Item> {
+pub trait Data<V: Value> {
 	/// State to query for this value.
 	type S;
 
@@ -46,12 +46,12 @@ pub trait Data<V: Item> {
 // TODO EMCH refact with 'a for inner value
 // and a get value type (see test on rust playground).
 // So we only got Data type.
-pub trait DataRef<V: Item>: Data<V> {
+pub trait DataRef<V: Value>: Data<V> {
 	/// Get reference to the value at this state.
 	fn get_ref(&self, at: &Self::S) -> Option<&V>;
 }
 
-pub trait DataSlices<V: Item>: Data<V> {
+pub trait DataSlices<V: Value>: Data<V> {
 	/// Get reference to the value at this state.
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
 }
@@ -62,7 +62,7 @@ pub trait DataSliceRanges<S> {
 }
 
 /// An item of historied value.
-pub trait Item: Sized {
+pub trait Value: Sized {
 	/// This associeted constant defines if a neutral item
 	/// does exist.
 	const NEUTRAL: bool;
@@ -84,7 +84,7 @@ pub trait Item: Sized {
 	fn into_storage(self) -> Self::Storage;
 }
 
-pub trait ItemRef: Item {
+pub trait ValueRef: Value {
 	fn from_storage_ref(storage: &Self::Storage) -> &Self;
 
 	fn into_storage_ref(&self) -> &Self::Storage;
@@ -94,9 +94,9 @@ pub trait ItemRef: Item {
 	fn into_storage_ref_mut(&mut self) -> &mut Self::Storage;
 }
 
-/// Default implementation of Item for `Option`, as this
+/// Default implementation of Value for `Option`, as this
 /// is a common use case.
-impl<X: Eq> Item for Option<X> {
+impl<X: Eq> Value for Option<X> {
 	const NEUTRAL: bool = true;
 
 	type Storage = Option<X>;
@@ -122,7 +122,7 @@ impl<X: Eq> Item for Option<X> {
 	}
 }
 
-impl<X: Eq> ItemRef for Option<X> {
+impl<X: Eq> ValueRef for Option<X> {
 	#[inline(always)]
 	fn from_storage_ref(storage: &Self::Storage) -> &Self {
 		storage
@@ -146,7 +146,7 @@ impl<X: Eq> ItemRef for Option<X> {
 
 macro_rules! default_item {
 	($name: ty) => {
-	impl Item for $name {
+	impl Value for $name {
 		const NEUTRAL: bool = false;
 		type Storage = Self;
 
@@ -171,7 +171,7 @@ macro_rules! default_item {
 		}
 	}
 
-	impl ItemRef for $name {
+	impl ValueRef for $name {
 		#[inline(always)]
 		fn from_storage_ref(storage: &Self::Storage) -> &Self {
 			storage
@@ -202,7 +202,7 @@ default_item!(u64);
 default_item!(u128);
 
 /// Trait for mutable historied data.
-pub trait DataMut<V: Item>: Data<V> + Context {
+pub trait DataMut<V: Value>: Data<V> + Context {
 	/// State to use for changing value.
 	/// We use a different state than
 	/// for querying as it can use different
@@ -244,7 +244,7 @@ pub trait DataMut<V: Item>: Data<V> + Context {
 }
 
 /// Returns pointer to in memory value.
-pub trait DataRefMut<V: Item>: DataMut<V> {
+pub trait DataRefMut<V: Value>: DataMut<V> {
 	/// Get latest value, can apply updates.
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V>;
 
@@ -258,7 +258,7 @@ pub trait DataRefMut<V: Item>: DataMut<V> {
 /// It is also usefull when some asumption are not strong enough, for
 /// instance if `DataMut` is subject to concurrent access.
 /// TODO an entry api would be more proper (returning optional entry).
-pub trait ConditionalDataMut<V: Item>: DataMut<V> {
+pub trait ConditionalDataMut<V: Value>: DataMut<V> {
 	/// Internal index.
 	type IndexConditional;
 
@@ -276,7 +276,7 @@ pub trait ConditionalDataMut<V: Item>: DataMut<V> {
 /// Setting value is usually done on latest state for an history.
 /// This trait allow setting values in the past, this is usually
 /// not a good idea to maintain state coherency.
-pub trait ForceDataMut<V: Item>: DataMut<V> {
+pub trait ForceDataMut<V: Value>: DataMut<V> {
 	/// Internal index.
 	type IndexForce;
 

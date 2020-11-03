@@ -24,7 +24,7 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
-	DataSlices, DataRefMut, ConditionalDataMut, Item, ItemRef, ForceDataMut,
+	DataSlices, DataRefMut, ConditionalDataMut, Value, ValueRef, ForceDataMut,
 	aggregate::{Sum as DataSum, SumValue}};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
@@ -196,7 +196,7 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	}
 }
 
-impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> for Linear<V, S, D> {
+impl<V: Value + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> for Linear<V, S, D> {
 	type S = S;
 
 	fn get(&self, at: &Self::S) -> Option<V> {
@@ -212,8 +212,8 @@ impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> f
 	}
 }
 
-// TODO should it be ItemRef?
-impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRanges<S> for Linear<V, S, D> {
+// TODO should it be ValueRef?
+impl<V: Value, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRanges<S> for Linear<V, S, D> {
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice(slice) {
 			for index in inner.rev_index_iter() {
@@ -228,7 +228,7 @@ impl<V: Item, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRan
 	}
 }
 
-impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
 		for index in self.0.rev_index_iter() {
 			let HistoriedValue { value, state } = A::get_adapt(&self.0, index);
@@ -253,7 +253,7 @@ impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
@@ -343,7 +343,7 @@ impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S,
 				if let Some(overwrite) = value {
 					let last = self.0.get(index);
 					// Non negligeable cost in some case: TODO consider skipping this test.
-					// Or use ItemRef
+					// Or use ValueRef
 					let last_value = V::from_storage(last.value);
 					if overwrite != &last_value {
 						return false;
@@ -355,7 +355,7 @@ impl<V: Item + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S,
 	}
 }
 
-impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn pos_index(&self, at: &S) -> Option<D::Index> {
 		let mut pos = None;
 		for index in self.0.rev_index_iter() {
@@ -369,9 +369,9 @@ impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> DataRef<V> for Linear<V, S, D> {
+impl<V: ValueRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> DataRef<V> for Linear<V, S, D> {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
-		self.get_adapt::<_, RefVecAdapter>(at).map(ItemRef::from_storage_ref)
+		self.get_adapt::<_, RefVecAdapter>(at).map(ValueRef::from_storage_ref)
 	}
 }
 
@@ -381,7 +381,7 @@ impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> DataSlices<Vec<u8>> for 
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> DataMut<V> for Linear<V, S, D> {
+impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> DataMut<V> for Linear<V, S, D> {
 	type SE = Latest<S>;
 	type Index = S;
 	type GC = LinearGC<S>;
@@ -511,7 +511,7 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::St
 	}
 }
 
-impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> DataRefMut<V> for Linear<V, S, D> {
+impl<V: ValueRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> DataRefMut<V> for Linear<V, S, D> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
 		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| V::from_storage_ref_mut(h.value))
@@ -522,7 +522,7 @@ impl<V: ItemRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalDataMut<V> for Linear<V, S, D> {
+impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalDataMut<V> for Linear<V, S, D> {
 	type IndexConditional = Self::Index;
 	fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
 		self.can_if_inner(no_overwrite, at)
@@ -536,7 +536,7 @@ impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::St
 	}
 }
 
-impl<V: Item + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceDataMut<V> for Linear<V, S, D> {
+impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceDataMut<V> for Linear<V, S, D> {
 	type IndexForce = Self::Index;
 
 	fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
@@ -574,8 +574,8 @@ pub mod aggregate {
 
 	/// Use linear as linear diff. TODO put in its own module?
 	///
-	/// If at some point `SumValue` and `Item` get merged, this would not be needed.
-	/// (there is already need to have some const related to `SumValue` in `Item`
+	/// If at some point `SumValue` and `Value` get merged, this would not be needed.
+	/// (there is already need to have some const related to `SumValue` in `Value`
 	/// to forbid some operations (gc and migrate)).
 	pub struct Sum<'a, V: SumValue, S, D>(pub &'a Linear<V::Value, S, D>);
 
@@ -592,7 +592,7 @@ pub mod aggregate {
 			V: SumValue,
 			V::Value: Clone,
 			S: LinearState,
-			D: LinearStorage<<V::Value as Item>::Storage, S>,
+			D: LinearStorage<<V::Value as Value>::Storage, S>,
 	{
 		type S = S;
 
@@ -614,7 +614,7 @@ pub mod aggregate {
 			V: SumValue,
 			V::Value: Clone,
 			S: LinearState,
-			D: LinearStorage<<V::Value as Item>::Storage, S>,
+			D: LinearStorage<<V::Value as Value>::Storage, S>,
 	{
 		fn get_sum_values(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
 			for index in self.0.0.rev_index_iter() {
@@ -646,7 +646,7 @@ mod test {
 	/// Bytes with neutral item.
 	struct BytesNeutral(Vec<u8>); 
 
-	impl Item for BytesNeutral {
+	impl Value for BytesNeutral {
 		const NEUTRAL: bool = true;
 
 		type Storage = Vec<u8>;

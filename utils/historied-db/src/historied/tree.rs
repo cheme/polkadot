@@ -22,7 +22,7 @@
 #[cfg(feature = "need_implementation_changes")]
 use super::ConditionalDataMut;
 use super::{HistoriedValue, Data, DataMut, DataRef, DataRefMut, ForceDataMut,
-	DataSlices, DataSliceRanges, UpdateResult, Item, ItemRef,
+	DataSlices, DataSliceRanges, UpdateResult, Value, ValueRef,
 	aggregate::{Sum as DataSum, SumValue}};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC, aggregate::Sum as LinearSum};
@@ -151,7 +151,7 @@ type Branch<I, BI, V, BD> = HistoriedValue<Linear<V, BI, BD>, I>;
 impl<
 	I: Clone,
 	BI: LinearState + SubAssign<BI>,
-	V: Item + Clone + Eq,
+	V: Value + Clone + Eq,
 	BD: LinearStorage<V::Storage, BI>,
 > Branch<I, BI, V, BD>
 {
@@ -169,7 +169,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Item + Clone,
+	V: Value + Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 	BD: LinearStorage<V::Storage, BI>,
 > Data<V> for Tree<I, BI, V, D, BD> {
@@ -193,7 +193,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: ItemRef + Clone,
+	V: ValueRef + Clone,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI>,
 > DataRef<V> for Tree<I, BI, V, D, BD> {
@@ -203,7 +203,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Item + Clone + Eq,
+	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
 > DataMut<V> for Tree<I, BI, V, D, BD> {
@@ -388,7 +388,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + Clone,
-	V: Item + Clone + Eq,
+	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
 > Tree<I, BI, V, D, BD> {
@@ -546,7 +546,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: ItemRef + Clone + Eq,
+	V: ValueRef + Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI, Context = D::Context>,
 > DataRefMut<V> for Tree<I, BI, V, D, BD> {
@@ -599,7 +599,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Item + Clone + Eq,
+	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
 > Tree<I, BI, V, D, BD> {
@@ -671,7 +671,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Item + Clone + Eq,
+	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
 > ForceDataMut<V> for Tree<I, BI, V, D, BD> {
@@ -728,7 +728,7 @@ impl<
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Item + Clone + Eq,
+	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
 	BD: LinearStorage<V::Storage, BI>,
 > ConditionalDataMut<V> for Tree<I, BI, V, D, BD> {
@@ -770,7 +770,7 @@ impl Tree<u32, u32, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Item + Clone + AsRef<[u8]> + AsMut<[u8]>,
+	V: Value + Clone + AsRef<[u8]> + AsMut<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
 	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V::Storage, BI>,
 > DataSlices<V> for Tree<I, BI, V, D, BD> {
@@ -808,9 +808,9 @@ pub mod aggregate {
 			I: Default + Eq + Ord + Clone,
 			BI: LinearState + SubAssign<BI> + One,
 			V: SumValue,
-			V::Value: Item + Clone,
+			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
-			BD: LinearStorage<<V::Value as Item>::Storage, BI>,
+			BD: LinearStorage<<V::Value as Value>::Storage, BI>,
 	{
 		type S = ForkPlan<I, BI>;
 
@@ -832,9 +832,9 @@ pub mod aggregate {
 			I: Default + Eq + Ord + Clone,
 			BI: LinearState + SubAssign<BI> + One,
 			V: SumValue,
-			V::Value: Item + Clone,
+			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
-			BD: LinearStorage<<V::Value as Item>::Storage, BI>,
+			BD: LinearStorage<<V::Value as Value>::Storage, BI>,
 	{
 		fn get_sum_values(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
 			// could also exten tree_get macro but it will end up being hard to read,
@@ -1169,7 +1169,7 @@ mod test {
 		}
 	}
 
-	impl Item for U16Neutral {
+	impl Value for U16Neutral {
 		const NEUTRAL: bool = true;
 
 		type Storage = u16;
@@ -1195,7 +1195,7 @@ mod test {
 		}
 	}
 
-	impl ItemRef for U16Neutral {
+	impl ValueRef for U16Neutral {
 		fn from_storage_ref(storage: &Self::Storage) -> &Self {
 			U16Neutral::ref_cast(storage)
 		}

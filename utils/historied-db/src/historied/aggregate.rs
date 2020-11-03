@@ -53,7 +53,7 @@ pub trait SumValue: Sized {
 	/// Internal Value stored.
 	/// Default is the empty value (a neutral value
 	/// indicating that there is no content).
-	type Value: Item + Default;
+	type Value: Value + Default;
 
 	/// Internal type to build items.
 	type SumBuilder: SumBuilder<SumValue = Self>;
@@ -149,7 +149,7 @@ pub mod xdelta {
 		}
 	}
 
-	impl Item for BytesDiff {
+	impl Value for BytesDiff {
 		const NEUTRAL: bool = true;
 		type Storage = Vec<u8>;
 
@@ -174,7 +174,7 @@ pub mod xdelta {
 				},
 				1u8 => BytesDiff::Value(storage),
 				2u8 => BytesDiff::VcDiff(storage),
-				_ => unreachable!("Item trait does not allow undefined content"),
+				_ => unreachable!("Value trait does not allow undefined content"),
 			}
 		}
 
@@ -310,7 +310,7 @@ pub mod map_delta {
 		}
 	}
 
-	impl<K: Codec, V: Codec> Item for MapDiff<K, V> {
+	impl<K: Codec, V: Codec> Value for MapDiff<K, V> {
 		const NEUTRAL: bool = true;
 		type Storage = Vec<u8>;
 

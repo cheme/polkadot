@@ -19,7 +19,7 @@
 
 use hash_db::{PlainDBRef, PlainDB};
 use crate::{UpdateResult, Context, StateIndex,
-	historied::{DataMut, Data, DataRef, Item}};
+	historied::{DataMut, Data, DataRef, Value}};
 use sp_std::marker::PhantomData;
 
 /// Trait for immutable reference of a plain key value db.
@@ -84,7 +84,7 @@ impl<K: Ord, V, D: Context> BTreeMap<K, V, D> {
 	}
 }
 
-impl<K: Ord, V: Item + Clone, D: Data<V> + Context> StateDB<K, V> for BTreeMap<K, V, D> {
+impl<K: Ord, V: Value + Clone, D: Data<V> + Context> StateDB<K, V> for BTreeMap<K, V, D> {
 	type S = D::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -100,7 +100,7 @@ impl<K: Ord, V: Item + Clone, D: Data<V> + Context> StateDB<K, V> for BTreeMap<K
 }
 
 // note that the constraint on state db ref for the associated type is bad (forces V as clonable).
-impl<K: Ord, V: Item, D: DataRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, D> {
+impl<K: Ord, V: Value, D: DataRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, D> {
 	type S = D::S;
 
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V> {
@@ -109,7 +109,7 @@ impl<K: Ord, V: Item, D: DataRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, 
 	}
 }
 
-impl<K: Ord + Clone, V: Item + Clone + Eq, D: DataMut<V>> StateDBMut<K, V> for BTreeMap<K, V, D> {
+impl<K: Ord + Clone, V: Value + Clone + Eq, D: DataMut<V>> StateDBMut<K, V> for BTreeMap<K, V, D> {
 	type SE = D::SE;
 	type GC = D::GC;
 	type Migrate = D::Migrate;
@@ -168,7 +168,7 @@ pub struct PlainDBState<K, DB, D, S> {
 	_ph: PhantomData<D>,
 }
 
-impl<K, V: Item + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for PlainDBState<K, DB, D, S> {
+impl<K, V: Value + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for PlainDBState<K, DB, D, S> {
 	type S = D::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
@@ -185,7 +185,7 @@ impl<K, V: Item + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for 
 
 impl<
 	K: Ord + Clone,
-	V: Item + Clone + Eq,
+	V: Value + Clone + Eq,
 	D: DataMut<V, Context = ()>,
 	DB: PlainDBRef<K, D> + PlainDB<K, D>,
 > StateDBMut<K, V> for PlainDBState<K, DB, D, D::Index>
