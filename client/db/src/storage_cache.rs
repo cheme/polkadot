@@ -17,9 +17,10 @@
 //! Global cache state.
 
 use historied_db::{
-	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
-	ForkableManagement, Latest, UpdateResult,
-	historied::{InMemoryValue, Value},
+	db_traits::{StateDB, StateDBRef, StateDBMut},
+	management::{Management, ManagementMut, ForkableManagement},
+	Latest, UpdateResult,
+	historied::{DataRef, DataMut},
 	historied::tree::Tree,
 	management::tree::{Tree as TreeMgmt, TreeManagement, ForkPlan},
 };
@@ -47,10 +48,10 @@ const STATE_CACHE_BLOCKS: usize = 12;
 type ChildStorageKey = (Vec<u8>, Vec<u8>);
 
 type HistoriedTreeBackend = historied_db::backend::in_memory::MemoryOnly<
-	historied_db::historied::linear::Linear<Option<Vec<u8>>, u32, HistoriedLinearBackend>,
+	historied_db::historied::linear::Linear<Option<Vec<u8>>, u64, HistoriedLinearBackend>,
 	u32,
 >;
-type HistoriedLinearBackend = historied_db::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u32>;
+type HistoriedLinearBackend = historied_db::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u64>;
 
 /// Shared canonical state cache.
 pub struct Cache<B: BlockT> {
@@ -66,11 +67,11 @@ pub struct Cache<B: BlockT> {
 }
 
 // TODO remove (useless) -> make the ExperimentalCache
-impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for SyncExperimentalCache<B> {
-	type S = ForkPlan<u32, u32>;
+impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for SyncExperimentalCache<B> {
+	type S = ForkPlan<u32, u64>;
 
 	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
-		use historied_db::historied::ValueRef;
+		use historied_db::historied::Data;
 		self.0.write().lru_storage.get(key).and_then(|history| history.get(at))
 	}
 
@@ -79,8 +80,8 @@ impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for SyncExperimenta
 	}
 }
 
-impl<B: BlockT> StateDBRef<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
-	type S = ForkPlan<u32, u32>;
+impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
+	type S = ForkPlan<u32, u64>;
 	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
 		unreachable!("dummy implementation for state db implementation")
 	}
@@ -97,15 +98,15 @@ impl<B: BlockT> InMemoryStateDBRef<StorageKey, Option<StorageValue>> for SyncExp
 	}
 }
 */
-impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
-	type SE = Latest<(u32, u32)>;
+impl<B: BlockT> StateDBMut<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
+	type SE = Latest<(u32, u64)>;
 	// not needed as ExperimentalCache also implement management
 	type GC = ();
 	// not needed as ExperimentalCache also implement management
 	type Migrate = ();
 
 	fn emplace(&mut self, key: StorageKey, value: Option<StorageValue>, at: &Self::SE) {
-		use historied_db::historied::Value;
+		use historied_db::historied::DataMut;
 		if let Some(history) = self.lru_storage.get(&key) {
 			let mut additional_size = value.as_ref().map(|v| v.estimate_size());
 			match history.set_mut(value, at) {
@@ -225,8 +226,8 @@ struct LRUMap<K, V, B>(LinkedHashMap<K, V>, usize, usize, PhantomData<B>);
 
 /// TODO replace second usize index by actual B::blocknumber
 pub struct ExperimentalCache<B: BlockT>{
-	lru_storage: LRUMap<StorageKey, Tree<u32, u32, Option<StorageValue>, HistoriedTreeBackend, HistoriedLinearBackend>, B>,
-	management: TreeManagement<B::Hash, u32, u32, Option<StorageValue>, ()>,
+	lru_storage: LRUMap<StorageKey, Tree<u32, u64, Option<StorageValue>, HistoriedTreeBackend, HistoriedLinearBackend>, B>,
+	management: TreeManagement<B::Hash, u32, u64, ()>,
 	/// since retracted branch could potentially be enacted back we do not put it
 	/// in management directly.
 	/// TODO Note that we only need lower branch number block, but will also
@@ -249,8 +250,8 @@ impl<B: BlockT> ExperimentalCache<B> {
 		retracted: &[B::Hash],
 		commit_hash: Option<&B::Hash>,
 		parent_hash: Option<&B::Hash>, // TODO just for debugging, remove
-		experimental_query_plan: Option<&ForkPlan<u32, u32>>,
-	) -> Option<(ForkPlan<u32, u32>, Latest<(u32, u32)>)> {
+		experimental_query_plan: Option<&ForkPlan<u32, u64>>,
+	) -> Option<(ForkPlan<u32, u64>, Latest<(u32, u64)>)> {
 		trace!("Syncing experimental cache, pivot = {:?}, enacted = {:?}, retracted = {:?}", pivot, enacted, retracted);
 			warn!("Syncing = {:?}", (pivot, enacted, retracted));
 		for h in retracted {
@@ -351,7 +352,7 @@ impl EstimateSize for Option<Vec<u8>> {
 	}
 }
 
-impl EstimateSize for Tree<u32, u32, Option<StorageValue>, HistoriedTreeBackend, HistoriedLinearBackend> {
+impl EstimateSize for Tree<u32, u64, Option<StorageValue>, HistoriedTreeBackend, HistoriedLinearBackend> {
 	fn estimate_size(&self) -> usize {
 		self.temp_size()
 	}
@@ -456,7 +457,6 @@ impl<K: EstimateSize + Eq + StdHash, V: EstimateSize, B> LRUMap<K, V, B> {
 		self.0.clear();
 		self.1 = 0;
 	}
-
 }
 
 impl<B: BlockT> Cache<B> {
@@ -615,9 +615,9 @@ pub struct CacheChanges<B: BlockT> {
 	/// Hash of the block on top of which this instance was created or
 	/// `None` if cache is disabled
 	pub parent_hash: Option<B::Hash>,
-	pub experimental_query_plan: Option<ForkPlan<u32, u32>>,
+	pub experimental_query_plan: Option<ForkPlan<u32, u64>>,
 	// TODO rather unused as we update on hresh fork.
-	pub experimental_update: Option<Latest<(u32, u32)>>,
+	pub experimental_update: Option<Latest<(u32, u64)>>,
 	/// disable checking experimental cache value
 	pub no_assert: bool,
 	/// avoid doing assert against backend result (no backend in qc test)

@@ -6694,7 +6694,7 @@ dependencies = [
  "substrate-prometheus-endpoint",
  "substrate-test-runtime-client",
  "tempfile",
- "trie-db 0.22.0",
+ "trie-db",
 ]
 
 [[package]]
@@ -8348,6 +8348,7 @@ name = "sp-database"
 version = "2.0.0"
 dependencies = [
  "kvdb",
+ "parity-scale-codec",
  "parity-util-mem",
  "parking_lot 0.10.2",
  "radix-tree",
@@ -8668,7 +8669,7 @@ dependencies = [
  "sp-std 2.0.0",
  "sp-trie",
  "thiserror",
- "trie-db 0.22.0",
+ "trie-db",
  "trie-root",
 ]
 
@@ -8771,7 +8772,7 @@ dependencies = [
  "sp-runtime",
  "sp-std 2.0.0",
  "trie-bench",
- "trie-db 0.22.0",
+ "trie-db",
  "trie-root",
  "trie-standardmap",
 ]
@@ -9104,7 +9105,7 @@ dependencies = [
  "sp-version",
  "substrate-test-runtime-client",
  "substrate-wasm-builder-runner",
- "trie-db 0.22.0",
+ "trie-db",
 ]
 
 [[package]]
@@ -9797,22 +9798,9 @@ dependencies = [
  "keccak-hasher",
  "memory-db",
  "parity-scale-codec",
- "trie-db 0.22.1",
+ "trie-db",
  "trie-root",
  "trie-standardmap",
-]
-
-[[package]]
-name = "trie-db"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39f1a9a9252d38c5337cf0c5392988821a5cf1b2103245016968f2ab41de9e38"
-dependencies = [
- "hash-db",
- "hashbrown 0.8.1",
- "log",
- "rustc-hex",
- "smallvec 1.4.2",
 ]
 
 [[package]]

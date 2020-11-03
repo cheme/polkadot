@@ -46,13 +46,14 @@ mod stats;
 mod parity_db;
 
 use historied_db::{
-	Management, ForkableManagement, DecodeWithContext,
-	historied::{InMemoryValue, Value},
-	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef,
+	DecodeWithContext,
+	management::{ManagementMut, ForkableManagement, Management},
+	historied::{DataMut, DataRef},
+	mapped_db::TransactionalMappedDB,
+	db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
 	Latest, UpdateResult,
 	historied::tree::Tree,
 	management::tree::{Tree as TreeMgmt, ForkPlan},
-	simple_db::TransactionalSerializeDB,
 	backend::nodes::ContextHead,
 };
 
@@ -119,7 +120,7 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
-	current_state: historied_db::management::tree::ForkPlan<u32, u32>,
+	current_state: historied_db::management::tree::ForkPlan<u32, u64>,
 	db: Arc<dyn OrderedDatabase<DbHash>>,
 	// only assert when spawned from cli command (so tests pass)
 	do_assert: bool,
@@ -138,14 +139,14 @@ type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 >;
 */
 type TreeBackend<'a> = historied_db::backend::in_memory::MemoryOnly<
-	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
+	historied_db::historied::linear::Linear<Vec<u8>, u64, LinearBackend<'a>>,
 	u32,
 >;
 
 // Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
 // None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
 /// Historied value with multiple parallel branches.
-pub type HValue<'a> = Tree<u32, u32, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
+pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 impl HistoriedDB {
 	fn storage_inner(&self, key: &[u8], column: u32) -> Result<Option<Vec<u8>>, String> {
@@ -324,7 +325,7 @@ impl HistoriedDB {
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
-			use historied_db::historied::ValueRef;
+			use historied_db::historied::Data;
 			if let Some(mut v) = v.get(&current_state) {
 				match v.pop() {
 					Some(0u8) => None,
@@ -341,7 +342,7 @@ impl HistoriedDB {
 /// Key value db change for at a given block of an historied DB.
 pub struct HistoriedDBMut<DB> {
 	/// Branch head indexes to change values of a latest block.
-	pub current_state: historied_db::Latest<(u32, u32)>,
+	pub current_state: historied_db::Latest<(u32, u64)>,
 	/// Inner database to modify historied values.
 	pub db: DB,
 }
@@ -372,8 +373,10 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			backend: branch_nodes.clone(),
 			node_init_from: init_nodes.clone(),
 		};
+
 		let histo = if let Some(histo) = self.db.get(column, k) {
-			Some(HValue::decode_with_context(&mut &histo[..], &(init.clone(), init_nodes.clone())).expect("Bad encoded value in db, closing"))
+			Some(HValue::decode_with_context(&mut &histo[..], &(init.clone(), init_nodes.clone()))
+				.expect("Bad encoded value in db, closing"))
 		} else {
 			if change.is_none() {
 				return;
@@ -469,6 +472,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 }
 
 const DB_HASH_LEN: usize = 32;
+
 /// Hash type that this backend uses for the database.
 pub type DbHash = [u8; DB_HASH_LEN];
 
@@ -713,17 +717,18 @@ pub(crate) mod columns {
 
 #[derive(Clone)]
 /// Database backed tree management.
+///
+/// Definitions for storage of historied
+/// db tree state (maps block hashes to internal
+/// history index).
 pub struct TreeManagementPersistence;
 
 #[derive(Clone)]
 /// Database backed tree management, no transaction.
 pub struct TreeManagementPersistenceNoTx;
 
-
 #[derive(Clone)]
 /// Database backed tree management for a rocksdb database.
-/// TODO consider switching to use of kvdb trait instead of
-/// rocksdb database.
 pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
 
 /// Database backed tree management for an unoredered database.
@@ -733,7 +738,7 @@ pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeData
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_DELETE: bool = true;
 	// Use pointer to serialize db with a transactional layer.
-	type Storage = TransactionalSerializeDB<historied_db::simple_db::SerializeDBDyn>;
+	type Storage = TransactionalMappedDB<historied_db::mapped_db::MappedDBDyn>;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type TouchedGC = historied_tree_bindings::TouchedGC;
@@ -801,7 +806,7 @@ const fn resolve_collection_inner<'a>(c: &'a [u8]) -> u32 {
 	u32::from_le_bytes(buf)
 }
 
-impl historied_db::simple_db::SerializeDB for RocksdbStorage {
+impl historied_db::mapped_db::MappedDB for RocksdbStorage {
 	#[inline(always)]
 	fn is_active(&self) -> bool {
 		true
@@ -844,11 +849,11 @@ impl historied_db::simple_db::SerializeDB for RocksdbStorage {
 		})
 	}
 
-	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::simple_db::SerializeDBIter<'a> {
+	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::mapped_db::MappedDBIter<'a> {
 		let iter = resolve_collection(c).map(|(c, p)| {
 			use kvdb::KeyValueDB;
 			if let Some(p) = p {
-				<kvdb_rocksdb::Database as KeyValueDB>::iter_with_prefix(&*self.0, c, p)
+				self.0.iter_with_prefix(c, p)
 			} else {
 				<kvdb_rocksdb::Database as KeyValueDB>::iter(&*self.0, c)
 			}.map(|(k, v)| (Vec::<u8>::from(k), Vec::<u8>::from(v)))
@@ -893,7 +898,6 @@ impl<H: Clone> Database<H> for RocksdbStorage {
 }
 
 impl<H: Clone> OrderedDatabase<H> for RocksdbStorage {
-
 	fn iter<'a>(&'a self, col: u32) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
 		Box::new(self.0.iter(col).map(|(k, v)| (k.to_vec(), v.to_vec())))
 	}
@@ -916,7 +920,7 @@ impl<H: Clone> OrderedDatabase<H> for RocksdbStorage {
 	}
 }
 
-impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
+impl<H> historied_db::mapped_db::MappedDB for DatabaseStorage<H>
 	where H: Clone + PartialEq + std::fmt::Debug + Default + 'static,
 {
 	#[inline(always)]
@@ -942,7 +946,7 @@ impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
 
 	fn clear(&mut self, c: &'static [u8]) {
 		// Inefficient implementation.
-		let mut keys: Vec<Vec<u8>> = self.iter(c).map(|kv| kv.0).collect();
+		let keys: Vec<Vec<u8>> = self.iter(c).map(|kv| kv.0).collect();
 		for key in keys {
 			self.remove(c, key.as_slice());
 		}
@@ -955,8 +959,7 @@ impl<H> historied_db::simple_db::SerializeDB for DatabaseStorage<H>
 		})
 	}
 
-	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::simple_db::SerializeDBIter<'a> {
-		use sp_database::OrderedDatabase;
+	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::mapped_db::MappedDBIter<'a> {
 		let iter = resolve_collection(c).map(|(c, p)| {
 			if let Some(p) = p {
 				self.0.prefix_iter(c, p, true)
@@ -978,17 +981,17 @@ pub mod historied_tree_bindings {
 	macro_rules! static_instance {
 		($name: ident, $col: expr) => {
 
+		/// Simple db map or instance definition for $name.
 		#[derive(Default, Clone)]
 		pub struct $name;
-		impl historied_db::simple_db::SerializeInstanceMap for $name {
+		impl historied_db::mapped_db::MapInfo for $name {
 			const STATIC_COL: &'static [u8] = $col;
 		}
-		
 	}}
 	macro_rules! static_instance_variable {
 		($name: ident, $col: expr, $path: expr, $lazy: expr) => {
 			static_instance!($name, $col);
-		impl historied_db::simple_db::SerializeInstanceVariable for $name {
+		impl historied_db::mapped_db::VariableInfo for $name {
 			const PATH: &'static [u8] = $path;
 			const LAZY: bool = $lazy;
 		}
@@ -1270,13 +1273,14 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 		&mut self,
 		transaction: &mut Transaction<DbHash>,
 		historied: Option<&mut HistoriedDBMut<Arc<dyn Database<DbHash>>>>,
+		journals: Option<&mut TransactionalMappedDB<historied_db::mapped_db::MappedDBDyn>>,
 	) {
-
 		let mut historied = historied.map(|historied_db| {
 			let block_nodes = BlockNodes::new(historied_db.db.clone());
 			let branch_nodes = BranchNodes::new(historied_db.db.clone());
 			(historied_db, block_nodes, branch_nodes)
 		});
+		let mut journal_keys = journals.as_ref().map(|_| Vec::new());
 		for ((prefix, key), value_operation) in self.offchain_storage_updates.drain() {
 			let key: Vec<u8> = prefix
 				.into_iter()
@@ -1290,14 +1294,34 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 					historied.as_mut().map(|(historied_db, block_nodes, branch_nodes)|
 						historied_db.update_single_offchain(&key, Some(val), transaction, branch_nodes, block_nodes)
 					);
+					journal_keys.as_mut().map(|journal| journal.push(key));
 				},
 				OffchainOverlayedChange::RemoveLocal => {
 					historied.as_mut().map(|(historied_db, block_nodes, branch_nodes)|
 						historied_db.update_single_offchain(&key, None, transaction, branch_nodes, block_nodes)
 					);
+					journal_keys.as_mut().map(|journal| journal.push(key));
 				},
 			}
 		}
+		if let (
+			Some(journal_keys),
+			Some(ordered_db),
+			Some(historied),
+		) = (journal_keys, journals, historied.as_ref()) {
+			// Note that this is safe because we import a new block.
+			// Otherwhise we would need to share cache with a single journal instance.
+			let mut journals = historied_db::management::JournalForMigrationBasis
+				::<_, _, _, crate::historied_tree_bindings::LocalOffchainDelete>
+				::from_db(ordered_db);
+			journals.add_changes(
+				ordered_db,
+				historied.0.current_state.latest().clone(),
+				journal_keys,
+				true, // New block, no need for fetch
+			)
+		}
+
 		historied.as_mut().map(|(_historied_db, block_nodes, branch_nodes)| {
 			block_nodes.apply_transaction(transaction);
 			branch_nodes.apply_transaction(transaction);
@@ -1516,14 +1540,20 @@ impl<T: Clone> FrozenForDuration<T> {
 	}
 }
 
-/// Holder for state of historied.
-type HistoriedState = ();
-
+/// Tree management for substrate. Inedxes are `u32` and values ar encoded as
+/// `Vec<u8>`.
 pub type TreeManagement<H, S> = historied_db::management::tree::TreeManagement<
 	H,
 	u32,
+	u64,
+	S,
+>;
+
+/// Register tree management consumer.
+pub type RegisteredConsumer<H, S> = historied_db::management::tree::RegisteredConsumer<
+	H,
 	u32,
-	Vec<u8>,
+	u64,
 	S,
 >;
 
@@ -1551,8 +1581,14 @@ pub struct Backend<Block: BlockT> {
 		<HashFor<Block> as Hasher>::Out,
 		TreeManagementPersistence,
 	>>>,
-	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
 	historied_state_do_assert: bool,
+	historied_pruning_window: Option<NumberFor<Block>>,
+	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
+	historied_management_consumer: RegisteredConsumer<
+		<HashFor<Block> as Hasher>::Out,
+		TreeManagementPersistence,
+	>,
+	historied_management_consumer_transaction: Arc<RwLock<Transaction<DbHash>>>,
 }
 
 impl<Block: BlockT> Backend<Block> {
@@ -1560,11 +1596,11 @@ impl<Block: BlockT> Backend<Block> {
 	///
 	/// The pruning window is how old a block must be before the state is pruned.
 	pub fn new(config: DatabaseSettings, canonicalization_delay: u64) -> ClientResult<Self> {
-		let (db, ordered, management) = crate::utils::open_database_and_historied::<Block>(
+		let (db, ordered, management, management2) = crate::utils::open_database_and_historied::<Block>(
 			&config,
 			DatabaseType::Full,
 		)?;
-		Self::from_database(db as Arc<_>, ordered, management, canonicalization_delay, &config)
+		Self::from_database(db as Arc<_>, ordered, management, management2, canonicalization_delay, &config)
 	}
 
 	/// Create new memory-backed client backend for tests.
@@ -1590,7 +1626,8 @@ impl<Block: BlockT> Backend<Block> {
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
-		management_db: historied_db::simple_db::SerializeDBDyn,
+		management_db: historied_db::mapped_db::MappedDBDyn,
+		management_db_2: historied_db::mapped_db::MappedDBDyn,
 		canonicalization_delay: u64,
 		config: &DatabaseSettings,
 	) -> ClientResult<Self> {
@@ -1600,6 +1637,10 @@ impl<Block: BlockT> Backend<Block> {
 		let map_e = |e: sc_state_db::Error<io::Error>| sp_blockchain::Error::from(
 			format!("State database error: {:?}", e)
 		);
+		let historied_pruning_window = match &config.pruning {
+			PruningMode::Constrained(constraint) => constraint.max_blocks.map(|nb| nb.into()),
+			_ => None,
+		};
 		let state_db: StateDb<_, _> = StateDb::new(
 			config.pruning.clone(),
 			!config.source.supports_ref_counting(),
@@ -1632,12 +1673,28 @@ impl<Block: BlockT> Backend<Block> {
 			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
 			config.experimental_cache,
 		);
-		let historied_persistence = TransactionalSerializeDB {
+		let historied_persistence = TransactionalMappedDB {
 			db: management_db,
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
-		let offchain_local_storage = offchain::BlockChainLocalStorage::new(db, historied_management.clone());
+		let offchain_local_storage = offchain::BlockChainLocalStorage::new(
+			db,
+			historied_management.clone(),
+			management_db_2,
+		);
+		let mut historied_management_consumer: RegisteredConsumer<
+			<HashFor<Block> as Hasher>::Out,
+			TreeManagementPersistence,
+		> = Default::default();
+		let historied_management_consumer_transaction = Arc::new(RwLock::new(
+			Default::default()
+		));
+		historied_management_consumer.register_consumer(Box::new(
+			offchain::TransactionalConsumer {
+				storage: offchain_local_storage.clone(),
+				pending: historied_management_consumer_transaction.clone(),
+			}));
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
@@ -1831,6 +1888,19 @@ impl<Block: BlockT> Backend<Block> {
 		});
 
 		let (mut historied_db, mut ordered_historied_db) = if let Some((hash, parent_hash)) = hashes {
+			// lazy init, not that this can lead to no finalization
+			// if the node get close to often, with current windows
+			// size, this is fine, otherwhise this value will need
+			// to persist.
+			if self.historied_next_finalizable.read().is_none() {
+				let parent_block = BlockId::Hash(parent_hash.clone());
+				if let Some(nb) = self.blockchain.block_number_from_id(&parent_block)? {
+					*self.historied_next_finalizable.write() = Some(nb + HISTORIED_FINALIZATION_WINDOWS.into());
+				}
+			}
+
+			// Ensure pending layer is clean
+			let _ = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
 			let update_plan = {
 				// lock does notinclude update of value as we do not have concurrent block creation
 				let mut management = self.historied_management.write();
@@ -1861,11 +1931,25 @@ impl<Block: BlockT> Backend<Block> {
 		} else {
 			(None, None)
 		};
+
+		{
+			use historied_db::management::tree::TreeManagementStorage;
+			let mut management;
+			let journals = if TreeManagementPersistence::JOURNAL_DELETE {
+				management = self.historied_management.write();
+				Some(management.ser())
+			} else {
+				None
+			};
+		
+			operation.apply_offchain(&mut transaction, historied_db.as_mut(), journals);
+		}
+
 		// write management state changes
 		let pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
 		for (col, (mut changes, dropped)) in pending {
 			if dropped {
-				use historied_db::simple_db::SerializeDB;
+				use historied_db::mapped_db::MappedDB;
 				for (key, _v) in self.historied_management.read().ser_ref().iter(col) {
 					changes.insert(key, None);
 				}
@@ -1882,8 +1966,6 @@ impl<Block: BlockT> Backend<Block> {
 				warn!("Unknown collection for tree management pending transaction {:?}", col);
 			}
 		}
-
-		operation.apply_offchain(&mut transaction, historied_db.as_mut());
 
 		// index uses non ordered historied_db
 		if let Some(historied_db) = historied_db.as_mut() {
@@ -1983,7 +2065,7 @@ impl<Block: BlockT> Backend<Block> {
 				let mut bytes: u64 = 0;
 				let mut removal: u64 = 0;
 				let mut bytes_removal: u64 = 0;
-				for (mut key, (val, rc)) in operation.db_updates.db.drain() {
+				for (mut key, (val, rc)) in operation.db_updates.drain() {
 					if !self.storage.prefix_keys {
 						// Strip prefix
 						key.drain(0 .. key.len() - DB_HASH_LEN);
@@ -2220,21 +2302,63 @@ impl<Block: BlockT> Backend<Block> {
 		Ok(())
 	}
 
-
-	fn historied_new_finalized(&self, hash: &Block::Hash, number: NumberFor<Block>, force: bool)
+	fn historied_pruning(&self, hash: &Block::Hash, number: NumberFor<Block>)
 		-> ClientResult<()> {
-		let do_finalize = force && &number > &self.historied_next_finalizable.read().as_ref().unwrap_or(&0.into());
+		// TODO this currently only cover offchain storage (the only one to manage its journals).
+		// Journal and pruning should also be needed for state and index, but with adiffernet pruning
+		// period?
+		let do_finalize = &number > &self.historied_next_finalizable.read().as_ref().unwrap_or(&0.into());
 		if !do_finalize {
 			return Ok(())
 		}
 
+		let prune_index = self.historied_pruning_window.map(|nb| {
+			number.saturating_sub(nb).saturated_into::<u64>()
+		});
+
+		// Ensure pending layer is clean
+		let _ = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
+
+		// TODO large mgmt lock
 		let switch_index = self.historied_management.write().get_db_state_for_fork(hash);
+		let path = {
+			use historied_db::management::Management;
+			self.historied_management.write().get_db_state(hash)
+		};
 		
-		// TODO current canonicalize is broken (uses a path, but remove all that is afterward too), we just need to change composite treshold
-		// and migrate. Or we canonicallize over ptha to hash and only ever migrate less often
-		// (composite index).
-		//self.historied_management.canonicalize(switch_index);
-		// TODO EMCH do migrate data
+		if let (Some(switch_index), Some(path)) = (switch_index, path) {
+			self.historied_management.write().canonicalize(path, switch_index, prune_index);
+			// do migrate data
+			self.historied_management_consumer.migrate(&mut *self.historied_management.write());
+		} else {
+			return Err(ClientError::UnknownBlock("Missing in historied management".to_string()));
+		}
+
+		// flush historied management changes
+		let pending = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
+		let mut transaction = std::mem::replace(&mut *self.historied_management_consumer_transaction.write(), Default::default());
+		// TODO this is duplicated code: put in a function
+		for (col, (mut changes, dropped)) in pending {
+			if dropped {
+				use historied_db::mapped_db::MappedDB;
+				for (key, _v) in self.historied_management.read().ser_ref().iter(col) {
+					changes.insert(key, None);
+				}
+			}
+			if let Some((col, p)) = resolve_collection(col) {
+				for (key, change) in changes {
+					subcollection_prefixed_key!(p, key);
+					match change {
+						Some(value) => transaction.set_from_vec(col, key, value),
+						None => transaction.remove(col, key),
+					}
+				}
+			} else {
+				warn!("Unknown collection for tree management pending transaction {:?}", col);
+			}
+		}
+
+		self.storage.db.commit(transaction)?;
 		*self.historied_next_finalizable.write() = Some(number + HISTORIED_FINALIZATION_WINDOWS.into());
 		Ok(())
 	}
@@ -2335,15 +2459,17 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
-				// TODO move in try_commit
+				self.storage.state_db.apply_pending();
+
+				// call historied pruning
 				if let Some(latest_final) = last_final {
 					let block = latest_final.0;
 					if let (Some(number), Some(hash)) = (self.blockchain.block_number_from_id(&block)?,
 						self.blockchain.block_hash_from_id(&block)?) {
-						self.historied_new_finalized(&hash, number, false)?;
+						self.historied_pruning(&hash, number)?;
 					}
 				}
-				self.storage.state_db.apply_pending();
+	
 				Ok(())
 			},
 			e @ Err(_) => {
@@ -2377,7 +2503,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		self.blockchain.update_meta(hash, number, is_best, is_finalized);
 		self.changes_tries_storage.post_commit(changes_trie_cache_ops);
 		if let Some(number) = self.blockchain.block_number_from_id(&block)? {
-			self.historied_new_finalized(&hash, number, true)?;
+			self.historied_pruning(&hash, number)?;
 		}
 		Ok(())
 	}
@@ -2714,6 +2840,17 @@ pub(crate) mod tests {
 		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
 		extrinsics_root: H256,
 	) -> H256 {
+		insert_block(backend, number, parent_hash, changes, None, extrinsics_root)
+	}
+
+	pub fn insert_block(
+		backend: &Backend<Block>,
+		number: u64,
+		parent_hash: H256,
+		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
+		offchain: Option<OffchainOverlayedChanges>,
+		extrinsics_root: H256,
+	) -> H256 {
 		use sp_runtime::testing::Digest;
 
 		let mut digest = Digest::default();
@@ -2741,6 +2878,9 @@ pub(crate) mod tests {
 		backend.begin_state_operation(&mut op, block_id).unwrap();
 		op.set_block_data(header, Some(Vec::new()), None, NewBlockState::Best).unwrap();
 		op.update_changes_trie((changes_trie_update, ChangesTrieCacheAction::Clear)).unwrap();
+		if let Some(offchain) = offchain {
+			op.update_offchain_storage(offchain).unwrap();
+		}
 		backend.commit_operation(op).unwrap();
 
 		header_hash
@@ -2749,7 +2889,7 @@ pub(crate) mod tests {
 	#[test]
 	fn block_hash_inserted_correctly() {
 		let backing = {
-			let db = Backend::<Block>::new_test(1, 0, Default::default());
+			let db = Backend::<Block>::new_test(1, 0);
 			for i in 0..10 {
 				assert!(db.blockchain().hash(i).unwrap().is_none());
 
@@ -2803,7 +2943,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn set_state_data() {
-		let db = Backend::<Block>::new_test(2, 0, Default::default());
+		let db = Backend::<Block>::new_test(2, 0);
 		let hash = {
 			let mut op = db.begin_operation().unwrap();
 			db.begin_state_operation(&mut op, BlockId::Hash(Default::default())).unwrap();
@@ -2893,7 +3033,7 @@ pub(crate) mod tests {
 	fn delete_only_when_negative_rc() {
 		sp_tracing::try_init_simple();
 		let key;
-		let backend = Backend::<Block>::new_test(1, 0, Default::default());
+		let backend = Backend::<Block>::new_test(1, 0);
 
 		let hash = {
 			let mut op = backend.begin_operation().unwrap();
@@ -3048,7 +3188,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn tree_route_works() {
-		let backend = Backend::<Block>::new_test(1000, 100, Default::default());
+		let backend = Backend::<Block>::new_test(1000, 100);
 		let blockchain = backend.blockchain();
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
@@ -3096,7 +3236,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn tree_route_child() {
-		let backend = Backend::<Block>::new_test(1000, 100, Default::default());
+		let backend = Backend::<Block>::new_test(1000, 100);
 		let blockchain = backend.blockchain();
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
@@ -3113,7 +3253,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn lowest_common_ancestor_works() {
-		let backend = Backend::<Block>::new_test(1000, 100, Default::default());
+		let backend = Backend::<Block>::new_test(1000, 100);
 		let blockchain = backend.blockchain();
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
@@ -3178,7 +3318,7 @@ pub(crate) mod tests {
 		// triggering the issue being eviction of a previously fetched record
 		// from the cache, therefore this test is dependent on the LRU cache
 		// size for header metadata, which is currently set to 5000 elements.
-		let backend = Backend::<Block>::new_test(10000, 10000, Default::default());
+		let backend = Backend::<Block>::new_test(10000, 10000);
 		let blockchain = backend.blockchain();
 
 		let genesis = insert_header(&backend, 0, Default::default(), None, Default::default());
@@ -3205,25 +3345,25 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_leaves_with_complex_block_tree() {
-		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20, Default::default()));
+		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20));
 		substrate_test_runtime_client::trait_tests::test_leaves_for_backend(backend);
 	}
 
 	#[test]
 	fn test_children_with_complex_block_tree() {
-		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20, Default::default()));
+		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20));
 		substrate_test_runtime_client::trait_tests::test_children_for_backend(backend);
 	}
 
 	#[test]
 	fn test_blockchain_query_by_number_gets_canonical() {
-		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20, Default::default()));
+		let backend: Arc<Backend<substrate_test_runtime_client::runtime::Block>> = Arc::new(Backend::new_test(20, 20));
 		substrate_test_runtime_client::trait_tests::test_blockchain_query_by_number_gets_canonical(backend);
 	}
 
 	#[test]
 	fn test_leaves_pruned_on_finality() {
-		let backend: Backend<Block> = Backend::new_test(10, 10, Default::default());
+		let backend: Backend<Block> = Backend::new_test(10, 10);
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 
 		let block1_a = insert_header(&backend, 1, block0, None, Default::default());
@@ -3247,7 +3387,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_aux() {
-		let backend: Backend<substrate_test_runtime_client::runtime::Block> = Backend::new_test(0, 0, Default::default());
+		let backend: Backend<substrate_test_runtime_client::runtime::Block> = Backend::new_test(0, 0);
 		assert!(backend.get_aux(b"test").unwrap().is_none());
 		backend.insert_aux(&[(&b"test"[..], &b"hello"[..])], &[]).unwrap();
 		assert_eq!(b"hello", &backend.get_aux(b"test").unwrap().unwrap()[..]);
@@ -3259,7 +3399,7 @@ pub(crate) mod tests {
 	fn test_finalize_block_with_justification() {
 		use sc_client_api::blockchain::{Backend as BlockChainBackend};
 
-		let backend = Backend::<Block>::new_test(10, 10, Default::default());
+		let backend = Backend::<Block>::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let _ = insert_header(&backend, 1, block0, None, Default::default());
@@ -3275,7 +3415,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_finalize_multiple_blocks_in_single_op() {
-		let backend = Backend::<Block>::new_test(10, 10, Default::default());
+		let backend = Backend::<Block>::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let block1 = insert_header(&backend, 1, block0, None, Default::default());
@@ -3300,7 +3440,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_finalize_non_sequential() {
-		let backend = Backend::<Block>::new_test(10, 10, Default::default());
+		let backend = Backend::<Block>::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let block1 = insert_header(&backend, 1, block0, None, Default::default());
@@ -3317,7 +3457,7 @@ pub(crate) mod tests {
 	fn header_cht_root_works() {
 		use sc_client_api::ProvideChtRoots;
 
-		let backend = Backend::<Block>::new_test(10, 10, Default::default());
+		let backend = Backend::<Block>::new_test(10, 10);
 
 		// insert 1 + SIZE + SIZE + 1 blocks so that CHT#0 is created
 		let mut prev_hash = insert_header(&backend, 0, Default::default(), None, Default::default());
@@ -3336,5 +3476,117 @@ pub(crate) mod tests {
 			.unwrap().unwrap();
 		assert_eq!(cht_root_1, cht_root_2);
 		assert_eq!(cht_root_2, cht_root_3);
+	}
+
+	#[test]
+	fn offchain_backends_indexing() {
+		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
+
+		let backend = Backend::<Block>::new_test(10, 10);
+
+		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
+		let offchain_local_storage = backend.offchain_local_storage().unwrap();
+		let offchain_local_storage = offchain_local_storage.at(block0).unwrap();
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
+
+		let mut ooc = OffchainOverlayedChanges::enabled();
+		ooc.set(b"prefix1", b"key1", b"value1", true);
+		let block1 = insert_block(&backend, 1, block0, None, Some(ooc), Default::default());
+		let offchain_local_storage = backend.offchain_local_storage().unwrap();
+		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
+		let offchain_local_storage = offchain_local_storage.at(block1).unwrap();
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+
+		let mut ooc = OffchainOverlayedChanges::enabled();
+		ooc.set(b"prefix1", b"key1", vec![4u8; 20_000].as_slice(), true);
+		let block2 = insert_block(&backend, 2, block1, None, Some(ooc), Default::default());
+		let offchain_local_storage = backend.offchain_local_storage().unwrap();
+		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+		let offchain_local_storage = offchain_local_storage.at(block2).unwrap();
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1").map(|v| v.len()), Some(20_000));
+
+		let mut ooc = OffchainOverlayedChanges::enabled();
+		ooc.remove(b"prefix1", b"key1", true);
+		let block3 = insert_block(&backend, 3, block2, None, Some(ooc), Default::default());
+		let offchain_local_storage = backend.offchain_local_storage().unwrap();
+		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
+		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+		assert_eq!(offchain_local_storage.at(block2).unwrap().get(b"prefix1", b"key1").map(|v| v.len()), Some(20_000));
+		let offchain_local_storage = offchain_local_storage.at(block3).unwrap();
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1").map(|v| v.len()), None);
+
+		let mut ooc = OffchainOverlayedChanges::enabled();
+		ooc.remove(b"prefix1", b"key1", true);
+		let block1_b = insert_block(&backend, 1, block0, None, Some(ooc), [1; 32].into());
+		let offchain_local_storage = backend.offchain_local_storage().unwrap();
+		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
+		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+		let offchain_local_storage = offchain_local_storage.at(block1_b).unwrap();
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
+	}
+
+	#[test]
+	fn offchain_backends_change_new() {
+		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
+
+		let backend = Backend::<Block>::new_test(10, 10);
+
+		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
+		let offchain_local_storage = backend.offchain_local_storage().unwrap();
+		let offchain_local_storage = offchain_local_storage.at(block0).unwrap();
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
+
+		let mut ooc = OffchainOverlayedChanges::enabled();
+		ooc.set(b"prefix1", b"key1", b"value1", true);
+		let block1 = insert_block(&backend, 1, block0, None, Some(ooc), Default::default());
+		let offchain_local_storage = backend.offchain_local_storage().unwrap();
+		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
+		assert!(!offchain_local_storage.at_new(block0).unwrap().can_update()); // TODO change
+		let mut offchain_local_storage = offchain_local_storage.at_new(block1).unwrap();
+		assert!(offchain_local_storage.can_update());
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+		offchain_local_storage.set(b"prefix1", b"key1", b"test");
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test".to_vec()));
+		offchain_local_storage.set(b"prefix1", b"key2", b"test");
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test".to_vec()));
+	}
+
+	#[test]
+	fn offchain_backends_change_current_new_value() {
+		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
+
+		let backend = Backend::<Block>::new_test(10, 10);
+
+		let block0 = insert_block(&backend, 0, Default::default(), None, None, Default::default());
+		let offchain_local = backend.offchain_local_storage().unwrap();
+		let mut offchain_local_storage = offchain_local.at(block0).unwrap();
+		assert!(offchain_local_storage.can_update());
+		offchain_local_storage.set(b"prefix1", b"key1", b"test");
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test".to_vec()));
+
+		let block1 = insert_block(&backend, 1, block0, None, None, Default::default());
+		let mut offchain_local_storage = offchain_local.at(block1).unwrap();
+		offchain_local_storage.set(b"prefix1", b"key2", b"test2");
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
+
+		let _block2 = insert_block(&backend, 2, block1, None, None, Default::default());
+		// can insert in the past if there is no following change
+		let mut offchain_local_storage = offchain_local.at(block1).unwrap();
+		assert!(offchain_local_storage.can_update());
+		offchain_local_storage.set(b"prefix1", b"key3", b"test3");
+		offchain_local_storage.set(b"prefix1", b"key1", b"test1");
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key3"), Some(b"test3".to_vec()));
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test1".to_vec()));
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
+		let mut offchain_local_storage = offchain_local.at(block0).unwrap();
+		// actual force set backward
+		offchain_local_storage.set(b"prefix1", b"key1", b"test11");
+		offchain_local_storage.set(b"prefix1", b"key2", b"test12");
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test11".to_vec()));
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test12".to_vec()));
+		assert!(offchain_local_storage.can_update());
+		let offchain_local_storage = offchain_local.at(block1).unwrap();
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test1".to_vec()));
+		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
 	}
 }

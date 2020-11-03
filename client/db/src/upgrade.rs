@@ -29,9 +29,10 @@ use crate::utils::DatabaseType;
 use crate::{StateDb, PruningMode, StateMetaDb};
 use historied_db::management::tree::TreeManagement;
 use historied_db::{
-	StateDBRef, InMemoryStateDBRef, StateDB, ManagementRef, Management,
-	ForkableManagement, Latest, UpdateResult,
-	historied::{InMemoryValue, InMemoryValueSlice, Value},
+	db_traits::{StateDB, StateDBRef, StateDBMut},
+	management::{Management, ManagementMut, ForkableManagement},
+	Latest, UpdateResult,
+	historied::{DataRef, DataSlices, DataMut},
 	historied::tree::Tree,
 	management::tree::{Tree as TreeMgmt, ForkPlan},
 };
@@ -192,8 +193,7 @@ fn inject_non_canonical<Block: BlockT>(
 	let mut management = TreeManagement::<
 		<HashFor<Block> as hash_db::Hasher>::Out,
 		u32,
-		u32,
-		Vec<u8>,
+		u64,
 		crate::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence.clone());
 	
@@ -259,8 +259,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	let mut management = TreeManagement::<
 		<HashFor<Block> as hash_db::Hasher>::Out,
 		u32,
-		u32,
-		Vec<u8>,
+		u64,
 		crate::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence);
 
@@ -396,8 +395,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let mut management = TreeManagement::<
 		<HashFor<Block> as hash_db::Hasher>::Out,
 		u32,
-		u32,
-		Vec<u8>,
+		u64,
 		crate::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence.clone());
 	let state = management.latest_state_fork();

@@ -66,6 +66,10 @@ impl Externalities for AsyncExternalities {
 		panic!("`set_offchain_storage`: should not be used in async externalities!")
 	}
 
+	fn set_offchain_local_storage(&mut self, _key: &[u8], _value: Option<&[u8]>) {
+		panic!("`set_offchain_local_storage`: should not be used in async externalities!")
+	}
+
 	fn storage(&self, _key: &[u8]) -> Option<StorageValue> {
 		panic!("`storage`: should not be used in async externalities!")
 	}

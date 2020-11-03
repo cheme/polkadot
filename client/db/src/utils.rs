@@ -205,13 +205,15 @@ pub fn block_id_to_lookup_key<Block>(
 		BlockId::Hash(h) => db.get(key_lookup_col, h.as_ref())
 	})
 }
+
+/// Opens the configured database.
 pub fn open_database<Block: BlockT>(
 	config: &DatabaseSettings,
 	db_type: DatabaseType,
 ) -> sp_blockchain::Result<Arc<dyn Database<DbHash>>> {
 	Ok(open_database_and_historied::<Block>(config, db_type)?.0)
 }
-const DEFAULT_CACHE_SIZE: usize = 128;
+
 /// Opens the configured database, and a database for historied state.
 pub fn open_database_and_historied<Block: BlockT>(
 	config: &DatabaseSettings,
@@ -219,7 +221,8 @@ pub fn open_database_and_historied<Block: BlockT>(
 ) -> sp_blockchain::Result<(
 	Arc<dyn Database<DbHash>>,
 	Arc<dyn OrderedDatabase<DbHash>>,
-	historied_db::simple_db::SerializeDBDyn,
+	historied_db::mapped_db::MappedDBDyn,
+	historied_db::mapped_db::MappedDBDyn,
 )> {
 	#[allow(unused)]
 	fn db_open_error(feat: &'static str) -> sp_blockchain::Error {
@@ -231,7 +234,8 @@ pub fn open_database_and_historied<Block: BlockT>(
 	let db: (
 		Arc<dyn Database<DbHash>>,
 		Arc<dyn OrderedDatabase<DbHash>>,
-		historied_db::simple_db::SerializeDBDyn,
+		historied_db::mapped_db::MappedDBDyn,
+		historied_db::mapped_db::MappedDBDyn,
 	) = match &config.source {
 		#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 		DatabaseSettingsSrc::RocksDb { path, cache_size } => {
@@ -286,7 +290,8 @@ pub fn open_database_and_historied<Block: BlockT>(
 			let rocks_db = Arc::new(db);
 			let ordered = Arc::new(crate::RocksdbStorage(rocks_db.clone()));
 			let management = Box::new(crate::RocksdbStorage(rocks_db.clone()));
-			(sp_database::arc_as_database(rocks_db), ordered, management)
+			let management2 = Box::new(crate::RocksdbStorage(rocks_db.clone()));
+			(sp_database::arc_as_database(rocks_db), ordered, management, management2)
 		},
 		#[cfg(not(any(feature = "with-kvdb-rocksdb", test)))]
 		DatabaseSettingsSrc::RocksDb { .. } => {
@@ -298,8 +303,10 @@ pub fn open_database_and_historied<Block: BlockT>(
 				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
 			let inner = sp_database::RadixTreeDatabase::new(parity_db.clone());
 			let ordered = Arc::new(inner.clone());
-			let management = Box::new(crate::DatabaseStorage(inner));
-			(parity_db, ordered, management)
+			let management = Box::new(crate::DatabaseStorage(inner.clone()));
+			let management2 = Box::new(crate::DatabaseStorage(inner));
+
+			(parity_db, ordered, management, management2)
 		},
 		#[cfg(not(feature = "with-parity-db"))]
 		DatabaseSettingsSrc::ParityDb { .. } => {
@@ -308,8 +315,9 @@ pub fn open_database_and_historied<Block: BlockT>(
 		DatabaseSettingsSrc::Custom(db) => {
 			let inner = sp_database::RadixTreeDatabase::new(db.clone());
 			let ordered = Arc::new(inner.clone());
-			let management = Box::new(crate::DatabaseStorage(inner));
-			(db.clone(), ordered, management)
+			let management = Box::new(crate::DatabaseStorage(inner.clone()));
+			let management2 = Box::new(crate::DatabaseStorage(inner));
+			(db.clone(), ordered, management, management2)
 		},
 	};
 

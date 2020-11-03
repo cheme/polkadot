@@ -25,7 +25,8 @@ use std::{
 
 use crate::{columns, Database, DbHash, Transaction};
 use parking_lot::{Mutex, RwLock};
-use historied_db::{Latest, Management, ManagementRef, UpdateResult,
+use historied_db::{Latest, UpdateResult,
+	management::{Management, ManagementMut},
 	management::tree::{TreeManagementStorage, ForkPlan},
 	historied::tree::Tree,
 	backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead},
@@ -40,12 +41,110 @@ pub struct LocalStorage {
 	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
 }
 
+type ChangesJournal<Db> = historied_db::management::JournalForMigrationBasis<
+	(u64, u32),
+	Vec<u8>,
+	Db,
+	crate::historied_tree_bindings::LocalOffchainDelete,
+>;
+
+pub(crate) type ChangesJournalSync = Arc<Mutex<ChangesJournal<historied_db::mapped_db::MappedDBDyn>>>;
+
 /// Offchain local storage with blockchain historied storage.
 #[derive(Clone)]
 pub struct BlockChainLocalStorage<H: Ord, S: TreeManagementStorage> {
 	historied_management: Arc<RwLock<crate::TreeManagement<H, S>>>,
 	db: Arc<dyn Database<DbHash>>,
 	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
+	ordered_db: Arc<Mutex<historied_db::mapped_db::MappedDBDyn>>,
+	changes_journals: ChangesJournalSync,
+}
+
+/// For migration this will update a pending change layer to support
+/// transaction.
+pub struct TransactionalConsumer<H: Ord, S: TreeManagementStorage> {
+	/// Storage to use.
+	pub storage: BlockChainLocalStorage<H, S>,
+	/// Transaction to update on migrate.
+	pub pending: Arc<RwLock<Transaction<DbHash>>>,
+}
+
+impl<H, S> historied_db::management::ManagementConsumer<H, crate::TreeManagement<H, S>> for TransactionalConsumer<H, S>
+	where
+		H: Ord + Clone + Codec + Send + Sync + 'static,
+		S: TreeManagementStorage + 'static,
+{
+	fn migrate(&self, migrate: &mut historied_db::management::Migrate<H, crate::TreeManagement<H, S>>) {
+		let mut keys = std::collections::BTreeSet::<Vec<u8>>::new();
+		let (prune, changes) = migrate.migrate().touched_state();
+		// this db is transactional.
+		let db = migrate.management().ser();
+		// using a new instance (transactional db is a different type).
+		// This means some ununsed cache state can remain.
+		let mut journals = ChangesJournal::from_db(db);
+		if let Some(pruning) = prune {
+			journals.remove_changes_before(db, &(pruning, Default::default()), &mut keys);
+		}
+
+		for state in changes {
+			let state = state.clone();
+			let state = (state.1, state.0);
+			if let Some(removed) = journals.remove_changes_at(db, &state) {
+				for key in removed {
+					keys.insert(key);
+				}
+			}
+		}
+
+		if keys.is_empty() {
+			return;
+		}
+
+		let block_nodes = BlockNodes::new(self.storage.db.clone());
+		let branch_nodes = BranchNodes::new(self.storage.db.clone());
+
+		let mut pending = self.pending.write();
+		for k in keys {
+			let column = crate::columns::OFFCHAIN;
+			let init_nodes = ContextHead {
+				key: k.clone(),
+				backend: block_nodes.clone(),
+				node_init_from: (),
+			};
+			let init = ContextHead {
+				key: k.clone(),
+				backend: branch_nodes.clone(),
+				node_init_from: init_nodes.clone(),
+			};
+
+			let k = k.as_slice();
+			let histo: HValue = if let Some(histo) = self.storage.db.get(column, k) {
+				historied_db::DecodeWithContext::decode_with_context(&mut &histo[..], &(init.clone(), init_nodes.clone()))
+					.expect("Bad encoded value in db, closing")
+			} else {
+				continue;
+			};
+
+			let mut new_value = histo;
+			use historied_db::historied::DataMut;
+			match new_value.migrate(migrate.migrate()) {
+				historied_db::UpdateResult::Changed(()) => {
+					use historied_db::Trigger;
+					new_value.trigger_flush();
+					pending.set_from_vec(column, k, new_value.encode());
+				},
+				historied_db::UpdateResult::Cleared(()) => {
+					use historied_db::Trigger;
+					new_value.trigger_flush();
+					pending.remove(column, k);
+				},
+				historied_db::UpdateResult::Unchanged => (),
+			}
+		}
+
+		block_nodes.apply_transaction(&mut pending);
+		branch_nodes.apply_transaction(&mut pending);
+	}
 }
 
 /// Offchain local storage for a given block.
@@ -54,9 +153,12 @@ pub struct BlockChainLocalAt {
 	db: Arc<dyn Database<DbHash>>,
 	block_nodes: BlockNodes,
 	branch_nodes: BranchNodes,
-	at_read: ForkPlan<u32, u32>,
-	at_write: Option<Latest<(u32, u32)>>,
+	at_read: ForkPlan<u32, u64>,
+	at_write: Option<Latest<(u32, u64)>>,
 	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
+	ordered_db: Arc<Mutex<historied_db::mapped_db::MappedDBDyn>>,
+	changes_journals: ChangesJournalSync,
+	skip_journalize: bool,
 }
 
 /// Offchain local storage for a given block,
@@ -101,14 +203,17 @@ impl<H: Ord, S: TreeManagementStorage> BlockChainLocalStorage<H, S> {
 	pub fn new(
 		db: Arc<dyn Database<DbHash>>,
 		historied_management: Arc<RwLock<crate::TreeManagement<H, S>>>,
+		journals_db: historied_db::mapped_db::MappedDBDyn,
 	) -> Self {
+		let journals = historied_db::management::JournalForMigrationBasis::from_db(&journals_db);
 		Self {
 			historied_management,
 			db,
 			locks: Default::default(),
+			ordered_db: Arc::new(Mutex::new(journals_db)),
+			changes_journals: Arc::new(Mutex::new(journals)),
 		}
 	}
-
 }
 
 impl<H: Ord> BlockChainLocalStorage<H, ()> {
@@ -116,9 +221,11 @@ impl<H: Ord> BlockChainLocalStorage<H, ()> {
 	#[cfg(any(test, feature = "test-helpers"))]
 	pub fn new_test() -> Self {
 		let db = kvdb_memorydb::create(crate::utils::NUM_COLUMNS);
-		let db = sp_database::as_database(db);
+		let db: Arc<dyn Database<DbHash>> = sp_database::as_database(db);
 		let historied_management = Arc::new(RwLock::new(crate::TreeManagement::default()));
-		Self::new(db as _, historied_management)
+		let ordered = sp_database::RadixTreeDatabase::new(db.clone());
+		let ordered = Box::new(crate::DatabaseStorage(ordered));
+		Self::new(db as _, historied_management, ordered)
 	}
 }
 
@@ -205,6 +312,9 @@ impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStora
 				at_read,
 				at_write,
 				locks: self.locks.clone(),
+				ordered_db: self.ordered_db.clone(),
+				changes_journals: self.changes_journals.clone(),
+				skip_journalize: !S::JOURNAL_DELETE,
 			})
 		} else {
 			None
@@ -225,6 +335,12 @@ impl BlockChainLocalAt {
 	pub fn can_update(&self) -> bool {
 		true
 	}
+
+	/// When doing batch update we can skip journalize,
+	/// and produce the journalize item at once later.
+	pub fn skip_journalize(&mut self) {
+		self.skip_journalize = true;
+	}
 }
 
 impl BlockChainLocalAtNew {
@@ -232,17 +348,17 @@ impl BlockChainLocalAtNew {
 	pub fn can_update(&self) -> bool {
 		self.0.at_write.is_some()
 	}
+
+	/// When doing batch update we can skip journalize,
+	/// and produce the journalize item at once later.
+	pub fn skip_journalize(&mut self) {
+		self.0.skip_journalize = true;
+	}
 }
 
 
 impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
-		if !self.set_if_possible(prefix, key, value) {
-			panic!("Concurrency failure for sequential write of offchain storage");
-		}
-	}
-
-	fn set_if_possible(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) -> bool {
 		let test: Option<fn(Option<&[u8]>) -> bool> = None;
 		match self.modify(
 			prefix,
@@ -251,8 +367,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 			Some(value),
 			false,
 		) {
-			Ok(_) => true,
-			Err(ModifyError::AlreadyWritten) => false,
+			Ok(_) => (),
 			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
 			Err(ModifyError::DbWrite) => panic!("Offchain local db commit failure"),
 		}
@@ -260,13 +375,17 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 
 	fn remove(&mut self, prefix: &[u8], key: &[u8]) {
 		let test: Option<fn(Option<&[u8]>) -> bool> = None;
-		self.modify(
+		match self.modify(
 			prefix,
 			key,
 			test,
 			None,
 			false,
-		).expect("Concurrency failure for sequential write of offchain storage");
+		) {
+			Ok(_) => (),
+			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
+			Err(ModifyError::DbWrite) => panic!("Offchain local db commit failure"),
+		}
 	}
 
 	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
@@ -292,7 +411,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 				let v: Option<HValue> = historied_db::DecodeWithContext::decode_with_context(&mut &v[..], &(init, init_nodes));
 				v
 			}.and_then(|h| {
-				use historied_db::historied::ValueRef;
+				use historied_db::historied::Data;
 				h.get(&self.at_read).flatten()
 			}))
 	}
@@ -305,24 +424,22 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 		new_value: &[u8],
 	) -> bool {
 		let test = |v: Option<&[u8]>| old_value == v;
-		self.modify(
+		match self.modify(
 			prefix,
 			item_key,
 			Some(test),
 			Some(new_value),
 			false,
-		).expect("Concurrency failure for sequential write of offchain storage")
+		) {
+			Ok(b) => b,
+			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
+			Err(ModifyError::DbWrite) => panic!("Offchain local db commit failure"),
+		}
 	}
 }
 
 impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
 	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
-		if !self.set_if_possible(prefix, key, value) {
-			panic!("Concurrency failure for sequential write of offchain storage");
-		}
-	}
-
-	fn set_if_possible(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) -> bool {
 		let test: Option<fn(Option<&[u8]>) -> bool> = None;
 		match self.0.modify(
 			prefix,
@@ -331,8 +448,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
 			Some(value),
 			true,
 		) {
-			Ok(_) => true,
-			Err(ModifyError::AlreadyWritten) => false,
+			Ok(_) => (),
 			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
 			Err(ModifyError::DbWrite) => panic!("Offchain local db commit failure"),
 		}
@@ -340,13 +456,17 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
 
 	fn remove(&mut self, prefix: &[u8], key: &[u8]) {
 		let test: Option<fn(Option<&[u8]>) -> bool> = None;
-		self.0.modify(
+		match self.0.modify(
 			prefix,
 			key,
 			test,
 			None,
 			true,
-		).expect("Concurrency failure for sequential write of offchain storage");
+		) {
+			Ok(_) => (),
+			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
+			Err(ModifyError::DbWrite) => panic!("Offchain local db commit failure"),
+		}
 	}
 
 	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
@@ -361,20 +481,23 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
 		new_value: &[u8],
 	) -> bool {
 		let test = |v: Option<&[u8]>| old_value == v;
-		self.0.modify(
+		match self.0.modify(
 			prefix,
 			item_key,
 			Some(test),
 			Some(new_value),
 			true,
-		).expect("Concurrency failure for sequential write of offchain storage")
+		) {
+			Ok(_) => true,
+			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
+			Err(ModifyError::DbWrite) => panic!("Offchain local db commit failure"),
+		}
 	}
 }
 
 #[derive(Debug)]
 enum ModifyError {
 	NoWriteState,
-	AlreadyWritten,
 	DbWrite,
 }
 
@@ -431,30 +554,26 @@ impl BlockChainLocalAt {
 						v
 					});
 				let val = histo.as_ref().and_then(|h| {
-					use historied_db::historied::ValueRef;
+					use historied_db::historied::Data;
 					h.get(&self.at_read).flatten()
 				});
 
 				is_set = condition.map(|c| c(val.as_ref().map(|v| v.as_slice()))).unwrap_or(true);
 
 				if is_set {
-					use historied_db::historied::Value;
+					use historied_db::historied::DataMut;
 					let is_insert = new_value.is_some();
 					let new_value = new_value.map(|v| v.to_vec());
 					let (new_value, update_result) = if let Some(mut histo) = histo {
 						let update_result = if is_new {
 							histo.set(new_value, at_write)
 						} else {
-							use historied_db::historied::ConditionalValueMut;
-							use historied_db::historied::StateIndex;
-							if let Some(update_result) = histo.set_if_possible_no_overwrite(
+							use historied_db::historied::force::ForceDataMut;
+							use historied_db::StateIndex;
+							histo.force_set(
 								new_value,
 								at_write.index_ref(),
-							) {
-								update_result
-							} else {
-								return Err(ModifyError::AlreadyWritten);
-							}
+							)
 						};
 						if let &UpdateResult::Unchanged = &update_result {
 							(Vec::new(), update_result)
@@ -505,7 +624,27 @@ impl BlockChainLocalAt {
 						},
 						UpdateResult::Unchanged => (),
 					}
+					match update_result {
+						UpdateResult::Unchanged => (),
+						UpdateResult::Changed(())
+						| UpdateResult::Cleared(()) => {
+							if !self.skip_journalize {
+								use std::ops::DerefMut;
+								let at_write = at_write.latest().clone();
+								// Needed for encoded ordering against block index
+								let at_write = (at_write.1, at_write.0);
+								self.changes_journals.lock().add_changes(
+									self.ordered_db.lock().deref_mut(),
+									at_write,
+									vec![key.clone()],
+									false,
+								)
+							}
+						},
+					}
+
 				}
+
 			}
 			Ok(is_set)
 		}();
@@ -631,8 +770,8 @@ impl BranchNodes {
 	}
 }
 
-impl NodeStorage<Option<Vec<u8>>, u32, LinearBackendInner, MetaBlocks> for BlockNodes {
-	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<LinearNode> {
+impl NodeStorage<Option<Vec<u8>>, u64, LinearBackendInner, MetaBlocks> for BlockNodes {
+	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<LinearNode> {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.0.read(crate::columns::AUX, &key).and_then(|value| {
 			// use encoded len as size (this is bigger than the call to estimate size
@@ -648,20 +787,20 @@ impl NodeStorage<Option<Vec<u8>>, u32, LinearBackendInner, MetaBlocks> for Block
 	}
 }
 
-impl NodeStorageMut<Option<Vec<u8>>, u32, LinearBackendInner, MetaBlocks> for BlockNodes {
-	fn set_node(&mut self, reference_key: &[u8], relative_index: u32, node: &LinearNode) {
+impl NodeStorageMut<Option<Vec<u8>>, u64, LinearBackendInner, MetaBlocks> for BlockNodes {
+	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &LinearNode) {
 		let key = Self::vec_address(reference_key, relative_index);
 		let encoded = node.inner().encode();
 		self.0.write(key, encoded);
 	}
-	fn remove_node(&mut self, reference_key: &[u8], relative_index: u32) {
+	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64) {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.0.remove(key);
 	}
 }
 
 impl NodeStorage<BranchLinear, u32, TreeBackendInner, MetaBranches> for BranchNodes {
-	fn get_node(&self, reference_key: &[u8], relative_index: u32) -> Option<TreeNode> {
+	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<TreeNode> {
 		use historied_db::DecodeWithContext;
 		let key = Self::vec_address(reference_key, relative_index);
 		self.0.read(crate::columns::AUX, &key).and_then(|value| {
@@ -687,12 +826,12 @@ impl NodeStorage<BranchLinear, u32, TreeBackendInner, MetaBranches> for BranchNo
 }
 
 impl NodeStorageMut<BranchLinear, u32, TreeBackendInner, MetaBranches> for BranchNodes {
-	fn set_node(&mut self, reference_key: &[u8], relative_index: u32, node: &TreeNode) {
+	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &TreeNode) {
 		let key = Self::vec_address(reference_key, relative_index);
 		let encoded = node.inner().encode();
 		self.0.write(key, encoded);
 	}
-	fn remove_node(&mut self, reference_key: &[u8], relative_index: u32) {
+	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64) {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.0.remove(key);
 	}
@@ -701,13 +840,13 @@ impl NodeStorageMut<BranchLinear, u32, TreeBackendInner, MetaBranches> for Branc
 // Values are stored in memory in Vec like structure
 type LinearBackendInner = historied_db::backend::in_memory::MemoryOnly<
 	Option<Vec<u8>>,
-	u32,
+	u64,
 >;
 
 // A multiple nodes wraps multiple vec like structure
 type LinearBackend = historied_db::backend::nodes::Head<
 	Option<Vec<u8>>,
-	u32,
+	u64,
 	LinearBackendInner,
 	MetaBlocks,
 	BlockNodes,
@@ -717,13 +856,13 @@ type LinearBackend = historied_db::backend::nodes::Head<
 // Nodes storing these
 type LinearNode = historied_db::backend::nodes::Node<
 	Option<Vec<u8>>,
-	u32,
+	u64,
 	LinearBackendInner,
 	MetaBlocks,
 >;
 
 // Branch
-type BranchLinear = historied_db::historied::linear::Linear<Option<Vec<u8>>, u32, LinearBackend>;
+type BranchLinear = historied_db::historied::linear::Linear<Option<Vec<u8>>, u64, LinearBackend>;
 
 // Branch are stored in memory
 type TreeBackendInner = historied_db::backend::in_memory::MemoryOnly<
@@ -754,7 +893,7 @@ type TreeNode = historied_db::backend::nodes::Node<
 /// Indexed by u32 for both branches and value into branches.
 /// Value are in memory but serialized as splitted node.
 /// Each node contains multiple values or multiple branch head of nodes.
-pub type HValue = Tree<u32, u32, Option<Vec<u8>>, TreeBackend, LinearBackend>;
+pub type HValue = Tree<u32, u64, Option<Vec<u8>>, TreeBackend, LinearBackend>;
 
 #[cfg(test)]
 mod tests {
