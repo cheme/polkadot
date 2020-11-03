@@ -41,10 +41,11 @@ use sp_std::{vec::Vec, boxed::Box, marker::PhantomData};
 use crate::Ref;
 
 /// Management maps a historical tag of type `H` with its different db states representation.
-pub trait ManagementRef<H> {
+pub trait Management<H> {
 	/// attached db state needed for query.
 	type S;
 	/// attached db gc strategy.
+	/// TODO at Mut level? also is having a mut variant of any use here?
 	type GC;
 	type Migrate;
 	/// Returns the historical state representation for a given historical tag.
@@ -54,7 +55,7 @@ pub trait ManagementRef<H> {
 	fn get_gc(&self) -> Option<Ref<Self::GC>>;
 }
 
-pub trait Management<H>: ManagementRef<H> + Sized {
+pub trait ManagementMut<H>: Management<H> + Sized {
 	/// attached db state needed for update.
 	type SE; // TODO rename to latest or pending???
 
@@ -89,8 +90,7 @@ pub trait Management<H>: ManagementRef<H> + Sized {
 }
 
 /// This trait is for mapping a given state to the DB opaque inner state.
-// TODO is only ManagementRef
-pub trait ForkableManagement<H>: Management<H> {
+pub trait ForkableManagement<H>: ManagementMut<H> {
 	/// Do we keep trace of changes.
 	const JOURNAL_DELETE: bool;
 	/// Fork at any given internal state.
@@ -133,7 +133,7 @@ pub trait ForkableManagement<H>: Management<H> {
 	}
 }
 
-pub trait LinearManagement<H>: ManagementRef<H> {
+pub trait LinearManagement<H>: Management<H> {
 	fn append_external_state(&mut self, state: H) -> Option<Self::S>;
 
 	// cannot be empty: if at initial state we return initial
@@ -149,21 +149,19 @@ pub trait LinearManagement<H>: ManagementRef<H> {
 /// (a byte trie with locks that invalidate cache when set storage is call).
 /// get_aggregate(aggregate_key)-> option<StructAggregate>
 /// set_aggregate(aggregate_key, struct aggregate, [(child_info, lockprefixes)]).
-pub trait ForkableHeadManagement<H>: ManagementRef<H> {
+pub trait ForkableHeadManagement<H>: Management<H> {
 	fn register_external_state_head(&mut self, state: H, at: &Self::S) -> Self::S;
 	fn try_register_external_state_head(&mut self, state: H, at: &H) -> Option<Self::S> {
 		self.get_db_state(at).map(|at| self.register_external_state_head(state, &at))
 	}
 }
 
-
-
 /// Type holding a state db to lock the management, until applying migration.
 /// TODO consider removing applied migrate, since it is easier to use a transactional
 /// backend on historied management.
-pub struct Migrate<'a, H, M: Management<H>>(&'a mut M, M::Migrate, PhantomData<H>);
+pub struct Migrate<'a, H, M: ManagementMut<H>>(&'a mut M, M::Migrate, PhantomData<H>);
 
-impl<'a, H, M: Management<H>> Migrate<'a, H, M> {
+impl<'a, H, M: ManagementMut<H>> Migrate<'a, H, M> {
 	pub fn new(management: &'a mut M, migrate: M::Migrate) -> Self {
 		Migrate(management, migrate, PhantomData)
 	}
@@ -186,12 +184,12 @@ impl<'a, H, M: Management<H>> Migrate<'a, H, M> {
 /// Dynamic trait to register historied db
 /// implementation in order to allow migration
 /// (state global change requires to update all associated dbs).
-pub trait ManagementConsumer<H, M: Management<H>>: Send + Sync + 'static {
+pub trait ManagementConsumer<H, M: ManagementMut<H>>: Send + Sync + 'static {
 	fn migrate(&self, migrate: &mut Migrate<H, M>);
 }
 
 /// Register db, this associate treemanagement.
-pub fn consumer_to_register<H, M: Management<H>, C: ManagementConsumer<H, M> + Clone>(c: &C) -> Box<dyn ManagementConsumer<H, M>> {
+pub fn consumer_to_register<H, M: ManagementMut<H>, C: ManagementConsumer<H, M> + Clone>(c: &C) -> Box<dyn ManagementConsumer<H, M>> {
 	Box::new(c.clone())
 }
 

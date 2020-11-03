@@ -19,7 +19,7 @@
 //! Linear state management implementations.
 
 use crate::Latest;
-use crate::management::{Management, ManagementRef, Migrate, LinearManagement};
+use crate::management::{ManagementMut, Management, Migrate, LinearManagement};
 use sp_std::ops::{AddAssign, SubAssign};
 use num_traits::One;
 
@@ -40,7 +40,7 @@ impl<H, S: AddAssign<u32>> LinearInMemoryManagement<H, S> {
 	}
 }
 
-impl<H: Ord, S: Clone> ManagementRef<H> for LinearInMemoryManagement<H, S> {
+impl<H: Ord, S: Clone> Management<H> for LinearInMemoryManagement<H, S> {
 	type S = S;
 	type GC = S;
 	type Migrate = (S, Self::GC);
@@ -77,7 +77,7 @@ S: Default + Clone + AddAssign<u32> + Ord,
 impl<
 H: Ord + Clone,
 S: Default + Clone + AddAssign<u32> + Ord,
-> Management<H> for LinearInMemoryManagement<H, S> {
+> ManagementMut<H> for LinearInMemoryManagement<H, S> {
 	type SE = Latest<S>;
 
 	fn get_db_state_mut(&mut self, state: &H) -> Option<Self::SE> {

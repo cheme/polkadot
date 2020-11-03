@@ -29,7 +29,7 @@ use sp_std::fmt::Debug;
 use num_traits::One;
 use crate::historied::linear::LinearGC;
 use crate::Latest;
-use crate::management::{Management, ManagementRef, Migrate, ForkableManagement};
+use crate::management::{ManagementMut, Management, Migrate, ForkableManagement};
 use codec::{Codec, Encode, Decode};
 use crate::mapped_db::{MappedDB, Map as MappedDbMap, Variable as MappedDbVariable, MapInfo, VariableInfo};
 use derivative::Derivative;
@@ -1345,7 +1345,7 @@ impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
 	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
-> ManagementRef<H> for TreeManagement<H, I, BI, S> {
+> Management<H> for TreeManagement<H, I, BI, S> {
 	type S = ForkPlan<I, BI>;
 	/// Garbage collect over current
 	/// state or registered changes.
@@ -1369,7 +1369,7 @@ impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
 	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
-> Management<H> for TreeManagement<H, I, BI, S> {
+> ManagementMut<H> for TreeManagement<H, I, BI, S> {
 	// TODO attach gc infos to allow some lazy cleanup (make it optional)
 	// on set and on get_mut
 	type SE = Latest<(I, BI)>;

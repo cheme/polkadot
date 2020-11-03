@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use crate::{Latest, Ref};
-use crate::management::{Management, ManagementRef, ForkableManagement, Migrate};
+use crate::management::{ManagementMut, Management, ForkableManagement, Migrate};
 use crate::db_traits::{StateDBMut, StateDBRef, StateDB};
 use super::{StateInput, StateIndex};
 
@@ -112,7 +112,7 @@ impl<K: Hash + Eq, V: Clone> StateDBMut<K, V> for Db<K, V> {
 	fn migrate(&mut self, _mig: &mut Self::Migrate) { }
 }
 
-impl<K: Eq + Hash, V> ManagementRef<StateInput> for Db<K, V> {
+impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 	type S = Query;
 	type GC = ();
 	type Migrate = ();
@@ -156,7 +156,7 @@ impl<K: Eq + Hash, V> Default for Db<K, V> {
 	}
 }
 
-impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
+impl<K: Eq + Hash, V> ManagementMut<StateInput> for Db<K, V> {
 	type SE = Latest<StateIndex>;
 
 	fn get_db_state_mut(&mut self, state: &StateInput) -> Option<Self::SE> {

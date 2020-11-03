@@ -20,7 +20,7 @@
 //! problematic fuzzer inputs.
 
 use crate::{
-	management::{Management, ForkableManagement, ManagementRef},
+	management::{ManagementMut, ForkableManagement, Management},
 	db_traits::{StateDB, StateDBMut},
 	historied::DataMut,
 };

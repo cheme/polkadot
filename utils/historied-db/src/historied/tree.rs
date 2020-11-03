@@ -1065,7 +1065,7 @@ mod test {
 	#[cfg(feature = "conditional-data")]
 	#[test]
 	fn test_conditional_set_get() {
-		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::historied::conditional::ConditionalDataMut;
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
@@ -1116,7 +1116,7 @@ mod test {
 	#[cfg(feature = "force-data")]
 	#[test]
 	fn test_force_set_get() {
-		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		use crate::historied::force::ForceDataMut;
 		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
@@ -1226,7 +1226,7 @@ mod test {
 
 	#[test]
 	fn test_migrate() {
-		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u16, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
@@ -1427,7 +1427,7 @@ mod test {
 	fn test_diff1() {
 		use crate::historied::aggregate::{Substract};
 		use crate::historied::aggregate::xdelta::{BytesDelta, BytesDiff, BytesSubstract}; 
-		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
@@ -1478,7 +1478,7 @@ mod test {
 	#[test]
 	fn test_diff2() {
 		use crate::historied::aggregate::map_delta::{MapDelta, MapDiff}; 
-		use crate::management::{Management, ManagementRef, ForkableManagement};
+		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<

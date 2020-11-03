@@ -210,7 +210,7 @@ impl<'a, V: Clone> Ref<'a, V> {
 pub struct Latest<S>(S);
 
 impl<S> Latest<S> {
-	/// This is only to be use by a `Management` or
+	/// This is only to be use by a `ManagementMut` or
 	/// a context where the state can be proven as
 	/// being the latest.
 	pub fn unchecked_latest(s: S) -> Self {
