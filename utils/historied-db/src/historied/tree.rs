@@ -21,11 +21,11 @@
 
 #[cfg(feature = "need_implementation_changes")]
 use super::ConditionalValueMut;
-use super::{HistoriedValue, ValueRef, Value, InMemoryValueRef, InMemoryValue, ForceValueMut,
+use super::{HistoriedValue, Data, Value, InMemoryData, InMemoryValue, ForceValueMut,
 	InMemoryValueSlice, InMemoryValueRange, UpdateResult, Item, ItemRef,
-	ValueDiff, ItemDiff};
+	aggregate::{Sum as DataSum, SumValue}};
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
-use crate::historied::linear::{Linear, LinearState, LinearGC, LinearDiff};
+use crate::historied::linear::{Linear, LinearState, LinearGC, LinearLeftSum};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
 use sp_std::ops::SubAssign;
 use num_traits::One;
@@ -50,7 +50,7 @@ use core::default::Default;
 // Call second linear historied value afterward.
 macro_rules! tree_get {
 	($fn_name: ident, $return_type: ty, $branch_query: ident, $value_query: expr, $post_process: expr) => {
-	fn $fn_name<'a>(&'a self, at: &<Self as ValueRef<V>>::S) -> Option<$return_type> {
+	fn $fn_name<'a>(&'a self, at: &<Self as Data<V>>::S) -> Option<$return_type> {
 		// note that we expect branch index to be linearily set
 		// along a branch (no state containing unordered branch_index
 		// and no history containing unorderd branch_index).
@@ -172,7 +172,7 @@ impl<
 	V: Item + Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 	BD: LinearStorage<V::Storage, BI>,
-> ValueRef<V> for Tree<I, BI, V, D, BD> {
+> Data<V> for Tree<I, BI, V, D, BD> {
 	type S = ForkPlan<I, BI>;
 
 	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _| r);
@@ -187,31 +187,35 @@ impl<
 	}
 }
 
-/// Tree access to Diff structure.
+/// Tree access to Sum structure.
 ///
-/// TODO put in its own module?
-pub struct TreeDiff<'a, I, BI, V: ItemDiff, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Diff, D, BD>);
+/// The aggregate must be applied in a non associative
+/// non commutative way (operations only apply
+/// from oldest zero item to the target state).
+/// Good for diff, but can be use for other use case
+/// with simple implementation (eg list). 
+pub struct TreeLeftSum<'a, I, BI, V: SumValue, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Value, D, BD>);
 
-impl<'a, I, BI, V: ItemDiff, D: Context, BD: Context> sp_std::ops::Deref for TreeDiff<'a, I, BI, V, D, BD> {
-	type Target = Tree<I, BI, V::Diff, D, BD>;
+impl<'a, I, BI, V: SumValue, D: Context, BD: Context> sp_std::ops::Deref for TreeLeftSum<'a, I, BI, V, D, BD> {
+	type Target = Tree<I, BI, V::Value, D, BD>;
 
-	fn deref(&self) -> &Tree<I, BI, V::Diff, D, BD> {
+	fn deref(&self) -> &Tree<I, BI, V::Value, D, BD> {
 		&self.0
 	}
 }
 
-impl<'a, I, BI, V, D, BD> ValueRef<V::Diff> for TreeDiff<'a, I, BI, V, D, BD>
+impl<'a, I, BI, V, D, BD> Data<V::Value> for TreeLeftSum<'a, I, BI, V, D, BD>
 	where
 		I: Default + Eq + Ord + Clone,
 		BI: LinearState + SubAssign<BI> + One,
-		V: ItemDiff,
-		V::Diff: Item + Clone,
-		D: LinearStorage<Linear<V::Diff, BI, BD>, I>,
-		BD: LinearStorage<<V::Diff as Item>::Storage, BI>,
+		V: SumValue,
+		V::Value: Item + Clone,
+		D: LinearStorage<Linear<V::Value, BI, BD>, I>,
+		BD: LinearStorage<<V::Value as Item>::Storage, BI>,
 {
 	type S = ForkPlan<I, BI>;
 
-	fn get(&self, at: &Self::S) -> Option<V::Diff> {
+	fn get(&self, at: &Self::S) -> Option<V::Value> {
 		self.0.get(at)
 	}
 
@@ -224,16 +228,16 @@ impl<'a, I, BI, V, D, BD> ValueRef<V::Diff> for TreeDiff<'a, I, BI, V, D, BD>
 	}
 }
 
-impl<'a, I, BI, V, D, BD> ValueDiff<V> for TreeDiff<'a, I, BI, V, D, BD>
+impl<'a, I, BI, V, D, BD> DataSum<V> for TreeLeftSum<'a, I, BI, V, D, BD>
 	where
 		I: Default + Eq + Ord + Clone,
 		BI: LinearState + SubAssign<BI> + One,
-		V: ItemDiff,
-		V::Diff: Item + Clone,
-		D: LinearStorage<Linear<V::Diff, BI, BD>, I>,
-		BD: LinearStorage<<V::Diff as Item>::Storage, BI>,
+		V: SumValue,
+		V::Value: Item + Clone,
+		D: LinearStorage<Linear<V::Value, BI, BD>, I>,
+		BD: LinearStorage<<V::Value as Item>::Storage, BI>,
 {
-	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool {
+	fn get_sums(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
 		// could also exten tree_get macro but it will end up being hard to read,
 		// so copying loop here.
 		let mut next_branch_index = self.branches.last();
@@ -248,7 +252,7 @@ impl<'a, I, BI, V, D, BD> ValueDiff<V> for TreeDiff<'a, I, BI, V, D, BD>
 					upper_bound -= BI::one();
 					// TODO get_ref variant?
 					let branch = self.branches.get(branch_ix).value;
-					if LinearDiff::<V, _, _>(&branch).get_diffs(&upper_bound, changes) {
+					if LinearLeftSum::<V, _, _>(&branch).get_sums(&upper_bound, changes) {
 						return true;
 					}
 				}
@@ -261,7 +265,7 @@ impl<'a, I, BI, V, D, BD> ValueDiff<V> for TreeDiff<'a, I, BI, V, D, BD>
 			let branch_index = &self.branches.get_state(branch_ix);
 			if branch_index <= &at.composite_treshold.0 {
 				let branch = self.branches.get(branch_ix).value;
-				if LinearDiff::<V, _, _>(&branch).get_diffs(&at.composite_treshold.1, changes) {
+				if LinearLeftSum::<V, _, _>(&branch).get_sums(&at.composite_treshold.1, changes) {
 					return true;
 				}
 			}
@@ -280,7 +284,7 @@ impl<
 	V: ItemRef + Clone,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI>,
-> InMemoryValueRef<V> for Tree<I, BI, V, D, BD> {
+> InMemoryData<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _| r );
 }
 
@@ -877,7 +881,7 @@ mod test {
 	#[test]
 	fn compile_double_encoded_single() {
 		use crate::backend::encoded_array::{EncodedArray, NoVersion};
-		use crate::historied::ValueRef;
+		use crate::historied::Data;
 
 		type BD<'a> = EncodedArray<'a, Vec<u8>, NoVersion>;
 //		type D<'a> = crate::historied::linear::MemoryOnly<
@@ -906,7 +910,7 @@ mod test {
 		use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
 		use crate::backend::nodes::{Head, Node, ContextHead};
 		use crate::backend::nodes::test::{MetaNb, MetaSize};
-		use crate::historied::ValueRef;
+		use crate::historied::Data;
 		use sp_std::collections::btree_map::BTreeMap;
 
 		type EncArray<'a> = EncodedArray<'a, Vec<u8>, DefaultVersion>;
@@ -955,7 +959,7 @@ mod test {
 		use crate::backend::in_memory::MemoryOnly;
 		use crate::backend::nodes::{Head, Node, ContextHead};
 		use crate::backend::nodes::test::{MetaNb, MetaSize};
-		use crate::historied::ValueRef;
+		use crate::historied::Data;
 		use sp_std::collections::btree_map::BTreeMap;
 
 		type MemOnly = MemoryOnly<Vec<u8>, u32>;
@@ -1405,8 +1409,8 @@ mod test {
 	#[cfg(feature = "xdelta3-diff")]
 	#[test]
 	fn test_diff1() {
-		use crate::historied::{DiffBuilder};
-		use crate::historied::xdelta::{BytesDelta, BytesDiff, BytesDiffBuilder}; 
+		use crate::historied::aggregate::{Substract};
+		use crate::historied::aggregate::xdelta::{BytesDelta, BytesDiff, BytesSubstract}; 
 		use crate::management::{Management, ManagementRef, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
@@ -1432,11 +1436,11 @@ mod test {
 
 		let mut successive_deltas: Vec<BytesDiff> = Vec::with_capacity(successive_values.len());
 
-		let mut builder = BytesDiffBuilder::new_diff_builder();
-		successive_deltas.push(builder.calculate_diff(&Default::default(), &successive_values[0]));
-		successive_deltas.push(builder.calculate_diff(&successive_values[0], &successive_values[1]));
-		successive_deltas.push(builder.calculate_diff(&successive_values[1], &successive_values[2]));
-		successive_deltas.push(builder.calculate_diff(&successive_values[1], &successive_values[3]));
+		let mut builder = BytesSubstract::new();
+		successive_deltas.push(builder.substract(&Default::default(), &successive_values[0]));
+		successive_deltas.push(builder.substract(&successive_values[0], &successive_values[1]));
+		successive_deltas.push(builder.substract(&successive_values[1], &successive_values[2]));
+		successive_deltas.push(builder.substract(&successive_values[1], &successive_values[3]));
 
 		let successive_deltas = successive_deltas;
 
@@ -1449,15 +1453,15 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
 
-		let item = TreeDiff::<_, _, BytesDelta, _, _>(&item);
-		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
-		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
-		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
+		let item = TreeLeftSum::<_, _, BytesDelta, _, _>(&item);
+		assert_eq!(item.get_sum(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
+		assert_eq!(item.get_sum(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
+		assert_eq!(item.get_sum(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
 	}
 
 	#[test]
 	fn test_diff2() {
-		use crate::historied::map_delta::{MapDelta, MapDiff}; 
+		use crate::historied::aggregate::map_delta::{MapDelta, MapDiff}; 
 		use crate::management::{Management, ManagementRef, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
@@ -1497,9 +1501,9 @@ mod test {
 		assert_eq!(item.get(&states.query_plan(3)).as_ref(), Some(&successive_deltas[2]));
 		assert_eq!(item.get(&states.query_plan(4)).as_ref(), Some(&successive_deltas[3]));
 
-		let item = TreeDiff::<_, _, MapDelta<u8, u8>, _, _>(&item);
-		assert_eq!(item.get_diff(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
-		assert_eq!(item.get_diff(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
-		assert_eq!(item.get_diff(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
+		let item = TreeLeftSum::<_, _, MapDelta<u8, u8>, _, _>(&item);
+		assert_eq!(item.get_sum(&states.query_plan(1)).as_ref(), Some(&successive_values[1]));
+		assert_eq!(item.get_sum(&states.query_plan(3)).as_ref(), Some(&successive_values[2]));
+		assert_eq!(item.get_sum(&states.query_plan(4)).as_ref(), Some(&successive_values[3]));
 	}
 }

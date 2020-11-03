@@ -19,7 +19,7 @@
 
 use hash_db::{PlainDBRef, PlainDB};
 use crate::{UpdateResult, Context,
-	historied::{Value, ValueRef, InMemoryValueRef, Item, StateIndex}};
+	historied::{Value, Data, InMemoryData, Item, StateIndex}};
 use sp_std::marker::PhantomData;
 
 /// Trait for immutable reference of a plain key value db.
@@ -76,16 +76,16 @@ pub trait StateDB<K, V>: StateDBRef<K, V> {
 }
 
 /// Implementation for plain db.
-pub struct BTreeMap<K, V, H: Context>(pub(crate) sp_std::collections::btree_map::BTreeMap<K, H>, H::Context, PhantomData<V>);
+pub struct BTreeMap<K, V, D: Context>(pub(crate) sp_std::collections::btree_map::BTreeMap<K, D>, D::Context, PhantomData<V>);
 
-impl<K: Ord, V, H: Context> BTreeMap<K, V, H> {
-	pub fn new(init: H::Context) -> Self {
+impl<K: Ord, V, D: Context> BTreeMap<K, V, D> {
+	pub fn new(init: D::Context) -> Self {
 		BTreeMap(sp_std::collections::btree_map::BTreeMap::new(), init, PhantomData)
 	}
 }
 
-impl<K: Ord, V: Item + Clone, H: ValueRef<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, H> {
-	type S = H::S;
+impl<K: Ord, V: Item + Clone, D: Data<V> + Context> StateDBRef<K, V> for BTreeMap<K, V, D> {
+	type S = D::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
 		self.0.get(key)
@@ -100,8 +100,8 @@ impl<K: Ord, V: Item + Clone, H: ValueRef<V> + Context> StateDBRef<K, V> for BTr
 }
 
 // note that the constraint on state db ref for the associated type is bad (forces V as clonable).
-impl<K: Ord, V: Item, H: InMemoryValueRef<V> + Context> InMemoryStateDBRef<K, V> for BTreeMap<K, V, H> {
-	type S = H::S;
+impl<K: Ord, V: Item, D: InMemoryData<V> + Context> InMemoryStateDBRef<K, V> for BTreeMap<K, V, D> {
+	type S = D::S;
 
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V> {
 		self.0.get(key)
@@ -109,16 +109,16 @@ impl<K: Ord, V: Item, H: InMemoryValueRef<V> + Context> InMemoryStateDBRef<K, V>
 	}
 }
 
-impl<K: Ord + Clone, V: Item + Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeMap<K, V, H> {
-	type SE = H::SE;
-	type GC = H::GC;
-	type Migrate = H::Migrate;
+impl<K: Ord + Clone, V: Item + Clone + Eq, D: Value<V>> StateDB<K, V> for BTreeMap<K, V, D> {
+	type SE = D::SE;
+	type GC = D::GC;
+	type Migrate = D::Migrate;
 
 	fn emplace(&mut self, key: K, value: V, at: &Self::SE) {
 		if let Some(hist) = self.0.get_mut(&key) {
 			hist.set(value, at);
 		} else {
-			self.0.insert(key, H::new(value, at, self.1.clone()));
+			self.0.insert(key, D::new(value, at, self.1.clone()));
 		}
 	}
 
@@ -162,14 +162,14 @@ impl<K: Ord + Clone, V: Item + Clone + Eq, H: Value<V>> StateDB<K, V> for BTreeM
 }
 
 /// Implementation for plain db.
-pub struct PlainDBState<K, DB, H, S> {
+pub struct PlainDBState<K, DB, D, S> {
 	db: DB,
 	touched_keys: sp_std::collections::btree_map::BTreeMap<S, Vec<K>>, // TODO change that by a journal trait!!
-	_ph: PhantomData<H>,
+	_ph: PhantomData<D>,
 }
 
-impl<K, V: Item + Clone, H: ValueRef<V>, DB: PlainDBRef<K, H>, S> StateDBRef<K, V> for PlainDBState<K, DB, H, S> {
-	type S = H::S;
+impl<K, V: Item + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDBRef<K, V> for PlainDBState<K, DB, D, S> {
+	type S = D::S;
 
 	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
 		self.db.get(key)
@@ -186,15 +186,15 @@ impl<K, V: Item + Clone, H: ValueRef<V>, DB: PlainDBRef<K, H>, S> StateDBRef<K, 
 impl<
 	K: Ord + Clone,
 	V: Item + Clone + Eq,
-	H: Value<V, Context = ()>,
-	DB: PlainDBRef<K, H> + PlainDB<K, H>,
-> StateDB<K, V> for PlainDBState<K, DB, H, H::Index>
+	D: Value<V, Context = ()>,
+	DB: PlainDBRef<K, D> + PlainDB<K, D>,
+> StateDB<K, V> for PlainDBState<K, DB, D, D::Index>
 	where
-			H::Index: Clone + Ord,
+			D::Index: Clone + Ord,
 {
-	type SE = H::SE;
-	type GC = H::GC;
-	type Migrate = H::Migrate;
+	type SE = D::SE;
+	type GC = D::GC;
+	type Migrate = D::Migrate;
 
 	fn emplace(&mut self, key: K, value: V, at: &Self::SE) {
 		if let Some(mut hist) = <DB as PlainDB<_, _>>::get(&self.db, &key) {
@@ -204,7 +204,7 @@ impl<
 				UpdateResult::Unchanged => return,
 			}
 		} else {
-			self.db.emplace(key.clone(), H::new(value, at, ()));
+			self.db.emplace(key.clone(), D::new(value, at, ()));
 		}
 		self.touched_keys.entry(at.index()).or_default().push(key);
 	}
@@ -244,7 +244,7 @@ impl<
 		let mut states = Vec::new();
 		// TODO do we really want this error prone prefiltering??
 		for touched in self.touched_keys.keys() {
-			if H::is_in_migrate(touched, mig) {
+			if D::is_in_migrate(touched, mig) {
 				states.push(touched.clone());
 			}
 		}

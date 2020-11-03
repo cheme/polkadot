@@ -23,9 +23,9 @@
 //!
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
-use super::{HistoriedValue, ValueRef, Value, InMemoryValueRange, InMemoryValueRef,
+use super::{HistoriedValue, Data, Value, InMemoryValueRange, InMemoryData,
 	InMemoryValueSlice, InMemoryValue, ConditionalValueMut, Item, ItemRef, ForceValueMut,
-	ValueDiff, ItemDiff};
+	aggregate::{Sum as DataSum, SumValue}};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
@@ -196,7 +196,7 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	}
 }
 
-impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> ValueRef<V> for Linear<V, S, D> {
+impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> for Linear<V, S, D> {
 	type S = S;
 
 	fn get(&self, at: &Self::S) -> Option<V> {
@@ -214,29 +214,29 @@ impl<V: Item + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> ValueRef<
 
 /// Use linear as linear diff. TODO put in its own module?
 ///
-/// If at some point `ItemDiff` and `Item` get merged, this would not be needed.
-/// (there is already need to have some const related to `ItemDiff` in `Item`
+/// If at some point `SumValue` and `Item` get merged, this would not be needed.
+/// (there is already need to have some const related to `SumValue` in `Item`
 /// to forbid some operations (gc and migrate)).
-pub struct LinearDiff<'a, V: ItemDiff, S, D>(pub &'a Linear<V::Diff, S, D>);
+pub struct LinearLeftSum<'a, V: SumValue, S, D>(pub &'a Linear<V::Value, S, D>);
 
-impl<'a, V: ItemDiff, S, D> sp_std::ops::Deref for LinearDiff<'a, V, S, D> {
-	type Target = Linear<V::Diff, S, D>;
+impl<'a, V: SumValue, S, D> sp_std::ops::Deref for LinearLeftSum<'a, V, S, D> {
+	type Target = Linear<V::Value, S, D>;
 
-	fn deref(&self) -> &Linear<V::Diff, S, D> {
+	fn deref(&self) -> &Linear<V::Value, S, D> {
 		&self.0
 	}
 }
 
-impl<'a, V, S, D> ValueRef<V::Diff> for LinearDiff<'a, V, S, D>
+impl<'a, V, S, D> Data<V::Value> for LinearLeftSum<'a, V, S, D>
 	where
-		V: ItemDiff,
-		V::Diff: Clone,
+		V: SumValue,
+		V::Value: Clone,
 		S: LinearState,
-		D: LinearStorage<<V::Diff as Item>::Storage, S>,
+		D: LinearStorage<<V::Value as Item>::Storage, S>,
 {
 	type S = S;
 
-	fn get(&self, at: &Self::S) -> Option<V::Diff> {
+	fn get(&self, at: &Self::S) -> Option<V::Value> {
 		self.0.get(at)
 	}
 
@@ -249,20 +249,20 @@ impl<'a, V, S, D> ValueRef<V::Diff> for LinearDiff<'a, V, S, D>
 	}
 }
 
-impl<'a, V, S, D> ValueDiff<V> for LinearDiff<'a, V, S, D>
+impl<'a, V, S, D> DataSum<V> for LinearLeftSum<'a, V, S, D>
 	where
-		V: ItemDiff,
-		V::Diff: Clone,
+		V: SumValue,
+		V::Value: Clone,
 		S: LinearState,
-		D: LinearStorage<<V::Diff as Item>::Storage, S>,
+		D: LinearStorage<<V::Value as Item>::Storage, S>,
 {
-	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool {
+	fn get_sums(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool {
 		for index in self.0.0.rev_index_iter() {
 			// TODO could really use get_ref here (would need trait variant,
 			// so keep up with copy for now). Also would need builder from
 			// ref (which is usefull for some impl).
 			let HistoriedValue { value, state } = self.0.0.get(index)
-				.map(V::Diff::from_storage);
+				.map(V::Value::from_storage);
 			if state.exists(at) {
 				if V::is_complete(&value) {
 					changes.push(value);
@@ -433,7 +433,7 @@ impl<V: Item, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	}
 }
 
-impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> InMemoryValueRef<V> for Linear<V, S, D> {
+impl<V: ItemRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> InMemoryData<V> for Linear<V, S, D> {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
 		self.get_adapt::<_, RefVecAdapter>(at).map(ItemRef::from_storage_ref)
 	}

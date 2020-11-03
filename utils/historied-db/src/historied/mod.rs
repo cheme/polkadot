@@ -27,9 +27,10 @@ use crate::{Context, DecodeWithContext, Trigger};
 
 pub mod linear;
 pub mod tree;
+pub mod aggregate;
 
-/// Trait for historied value
-pub trait ValueRef<V: Item> {
+/// Trait for historied data.
+pub trait Data<V: Item> {
 	/// State to query for this value.
 	type S;
 
@@ -43,40 +44,15 @@ pub trait ValueRef<V: Item> {
 	fn is_empty(&self) -> bool;
 }
 
-/// Trait for historied value with differential
-/// storage.
-pub trait ValueDiff<V: ItemDiff>: ValueRef<V::Diff> {
-	/// Get value at this state.
-	fn get_diff(&self, at: &Self::S) -> Option<V> {
-		let mut builder = V::new_item_builder();
-		let mut changes = Vec::new();
-		if !self.get_diffs(at, &mut changes) {
-			debug_assert!(changes.len() == 0); // Incoherent state no origin for diff
-		}
-		if changes.len() == 0 {
-			return None;
-		}
-		for change in changes.into_iter().rev() {
-			builder.apply_diff(change);
-		}
-		Some(builder.extract_item())
-	}
-
-	/// Accumulate all changes for this state.
-	/// Changes are written in reverse order into `changes`.
-	/// Return `true` if a complete change was written.
-	fn get_diffs(&self, at: &Self::S, changes: &mut Vec<V::Diff>) -> bool;
-}
-
 // TODO EMCH refact with 'a for inner value
 // and a get value type (see test on rust playground).
-// So we only got ValueRef type.
-pub trait InMemoryValueRef<V: Item>: ValueRef<V> {
+// So we only got Data type.
+pub trait InMemoryData<V: Item>: Data<V> {
 	/// Get reference to the value at this state.
 	fn get_ref(&self, at: &Self::S) -> Option<&V>;
 }
 
-pub trait InMemoryValueSlice<V: Item>: ValueRef<V> {
+pub trait InMemoryValueSlice<V: Item>: Data<V> {
 	/// Get reference to the value at this state.
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
 }
@@ -119,333 +95,6 @@ pub trait ItemRef: Item {
 	fn into_storage_ref_mut(&mut self) -> &mut Self::Storage;
 }
 
-/// An item that can be build from consecutives
-/// diffs. TODO rename (itemDiff should be the inner type)
-pub trait ItemDiff: Sized {
-	/// Internal Diff stored.
-	/// Default is the empty value (a neutral value
-	/// indicating that there is no content).
-	type Diff: Item + Default;
-
-	/// Internal type to build items.
-	type ItemBuilder: ItemBuilder<ItemDiff = Self>;
-
-	fn new_item_builder() -> Self::ItemBuilder {
-		Self::ItemBuilder::new_item_builder()
-	}
-
-	/// Check if the item can be a building source for 
-	/// TODO consider a trait specific to diff inner item.
-	fn is_complete(diff: &Self::Diff) -> bool;
-}
-
-pub trait ItemBuilder {
-	type ItemDiff: ItemDiff;
-
-	fn new_item_builder() -> Self;
-	fn apply_diff(&mut self, diff: <Self::ItemDiff as ItemDiff>::Diff);
-	fn extract_item(&mut self) -> Self::ItemDiff;
-}
-
-/// This is a different trait than item diff, because usually
-/// we are able to set the diff directly.
-/// Eg if we manage a list, our diff will be index and new item.
-/// If a vcdiff, it will be vcdiff calculated from a previous call to
-/// get.
-/// This usually means that we need to fetch item before modifying,
-/// at this point this is how we should proceed (even if it means
-/// a redundant query for modifying.
-///
-/// We could consider merging this trait with `ItemDiff`, and
-/// have an automated update for the case where we did not fetch
-/// the value first.
-pub trait DiffBuilder {
-	type ItemDiff: ItemDiff;
-
-	fn new_diff_builder() -> Self;
-	fn calculate_diff(
-		&mut self,
-		previous: &Self::ItemDiff,
-		target: &Self::ItemDiff,
-	) -> <Self::ItemDiff as ItemDiff>::Diff;
-}
-
-#[cfg(feature = "xdelta3-diff")]
-/// Diff using xdelta 3 lib
-pub mod xdelta {
-	use super::*;
-
-	#[derive(Clone, PartialEq, Eq, Debug, Default)]
-	pub struct BytesDelta(Vec<u8>);
-
-	impl std::ops::Deref for BytesDelta {
-		type Target = Vec<u8>;
-		fn deref(&self) -> &Self::Target {
-			&self.0
-		}
-	}
-
-	impl std::ops::DerefMut for BytesDelta {
-		fn deref_mut(&mut self) -> &mut Self::Target {
-			&mut self.0
-		}
-	}
-
-	impl From<Vec<u8>> for BytesDelta {
-		fn from(v: Vec<u8>) -> Self {
-			BytesDelta(v)
-		}
-	}
-
-	impl<'a> From<&'a [u8]> for BytesDelta {
-		fn from(v: &'a [u8]) -> Self {
-			BytesDelta(v.to_vec())
-		}
-	}
-
-	#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
-	pub enum BytesDiff {
-		/// Encoded vc diff (contains enum encoding first byte)
-		VcDiff(Vec<u8>),
-		/// Fully encoded value (contains enum encoding first byte).
-		Value(Vec<u8>),
-		/// Deleted or non existent value.
-		/// This is a neutral element.
-		None,
-	}
-
-	impl Default for BytesDiff {
-		fn default() -> Self {
-			BytesDiff::None
-		}
-	}
-
-	impl Item for BytesDiff {
-		const NEUTRAL: bool = true;
-		type Storage = Vec<u8>;
-
-		fn is_neutral(&self) -> bool {
-			if let BytesDiff::None = self {
-				true
-			} else {
-				false
-			}
-		}
-
-		fn is_storage_neutral(storage: &Self::Storage) -> bool {
-			storage.as_slice() == &[0u8]
-		}
-
-		fn from_storage(storage: Self::Storage) -> Self {
-			debug_assert!(storage.len() > 0);
-			match storage[0] {
-				0u8 => {
-					debug_assert!(storage.len() == 1);
-					BytesDiff::None
-				},
-				1u8 => BytesDiff::Value(storage),
-				2u8 => BytesDiff::VcDiff(storage),
-				_ => unreachable!("Item trait does not allow undefined content"),
-			}
-		}
-
-		fn into_storage(self) -> Self::Storage {
-			match self {
-				BytesDiff::Value(storage) => {
-					debug_assert!(storage[0] == 1u8);
-					storage
-				},
-				BytesDiff::VcDiff(storage) => {
-					debug_assert!(storage[0] == 2u8);
-					storage
-				},
-				BytesDiff::None => vec![0], 
-			}
-		}
-	}
-
-	pub struct BytesDiffBuilder;
-
-	impl DiffBuilder for BytesDiffBuilder {
-		type ItemDiff = BytesDelta;
-
-		fn new_diff_builder() -> Self {
-			BytesDiffBuilder
-		}
-		fn calculate_diff(
-			&mut self,
-			previous: &Self::ItemDiff,
-			target: &Self::ItemDiff,
-		) -> <Self::ItemDiff as ItemDiff>::Diff {
-			if target.0.len() == 0 {
-				return BytesDiff::None;
-			}
-			if previous.0.len() == 0 {
-				let mut result = target.0.clone();
-				result.insert(0, 1u8);
-				return BytesDiff::Value(result);
-			}
-			if let Some(mut result) = xdelta3::encode(target.0.as_slice(), previous.0.as_slice()) {
-				result.insert(0, 2u8);
-				BytesDiff::VcDiff(result)
-			} else {
-				// write as standalone
-				let mut result = target.0.clone();
-				result.insert(0, 1u8);
-				BytesDiff::Value(result)
-			}
-		}
-	}
-
-	pub struct BytesItemBuilder(Vec<u8>);
-
-	impl ItemBuilder for BytesItemBuilder {
-		type ItemDiff = BytesDelta;
-
-		fn new_item_builder() -> Self {
-			BytesItemBuilder(Default::default())
-		}
-		fn apply_diff(&mut self, diff: <Self::ItemDiff as ItemDiff>::Diff) {
-			match diff {
-				BytesDiff::Value(mut val) => {
-					val.remove(0);
-					self.0 = val;
-				},
-				BytesDiff::None => {
-					self.0.clear();
-				},
-				BytesDiff::VcDiff(diff) => {
-					self.0 = xdelta3::decode(&diff[1..], self.0.as_slice())
-						.expect("diff build only from diff builder");
-				}
-			}
-		}
-		fn extract_item(&mut self) -> Self::ItemDiff {
-			BytesDelta(sp_std::mem::replace(&mut self.0, Vec::new()))
-		}
-	}
-
-	impl ItemDiff for BytesDelta {
-		type Diff = BytesDiff;
-		type ItemBuilder = BytesItemBuilder;
-
-		fn is_complete(diff: &Self::Diff) -> bool {
-			match diff {
-				BytesDiff::VcDiff(_) => false,
-				BytesDiff::Value(_)
-				| BytesDiff::None => true,
-			}
-		}
-	}
-}
-
-/// Set delta.
-/// TODO even if just an implementation sample, allow multiple changes.
-pub mod map_delta{
-	use super::*;
-	use codec::Codec;
-	use sp_std::collections::btree_map::BTreeMap;
-
-	#[derive(Clone, PartialEq, Eq, Debug, Default)]
-	pub struct MapDelta<K: Ord, V>(pub BTreeMap<K, V>);
-
-	impl<K: Ord, V> sp_std::ops::Deref for MapDelta<K, V> {
-		type Target = BTreeMap<K, V>;
-		fn deref(&self) -> &Self::Target {
-			&self.0
-		}
-	}
-
-	impl<K: Ord, V> sp_std::ops::DerefMut for MapDelta<K, V> {
-		fn deref_mut(&mut self) -> &mut Self::Target {
-			&mut self.0
-		}
-	}
-
-	impl<K: Ord, V> From<BTreeMap<K, V>> for MapDelta<K, V> {
-		fn from(v: BTreeMap<K, V>) -> Self {
-			MapDelta(v)
-		}
-	}
-
-	#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
-	pub enum MapDiff<K, V> {
-		Reset,
-		Insert(K, V),
-		Remove(K),
-	}
-
-	impl<K, V> Default for MapDiff<K, V> {
-		fn default() -> Self {
-			MapDiff::Reset
-		}
-	}
-
-	impl<K: Codec, V: Codec> Item for MapDiff<K, V> {
-		const NEUTRAL: bool = true;
-		type Storage = Vec<u8>;
-
-		fn is_neutral(&self) -> bool {
-			if let MapDiff::Reset = self {
-				true
-			} else {
-				false
-			}
-		}
-
-		fn is_storage_neutral(storage: &Self::Storage) -> bool {
-			storage.as_slice() == &[0u8]
-		}
-
-		fn from_storage(storage: Self::Storage) -> Self {
-			Self::decode(&mut storage.as_slice())
-				.expect("Only encoded data in storage")
-		}
-
-		fn into_storage(self) -> Self::Storage {
-			self.encode()
-		}
-	}
-
-	pub struct MapItemBuilder<K, V>(BTreeMap<K, V>);
-
-	impl<K: Ord + Codec, V: Codec> ItemBuilder for MapItemBuilder<K, V> {
-		type ItemDiff = MapDelta<K, V>;
-
-		fn new_item_builder() -> Self {
-			MapItemBuilder(BTreeMap::default())
-		}
-		fn apply_diff(&mut self, diff: <Self::ItemDiff as ItemDiff>::Diff) {
-			match diff {
-				MapDiff::Insert(k, v) => {
-					self.0.insert(k, v);
-				},
-				MapDiff::Remove(k) => {
-					self.0.remove(&k);
-				},
-				MapDiff::Reset => {
-					self.0.clear();
-				},
-			}
-		}
-		fn extract_item(&mut self) -> Self::ItemDiff {
-			MapDelta(sp_std::mem::replace(&mut self.0, BTreeMap::new()))
-		}
-	}
-
-	impl<K: Ord + Codec, V: Codec> ItemDiff for MapDelta<K, V> {
-		type Diff = MapDiff<K, V>;
-		type ItemBuilder = MapItemBuilder<K, V>;
-
-		fn is_complete(diff: &Self::Diff) -> bool {
-			match diff {
-				MapDiff::Reset => true,
-				MapDiff::Insert(..)
-				| MapDiff::Remove(_) => false,
-			}
-		}
-	}
-}
 /// Default implementation of Item for `Option`, as this
 /// is a common use case.
 impl<X: Eq> Item for Option<X> {
@@ -554,7 +203,7 @@ default_item!(u64);
 default_item!(u128);
 
 /// Trait for historied value.
-pub trait Value<V: Item>: ValueRef<V> + Context {
+pub trait Value<V: Item>: Data<V> + Context {
 	/// State to use for changing value.
 	/// We use a different state than
 	/// for querying as it can use different

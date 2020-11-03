@@ -17,9 +17,6 @@
 
 //! Database for key value with history.
 
-// TODO change all ref to S to a borrow similar to map (most
-// of the type S is copied so using reference looks pointless).
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
 //#[cfg(feature = "std")]
