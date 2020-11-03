@@ -593,10 +593,13 @@ impl<
 	}
 }
 
-type LinearBackendTempSize = crate::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u32>;
-type TreeBackendTempSize = crate::backend::in_memory::MemoryOnly<Linear<Option<Vec<u8>>, u32, LinearBackendTempSize>, u32>;
+#[cfg(feature = "temp-size-impl")]
+type LinearBackendTempSize = crate::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u64>;
+#[cfg(feature = "temp-size-impl")]
+type TreeBackendTempSize = crate::backend::in_memory::MemoryOnly<Linear<Option<Vec<u8>>, u64, LinearBackendTempSize>, u32>;
 
-impl Tree<u32, u32, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize> {
+#[cfg(feature = "temp-size-impl")]
+impl Tree<u32, u64, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize> {
 	/// Temporary function to get occupied stage.
 	/// TODO replace by heapsizeof
 	pub fn temp_size(&self) -> usize {

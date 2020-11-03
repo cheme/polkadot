@@ -453,7 +453,8 @@ pub struct LinearGC<S> {
 	pub(crate) new_end: Option<S>,
 }
 
-impl Linear<Option<Vec<u8>>, u32, crate::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u32>> {
+#[cfg(feature = "temp-size-impl")]
+impl Linear<Option<Vec<u8>>, u64, crate::backend::in_memory::MemoryOnly<Option<Vec<u8>>, u64>> {
 	/// Temporary function to get occupied stage.
 	/// TODO replace by heapsizeof
 	pub fn temp_size(&self) -> usize {
