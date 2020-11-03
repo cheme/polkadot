@@ -21,9 +21,9 @@ use std::collections::hash_map::{HashMap, Entry};
 use crate::offchain::OffchainStorage;
 use std::iter::Iterator;
 use historied_db::management::tree::{TreeManagement, ForkPlan};
-use historied_db::{Latest, Management, ManagementRef};
+use historied_db::{Latest, management::{Management, ManagementMut}};
 use historied_db::historied::tree::Tree;
-use historied_db::historied::{InMemoryValueRef, InMemoryValue};
+use historied_db::historied::{DataRef, DataRefMut};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use codec::Codec;
@@ -54,7 +54,7 @@ pub type InMemHValue = Tree<u32, u32, Option<Vec<u8>>, InMemTreeBackend, InMemLi
 pub struct BlockChainInMemOffchainStorage<Hash: Ord> {
 	// Note that we could parameterized over historied management here.
 	// Also could remove inner mutability if changing historied db simple db trait.
-	historied_management: Arc<RwLock<TreeManagement<Hash, u32, u32, Option<Vec<u8>>, ()>>>,
+	historied_management: Arc<RwLock<TreeManagement<Hash, u32, u32, ()>>>,
 	storage: Arc<RwLock<HashMap<Vec<u8>, InMemHValue>>>,
 }
 
@@ -283,19 +283,19 @@ impl BlockChainInMemOffchainStorageAt {
 		is_set = condition.map(|c| c(val.as_ref().map(|v| v.as_slice()))).unwrap_or(true);
 
 		if is_set {
-			use historied_db::historied::Value;
+			use historied_db::historied::DataMut;
 			let is_insert = new_value.is_some();
 			let new_value = new_value.map(|v| v.to_vec());
 			if let Some(histo) = histo {
 				if is_new {
 					let _update_result = histo.set_mut(new_value, at_write);
 				} else {
-					use historied_db::historied::ConditionalValueMut;
-					use historied_db::historied::StateIndex;
-					let _update_result = histo.set_if_possible_no_overwrite(
+					use historied_db::historied::force::ForceDataMut;
+					use historied_db::StateIndex;
+					let _update_result = histo.force_set(
 						new_value,
 						at_write.index_ref(),
-					).expect("Concurrency failure for sequential write of offchain storage");
+					);
 				}
 			} else {
 				if is_insert {
