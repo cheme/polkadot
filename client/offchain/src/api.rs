@@ -56,6 +56,8 @@ pub(crate) struct Api<PersistentStorage, LocalStorage> {
 	network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 	/// Is this node a potential validator?
 	is_validator: bool,
+	/// Is this node runing on a best new block?
+	is_new_best: bool,
 	/// Everything HTTP-related is handled by a different struct.
 	http: http::HttpApi,
 }
@@ -187,6 +189,10 @@ impl<
 		self.network_provider.set_authorized_peers(peer_ids);
 		self.network_provider.set_authorized_only(authorized_only);
 	}
+
+	fn is_new_best(&self) -> bool {
+		self.is_new_best
+	}
 }
 
 /// Information about the local node's network state.
@@ -269,6 +275,7 @@ impl AsyncApi {
 		local_db: LS,
 		network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 		is_validator: bool,
+		is_new_best: bool,
 		shared_client: SharedClient,
 	) -> (Api<PS, LS>, Self) {
 		let (http_api, http_worker) = http::http(shared_client);
@@ -278,6 +285,7 @@ impl AsyncApi {
 			local_db,
 			network_provider,
 			is_validator,
+			is_new_best,
 			http: http_api,
 		};
 
@@ -337,6 +345,7 @@ mod tests {
 			local_db,
 			mock,
 			false,
+			true,
 			shared_client,
 		)
 	}

@@ -26,7 +26,7 @@ pub use sp_core::offchain::LOCAL_STORAGE_PREFIX as LOCAL_STORAGE_PREFIX;
 
 sp_api::decl_runtime_apis! {
 	/// The offchain worker api.
-	#[api_version(2)]
+	#[api_version(3)]
 	pub trait OffchainWorkerApi {
 		/// Starts the off-chain task for given block number.
 		#[skip_initialize_block]

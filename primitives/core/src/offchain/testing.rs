@@ -382,6 +382,10 @@ impl offchain::Externalities for TestOffchainExt {
 	fn set_authorized_nodes(&mut self, _nodes: Vec<OpaquePeerId>, _authorized_only: bool) {
 		unimplemented!()
 	}
+
+	fn is_new_best(&self) -> bool {
+		true
+	}
 }
 
 /// The internal state of the fake transaction pool.

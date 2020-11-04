@@ -370,8 +370,9 @@ decl_module! {
 
 		// Runs after every block.
 		fn offchain_worker(now: T::BlockNumber) {
-			// Only send messages if we are a potential validator.
-			if sp_io::offchain::is_validator() {
+			// Only send messages if we are a potential validator
+			// and at a new best blocks.
+			if sp_io::offchain::is_new_best() && sp_io::offchain::is_validator() {
 				for res in Self::send_heartbeats(now).into_iter().flatten() {
 					if let Err(e) = res {
 						debug::debug!(

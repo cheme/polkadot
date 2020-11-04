@@ -963,6 +963,13 @@ pub trait Offchain {
 			.expect("set_authorized_nodes can be called only in the offchain worker context")
 			.set_authorized_nodes(nodes, authorized_only)
 	}
+
+	/// Does offchain workers run at a new best block.
+	fn is_new_best(&mut self) -> bool {
+		self.extension::<OffchainExt>()
+			.expect("is_new_best can be called only in the offchain worker context")
+			.is_new_best()
+	}
 }
 
 /// Wasm only interface that provides functions for calling into the allocator.

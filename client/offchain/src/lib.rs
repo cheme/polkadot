@@ -138,18 +138,35 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 		header: &Block::Header,
 		network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 		is_validator: bool,
+		is_new_best: bool,
 	) -> impl Future<Output = ()> {
 		let runtime = self.client.runtime_api();
 		let at = BlockId::hash(header.hash());
-		let has_api_v1 = runtime.has_api_with::<dyn OffchainWorkerApi<Block, Error = ()>, _>(
-			&at, |v| v == 1
+		let has_api_v3 = runtime.has_api_with::<dyn OffchainWorkerApi<Block, Error = ()>, _>(
+			&at, |v| v == 3
 		);
+		// early test to avoid a spawn (before api v 3 no process did run
+		// on non new best nodes).
+		if let Ok(false) = has_api_v3 {
+			if !is_new_best {
+				log::debug!(
+					target: "sc_offchain",
+					"Skipping offchain workers for non-canon block: {:?}",
+					header,
+				);
+				return futures::future::Either::Right(futures::future::ready(()));
+			}
+		}
 		let has_api_v2 = runtime.has_api_with::<dyn OffchainWorkerApi<Block, Error = ()>, _>(
 			&at, |v| v == 2
 		);
-		let version = match (has_api_v1, has_api_v2) {
-			(_, Ok(true)) => 2,
-			(Ok(true), _) => 1,
+		let has_api_v1 = runtime.has_api_with::<dyn OffchainWorkerApi<Block, Error = ()>, _>(
+			&at, |v| v == 1
+		);
+		let version = match (has_api_v1, has_api_v2, has_api_v3) {
+			(_, _, Ok(true)) => 2,
+			(_, Ok(true), _) => 2,
+			(Ok(true), _, _) => 1,
 			err => {
 				let help = "Consider turning off offchain workers if they are not part of your runtime.";
 				log::error!("Unsupported Offchain Worker API version: {:?}. {}.", err, help);
@@ -169,6 +186,7 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 				local_db_at.clone(),
 				network_provider,
 				is_validator,
+				is_new_best,
 				self.shared_client.clone(),
 			);
 			debug!("Spawning offchain workers at {:?}", at);
@@ -181,7 +199,7 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 				let context = ExecutionContext::OffchainCall(Some(
 					(api, offchain::Capabilities::all())
 				));
-				let run = if version == 2 {
+				let run = if version > 1 {
 					runtime.offchain_worker_with_context(&at, context, &header)
 				} else {
 					#[allow(deprecated)]
@@ -229,22 +247,15 @@ pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block,
 		Spawner: SpawnNamed
 {
 	client.import_notification_stream().for_each(move |n| {
-		if n.is_new_best {
-			spawner.spawn(
-				"offchain-on-block",
-				offchain.on_block_imported(
-					&n.header,
-					network_provider.clone(),
-					is_validator,
-				).boxed(),
-			);
-		} else {
-			log::debug!(
-				target: "sc_offchain",
-				"Skipping offchain workers for non-canon block: {:?}",
-				n.header,
-			)
-		}
+		spawner.spawn(
+			"offchain-on-block",
+			offchain.on_block_imported(
+				&n.header,
+				network_provider.clone(),
+				is_validator,
+				n.is_new_best,
+			).boxed(),
+		);
 
 		ready(())
 	}).await;
@@ -325,7 +336,7 @@ mod tests {
 		// when
 		let offchain = OffchainWorkers::new(client, db, local_db);
 		futures::executor::block_on(
-			offchain.on_block_imported(&header, network, false)
+			offchain.on_block_imported(&header, network, false, true)
 		);
 
 		// then

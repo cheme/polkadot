@@ -385,17 +385,20 @@ decl_module! {
 		/// Set reserved node every block. It may not be enabled depends on the offchain
 		/// worker settings when starting the node.
 		fn offchain_worker(now: T::BlockNumber) {
-			let network_state = sp_io::offchain::network_state();
-			match network_state {
-				Err(_) => debug::error!("Error: failed to get network state of node at {:?}", now),
-				Ok(state) => {
-					let encoded_peer = state.peer_id.0;
-					match Decode::decode(&mut &encoded_peer[..]) {
-						Err(_) => debug::error!("Error: failed to decode PeerId at {:?}", now),
-						Ok(node) => sp_io::offchain::set_authorized_nodes(
-							Self::get_authorized_nodes(&PeerId(node)),
-							true
-						)
+			// TODO should it be updated for non new best? (I would say no)
+			if sp_io::offchain::is_new_best() {
+				let network_state = sp_io::offchain::network_state();
+				match network_state {
+					Err(_) => debug::error!("Error: failed to get network state of node at {:?}", now),
+					Ok(state) => {
+						let encoded_peer = state.peer_id.0;
+						match Decode::decode(&mut &encoded_peer[..]) {
+							Err(_) => debug::error!("Error: failed to decode PeerId at {:?}", now),
+							Ok(node) => sp_io::offchain::set_authorized_nodes(
+								Self::get_authorized_nodes(&PeerId(node)),
+								true
+							)
+						}
 					}
 				}
 			}

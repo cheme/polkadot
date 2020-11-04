@@ -528,6 +528,9 @@ pub trait Externalities: Send {
 	/// - `authorized_only`: if true, only the authorized nodes are allowed to connect,
 	/// otherwise unauthorized nodes can also be connected through other mechanism.
 	fn set_authorized_nodes(&mut self, nodes: Vec<OpaquePeerId>, authorized_only: bool);
+
+	/// Is the offchain worker running on a new best block.
+	fn is_new_best(&self) -> bool;
 }
 
 impl<T: Externalities + ?Sized> Externalities for Box<T> {
@@ -609,6 +612,10 @@ impl<T: Externalities + ?Sized> Externalities for Box<T> {
 
 	fn set_authorized_nodes(&mut self, nodes: Vec<OpaquePeerId>, authorized_only: bool) {
 		(&mut **self).set_authorized_nodes(nodes, authorized_only)
+	}
+
+	fn is_new_best(&self) -> bool {
+		(& **self).is_new_best()
 	}
 }
 
@@ -732,6 +739,12 @@ impl<T: Externalities> Externalities for LimitedExternalities<T> {
 	fn set_authorized_nodes(&mut self, nodes: Vec<OpaquePeerId>, authorized_only: bool) {
 		self.check(Capability::NodeAuthorization, "set_authorized_nodes");
 		self.externalities.set_authorized_nodes(nodes, authorized_only)
+	}
+
+	fn is_new_best(&self) -> bool {
+		// No specific capability for accessing block import context.
+		// TODO consider new capability?
+		self.externalities.is_new_best()
 	}
 }
 

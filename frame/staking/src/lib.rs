@@ -1318,7 +1318,7 @@ decl_module! {
 		fn offchain_worker(now: T::BlockNumber) {
 			use offchain_election::{set_check_offchain_execution_status, compute_offchain_election};
 
-			if Self::era_election_status().is_open_at(now) {
+			if sp_io::offchain::is_new_best() && Self::era_election_status().is_open_at(now) {
 				let offchain_status = set_check_offchain_execution_status::<T>(now);
 				if let Err(why) = offchain_status {
 					log!(warn, "💸 skipping offchain worker in open election window due to [{}]", why);
