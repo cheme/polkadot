@@ -74,7 +74,7 @@ pub trait BlockChainOffchainStorage: Clone + Send + Sync {
 	/// Get offchain storage for the given block if the id is defined.
 	/// Writes in the resulting offchain storage only succeed if at
 	/// the latest value, panic otherwise.
-	fn at(&self, id: Self::BlockId) -> Option<Self::OffchainStorage>;
+	fn at(&self, id: Self::BlockId, locks: OffchainLocksRequirement) -> Option<Self::OffchainStorage>;
 
 	/// Get offchain storage for the given block if the id is defined.
 	/// This variant is using a block that is latest from a block
@@ -83,6 +83,9 @@ pub trait BlockChainOffchainStorage: Clone + Send + Sync {
 
 	/// Get latest added state.
 	fn latest(&self) -> Option<Self::BlockId>;
+
+	/// Notify of a new imported block to the offchain stoarge.
+	fn new_imported_block(&self, id: &Self::BlockId, parent: &Self::BlockId);
 }
 
 /// A type of supported crypto.
@@ -791,8 +794,33 @@ impl TransactionPoolExt {
 
 /// Declaration of future offchain locks usage.
 /// Allows early access for next block uses.
-#[derive(Default, Encode, Decode, PartialEq, Eq)]
+#[derive(Default, Encode, Decode, PartialEq, Eq, Clone)]
 pub struct OffchainLocksRequirement;
+
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+pub enum LockTarget {
+	/// Lock a whole prefix.
+	Prefix(Vec<u8>),
+	/// Only lock a single key.
+	/// Prefix should be prefered.
+	Key(Vec<u8>),
+}
+
+impl OffchainLocksRequirement {
+	/// Is there any requirement defined.
+	pub fn is_empty(&self) -> bool {
+		unimplemented!()
+	}
+	/// Try to start a critical section
+	/// against this requirement.
+	/// This checks is a way to avoid querying more costy structure
+	/// but is not strictly mandatory.
+	///
+	/// Return false all requirement for this target were used.
+	pub fn use_one(&mut self, target: &LockTarget) -> bool {
+		unimplemented!()
+	}
+}
 
 #[cfg(test)]
 mod tests {

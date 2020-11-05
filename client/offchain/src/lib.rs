@@ -175,12 +175,6 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 		};
 		debug!("Checking offchain workers at {:?}: version:{}", at, version);
 		if version > 0 {
-			let local_db_at = if let Some(local_db_at) = self.local_db.at(header.hash()) {
-				local_db_at
-			} else {
-				log::error!("Error no chain state for offchain local db at {:?}", at);
-				return futures::future::Either::Right(futures::future::ready(()));
-			};
 			let local_lock_reqirements = if version > 2 {
 				match runtime.offchain_worker_local_locks(&at) {
 					Ok(locks) => locks,
@@ -192,13 +186,18 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 			} else {
 				OffchainLocksRequirement::default()
 			};
+			let local_db_at = if let Some(local_db_at) = self.local_db.at(header.hash(), local_lock_reqirements) {
+				local_db_at
+			} else {
+				log::error!("Error no chain state for offchain local db at {:?}", at);
+				return futures::future::Either::Right(futures::future::ready(()));
+			};
 			let (api, runner) = api::AsyncApi::new(
 				self.db.clone(),
 				local_db_at.clone(),
 				network_provider,
 				is_validator,
 				is_new_best,
-				local_lock_reqirements,
 				self.shared_client.clone(),
 			);
 			debug!("Spawning offchain workers at {:?}", at);
@@ -259,6 +258,11 @@ pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block,
 		Spawner: SpawnNamed
 {
 	client.import_notification_stream().for_each(move |n| {
+		// Update branch tip
+		offchain.local_db.new_imported_block(
+			&n.header.hash(),
+			n.header.parent_hash(),
+		);
 		spawner.spawn(
 			"offchain-on-block",
 			offchain.on_block_imported(

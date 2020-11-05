@@ -19,18 +19,19 @@
 //! RocksDB-based offchain workers local storage.
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, BTreeMap, BTreeSet},
 	sync::Arc,
 };
 
 use crate::{columns, Database, DbHash, Transaction};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock, Condvar};
 use historied_db::{Latest, UpdateResult,
 	management::{Management, ManagementMut},
 	management::tree::{TreeManagementStorage, ForkPlan},
 	historied::tree::Tree,
 	backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead},
 };
+use sp_core::offchain::{OffchainLocksRequirement, LockTarget};
 use codec::{Decode, Encode, Codec};
 use log::error;
 
@@ -52,17 +53,184 @@ pub(crate) type ChangesJournalSync = Arc<Mutex<ChangesJournal<historied_db::mapp
 
 /// Offchain local storage with blockchain historied storage.
 #[derive(Clone)]
-pub struct BlockChainLocalStorage<H: Ord, S: TreeManagementStorage> {
+pub struct BlockChainLocalStorage<H: Clone + Ord, S: TreeManagementStorage> {
 	historied_management: Arc<RwLock<crate::TreeManagement<H, S>>>,
 	db: Arc<dyn Database<DbHash>>,
-	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
+	locks: SynchLocks<H>,
 	ordered_db: Arc<Mutex<historied_db::mapped_db::MappedDBDyn>>,
 	changes_journals: ChangesJournalSync,
 }
 
+/// Locks associated with current runing instance.
+/// This is not locks over the db (got its own global lock),
+/// but a way to define critical section.
+/// Critical section must be first declared for the lifetime of the
+/// storage.
+pub struct Locks<H: Ord> {
+	branch_tips: BTreeSet<H>,
+	// TODO replace by radix tree
+	locks: BTreeMap<Vec<u8>, BTreeMap<H, Lock>>,
+}
+
+impl<H: Ord> Default for Locks<H> {
+	fn default() -> Self {
+		Locks {
+			branch_tips: BTreeSet::new(),
+			locks: BTreeMap::new(),
+		}
+	}
+}
+impl<H: Ord> Locks<H> {
+	/// Set new branch tip `at`.
+	/// If `at` is in the set of branch tips, we simply update.
+	/// If `parent` is in set of branch tips, then we replace the
+	/// branch tip with `at`.
+	/// If none are in tip, then we assume this is a new branch tip.
+	/// This assumption comes from the fact that this method is
+	/// called sequentially on every blocks (once by the launch
+	/// of the offchain worker, and possibly also by the rpc but
+	/// the rpc locks ensure we are using a latest block import
+	/// registered state).
+	///
+	/// Note that for genesis we can use same parameter for parent and
+	/// hash, it will fall in the new tip case.
+	fn new_branch_tip (
+		&mut self,
+		parent: &H,
+		at: &H,
+	) {
+		unimplemented!()
+	}
+	
+	/// Set requirement in `Locks` for a given branch tip `at`.
+	/// Return false if `at` is not one of the tip.
+	fn branch_tip (
+		&mut self,
+		at: &H,
+		requirements: &OffchainLocksRequirement,
+	) -> bool {
+		unimplemented!("update inner locks struct with requirements");
+	}
+	
+	#[must_use]
+	/// Start a critical section (exclusive write access), and
+	/// update current requirement.
+	/// This can wait on an underlying `Condvar` or return
+	/// false.
+	fn start(&mut self, at: &H, target: &LockTarget) -> LockedTarget<H> {
+		unimplemented!()
+	}
+	fn end(&mut self, at: &H, target: &LockTarget) {
+		unimplemented!()
+	}
+	/// ensure all initial requirement are removed from the
+	/// global requirement definition.
+	fn end_all(&mut self, at: &H, remaining: &mut OffchainLocksRequirement) {
+		unimplemented!()
+	}
+
+	#[must_use]
+	/// Get a lock on read.
+	/// This read waits for any write locks to finished and blocks
+	/// any new write acquisition for the same state.
+	pub fn read(&mut self, at: &H, target: &LockTarget) -> LockedTargetRead<H> {
+		unimplemented!()
+	}
+}
+
+
+/// Thread shareable `Locks`.
+pub type SynchLocks<H> = Arc<RwLock<Locks<H>>>;
+
+#[derive(Clone)]
+/// This structure wraps the requirement with the global locks to
+/// allow release when dropped.
+pub struct DeclaredRequirement<H: Clone + Ord> {
+	requirements: OffchainLocksRequirement,
+	locks: SynchLocks<H>,
+	at: H,
+}
+
+impl<H: Clone + Ord> DeclaredRequirement<H> {
+	pub fn declare_requirements(
+		locks: &SynchLocks<H>,
+		at: H,
+		requirements: OffchainLocksRequirement,
+	) -> Option<Self> {
+		if locks.write().branch_tip(&at, &requirements) {
+			Some(DeclaredRequirement {
+				requirements,
+				locks: locks.clone(),
+				at,
+			})
+		} else {
+			None
+		}
+	}
+
+	#[must_use]
+	pub fn start(&mut self, target: &LockTarget) -> Option<LockedTarget<H>> {
+		if self.requirements.use_one(target) {
+			Some(self.locks.write().start(&self.at, target))
+		} else {
+			None
+		}
+	}
+	#[must_use]
+	pub fn read(&mut self, target: &LockTarget) -> LockedTargetRead<H> {
+		self.locks.write().read(&self.at, target)
+	}
+}
+
+type Lock = Arc<(Condvar, Mutex<LockInner>)>;
+
+struct LockInner {
+	/// Count the number of open read thread.
+	/// Cannot have this to 0 and at the same time
+	/// a write lock.
+	read: usize,
+	/// Write lock to a single process.
+	write: bool,
+	/// Declared locks (write) are limited.
+	remaining_declared: usize,
+}
+
+/// Note that locked target is only locking the critical section access
+/// for a branch tip.
+/// The underlying variable is locked on use (multiple tip of branch can
+/// therefore concurrently use one variable.
+pub struct LockedTarget<H: Ord> {
+	target: LockTarget,
+	locks: SynchLocks<H>,
+	parent_lock: Option<Lock>,
+	lock: Lock,
+	at: H,
+}
+
+pub struct LockedTargetRead<H> {
+	target: LockTarget,
+	parent_lock: Option<Lock>,
+	lock: Lock,
+	at: H,
+}
+
+impl<H: Ord> Drop for LockedTarget<H> {
+	fn drop(&mut self) {
+		self.locks.write().end(&self.at, &mut self.target);
+	}
+}
+
+impl<H: Clone + Ord> Drop for DeclaredRequirement<H> {
+	fn drop(&mut self) {
+		if !self.requirements.is_empty() {
+			self.locks.write().end_all(&self.at, &mut self.requirements);
+		}
+	}
+}
+
 /// For migration this will update a pending change layer to support
 /// transaction.
-pub struct TransactionalConsumer<H: Ord, S: TreeManagementStorage> {
+pub struct TransactionalConsumer<H: Clone + Ord, S: TreeManagementStorage> {
 	/// Storage to use.
 	pub storage: BlockChainLocalStorage<H, S>,
 	/// Transaction to update on migrate.
@@ -71,11 +239,11 @@ pub struct TransactionalConsumer<H: Ord, S: TreeManagementStorage> {
 
 impl<H, S> historied_db::management::ManagementConsumer<H, crate::TreeManagement<H, S>> for TransactionalConsumer<H, S>
 	where
-		H: Ord + Clone + Codec + Send + Sync + 'static,
+		H: Clone + Ord + Codec + Send + Sync + 'static,
 		S: TreeManagementStorage + 'static,
 {
 	fn migrate(&self, migrate: &mut historied_db::management::Migrate<H, crate::TreeManagement<H, S>>) {
-		let mut keys = std::collections::BTreeSet::<Vec<u8>>::new();
+		let mut keys = BTreeSet::<Vec<u8>>::new();
 		let (prune, changes) = migrate.migrate().touched_state();
 		// this db is transactional.
 		let db = migrate.management().ser();
@@ -149,13 +317,19 @@ impl<H, S> historied_db::management::ManagementConsumer<H, crate::TreeManagement
 
 /// Offchain local storage for a given block.
 #[derive(Clone)]
-pub struct BlockChainLocalAt {
+pub struct BlockChainLocalAt<H: Clone + Ord> {
+	inner: BlockChainLocalInner,
+	locks: DeclaredRequirement<H>,
+}
+
+/// Offchain local storage for a given block.
+#[derive(Clone)]
+struct BlockChainLocalInner {
 	db: Arc<dyn Database<DbHash>>,
 	block_nodes: BlockNodes,
 	branch_nodes: BranchNodes,
 	at_read: ForkPlan<u32, u64>,
 	at_write: Option<Latest<(u32, u64)>>,
-	locks: Arc<Mutex<HashMap<Vec<u8>, Arc<Mutex<()>>>>>,
 	ordered_db: Arc<Mutex<historied_db::mapped_db::MappedDBDyn>>,
 	changes_journals: ChangesJournalSync,
 	skip_journalize: bool,
@@ -164,7 +338,7 @@ pub struct BlockChainLocalAt {
 /// Offchain local storage for a given block,
 /// and for new state (without concurrency handling).
 #[derive(Clone)]
-pub struct BlockChainLocalAtNew(BlockChainLocalAt);
+pub struct BlockChainLocalAtNew(BlockChainLocalInner);
 
 impl std::fmt::Debug for LocalStorage {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -173,7 +347,7 @@ impl std::fmt::Debug for LocalStorage {
 	}
 }
 
-impl<H: Ord, S: TreeManagementStorage> std::fmt::Debug for BlockChainLocalStorage<H, S> {
+impl<H: Clone + Ord, S: TreeManagementStorage> std::fmt::Debug for BlockChainLocalStorage<H, S> {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
 		fmt.debug_struct("BlockChainLocalStorage")
 			.finish()
@@ -198,7 +372,7 @@ impl LocalStorage {
 	}
 }
 
-impl<H: Ord, S: TreeManagementStorage> BlockChainLocalStorage<H, S> {
+impl<H: Clone + Ord, S: TreeManagementStorage> BlockChainLocalStorage<H, S> {
 	/// Create offchain local storage with given `KeyValueDB` backend.
 	pub fn new(
 		db: Arc<dyn Database<DbHash>>,
@@ -209,14 +383,14 @@ impl<H: Ord, S: TreeManagementStorage> BlockChainLocalStorage<H, S> {
 		Self {
 			historied_management,
 			db,
-			locks: Default::default(),
+			locks: Arc::new(RwLock::new(Default::default())),
 			ordered_db: Arc::new(Mutex::new(journals_db)),
 			changes_journals: Arc::new(Mutex::new(journals)),
 		}
 	}
 }
 
-impl<H: Ord> BlockChainLocalStorage<H, ()> {
+impl<H: Clone + Ord> BlockChainLocalStorage<H, ()> {
 	/// Create new offchain storage for tests (backed by memorydb)
 	#[cfg(any(test, feature = "test-helpers"))]
 	pub fn new_test() -> Self {
@@ -292,26 +466,21 @@ impl sp_core::offchain::OffchainStorage for LocalStorage {
 	}
 }
 
-impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStorage<H, S>
+impl<H, S> BlockChainLocalStorage<H, S>
 	where
-		H: Send + Sync + Ord + Clone + Codec,
+		H: Send + Sync + Clone + Ord + Codec,
 		S: TreeManagementStorage + Send + Sync + Clone,
 {
-	type BlockId = H;
-	type OffchainStorage = BlockChainLocalAt;
-	type OffchainStorageNew = BlockChainLocalAtNew;
-
-	fn at(&self, id: Self::BlockId) -> Option<Self::OffchainStorage> {
-		let db_state = self.historied_management.write().get_db_state(&id);
+	fn at_inner(&self, id: &H) -> Option<BlockChainLocalInner> {
+		let db_state = self.historied_management.write().get_db_state(id);
 		if let Some(at_read) = db_state {
-			let at_write = self.historied_management.write().get_db_state_mut(&id);
-			Some(BlockChainLocalAt {
+			let at_write = self.historied_management.write().get_db_state_mut(id);
+			Some(BlockChainLocalInner {
 				db: self.db.clone(),
 				branch_nodes: BranchNodes::new(self.db.clone()),
 				block_nodes: BlockNodes::new(self.db.clone()),
 				at_read,
 				at_write,
-				locks: self.locks.clone(),
 				ordered_db: self.ordered_db.clone(),
 				changes_journals: self.changes_journals.clone(),
 				skip_journalize: !S::JOURNAL_DELETE,
@@ -320,15 +489,41 @@ impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStora
 			None
 		}
 	}
-	fn at_new(&self, id: Self::BlockId) -> Option<Self::OffchainStorageNew> {
-		self.at(id).map(|at| BlockChainLocalAtNew(at))
+}
+
+impl<H, S> sp_core::offchain::BlockChainOffchainStorage for BlockChainLocalStorage<H, S>
+	where
+		H: Send + Sync + Clone + Ord + Codec,
+		S: TreeManagementStorage + Send + Sync + Clone,
+{
+	type BlockId = H;
+	type OffchainStorage = BlockChainLocalAt<H>;
+	type OffchainStorageNew = BlockChainLocalAtNew;
+
+	fn at(&self, id: Self::BlockId, lock_requirements: OffchainLocksRequirement) -> Option<Self::OffchainStorage> {
+		self.at_inner(&id).and_then(|inner| {
+			DeclaredRequirement::declare_requirements(
+				&self.locks,
+				id,
+				lock_requirements
+			).map(|locks| BlockChainLocalAt { inner, locks })
+		})
 	}
+
+	fn at_new(&self, id: Self::BlockId) -> Option<Self::OffchainStorageNew> {
+		self.at_inner(&id).map(|at| BlockChainLocalAtNew(at))
+	}
+
 	fn latest(&self) -> Option<Self::BlockId> {
 		self.historied_management.write().latest_external_state()
 	}
+
+	fn new_imported_block(&self, id: &Self::BlockId, parent: &Self::BlockId) {
+		self.locks.write().new_branch_tip(parent, id);
+	}
 }
 
-impl BlockChainLocalAt {
+impl<H: Clone + Ord> BlockChainLocalAt<H> {
 	/// Under current design, the local update is only doable when we
 	/// are at a latest block, this function tells if we can use
 	/// function that modify state.
@@ -339,7 +534,7 @@ impl BlockChainLocalAt {
 	/// When doing batch update we can skip journalize,
 	/// and produce the journalize item at once later.
 	pub fn skip_journalize(&mut self) {
-		self.skip_journalize = true;
+		self.inner.skip_journalize = true;
 	}
 }
 
@@ -357,10 +552,12 @@ impl BlockChainLocalAtNew {
 }
 
 
-impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
+impl<H: Send + Sync + Clone + Ord> sp_core::offchain::OffchainStorage for BlockChainLocalAt<H> {
 	fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
 		let test: Option<fn(Option<&[u8]>) -> bool> = None;
-		match self.modify(
+		// TODO add lock logic (same for others operations). Or just put the lock as parameter: looks
+		// better. Probably a new trait like LockedOffchainStorage with associated lock.
+		match self.inner.modify(
 			prefix,
 			key,
 			test,
@@ -375,7 +572,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 
 	fn remove(&mut self, prefix: &[u8], key: &[u8]) {
 		let test: Option<fn(Option<&[u8]>) -> bool> = None;
-		match self.modify(
+		match self.inner.modify(
 			prefix,
 			key,
 			test,
@@ -389,31 +586,8 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 	}
 
 	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
-		// TODO consider using types for a totally encoded items.
-		let key: Vec<u8> = prefix
-			.iter()
-			.chain(std::iter::once(&b'/'))
-			.chain(key)
-			.cloned()
-			.collect();
-		self.db.get(columns::OFFCHAIN, &key)
-			.and_then(|v| {
-				let init_nodes = ContextHead {
-					key: key.clone(),
-					backend: self.block_nodes.clone(),
-					node_init_from: (),
-				};
-				let init = ContextHead {
-					key,
-					backend: self.branch_nodes.clone(),
-					node_init_from: init_nodes.clone(),
-				};
-				let v: Option<HValue> = historied_db::DecodeWithContext::decode_with_context(&mut &v[..], &(init, init_nodes));
-				v
-			}.and_then(|h| {
-				use historied_db::historied::Data;
-				h.get(&self.at_read).flatten()
-			}))
+		// TODO the lock
+		self.inner.get(prefix, key)
 	}
 
 	fn compare_and_set(
@@ -424,7 +598,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAt {
 		new_value: &[u8],
 	) -> bool {
 		let test = |v: Option<&[u8]>| old_value == v;
-		match self.modify(
+		match self.inner.modify(
 			prefix,
 			item_key,
 			Some(test),
@@ -501,7 +675,7 @@ enum ModifyError {
 	DbWrite,
 }
 
-impl BlockChainLocalAt {
+impl BlockChainLocalInner {
 	fn modify(
 		&mut self,
 		prefix: &[u8],
@@ -519,147 +693,157 @@ impl BlockChainLocalAt {
 			.chain(item_key)
 			.cloned()
 			.collect();
-		let key_lock = {
-			let mut locks = self.locks.lock();
-			locks.entry(key.clone()).or_default().clone()
+
+		let at_write_inner;
+		let at_write = if is_new {
+			self.at_write.as_ref().expect("checked above")
+		} else {
+			at_write_inner = Latest::unchecked_latest(self.at_read.latest_index());
+			&at_write_inner
 		};
 
-		let result = || -> Result<bool, ModifyError> {
-			let at_write_inner;
-			let at_write = if is_new {
-				self.at_write.as_ref().expect("checked above")
-			} else {
-				at_write_inner = Latest::unchecked_latest(self.at_read.latest_index());
-				&at_write_inner
-			};
-			let is_set;
-			{
-				let _key_guard = key_lock.lock();
-				let histo = self.db.get(columns::OFFCHAIN, &key)
-					.and_then(|v| {
-						let init_nodes = ContextHead {
-							key: key.clone(),
-							backend: self.block_nodes.clone(),
-							node_init_from: (),
-						};
-						let init = ContextHead {
-							key: key.clone(),
-							backend: self.branch_nodes.clone(),
-							node_init_from: init_nodes.clone(),
-						};
-						let v: Option<HValue> = historied_db::DecodeWithContext::decode_with_context(
-							&mut &v[..],
-							&(init, init_nodes),
-						);
-						v
-					});
-				let val = histo.as_ref().and_then(|h| {
-					use historied_db::historied::Data;
-					h.get(&self.at_read).flatten()
-				});
+		let is_set;
+		let histo = self.db.get(columns::OFFCHAIN, &key)
+			.and_then(|v| {
+				let init_nodes = ContextHead {
+					key: key.clone(),
+					backend: self.block_nodes.clone(),
+					node_init_from: (),
+				};
+				let init = ContextHead {
+					key: key.clone(),
+					backend: self.branch_nodes.clone(),
+					node_init_from: init_nodes.clone(),
+				};
+				let v: Option<HValue> = historied_db::DecodeWithContext::decode_with_context(
+					&mut &v[..],
+					&(init, init_nodes),
+				);
+				v
+			});
+		let val = histo.as_ref().and_then(|h| {
+			use historied_db::historied::Data;
+			h.get(&self.at_read).flatten()
+		});
 
-				is_set = condition.map(|c| c(val.as_ref().map(|v| v.as_slice()))).unwrap_or(true);
+		is_set = condition.map(|c| c(val.as_ref().map(|v| v.as_slice()))).unwrap_or(true);
 
-				if is_set {
-					use historied_db::historied::DataMut;
-					let is_insert = new_value.is_some();
-					let new_value = new_value.map(|v| v.to_vec());
-					let (new_value, update_result) = if let Some(mut histo) = histo {
-						let update_result = if is_new {
-							histo.set(new_value, at_write)
-						} else {
-							use historied_db::historied::force::ForceDataMut;
-							use historied_db::StateIndex;
-							histo.force_set(
-								new_value,
-								at_write.index_ref(),
-							)
-						};
-						if let &UpdateResult::Unchanged = &update_result {
-							(Vec::new(), update_result)
-						} else {
-							use historied_db::Trigger;
-							histo.trigger_flush();
-							(histo.encode(), update_result)
-						}
-					} else {
-						if is_insert {
-							let init_nodes = ContextHead {
-								key: key.clone(),
-								backend: self.block_nodes.clone(),
-								node_init_from: (),
-							};
-							let init = ContextHead {
-								key: key.clone(),
-								backend: self.branch_nodes.clone(),
-								node_init_from: init_nodes.clone(),
-							};
-
-							(HValue::new(
-									new_value,
-									at_write,
-									(init, init_nodes),
-								).encode(), UpdateResult::Changed(()))
-						} else {
-							// nothing to delete
-							(Default::default(), UpdateResult::Unchanged)
-						}
-					};
-					match update_result {
-						UpdateResult::Changed(()) => {
-							let mut tx = Transaction::new();
-							tx.set(columns::OFFCHAIN, &key, new_value.as_slice());
-
-							if self.db.commit(tx).is_err() {
-								return Err(ModifyError::DbWrite);
-							};
-						},
-						UpdateResult::Cleared(()) => {
-							let mut tx = Transaction::new();
-							tx.remove(columns::OFFCHAIN, &key);
-
-							if self.db.commit(tx).is_err() {
-								return Err(ModifyError::DbWrite);
-							};
-						},
-						UpdateResult::Unchanged => (),
-					}
-					match update_result {
-						UpdateResult::Unchanged => (),
-						UpdateResult::Changed(())
-						| UpdateResult::Cleared(()) => {
-							if !self.skip_journalize {
-								use std::ops::DerefMut;
-								let at_write = at_write.latest().clone();
-								// Needed for encoded ordering against block index
-								let at_write = (at_write.1, at_write.0);
-								self.changes_journals.lock().add_changes(
-									self.ordered_db.lock().deref_mut(),
-									at_write,
-									vec![key.clone()],
-									false,
-								)
-							}
-						},
-					}
-
+		if is_set {
+			use historied_db::historied::DataMut;
+			let is_insert = new_value.is_some();
+			let new_value = new_value.map(|v| v.to_vec());
+			let (new_value, update_result) = if let Some(mut histo) = histo {
+				let update_result = if is_new {
+					histo.set(new_value, at_write)
+				} else {
+					use historied_db::historied::force::ForceDataMut;
+					use historied_db::StateIndex;
+					histo.force_set(
+						new_value,
+						at_write.index_ref(),
+					)
+				};
+				if let &UpdateResult::Unchanged = &update_result {
+					(Vec::new(), update_result)
+				} else {
+					use historied_db::Trigger;
+					histo.trigger_flush();
+					(histo.encode(), update_result)
 				}
+			} else {
+				if is_insert {
+					let init_nodes = ContextHead {
+						key: key.clone(),
+						backend: self.block_nodes.clone(),
+						node_init_from: (),
+					};
+					let init = ContextHead {
+						key: key.clone(),
+						backend: self.branch_nodes.clone(),
+						node_init_from: init_nodes.clone(),
+					};
 
-			}
-			Ok(is_set)
-		}();
+					(HValue::new(
+							new_value,
+							at_write,
+							(init, init_nodes),
+						).encode(), UpdateResult::Changed(()))
+				} else {
+					// nothing to delete
+					(Default::default(), UpdateResult::Unchanged)
+				}
+			};
+			match update_result {
+				UpdateResult::Changed(()) => {
+					let mut tx = Transaction::new();
+					tx.set(columns::OFFCHAIN, &key, new_value.as_slice());
 
-		// clean the lock map if we're the only entry
-		let mut locks = self.locks.lock();
-		{
-			drop(key_lock);
-			let key_lock = locks.get_mut(&key);
-			if let Some(_) = key_lock.and_then(Arc::get_mut) {
-				locks.remove(&key);
+					if self.db.commit(tx).is_err() {
+						return Err(ModifyError::DbWrite);
+					};
+				},
+				UpdateResult::Cleared(()) => {
+					let mut tx = Transaction::new();
+					tx.remove(columns::OFFCHAIN, &key);
+
+					if self.db.commit(tx).is_err() {
+						return Err(ModifyError::DbWrite);
+					};
+				},
+				UpdateResult::Unchanged => (),
 			}
+			match update_result {
+				UpdateResult::Unchanged => (),
+				UpdateResult::Changed(())
+				| UpdateResult::Cleared(()) => {
+					if !self.skip_journalize {
+						use std::ops::DerefMut;
+						let at_write = at_write.latest().clone();
+						// Needed for encoded ordering against block index
+						let at_write = (at_write.1, at_write.0);
+						self.changes_journals.lock().add_changes(
+							self.ordered_db.lock().deref_mut(),
+							at_write,
+							vec![key.clone()],
+							false,
+						)
+					}
+				},
+			}
+
 		}
-		result
+		Ok(is_set)
 	}
+
+	fn get(&self, prefix: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+		// TODO consider using types for a totally encoded items.
+		let key: Vec<u8> = prefix
+			.iter()
+			.chain(std::iter::once(&b'/'))
+			.chain(key)
+			.cloned()
+			.collect();
+		self.db.get(columns::OFFCHAIN, &key)
+			.and_then(|v| {
+				let init_nodes = ContextHead {
+					key: key.clone(),
+					backend: self.block_nodes.clone(),
+					node_init_from: (),
+				};
+				let init = ContextHead {
+					key,
+					backend: self.branch_nodes.clone(),
+					node_init_from: init_nodes.clone(),
+				};
+				let v: Option<HValue> = historied_db::DecodeWithContext::decode_with_context(&mut &v[..], &(init, init_nodes));
+				v
+			}.and_then(|h| {
+				use historied_db::historied::Data;
+				h.get(&self.at_read).flatten()
+			}))
+	}
+
+
 }
 
 /// Multiple node splitting strategy based on content

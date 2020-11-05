@@ -2339,7 +2339,7 @@ pub(crate) mod tests {
 	use hash_db::{HashDB, EMPTY_PREFIX};
 	use super::*;
 	use crate::columns;
-	use sp_core::H256;
+	use sp_core::{H256, offchain::OffchainLocksRequirement};
 	use sc_client_api::backend::{Backend as BTrait, BlockImportOperation as Op};
 	use sc_client_api::blockchain::Backend as BLBTrait;
 	use sp_runtime::testing::{Header, Block as RawBlock, ExtrinsicWrapper};
@@ -3012,48 +3012,52 @@ pub(crate) mod tests {
 
 	#[test]
 	fn offchain_backends_indexing() {
-		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
+		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage, OffchainLocksRequirement};
 
+		let mut global_lock_requirement = OffchainLocksRequirement::default();
+		// TODO set a global read lock requirement
+		let read = global_lock_requirement;
+		// TODO also add test that not locked do fail.
 		let backend = Backend::<Block>::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		let offchain_local_storage = offchain_local_storage.at(block0).unwrap();
+		let offchain_local_storage = offchain_local_storage.at(block0, read.clone()).unwrap();
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
 
 		let mut ooc = OffchainOverlayedChanges::enabled();
 		ooc.set(b"prefix1", b"key1", b"value1", true);
 		let block1 = insert_block(&backend, 1, block0, None, Some(ooc), Default::default());
 		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
-		let offchain_local_storage = offchain_local_storage.at(block1).unwrap();
+		assert_eq!(offchain_local_storage.at(block0, read.clone()).unwrap().get(b"prefix1", b"key1"), None);
+		let offchain_local_storage = offchain_local_storage.at(block1, read.clone()).unwrap();
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
 
 		let mut ooc = OffchainOverlayedChanges::enabled();
 		ooc.set(b"prefix1", b"key1", vec![4u8; 20_000].as_slice(), true);
 		let block2 = insert_block(&backend, 2, block1, None, Some(ooc), Default::default());
 		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-		let offchain_local_storage = offchain_local_storage.at(block2).unwrap();
+		assert_eq!(offchain_local_storage.at(block1, read.clone()).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+		let offchain_local_storage = offchain_local_storage.at(block2, read.clone()).unwrap();
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1").map(|v| v.len()), Some(20_000));
 
 		let mut ooc = OffchainOverlayedChanges::enabled();
 		ooc.remove(b"prefix1", b"key1", true);
 		let block3 = insert_block(&backend, 3, block2, None, Some(ooc), Default::default());
 		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
-		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-		assert_eq!(offchain_local_storage.at(block2).unwrap().get(b"prefix1", b"key1").map(|v| v.len()), Some(20_000));
-		let offchain_local_storage = offchain_local_storage.at(block3).unwrap();
+		assert_eq!(offchain_local_storage.at(block0, read.clone()).unwrap().get(b"prefix1", b"key1"), None);
+		assert_eq!(offchain_local_storage.at(block1, read.clone()).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+		assert_eq!(offchain_local_storage.at(block2, read.clone()).unwrap().get(b"prefix1", b"key1").map(|v| v.len()), Some(20_000));
+		let offchain_local_storage = offchain_local_storage.at(block3, read.clone()).unwrap();
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1").map(|v| v.len()), None);
 
 		let mut ooc = OffchainOverlayedChanges::enabled();
 		ooc.remove(b"prefix1", b"key1", true);
 		let block1_b = insert_block(&backend, 1, block0, None, Some(ooc), [1; 32].into());
 		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
-		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-		let offchain_local_storage = offchain_local_storage.at(block1_b).unwrap();
+		assert_eq!(offchain_local_storage.at(block0, read.clone()).unwrap().get(b"prefix1", b"key1"), None);
+		assert_eq!(offchain_local_storage.at(block1, read.clone()).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
+		let offchain_local_storage = offchain_local_storage.at(block1_b, read.clone()).unwrap();
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
 	}
 
@@ -3061,18 +3065,22 @@ pub(crate) mod tests {
 	fn offchain_backends_change_new() {
 		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
 
+		let mut global_lock_requirement = OffchainLocksRequirement::default();
+		// TODO set a global read lock requirement
+		let read = global_lock_requirement;
+	
 		let backend = Backend::<Block>::new_test(10, 10);
 
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		let offchain_local_storage = offchain_local_storage.at(block0).unwrap();
+		let offchain_local_storage = offchain_local_storage.at(block0, read.clone()).unwrap();
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
 
 		let mut ooc = OffchainOverlayedChanges::enabled();
 		ooc.set(b"prefix1", b"key1", b"value1", true);
 		let block1 = insert_block(&backend, 1, block0, None, Some(ooc), Default::default());
 		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
+		assert_eq!(offchain_local_storage.at(block0, read.clone()).unwrap().get(b"prefix1", b"key1"), None);
 		assert!(!offchain_local_storage.at_new(block0).unwrap().can_update()); // TODO change
 		let mut offchain_local_storage = offchain_local_storage.at_new(block1).unwrap();
 		assert!(offchain_local_storage.can_update());
@@ -3087,37 +3095,41 @@ pub(crate) mod tests {
 	fn offchain_backends_change_current_new_value() {
 		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
 
+		let mut global_lock_requirement = OffchainLocksRequirement::default();
+		// TODO set a global read lock requirement
+		let read = global_lock_requirement;
+	
 		let backend = Backend::<Block>::new_test(10, 10);
 
 		let block0 = insert_block(&backend, 0, Default::default(), None, None, Default::default());
 		let offchain_local = backend.offchain_local_storage().unwrap();
-		let mut offchain_local_storage = offchain_local.at(block0).unwrap();
+		let mut offchain_local_storage = offchain_local.at(block0, read.clone()).unwrap();
 		assert!(offchain_local_storage.can_update());
 		offchain_local_storage.set(b"prefix1", b"key1", b"test");
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test".to_vec()));
 
 		let block1 = insert_block(&backend, 1, block0, None, None, Default::default());
-		let mut offchain_local_storage = offchain_local.at(block1).unwrap();
+		let mut offchain_local_storage = offchain_local.at(block1, read.clone()).unwrap();
 		offchain_local_storage.set(b"prefix1", b"key2", b"test2");
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
 
 		let _block2 = insert_block(&backend, 2, block1, None, None, Default::default());
 		// can insert in the past if there is no following change
-		let mut offchain_local_storage = offchain_local.at(block1).unwrap();
+		let mut offchain_local_storage = offchain_local.at(block1, read.clone()).unwrap();
 		assert!(offchain_local_storage.can_update());
 		offchain_local_storage.set(b"prefix1", b"key3", b"test3");
 		offchain_local_storage.set(b"prefix1", b"key1", b"test1");
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key3"), Some(b"test3".to_vec()));
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test1".to_vec()));
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
-		let mut offchain_local_storage = offchain_local.at(block0).unwrap();
+		let mut offchain_local_storage = offchain_local.at(block0, read.clone()).unwrap();
 		// actual force set backward
 		offchain_local_storage.set(b"prefix1", b"key1", b"test11");
 		offchain_local_storage.set(b"prefix1", b"key2", b"test12");
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test11".to_vec()));
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test12".to_vec()));
 		assert!(offchain_local_storage.can_update());
-		let offchain_local_storage = offchain_local.at(block1).unwrap();
+		let offchain_local_storage = offchain_local.at(block1, read.clone()).unwrap();
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test1".to_vec()));
 		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
 	}

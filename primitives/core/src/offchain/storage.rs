@@ -18,7 +18,7 @@
 //! In-memory implementation of offchain workers database.
 
 use std::collections::hash_map::{HashMap, Entry};
-use crate::offchain::OffchainStorage;
+use crate::offchain::{OffchainStorage, OffchainLocksRequirement};
 use std::iter::Iterator;
 use historied_db::management::tree::{TreeManagement, ForkPlan};
 use historied_db::{Latest, management::{Management, ManagementMut}};
@@ -50,6 +50,7 @@ pub type InMemHValue = Tree<u32, u32, Option<Vec<u8>>, InMemTreeBackend, InMemLi
 
 /// In-memory storage for offchain workers.
 /// With block chain data history.
+/// No lock management, intended for non concurrent access.
 #[derive(Debug, Clone, Default)]
 pub struct BlockChainInMemOffchainStorage<Hash: Ord> {
 	// Note that we could parameterized over historied management here.
@@ -128,15 +129,11 @@ impl OffchainStorage for InMemOffchainStorage {
 	}
 }
 
-impl<H> crate::offchain::BlockChainOffchainStorage for BlockChainInMemOffchainStorage<H>
+impl<H> BlockChainInMemOffchainStorage<H>
 	where
 		H: Ord + Clone + Send + Sync + Codec,
 {
-	type BlockId = H;
-	type OffchainStorage = BlockChainInMemOffchainStorageAt;
-	type OffchainStorageNew = BlockChainInMemOffchainStorageAtNew;
-
-	fn at(&self, id: Self::BlockId) -> Option<Self::OffchainStorage> {
+	fn at_inner(&self, id: H) -> Option<BlockChainInMemOffchainStorageAt> {
 		if let Some(at_read) = self.historied_management.write().get_db_state(&id) {
 			let at_write = self.historied_management.write().get_db_state_mut(&id);
 			Some(BlockChainInMemOffchainStorageAt {
@@ -148,13 +145,30 @@ impl<H> crate::offchain::BlockChainOffchainStorage for BlockChainInMemOffchainSt
 			None
 		}
 	}
+}
+
+
+impl<H> crate::offchain::BlockChainOffchainStorage for BlockChainInMemOffchainStorage<H>
+	where
+		H: Ord + Clone + Send + Sync + Codec,
+{
+	type BlockId = H;
+	type OffchainStorage = BlockChainInMemOffchainStorageAt;
+	type OffchainStorageNew = BlockChainInMemOffchainStorageAtNew;
+
+	fn at(&self, id: Self::BlockId, _: OffchainLocksRequirement) -> Option<Self::OffchainStorage> {
+		self.at_inner(id)
+	}
 
 	fn at_new(&self, id: Self::BlockId) -> Option<Self::OffchainStorageNew> {
-		self.at(id).map(|at| BlockChainInMemOffchainStorageAtNew(at))
+		self.at_inner(id).map(|at| BlockChainInMemOffchainStorageAtNew(at))
 	}
 
 	fn latest(&self) -> Option<Self::BlockId> {
 		self.historied_management.write().latest_external_state()
+	}
+
+	fn new_imported_block(&self, _id: &Self::BlockId, _parent: &Self::BlockId) {
 	}
 }
 
