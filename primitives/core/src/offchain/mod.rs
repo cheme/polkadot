@@ -789,6 +789,10 @@ impl TransactionPoolExt {
 	}
 }
 
+/// Declaration of future offchain locks usage.
+/// Allows early access for next block uses.
+#[derive(Default, Encode, Decode, PartialEq, Eq)]
+pub struct OffchainLocksRequirement;
 
 #[cfg(test)]
 mod tests {

@@ -1332,6 +1332,8 @@ decl_module! {
 			}
 		}
 
+		fn offchain_worker_local_locks(_requirements: &mut sp_runtime::offchain::OffchainLocksRequirement) { }
+
 		fn on_finalize() {
 			// Set the start of the first era.
 			if let Some(mut active_era) = Self::active_era() {

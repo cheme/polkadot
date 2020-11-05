@@ -22,6 +22,7 @@
 use sp_std::{prelude::*, result, marker::PhantomData, ops::Div, fmt::Debug};
 use codec::{FullCodec, Codec, Encode, Decode, EncodeLike};
 use sp_core::u32_trait::Value as U32;
+use sp_core::offchain::OffchainLocksRequirement;
 use sp_runtime::{
 	RuntimeDebug, ConsensusEngineId, DispatchResult, DispatchError,
 	traits::{
@@ -1506,6 +1507,9 @@ pub trait OffchainWorker<BlockNumber> {
 	/// with results to trigger any on-chain changes.
 	/// Any state alterations are lost and are not persisted.
 	fn offchain_worker(_n: BlockNumber) {}
+
+	/// This function aggregates offchain worker to requirements.
+	fn offchain_worker_local_locks(_requirements: &mut OffchainLocksRequirement) {}
 }
 
 pub mod schedule {

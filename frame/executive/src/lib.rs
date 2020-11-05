@@ -473,6 +473,12 @@ where
 			header.number().saturating_sub(1u32.into())
 		)
 	}
+
+	pub fn offchain_worker_local_locks() -> sp_core::offchain::OffchainLocksRequirement {
+		let mut result = sp_core::offchain::OffchainLocksRequirement::default();
+		<AllModules as OffchainWorker<System::BlockNumber>>::offchain_worker_local_locks(&mut result);
+		result
+	}
 }
 
 

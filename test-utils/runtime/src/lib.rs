@@ -760,6 +760,10 @@ cfg_if! {
 						sp_io::offchain::submit_transaction(ex.encode()).unwrap();
 					}
 				}
+
+				fn offchain_worker_local_locks() -> sp_core::offchain::OffchainLocksRequirement {
+					Default::default()
+				}
 			}
 
 			impl sp_session::SessionKeys<Block> for Runtime {
@@ -1012,6 +1016,10 @@ cfg_if! {
 						let ex = Extrinsic::IncludeData(header.number.encode());
 						sp_io::offchain::submit_transaction(ex.encode()).unwrap()
 					}
+				}
+
+				fn offchain_worker_local_locks() -> sp_core::offchain::OffchainLocksRequirement {
+					Default::default()
 				}
 			}
 

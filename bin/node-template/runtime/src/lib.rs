@@ -384,6 +384,10 @@ impl_runtime_apis! {
 		fn offchain_worker(header: &<Block as BlockT>::Header) {
 			Executive::offchain_worker(header)
 		}
+
+		fn offchain_worker_local_locks() -> sp_core::offchain::OffchainLocksRequirement {
+			Executive::offchain_worker_local_locks()
+		}
 	}
 
 	impl sp_consensus_aura::AuraApi<Block, AuraId> for Runtime {

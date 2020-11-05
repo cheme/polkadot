@@ -539,6 +539,11 @@ decl_module! {
 			// but we could dispatch extrinsic (transaction/unsigned/inherent) using
 			// sp_io::submit_extrinsic
 		}
+
+		// Future locks requirement for accessing local off chain storage.
+		fn offchain_worker_local_locks(requirements: &mut sp_runtime::offchain::OffchainLocksRequirement) {
+			// No specific use here so return an empty requirement to add.
+		}
 	}
 }
 

@@ -23,6 +23,7 @@
 /// Re-export of parent module scope storage prefix.
 pub use sp_core::offchain::STORAGE_PREFIX as STORAGE_PREFIX;
 pub use sp_core::offchain::LOCAL_STORAGE_PREFIX as LOCAL_STORAGE_PREFIX;
+pub use sp_core::offchain::OffchainLocksRequirement;
 
 sp_api::decl_runtime_apis! {
 	/// The offchain worker api.
@@ -36,5 +37,9 @@ sp_api::decl_runtime_apis! {
 		/// Starts the off-chain task for given block header.
 		#[skip_initialize_block]
 		fn offchain_worker(header: &Block::Header);
+
+		/// Get locks required for offchain local storage.
+		#[skip_initialize_block]
+		fn offchain_worker_local_locks() -> OffchainLocksRequirement;
 	}
 }

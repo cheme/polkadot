@@ -29,7 +29,7 @@ use codec::{Encode, Decode};
 use sp_core::OpaquePeerId;
 use sp_core::offchain::{
 	Externalities as OffchainExt, HttpRequestId, Timestamp, HttpRequestStatus, HttpError,
-	OffchainStorage, OpaqueNetworkState, OpaqueMultiaddr, StorageKind,
+	OffchainStorage, OpaqueNetworkState, OpaqueMultiaddr, StorageKind, OffchainLocksRequirement,
 };
 pub use sp_offchain::{STORAGE_PREFIX, LOCAL_STORAGE_PREFIX};
 pub use http::SharedClient;
@@ -58,6 +58,9 @@ pub(crate) struct Api<PersistentStorage, LocalStorage> {
 	is_validator: bool,
 	/// Is this node runing on a best new block?
 	is_new_best: bool,
+	/// Lock requirement for local persistence access acquired
+	/// for this run.
+	local_lock_requirements: OffchainLocksRequirement,
 	/// Everything HTTP-related is handled by a different struct.
 	http: http::HttpApi,
 }
@@ -276,6 +279,7 @@ impl AsyncApi {
 		network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 		is_validator: bool,
 		is_new_best: bool,
+		local_lock_requirements: OffchainLocksRequirement,
 		shared_client: SharedClient,
 	) -> (Api<PS, LS>, Self) {
 		let (http_api, http_worker) = http::http(shared_client);
@@ -286,6 +290,7 @@ impl AsyncApi {
 			network_provider,
 			is_validator,
 			is_new_best,
+			local_lock_requirements,
 			http: http_api,
 		};
 
@@ -346,6 +351,7 @@ mod tests {
 			mock,
 			false,
 			true,
+			Default::default(),
 			shared_client,
 		)
 	}

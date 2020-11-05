@@ -55,7 +55,7 @@ use frame_support::{
 	dispatch::DispatchResult, decl_module, decl_storage, decl_event,
 	traits::Get,
 };
-use sp_core::crypto::KeyTypeId;
+use sp_core::{crypto::KeyTypeId, offchain::OffchainLocksRequirement};
 use sp_runtime::{
 	RuntimeDebug,
 	offchain::{http, Duration, storage::StorageValueRef},
@@ -294,6 +294,13 @@ decl_module! {
 				debug::error!("Error: {}", e);
 			}
 		}
+
+		/// By implementing `offchain_worker_local_locks` you can define critical
+		/// section that will be use for accessing local storage kind.
+		/// If in doubt, on can lock the empty prefix for the whole diration of the
+		/// offchain processing, but then two consecutive block processing will exclude
+		/// themselves.
+		fn offchain_worker_local_locks(requirements: &mut OffchainLocksRequirement) { }
 	}
 }
 

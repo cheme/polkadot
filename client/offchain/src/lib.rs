@@ -44,7 +44,7 @@ use sp_api::{ApiExt, ProvideRuntimeApi, Hasher};
 use futures::future::Future;
 use log::{debug, warn};
 use sc_network::{ExHashT, NetworkService, NetworkStateInfo, PeerId};
-use sp_core::{offchain::{self, OffchainStorage, BlockChainOffchainStorage},
+use sp_core::{offchain::{self, OffchainStorage, BlockChainOffchainStorage, OffchainLocksRequirement},
 	ExecutionContext, traits::SpawnNamed};
 use sp_runtime::{generic::BlockId, traits::{self, Header, HashFor}};
 use futures::{prelude::*, future::ready};
@@ -181,12 +181,24 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 				log::error!("Error no chain state for offchain local db at {:?}", at);
 				return futures::future::Either::Right(futures::future::ready(()));
 			};
+			let local_lock_reqirements = if version > 2 {
+				match runtime.offchain_worker_local_locks(&at) {
+					Ok(locks) => locks,
+					Err(error) => {
+						log::error!("Error getting local offchain locks {:?}, pursuing with no access.", error);
+						Default::default()
+					},
+				}
+			} else {
+				OffchainLocksRequirement::default()
+			};
 			let (api, runner) = api::AsyncApi::new(
 				self.db.clone(),
 				local_db_at.clone(),
 				network_provider,
 				is_validator,
 				is_new_best,
+				local_lock_reqirements,
 				self.shared_client.clone(),
 			);
 			debug!("Spawning offchain workers at {:?}", at);

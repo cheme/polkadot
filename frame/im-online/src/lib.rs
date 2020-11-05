@@ -81,7 +81,7 @@ use sp_std::prelude::*;
 use sp_std::convert::TryInto;
 use pallet_session::historical::IdentificationTuple;
 use sp_runtime::{
-	offchain::storage::StorageValueRef,
+	offchain::{storage::StorageValueRef, OffchainLocksRequirement},
 	RuntimeDebug,
 	traits::{Convert, Member, Saturating, AtLeast32BitUnsigned}, Perbill,
 	transaction_validity::{
@@ -390,6 +390,10 @@ decl_module! {
 					now,
 				)
 			}
+		}
+
+		fn offchain_worker_local_locks(requirements: &mut OffchainLocksRequirement) {
+			// Local offchain worker is unused.
 		}
 	}
 }

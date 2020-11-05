@@ -17,7 +17,6 @@
 
 //! Dispatch system. Contains a macro for defining runtime modules and
 //! generating values representing lazy module function calls.
-
 pub use crate::sp_std::{result, fmt, prelude::{Vec, Clone, Eq, PartialEq}, marker};
 pub use crate::codec::{Codec, EncodeLike, Decode, Encode, Input, Output, HasCompact, EncodeAsRef};
 pub use frame_metadata::{
@@ -334,6 +333,7 @@ macro_rules! decl_module {
 			{}
 			{}
 			{}
+			{}
 			[]
 			$($t)*
 		);
@@ -369,6 +369,7 @@ macro_rules! decl_module {
 			{}
 			{}
 			{}
+			{}
 			[]
 			$($t)*
 		);
@@ -385,6 +386,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -403,6 +405,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $( $error_type )* }
 			{ $( $integrity_test)* }
@@ -420,6 +423,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -445,6 +449,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -466,6 +471,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{}
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -486,6 +492,7 @@ macro_rules! decl_module {
 				fn on_finalize( $( $param_name : $param ),* ) { $( $impl )* }
 			}
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $( $error_type )* }
 			{ $( $integrity_test)* }
@@ -504,6 +511,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{}
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -531,6 +539,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )+ }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -555,6 +564,7 @@ macro_rules! decl_module {
 		{}
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -580,6 +590,7 @@ macro_rules! decl_module {
 		{}
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -607,6 +618,7 @@ macro_rules! decl_module {
 		{}
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -627,6 +639,7 @@ macro_rules! decl_module {
 			}
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $( $error_type )* }
 			{ $( $integrity_test)* }
@@ -647,6 +660,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )+ }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -670,6 +684,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{}
@@ -688,6 +703,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $( $error_type )* }
 			{
@@ -711,6 +727,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )+ }
@@ -734,6 +751,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -759,6 +777,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -786,6 +805,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -806,6 +826,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $( $error_type )* }
 			{ $( $integrity_test)* }
@@ -826,6 +847,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -849,6 +871,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -869,6 +892,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ fn offchain_worker( $( $param_name : $param ),* ) { $( $impl )* } }
+			{ $( $offchain_locks:tt )* }
 			{ $( $constants )* }
 			{ $( $error_type )* }
 			{ $( $integrity_test)* }
@@ -889,6 +913,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )+ }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -898,6 +923,74 @@ macro_rules! decl_module {
 		$($rest:tt)*
 	) => {
 		compile_error!("`offchain_worker` can only be passed once as input.");
+	};
+	(@normalize
+		$(#[$attr:meta])*
+		pub struct $mod_type:ident<
+			$trait_instance:ident: $trait_name:ident
+			$(<I>, I: $instantiable:path $(= $module_default_instance:path)?)?
+		>
+		for enum $call_type:ident where origin: $origin_type:ty, system = $system:ident
+		{ $( $other_where_bounds:tt )* }
+		{ $( $deposit_event:tt )* }
+		{ $( $on_initialize:tt )* }
+		{ $( $on_runtime_upgrade:tt )* }
+		{ $( $on_finalize:tt )* }
+		{ $( $offchain:tt )* }
+		{ }
+		{ $( $constants:tt )* }
+		{ $( $error_type:tt )* }
+		{ $( $integrity_test:tt )* }
+		[ $( $dispatchables:tt )* ]
+		$(#[doc = $doc_attr:tt])*
+		fn offchain_worker_local_locks( $( $param_name:ident : $param:ty ),* $(,)? ) { $( $impl:tt )* }
+		$($rest:tt)*
+	) => {
+		$crate::decl_module!(@normalize
+			$(#[$attr])*
+			pub struct $mod_type<
+				$trait_instance: $trait_name$(<I>, I: $instantiable $(= $module_default_instance)?)?
+			>
+			for enum $call_type where origin: $origin_type, system = $system
+			{ $( $other_where_bounds )* }
+			{ $( $deposit_event )* }
+			{ $( $on_initialize )* }
+			{ $( $on_runtime_upgrade )* }
+			{ $( $on_finalize )* }
+			{ $( $offchain )* }
+			{
+				fn offchain_worker_local_locks( $( $param_name : $param ),* ) { $( $impl )* }
+			}
+			{ $( $constants )* }
+			{ $( $error_type )* }
+			{ $( $integrity_test)* }
+			[ $( $dispatchables )* ]
+			$($rest)*
+		);
+	};
+	// Compile error on trying to add a second `offchain_worker`.
+	(@normalize
+		$(#[$attr:meta])*
+		pub struct $mod_type:ident<
+			$trait_instance:ident: $trait_name:ident$(<I>, I: $instantiable:path $(= $module_default_instance:path)?)?
+		>
+		for enum $call_type:ident where origin: $origin_type:ty, system = $system:ident
+		{ $( $other_where_bounds:tt )* }
+		{ $( $deposit_event:tt )* }
+		{ $( $on_initialize:tt )* }
+		{ $( $on_runtime_upgrade:tt )* }
+		{ $( $on_finalize:tt )* }
+		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )+ }
+		{ $( $constants:tt )* }
+		{ $( $error_type:tt )* }
+		{ $( $integrity_test:tt )* }
+		[ $( $dispatchables:tt )* ]
+		$(#[doc = $doc_attr:tt])*
+		fn offchain_worker_local_locks( $( $param_name:ident : $param:ty ),* $(,)? ) { $( $impl:tt )* }
+		$($rest:tt)*
+	) => {
+		compile_error!("`offchain_worker_local_locks` can only be passed once as input.");
 	};
 	// This puts a constant in the parsed constants list.
 	(@normalize
@@ -913,6 +1006,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -934,6 +1028,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{
 				$( $constants )*
 				$( #[doc = $doc_attr ] )*
@@ -960,6 +1055,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ }
 		{ $( $integrity_test:tt )* }
@@ -980,6 +1076,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $error_type }
 			{ $( $integrity_test)* }
@@ -1001,6 +1098,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ }
 		{ $( $integrity_test:tt )* }
@@ -1019,6 +1117,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ &'static str }
 			{ $( $integrity_test)* }
@@ -1041,6 +1140,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $error_type:ty }
 		{ $( $integrity_test:tt )* }
@@ -1065,6 +1165,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $error_type }
 			{ $( $integrity_test)* }
@@ -1095,6 +1196,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -1123,6 +1225,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -1151,6 +1254,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -1179,6 +1283,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -1208,6 +1313,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $( $error_type:tt )* }
 		{ $( $integrity_test:tt )* }
@@ -1225,6 +1331,7 @@ macro_rules! decl_module {
 			{ $( $on_runtime_upgrade )* }
 			{ $( $on_finalize )* }
 			{ $( $offchain )* }
+			{ $( $offchain_locks )* }
 			{ $( $constants )* }
 			{ $( $error_type )* }
 			{ $( $integrity_test)* }
@@ -1439,12 +1546,14 @@ macro_rules! decl_module {
 		$module:ident<$trait_instance:ident: $trait_name:ident$(<I>, $instance:ident: $instantiable:path)?>;
 		{ $( $other_where_bounds:tt )* }
 		fn offchain_worker() { $( $impl:tt )* }
+		$( fn offchain_worker_local_locks( $( $param_name2:ident : $param2:ty ),* $(,)? ) { $( $impl2:tt )* } )*
 	) => {
 		impl<$trait_instance: $system::Trait + $trait_name$(<I>, $instance: $instantiable)?>
 			$crate::traits::OffchainWorker<<$trait_instance as $system::Trait>::BlockNumber>
 			for $module<$trait_instance$(, $instance)?> where $( $other_where_bounds )*
 		{
 			fn offchain_worker(_block_number_not_used: <$trait_instance as $system::Trait>::BlockNumber) { $( $impl )* }
+			$( fn offchain_worker_local_locks( $( $param_name2 : $param2 ),* ) { $( $impl2 )* } )*
 		}
 	};
 
@@ -1453,12 +1562,14 @@ macro_rules! decl_module {
 		$module:ident<$trait_instance:ident: $trait_name:ident$(<I>, $instance:ident: $instantiable:path)?>;
 		{ $( $other_where_bounds:tt )* }
 		fn offchain_worker($param:ident : $param_ty:ty) { $( $impl:tt )* }
+		$( fn offchain_worker_local_locks( $( $param_name2:ident : $param2:ty ),* $(,)? ) { $( $impl2:tt )* } )*
 	) => {
 		impl<$trait_instance: $system::Trait + $trait_name$(<I>, $instance: $instantiable)?>
 			$crate::traits::OffchainWorker<<$trait_instance as $system::Trait>::BlockNumber>
 			for $module<$trait_instance$(, $instance)?> where $( $other_where_bounds )*
 		{
 			fn offchain_worker($param: $param_ty) { $( $impl )* }
+			$( fn offchain_worker_local_locks( $( $param_name2 : $param2 ),* ) { $( $impl2 )* } )*
 		}
 	};
 
@@ -1651,6 +1762,7 @@ macro_rules! decl_module {
 		{ $( $on_runtime_upgrade:tt )* }
 		{ $( $on_finalize:tt )* }
 		{ $( $offchain:tt )* }
+		{ $( $offchain_locks:tt )* }
 		{ $( $constants:tt )* }
 		{ $error_type:ty }
 		{ $( $integrity_test:tt )* }
@@ -1696,6 +1808,7 @@ macro_rules! decl_module {
 			$mod_type<$trait_instance: $trait_name $(<I>, $instance: $instantiable)?>;
 			{ $( $other_where_bounds )* }
 			$( $offchain )*
+			$( $offchain_locks )*
 		}
 		$crate::decl_module! {
 			@impl_deposit_event
@@ -2369,6 +2482,9 @@ macro_rules! __check_reserved_fn_name {
 	};
 	(offchain_worker $( $rest:ident )*) => {
 		$crate::__check_reserved_fn_name!(@compile_error offchain_worker);
+	};
+	(offchain_worker_local_locks $( $rest:ident )*) => {
+		$crate::__check_reserved_fn_name!(@compile_error offchain_worker_local_locks);
 	};
 	(integrity_test $( $rest:ident )*) => {
 		$crate::__check_reserved_fn_name!(@compile_error integrity_test);
