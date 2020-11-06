@@ -61,21 +61,38 @@ pub struct BlockChainLocalStorage<H: Clone + Ord, S: TreeManagementStorage> {
 	changes_journals: ChangesJournalSync,
 }
 
+enum BranchTipState {
+	/// Requirement not yet received, this
+	/// tip is locked as if there was a global
+	/// remaining section.
+	PendingRequirement,
+	/// This is a an actual tip with possibly new writes.
+	Runing,
+}
 /// Locks associated with current runing instance.
 /// This is not locks over the db (got its own global lock),
 /// but a way to define critical section.
 /// Critical section must be first declared for the lifetime of the
 /// storage.
 pub struct Locks<H: Ord> {
-	branch_tips: BTreeSet<H>,
+	/// Current branch tips in lock.
+	///
+	/// Sometime there is multiple branchtip for a branch
+	/// (the point of this critical section locks being
+	/// to run multiple block concurrently).
+	/// It stores a `BranchTipState` and an potional reference
+	/// to its parent block.
+	/// If reference to parent block is `None`, the branch
+	/// do not required to check parent write state.
+	branch_tips: BTreeMap<H, (BranchTipState, Option<H>)>,
 	// TODO replace by radix tree
-	locks: BTreeMap<Vec<u8>, BTreeMap<H, Lock>>,
+	locks: BTreeMap<Vec<u8>, BTreeMap<H, (Lock, Option<LockParent>)>>,
 }
 
 impl<H: Ord> Default for Locks<H> {
 	fn default() -> Self {
 		Locks {
-			branch_tips: BTreeSet::new(),
+			branch_tips: BTreeMap::new(),
 			locks: BTreeMap::new(),
 		}
 	}
@@ -120,6 +137,9 @@ impl<H: Ord> Locks<H> {
 	fn start(&mut self, at: &H, target: &LockTarget) -> LockedTarget<H> {
 		unimplemented!()
 	}
+	fn try_start(&mut self, at: &H, target: &LockTarget) -> Option<LockedTarget<H>> {
+		unimplemented!()
+	}
 	fn end(&mut self, at: &H, target: &LockTarget) {
 		unimplemented!()
 	}
@@ -128,12 +148,15 @@ impl<H: Ord> Locks<H> {
 	fn end_all(&mut self, at: &H, remaining: &mut OffchainLocksRequirement) {
 		unimplemented!()
 	}
-
 	#[must_use]
 	/// Get a lock on read.
 	/// This read waits for any write locks to finished and blocks
 	/// any new write acquisition for the same state.
 	pub fn read(&mut self, at: &H, target: &LockTarget) -> LockedTargetRead<H> {
+		unimplemented!()
+	}
+	#[must_use]
+	pub fn try_read(&mut self, at: &H, target: &LockTarget) -> Option<LockedTargetRead<H>> {
 		unimplemented!()
 	}
 }
@@ -180,19 +203,37 @@ impl<H: Clone + Ord> DeclaredRequirement<H> {
 	pub fn read(&mut self, target: &LockTarget) -> LockedTargetRead<H> {
 		self.locks.write().read(&self.at, target)
 	}
+	#[must_use]
+	pub fn try_read(&mut self, target: &LockTarget) -> Option<LockedTargetRead<H>> {
+		unimplemented!()
+	}
 }
 
 type Lock = Arc<(Condvar, Mutex<LockInner>)>;
+// lock dedicated to waiting on a parent block
+// TODO make it a struct and notify all on drop
+type LockParent = Arc<(Condvar, Mutex<bool>)>;
 
 struct LockInner {
 	/// Count the number of open read thread.
 	/// Cannot have this to 0 and at the same time
 	/// a write lock.
 	read: usize,
+	/// Declared locks (write) are limited.
+	/// If `None` that is unlimited access (only reach 0
+	/// on thread end (`DeclaredRequirement` drop), but
+	/// in this case the lock is not needed anymore.
+	remaining_declared: Option<usize>,
 	/// Write lock to a single process.
 	write: bool,
-	/// Declared locks (write) are limited.
-	remaining_declared: usize,
+	/// This lock is pending so when it need to be freed before
+	/// a parent lock can put itself locked or pending.
+	waiting_child_lock: bool,
+	waiting_parent_lock: bool,
+	waiting_on_read: bool,
+	/// Lock we wait on.
+	wait_on: Lock,
+	wait_on_parent: LockParent,
 }
 
 /// Note that locked target is only locking the critical section access
