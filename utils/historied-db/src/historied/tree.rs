@@ -194,7 +194,7 @@ impl<
 	BD: LinearStorage<V::Storage, BI>,
 > IndexedDataBasis for Tree<I, BI, V, D, BD> {
 	type I = (D::Index, BD::Index);
-	// Not really use, but it would make sense to implement variants with get_ref.
+	// Not really used, but it would make sense to implement variants with get_ref.
 	tree_get!(index, Self::I, get, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r));
 }
 

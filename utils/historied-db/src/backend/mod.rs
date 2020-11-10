@@ -71,10 +71,10 @@ pub trait LinearStorage<V, S>: InitFrom {
 	fn get_lookup(&self, index: usize) -> Option<HistoriedValue<V, S>> {
 		self.lookup(index).map(|index| self.get(index))
 	}
-	/// Entry. TODO Entry on linear is not very interesting (consider removal).
-	/// Aka either delete or use Index internaly.
+	/// Entry.
 	fn entry<'a>(&'a mut self, index: usize) -> Entry<'a, V, S, Self> {
-		let value = self.lookup(index).map(|index| self.get(index));
+		let index = self.lookup(index);
+		let value = index.clone().map(|index| self.get(index));
 		let insert = value.is_none();
 		Entry {
 			value,
@@ -165,14 +165,11 @@ impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for RevIter<'a, V, S, D> {
 	}
 }
 
-// TODO this implementation uses a index and does not allow
-// performant implementation, it should (at least when existing
-// value) use a associated type index depending on backend
-// (slice index of encoded array, pointer of in_memory, pointer
-// of node inner value for nodes). Also not puting value in memory.
+
+/// Entry for a backend.
 pub struct Entry<'a, V, S, D: LinearStorage<V, S>> {
 	value: Option<HistoriedValue<V, S>>,
-	index: usize,
+	index: Option<D::Index>,
 	storage: &'a mut D,
 	changed: bool,
 	insert: bool,
@@ -225,14 +222,20 @@ impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
 	fn drop(&mut self) {
 		if self.changed {
 			if let Some(change) = self.value.take() {
-				if self.insert {
-					self.storage.insert_lookup(self.index, change);
+				if let Some(index) = self.index {
+					if self.insert {
+						self.storage.insert(index, change);
+					} else {
+						self.storage.emplace(index, change);
+					}
 				} else {
-					self.storage.emplace_lookup(self.index, change);
+					self.storage.push(change);
 				}
 			} else {
 				if self.changed && !self.insert {
-					self.storage.remove_lookup(self.index);
+					if let Some(index) = self.index {
+						self.storage.remove(index);
+					}
 				}
 			}
 		}
