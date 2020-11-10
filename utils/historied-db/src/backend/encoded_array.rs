@@ -21,8 +21,8 @@
 
 // TODO parameterized u64 (historied value) state (put it in config).
 
-// TODO next split between consecutive indexed values (replace write length by generic write meta)
-// TODO next split consecutive with range indexing
+// TODO for nodes provide next split between consecutive indexed values
+// (replace write length by generic write meta, so we also add first state)
 
 use sp_std::marker::PhantomData;
 use sp_std::borrow::Cow;
@@ -95,12 +95,7 @@ impl<'a, V, A> Encode for EncodedArray<'a, V, A> {
 	fn encode(&self) -> Vec<u8> {
 		self.0.encode()
 	}
-
-/*	fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
-		f(&self.0)
-	}*/
 }
-
 
 impl<'a, V, A> Decode for EncodedArray<'a, V, A> {
 	fn decode<I: CodecInput>(value: &mut I) -> Result<Self, codec::Error> {
@@ -233,14 +228,19 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 		let len = self.len();
 		let start_ix = self.index_start();
 		let end_ix = self.0.len();
-		// TODO EMCH use slice copy within after extend, no need for buffer!!!!
 		let mut new_ix = self.0[start_ix..end_ix].to_vec();
-		// truncate here can be bad
-		self.0.to_mut().truncate(start_ix + SIZE_BYTE_LEN);
+		let to_write = SIZE_BYTE_LEN + val.value.len() + extra.len();
+		self.0.to_mut().resize(end_ix + to_write, 0);
+		// move the index
+		self.0.copy_within(start_ix..end_ix, start_ix + to_write);
+
 		self.write_le_u64(start_ix, val.state);
-		self.0.to_mut().extend_from_slice(val.value);
-		self.0.to_mut().extend_from_slice(extra);
-		self.0.to_mut().append(&mut new_ix);
+		let mut start = start_ix + SIZE_BYTE_LEN;
+		let mut end = start + val.value.len();
+		self.0.to_mut()[start..end].copy_from_slice(val.value);
+		start = end;
+		end = start + extra.len();
+		self.0.to_mut()[start..end].copy_from_slice(extra);
 		if len > 0 {
 			self.write_le_usize(self.0.len() - SIZE_BYTE_LEN, start_ix);
 			self.append_le_usize(len + 1);
@@ -546,7 +546,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 		let end_ix = self.0.len();
 		if previous_size > value.value.as_ref().len() {
 			let delete_size = previous_size - value.value.as_ref().len();
-			let new_elt_end = elt_end - delete_size; // TODO this var is awkward
+			let new_elt_end = elt_end - delete_size;
 			self.write_le_u64(elt_start, value.state);
 			self.0[elt_start + SIZE_BYTE_LEN..new_elt_end].copy_from_slice(value.value.as_ref());
 			for _ in 0..delete_size {
@@ -789,89 +789,4 @@ mod test {
 		let mut ser2: EncodedArray<Vec<u8>, DefaultVersion> = Default::default();
 		crate::backend::test::test_linear_storage(&mut ser2);
 	}
-
-/*
-	// TODO rename to gc and activate when implementation
-	// similar to in memory in linear.rs is added to EncodedArray. 
-	#[test]
-	fn test_prune() {
-		let mut item: EncodedArray<NoVersion> = Default::default();
-		// setting value respecting branch build order
-		for i in 1..6 {
-			item.push(i, Some(&[i as u8]));
-		}
-
-		for a in 1..6 {
-			assert_eq!(item.get(a), Some(Some(&[a as u8][..])));
-		}
-		item.prune(1);
-		assert_eq!(item.get(1), None);
-		for a in 2..6 {
-			assert_eq!(item.get(a), Some(Some(&[a as u8][..])));
-		}
-
-		item.prune(4);
-		for a in 1..5 {
-			assert_eq!(item.get(a), None);
-		}
-		for a in 5..6 {
-			assert_eq!(item.get(a), Some(Some(&[a as u8][..])));
-		}
-
-		item.prune(80);
-		for a in 1..4 {
-			assert_eq!(item.get(a), None);
-		}
-		// pruning preserve last valid value
-		for a in 5..11 {
-			assert_eq!(item.get(a), Some(Some(&[5 as u8][..])));
-		}
-
-		// prune skip unrelevant delete
-		let mut item: EncodedArray<NoVersion> = Default::default();
-		item.push(1, Some(&[1 as u8]));
-		item.push(2, None);
-		item.push(3, Some(&[3 as u8]));
-		assert_eq!(item.get(1), Some(Some(&[1][..])));
-		assert_eq!(item.get(2), Some(None));
-		assert_eq!(item.get(3), Some(Some(&[3][..])));
-		assert_eq!(item.0.len(), 3);
-		item.prune(1);
-		assert_eq!(item.0.len(), 1);
-		assert_eq!(item.get(1), None);
-		assert_eq!(item.get(2), None);
-		assert_eq!(item.get(3), Some(Some(&[3][..])));
-
-		// prune skip unrelevant delete
-		let mut item: EncodedArray<NoVersion> = Default::default();
-		item.push(1, Some(&[1 as u8]));
-		item.push(3, None);
-		item.push(4, Some(&[4 as u8]));
-		assert_eq!(item.get(1), Some(Some(&[1][..])));
-		assert_eq!(item.get(2), Some(Some(&[1][..])));
-		assert_eq!(item.get(3), Some(None));
-		assert_eq!(item.get(4), Some(Some(&[4][..])));
-		assert_eq!(item.0.len(), 3);
-		// 1 needed for state two
-		assert_eq!(PruneResult::Unchanged, item.prune(1));
-		// 3 unneeded
-		item.prune(2);
-		assert_eq!(item.0.len(), 1);
-		assert_eq!(item.get(1), None);
-		assert_eq!(item.get(2), None);
-		assert_eq!(item.get(3), None);
-		assert_eq!(item.get(4), Some(Some(&[4][..])));
-
-		// prune delete at block
-		let mut item: EncodedArray<DefaultVersion> = Default::default();
-		item.push(0, Some(&[0 as u8]));
-		item.push(1, None);
-		assert_eq!(item.get(0), Some(Some(&[0][..])));
-		assert_eq!(item.get(1), Some(None));
-		item.prune(0);
-		assert_eq!(item.get(0), None);
-		assert_eq!(item.get(1), None);
-		assert_eq!(item.0.len(), 0);
-	}
-*/
 }
