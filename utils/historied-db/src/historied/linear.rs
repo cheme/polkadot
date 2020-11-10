@@ -24,7 +24,7 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
-	DataSlices, DataRefMut, Value, ValueRef,
+	DataSlices, DataRefMut, Value, ValueRef, DataBasis, IndexedData,
 	aggregate::{Sum as DataSum, SumValue}};
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
@@ -190,38 +190,6 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	}
 }
 
-impl<V: Value + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> for Linear<V, S, D> {
-	type S = S;
-
-	fn get(&self, at: &Self::S) -> Option<V> {
-		self.get_adapt::<_, ValueVecAdapter>(at).map(V::from_storage)
-	}
-
-	fn contains(&self, at: &Self::S) -> bool {
-		self.pos_index(at).is_some()
-	}
-
-	fn is_empty(&self) -> bool {
-		self.0.len() == 0
-	}
-}
-
-// TODO should it be ValueRef?
-impl<V: Value, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRanges<S> for Linear<V, S, D> {
-	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
-		if let Some(inner) = D::from_slice(slice) {
-			for index in inner.rev_index_iter() {
-				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, index) {
-					if state.exists(at) {
-						return Some(value);
-					}
-				}
-			}
-		}
-		None
-	}
-}
-
 impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
 	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
 		for index in self.0.rev_index_iter() {
@@ -239,7 +207,7 @@ impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> 
 		VR,
 		A: StorageAdapter<'a, S, VR, &'a mut D, D::Index>,
 	>(&'a mut self, at: &S)	-> Option<HistoriedValue<VR, S>> {
-		if let Some(index) = self.pos_index(at) {
+		if let Some(index) = self.index(at) {
 			Some(A::get_adapt(&mut self.0, index))
 		} else {
 			None
@@ -276,8 +244,22 @@ impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S
 
 }
 
-impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
-	fn pos_index(&self, at: &S) -> Option<D::Index> {
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> DataBasis for Linear<V, S, D> {
+	type S = S;
+
+	fn contains(&self, at: &Self::S) -> bool {
+		self.index(at).is_some()
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.len() == 0
+	}
+}
+
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedData for Linear<V, S, D> {
+	type I = D::Index;
+
+	fn index(&self, at: &Self::S) -> Option<Self::I> {
 		let mut pos = None;
 		for index in self.0.rev_index_iter() {
 			let vr = self.0.get_state(index);
@@ -296,9 +278,31 @@ impl<V: ValueRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> Da
 	}
 }
 
+// TODO should it be ValueRef?
+impl<V: Value, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRanges<S> for Linear<V, S, D> {
+	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
+		if let Some(inner) = D::from_slice(slice) {
+			for index in inner.rev_index_iter() {
+				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, index) {
+					if state.exists(at) {
+						return Some(value);
+					}
+				}
+			}
+		}
+		None
+	}
+}
+
 impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> DataSlices<Vec<u8>> for Linear<Vec<u8>, S, D> {
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]> {
 		self.get_adapt::<_, SliceAdapter>(at)
+	}
+}
+
+impl<V: Value + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> for Linear<V, S, D> {
+	fn get(&self, at: &Self::S) -> Option<V> {
+		self.get_adapt::<_, ValueVecAdapter>(at).map(V::from_storage)
 	}
 }
 
@@ -487,7 +491,7 @@ pub mod aggregate {
 		}
 	}
 
-	impl<'a, V, S, D> Data<V::Value> for Sum<'a, V, S, D>
+	impl<'a, V, S, D> DataBasis for Sum<'a, V, S, D>
 		where
 			V: SumValue,
 			V::Value: Clone,
@@ -496,16 +500,24 @@ pub mod aggregate {
 	{
 		type S = S;
 
-		fn get(&self, at: &Self::S) -> Option<V::Value> {
-			self.0.get(at)
-		}
-
 		fn contains(&self, at: &Self::S) -> bool {
 			self.0.contains(at)
 		}
 
 		fn is_empty(&self) -> bool {
 			self.0.is_empty()
+		}
+	}
+
+	impl<'a, V, S, D> Data<V::Value> for Sum<'a, V, S, D>
+		where
+			V: SumValue,
+			V::Value: Clone,
+			S: LinearState,
+			D: LinearStorage<<V::Value as Value>::Storage, S>,
+	{
+		fn get(&self, at: &Self::S) -> Option<V::Value> {
+			self.0.get(at)
 		}
 	}
 

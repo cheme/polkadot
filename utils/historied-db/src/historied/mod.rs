@@ -28,19 +28,24 @@ pub mod linear;
 pub mod tree;
 pub mod aggregate;
 
-/// Trait for historied data.
-pub trait Data<V: Value> {
+/// Basis trait for historied data.
+pub trait DataBasis {
 	/// State to query for this value.
 	type S;
-
-	/// Get value at this state.
-	fn get(&self, at: &Self::S) -> Option<V>;
 
 	/// Check if a value exists at this state.
 	fn contains(&self, at: &Self::S) -> bool;
 
 	/// Check if this is empty.
+	/// An empty data, can be dropped or
+	/// removed.
 	fn is_empty(&self) -> bool;
+}
+
+/// Trait for historied data.
+pub trait Data<V: Value>: DataBasis {
+	/// Get value at this state.
+	fn get(&self, at: &Self::S) -> Option<V>;
 }
 
 // TODO EMCH refact with 'a for inner value
@@ -252,6 +257,25 @@ pub trait DataRefMut<V: Value>: DataMut<V> {
 	/// Similar to value set but returning a pointer on replaced or deleted value.
 	/// If the value is change but history is kept (new state), no pointer is returned.
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>>;
+}
+
+/// Historied data is usually implemented using
+/// backend module. This trait allows access to
+/// such backend internal index.
+/// While using append only operation, those
+/// index could be use to index directly into the
+/// data.
+/// Be carefull that this access only stay consistent
+/// under particular condition.
+/// Eg `ForceDataMut` usually shift the index and
+/// invalidate those. But this will really depend
+/// on the backend implementation.
+pub trait IndexedData: DataBasis {
+	/// Backend internal associated index.
+	type I;
+
+	/// Get current internal struct index depending on state.
+	fn index(&self, at: &Self::S) -> Option<Self::I>;
 }
 
 /// An entry at a given history index.
