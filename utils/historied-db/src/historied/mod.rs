@@ -42,25 +42,28 @@ pub trait DataBasis {
 	fn is_empty(&self) -> bool;
 }
 
-/// Trait for historied data.
+/// Historied data.
 pub trait Data<V: Value>: DataBasis {
 	/// Get value at this state.
 	fn get(&self, at: &Self::S) -> Option<V>;
 }
 
-// TODO EMCH refact with 'a for inner value
-// and a get value type (see test on rust playground).
-// So we only got Data type.
-pub trait DataRef<V: Value>: Data<V> {
+/// Accessing reference to historied data.
+/// Generally for in memory storage or storage with cache.
+pub trait DataRef<V: Value>: DataBasis {
 	/// Get reference to the value at this state.
 	fn get_ref(&self, at: &Self::S) -> Option<&V>;
 }
 
-pub trait DataSlices<V: Value>: Data<V> {
+/// Access to slice of byte representing a value.
+pub trait DataSlices<V: Value>: DataBasis {
 	/// Get reference to the value at this state.
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
 }
 
+/// Access to a range over a slice.
+/// The api is a little awkward, but it to compose without
+/// lifetime issues.
 pub trait DataSliceRanges<S> {
 	/// Get reference to the value from which this slice can be build.
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>>;
@@ -207,7 +210,7 @@ default_item!(u64);
 default_item!(u128);
 
 /// Trait for mutable historied data.
-pub trait DataMut<V: Value>: Data<V> + Context {
+pub trait DataMut<V: Value>: DataBasis + Context {
 	/// State to use for changing value.
 	/// We use a different state than
 	/// for querying as it can use different
