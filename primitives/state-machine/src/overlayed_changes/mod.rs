@@ -18,15 +18,15 @@
 //! The overlayed changes to state.
 
 mod changeset;
-pub(crate) mod offchain;
+mod offchain;
 
+pub use self::offchain::OffchainOverlayedChanges;
 use crate::{
 	backend::Backend,
 	stats::StateMachineStats,
 };
 use sp_std::{vec::Vec, any::{TypeId, Any}, boxed::Box};
 use self::changeset::OverlayedChangeSet;
-use self::offchain::{OffchainOverlayedChanges, OffchainOverlayedChangesIntoIter};
 
 #[cfg(feature = "std")]
 use crate::{
@@ -474,8 +474,8 @@ impl OverlayedChanges {
 	///
 	/// Panics:
 	/// Panics if `transaction_depth() > 0`
-	fn offchain_drain_committed(&mut self) -> impl Iterator<Item=((StorageKey, StorageKey), OffchainOverlayedChange)> {
-		OffchainOverlayedChangesIntoIter::drain(&mut self.offchain)
+	pub fn offchain_drain_committed(&mut self) -> impl Iterator<Item=((StorageKey, StorageKey), OffchainOverlayedChange)> {
+		self.offchain.drain()
 	}
 
 	/// Get an iterator over all child changes as seen by the current transaction.
@@ -659,13 +659,11 @@ impl OverlayedChanges {
 			)
 	}
 
-	/// Activate offchain indexing.
-	/// Note that this function must only be call before any transactional
-	/// changes.
-	pub fn enable_offchain_indexing(&mut self) {
-		if let OffchainOverlayedChanges::Disabled = self.offchain {
-			self.offchain = OffchainOverlayedChanges::enabled();
-		}
+	/// Instantiate an offchain overlay with offchain indexing enabled.
+	pub fn default_with_offchain_indexing() -> Self {
+		let mut result = Self::default();
+		result.offchain = OffchainOverlayedChanges::enabled();
+		result
 	}
 
 	/// Read only access ot offchain overlay.
@@ -689,11 +687,6 @@ impl OverlayedChanges {
 			Some(value) => self.offchain.set(LOCAL_STORAGE_PREFIX, key, value),
 			None => self.offchain.remove(LOCAL_STORAGE_PREFIX, key),
 		}
-	}
-
-	/// Drain all elements of offchain changeset.
-	pub fn drain_offchain(&mut self) -> OffchainOverlayedChangesIntoIter {
-		self.offchain.drain()
 	}
 }
 

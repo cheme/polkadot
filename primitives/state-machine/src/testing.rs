@@ -16,9 +16,8 @@
 
 //! Test implementation for Externalities.
 
-use std::any::{Any, TypeId};
-use codec::Decode;
-use hash_db::Hasher;
+use std::{any::{Any, TypeId}, panic::{AssertUnwindSafe, UnwindSafe}};
+
 use crate::{
 	backend::Backend, OverlayedChanges, StorageTransactionCache, ext::Ext, InMemoryBackend,
 	StorageKey, StorageValue,
@@ -29,6 +28,9 @@ use crate::{
 		State as ChangesTrieState,
 	},
 };
+
+use codec::{Decode, Encode};
+use hash_db::Hasher;
 use sp_core::{
 	offchain::testing::TestPersistentOffchainDB,
 	storage::{
@@ -38,7 +40,6 @@ use sp_core::{
 	traits::TaskExecutorExt,
 	testing::TaskExecutor,
 };
-use codec::Encode;
 use sp_externalities::{Extensions, Extension};
 
 /// Simple HashMap-based Externalities impl.
@@ -91,11 +92,10 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 
 	/// Create a new instance of `TestExternalities` with code and storage.
 	pub fn new_with_code(code: &[u8], mut storage: Storage) -> Self {
-		let mut overlay = OverlayedChanges::default();
+		let mut overlay = OverlayedChanges::default_with_offchain_indexing();
 		let changes_trie_config = storage.top.get(CHANGES_TRIE_CONFIG)
 			.and_then(|v| Decode::decode(&mut &v[..]).ok());
 		overlay.set_collect_extrinsics(changes_trie_config.is_some());
-		overlay.enable_offchain_indexing();
 
 		assert!(storage.top.keys().all(|key| !is_child_storage_key(key)));
 		assert!(storage.children_default.keys().all(|key| is_child_storage_key(key)));
@@ -121,7 +121,7 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 
 	/// Move offchain changes from overlay to the persistent store.
 	pub fn persist_offchain_overlay(&mut self) {
-		self.offchain_db.apply_offchain_changes(self.overlay.drain_offchain());
+		self.offchain_db.apply_offchain_changes(self.overlay.offchain_drain_committed());
 	}
 
 	/// A shared reference type around the offchain worker storage.
@@ -169,6 +169,19 @@ impl<H: Hasher, N: ChangesTrieBlockNumber> TestExternalities<H, N>
 	pub fn execute_with<R>(&mut self, execute: impl FnOnce() -> R) -> R {
 		let mut ext = self.ext();
 		sp_externalities::set_and_run_with_externalities(&mut ext, execute)
+	}
+
+	/// Execute the given closure while `self` is set as externalities.
+	///
+	/// Returns the result of the given closure, if no panics occured.
+	/// Otherwise, returns `Err`.
+	pub fn execute_with_safe<R>(&mut self, f: impl FnOnce() -> R + UnwindSafe) -> Result<R, String> {
+		let mut ext = AssertUnwindSafe(self.ext());
+		std::panic::catch_unwind(move ||
+			sp_externalities::set_and_run_with_externalities(&mut *ext, f)
+		).map_err(|e| {
+			format!("Closure panicked: {:?}", e)
+		})
 	}
 }
 
