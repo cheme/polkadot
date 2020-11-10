@@ -262,6 +262,7 @@ pub trait DataRefMut<V: Value>: DataMut<V> {
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>>;
 }
 
+#[cfg(feature = "indexed-access")]
 /// Historied data is usually implemented using
 /// backend module. This trait allows access to
 /// such backend internal index.
@@ -273,7 +274,16 @@ pub trait DataRefMut<V: Value>: DataMut<V> {
 /// Eg `ForceDataMut` usually shift the index and
 /// invalidate those. But this will really depend
 /// on the backend implementation.
-pub trait IndexedData: DataBasis {
+pub trait IndexedData<V>: IndexedDataBasis {
+	/// Access value from internal index.
+	/// Internal index are subject to change and do
+	/// not have the same guarantees as actual state.
+	/// So using this on should be extra careful.
+	fn get_by_internal_index(&self, at: Self::I) -> V;
+}
+
+/// Basis component of IndexedData.
+pub trait IndexedDataBasis: DataBasis {
 	/// Backend internal associated index.
 	type I;
 

@@ -21,8 +21,10 @@
 
 use super::{HistoriedValue, Data, DataMut, DataRef, DataRefMut,
 	DataSlices, DataSliceRanges, UpdateResult, Value, ValueRef,
-	DataBasis, IndexedData,
+	DataBasis, IndexedDataBasis,
 	aggregate::{Sum as DataSum, SumValue}};
+#[cfg(feature = "indexed-access")]
+use super::IndexedData;
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC, aggregate::Sum as LinearSum};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
@@ -190,10 +192,24 @@ impl<
 	V: Value + Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 	BD: LinearStorage<V::Storage, BI>,
-> IndexedData for Tree<I, BI, V, D, BD> {
+> IndexedDataBasis for Tree<I, BI, V, D, BD> {
 	type I = (D::Index, BD::Index);
 	// Not really use, but it would make sense to implement variants with get_ref.
 	tree_get!(index, Self::I, get, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r));
+}
+
+#[cfg(feature = "indexed-access")]
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Value + Clone,
+	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+	BD: LinearStorage<V::Storage, BI>,
+> IndexedData<V> for Tree<I, BI, V, D, BD> {
+	fn get_by_internal_index(&self, at: Self::I) -> V {
+		let branch = self.branches.get(at.0).value;
+		branch.get_by_internal_index(at.1)
+	}
 }
 
 impl<

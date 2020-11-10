@@ -24,8 +24,10 @@
 //! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
-	DataSlices, DataRefMut, Value, ValueRef, DataBasis, IndexedData,
+	DataSlices, DataRefMut, Value, ValueRef, DataBasis, IndexedDataBasis,
 	aggregate::{Sum as DataSum, SumValue}};
+#[cfg(feature = "indexed-access")]
+use super::IndexedData;
 use crate::{UpdateResult, Latest};
 use sp_std::marker::PhantomData;
 use sp_std::vec::Vec;
@@ -256,7 +258,7 @@ impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> DataBasis for Li
 	}
 }
 
-impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedData for Linear<V, S, D> {
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedDataBasis for Linear<V, S, D> {
 	type I = D::Index;
 
 	fn index(&self, at: &Self::S) -> Option<Self::I> {
@@ -269,6 +271,13 @@ impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedData for 
 			}
 		}
 		pos
+	}
+}
+
+#[cfg(feature = "indexed-access")]
+impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedData<V> for Linear<V, S, D> {
+	fn get_by_internal_index(&self, at: Self::I) -> V {
+		V::from_storage(self.0.get(at).value)
 	}
 }
 
