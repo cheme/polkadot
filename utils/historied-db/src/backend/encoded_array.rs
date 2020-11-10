@@ -476,13 +476,10 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 	fn get_state(&self, index: Self::Index) -> u64 {
 		self.get_state_only(index)
 	}
-	//fn push(&mut self, value: HistoriedValue<&'a[u8], u64>) {
 	fn push(&mut self, value: HistoriedValue<V, u64>) {
 		let val = value.map_ref(|v| v.as_ref());
 		self.push_extra(val, &[])
 	}
-
-	//fn pop(&mut self) -> Option<HistoriedValue<&'a[u8], u64>> {
 	fn pop(&mut self) -> Option<HistoriedValue<V, u64>> {
 		let len = self.len();
 		if len == 0 {
