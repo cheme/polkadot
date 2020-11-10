@@ -55,7 +55,7 @@ impl<'a, V, F> Clone for EncodedArray<'a, V, F> {
 	}
 }
 
-pub trait EncodedArrayValue: AsRef<[u8]> + AsMut<[u8]> + Sized {
+pub trait EncodedArrayValue: AsRef<[u8]> + Sized {
 	fn from_slice(slice: &[u8]) -> Self;
 }
 

@@ -134,7 +134,7 @@ pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
 }
 
 /// Backend for linear storage with inmemory reference to a slice of bytes.
-pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, S> {
+pub trait LinearStorageSlice<V: AsRef<[u8]>, S>: LinearStorage<V, S> {
 	/// Unchecked access to value slice and state.
 	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], S>;
 	/// Unchecked mutable access to mutable value slice and state.
