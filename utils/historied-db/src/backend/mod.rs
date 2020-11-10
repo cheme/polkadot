@@ -110,23 +110,19 @@ pub trait LinearStorage<V, S>: InitFrom {
 	fn remove_lookup(&mut self, index: usize) {
 		self.lookup(index).map(|index| self.remove(index));
 	}
+	/// Efficient removal of last item.
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>>;
+	/// Clear all item, putting the backend in an empty state.
 	fn clear(&mut self);
+	/// Truncate items after this location (same semantic as std `Vec`).
 	fn truncate(&mut self, at: usize);
-	/// This can be slow, only define in migrate.
+	/// Replace a value at a given index.
+	/// Note that for some backend this can be slow.
 	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, S>);
 	/// Emplace with lookup.
 	fn emplace_lookup(&mut self, at: usize, value: HistoriedValue<V, S>) {
 		self.lookup(at).map(|index| self.emplace(index, value));
 	}
-}
-
-/// Backend for linear storage with inmemory reference.
-pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, S> {
-	/// Unchecked access to value slice and state.
-	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], S>;
-	/// Unchecked mutable access to mutable value slice and state.
-	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], S>;
 }
 
 /// Backend for linear storage with inmemory reference.
@@ -137,16 +133,30 @@ pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
 	fn get_ref_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut V, S>;
 }
 
+/// Backend for linear storage with inmemory reference to a slice of bytes.
+pub trait LinearStorageSlice<V: AsRef<[u8]> + AsMut<[u8]>, S>: LinearStorage<V, S> {
+	/// Unchecked access to value slice and state.
+	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], S>;
+	/// Unchecked mutable access to mutable value slice and state.
+	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], S>;
+}
+
+/// Technical trait to use for composing without
+/// the lifetime issue that can occurs with `LinearStorageSlice`.
 pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
-	// TODO rename to use get_range as get_range_from_slice also try again pure slice implementation.
-	/// Array like get.
+	/// Instantiate from an existing slice.
+	fn from_slice(slice: &[u8]) -> Option<Self>;
+	/// Return the range for the value in slice.
 	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, S>;
+	/// Get the range from a slice without using a `LinearStorageRange` instance.
 	fn get_range_from_slice(slice: &[u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, S>> {
 		Self::from_slice(slice).map(|inner|	inner.get_range(index))
 	}
-	fn from_slice(slice: &[u8]) -> Option<Self>;
 }
 
+/// Iterator over the internal index stored in a backend stoarge.
+/// This allow to iterate over value without relying on unsafe code,
+/// since accessing an item with internal state should be cheap.
 pub struct RevIter<'a, V, S, D: LinearStorage<V, S>>(
 	&'a D,
 	Option<D::Index>,
@@ -165,8 +175,9 @@ impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for RevIter<'a, V, S, D> {
 	}
 }
 
-
 /// Entry for a backend.
+///
+/// Actual change get commited on drop.
 pub struct Entry<'a, V, S, D: LinearStorage<V, S>> {
 	value: Option<HistoriedValue<V, S>>,
 	index: Option<D::Index>,
@@ -176,8 +187,7 @@ pub struct Entry<'a, V, S, D: LinearStorage<V, S>> {
 }
 
 impl<'a, V, S, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
-	/// ~ Vaccant enum of rust std lib.
-	/// Occupied is the negation of this.
+	/// Similar to `Vaccant` enum of rust std lib flavored entries.
 	pub fn is_vaccant(&self) -> bool {
 		self.insert
 	}
@@ -185,7 +195,7 @@ impl<'a, V, S, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
 	pub fn value(&self) -> Option<&HistoriedValue<V, S>> {
 		self.value.as_ref()
 	}
-	/// Change value.
+	/// Change current value.
 	pub fn and_modify<F>(mut self, f: impl FnOnce(&mut HistoriedValue<V, S>)) -> Self {
 		self.value.as_mut().map(f);
 		self.changed |= self.value.is_some();
@@ -217,8 +227,7 @@ impl<'a, V, S, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
 	}
 }
 
-impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D>
-{
+impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D> {
 	fn drop(&mut self) {
 		if self.changed {
 			if let Some(change) = self.value.take() {

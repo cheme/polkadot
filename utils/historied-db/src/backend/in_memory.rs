@@ -24,20 +24,17 @@ use sp_std::mem::replace;
 use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use sp_std::vec::Vec;
 
-/// Size of preallocated history per element.
-/// Currently at two for committed and prospective only.
-/// It means that using transaction in a module got a direct allocation cost.
-const ALLOCATED_HISTORY: usize = 2;
+macro_rules! memory_only_stack_size {
+	($memory_only: ident, $allocated_history: expr) => {
 
 /// Array like buffer for in memory storage.
 /// By in memory we expect that this will
 /// not required persistence and is not serialized.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct MemoryOnly<V, S>(pub(crate) smallvec::SmallVec<[HistoriedValue<V, S>; ALLOCATED_HISTORY]>);
+pub struct $memory_only<V, S>(pub(crate) smallvec::SmallVec<[HistoriedValue<V, S>; $allocated_history]>);
 
 
-impl<V: Encode, S: Encode> Encode for MemoryOnly<V, S> {
-
+impl<V: Encode, S: Encode> Encode for $memory_only<V, S> {
 	fn size_hint(&self) -> usize {
 		self.0.as_slice().size_hint()
 	}
@@ -45,21 +42,17 @@ impl<V: Encode, S: Encode> Encode for MemoryOnly<V, S> {
 	fn encode(&self) -> Vec<u8> {
 		self.0.as_slice().encode()
 	}
-
-/*	fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
-		f(&self.0)
-	}*/
 }
 
-impl<V: Decode, S: Decode> Decode for MemoryOnly<V, S> {
+impl<V: Decode, S: Decode> Decode for $memory_only<V, S> {
 	fn decode<I: Input>(value: &mut I) -> Result<Self, codec::Error> {
-		// TODO make a variant when len < ALLOCATED_HISTORY
+		// Note that we always decode on heap.
 		let v = Vec::decode(value)?;
-		Ok(MemoryOnly(smallvec::SmallVec::from_vec(v)))
+		Ok($memory_only(smallvec::SmallVec::from_vec(v)))
 	}
 }
 
-impl<V, S> DecodeWithContext for MemoryOnly<V, S>
+impl<V, S> DecodeWithContext for $memory_only<V, S>
 	where
 		V: DecodeWithContext,
 		S: Decode,
@@ -68,9 +61,8 @@ impl<V, S> DecodeWithContext for MemoryOnly<V, S>
 		// this align on scale codec inner implementation (DecodeWithContext trait
 		// could be a scale trait).
 		<codec::Compact<u32>>::decode(input).ok().and_then(|len| {
-			// TODO allocate with capacity
 			let len = len.0 as usize;
-			let mut result = smallvec::SmallVec::new();
+			let mut result = smallvec::SmallVec::with_capacity(len);
 			for _ in 0..len {
 				if let Some(value) = HistoriedValue::decode_with_context(input, init) {
 					result.push(value);
@@ -78,18 +70,18 @@ impl<V, S> DecodeWithContext for MemoryOnly<V, S>
 					return None;
 				}
 			}
-			Some(MemoryOnly(result))
+			Some($memory_only(result))
 		})
 	}
 }
 
-impl<V, S> Default for MemoryOnly<V, S> {
+impl<V, S> Default for $memory_only<V, S> {
 	fn default() -> Self {
-		MemoryOnly(smallvec::SmallVec::default())
+		$memory_only(smallvec::SmallVec::default())
 	}
 }
 
-impl<V: Clone + Context, S: Clone> LinearStorageMem<V, S> for MemoryOnly<V, S> {
+impl<V: Clone + Context, S: Clone> LinearStorageMem<V, S> for $memory_only<V, S> {
 	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S> {
 		let HistoriedValue { value, state } = &self.0[index];
 		HistoriedValue { value: &value, state: state.clone() }
@@ -100,7 +92,7 @@ impl<V: Clone + Context, S: Clone> LinearStorageMem<V, S> for MemoryOnly<V, S> {
 	}
 }
 
-impl<V: Clone + Context + Trigger, S: Clone> Trigger for MemoryOnly<V, S> {
+impl<V: Clone + Context + Trigger, S: Clone> Trigger for $memory_only<V, S> {
 	const TRIGGER: bool = <V as Trigger>::TRIGGER;
 
 	fn trigger_flush(&mut self) {
@@ -112,17 +104,17 @@ impl<V: Clone + Context + Trigger, S: Clone> Trigger for MemoryOnly<V, S> {
 	}
 }
 
-impl<V: Context, S> Context for MemoryOnly<V, S> {
+impl<V: Context, S> Context for $memory_only<V, S> {
 	type Context = V::Context;
 }
 
-impl<V: Context, S> InitFrom for MemoryOnly<V, S> {
+impl<V: Context, S> InitFrom for $memory_only<V, S> {
 	fn init_from(_init: Self::Context) -> Self {
 		Self::default()
 	}
 }
 
-impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
+impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for $memory_only<V, S> {
 	// Index position in array.
 	type Index = usize;
 	fn last(&self) -> Option<Self::Index> {
@@ -188,6 +180,15 @@ impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for MemoryOnly<V, S> {
 		self.0[index] = value;
 	}
 }
+
+}}
+
+memory_only_stack_size!(MemoryOnly, 2);
+memory_only_stack_size!(MemoryOnly4, 4);
+memory_only_stack_size!(MemoryOnly8, 8);
+memory_only_stack_size!(MemoryOnly16, 16);
+memory_only_stack_size!(MemoryOnly32, 32);
+memory_only_stack_size!(MemoryOnly64, 64);
 
 #[cfg(test)]
 mod test {
