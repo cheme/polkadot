@@ -150,7 +150,7 @@ pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
 	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, S>;
 	/// Get the range from a slice without using a `LinearStorageRange` instance.
 	fn get_range_from_slice(slice: &[u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, S>> {
-		Self::from_slice(slice).map(|inner|	inner.get_range(index))
+		Self::from_slice(slice).map(|inner| inner.get_range(index))
 	}
 }
 

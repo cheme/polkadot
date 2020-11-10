@@ -612,6 +612,14 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageSlice<V, u64> for Encod
 impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<V, u64> for EncodedArray<'a, V, F>
 	where V: EncodedArrayValue,
 {
+	fn get_range_from_slice(slice: &[u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, u64>> {
+		let ear = EncodedArray::<V, F>(EncodedArrayBuff::Cow(Cow::Borrowed(slice)), PhantomData);
+		let (start, end, state) = ear.get_range(index);
+		Some(HistoriedValue {
+			state,
+			value: start..end,
+		})
+	}
 	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, u64> {
 		let (start, end, state) = self.get_range(index);
 		HistoriedValue {
