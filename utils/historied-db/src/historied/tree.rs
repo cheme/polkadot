@@ -650,9 +650,9 @@ impl Tree<u32, u64, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone + AsRef<[u8]> + AsMut<[u8]>,
+	V: Value + Clone + AsRef<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
-	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V::Storage, BI>,
+	BD: AsRef<[u8]> + LinearStorageRange<V::Storage, BI>,
 > DataSlices<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(
 		get_slice,
