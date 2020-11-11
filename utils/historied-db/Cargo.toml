@@ -39,6 +39,8 @@ force-data = []
 encoded-array-backend = []
 # temp size implementation specific to a use case
 temp-size-impl = []
+# Index access is a rather unsafe api
+index-access = []
 std = [
   "codec/std",
 	"sp-std/std",

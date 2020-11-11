@@ -28,34 +28,42 @@ pub mod linear;
 pub mod tree;
 pub mod aggregate;
 
-/// Trait for historied data.
-pub trait Data<V: Value> {
+/// Basis trait for historied data.
+pub trait DataBasis {
 	/// State to query for this value.
 	type S;
-
-	/// Get value at this state.
-	fn get(&self, at: &Self::S) -> Option<V>;
 
 	/// Check if a value exists at this state.
 	fn contains(&self, at: &Self::S) -> bool;
 
 	/// Check if this is empty.
+	/// An empty data, can be dropped or
+	/// removed.
 	fn is_empty(&self) -> bool;
 }
 
-// TODO EMCH refact with 'a for inner value
-// and a get value type (see test on rust playground).
-// So we only got Data type.
-pub trait DataRef<V: Value>: Data<V> {
+/// Historied data.
+pub trait Data<V: Value>: DataBasis {
+	/// Get value at this state.
+	fn get(&self, at: &Self::S) -> Option<V>;
+}
+
+/// Accessing reference to historied data.
+/// Generally for in memory storage or storage with cache.
+pub trait DataRef<V: Value>: DataBasis {
 	/// Get reference to the value at this state.
 	fn get_ref(&self, at: &Self::S) -> Option<&V>;
 }
 
-pub trait DataSlices<V: Value>: Data<V> {
+/// Access to slice of byte representing a value.
+pub trait DataSlices<V: Value>: DataBasis {
 	/// Get reference to the value at this state.
 	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
 }
 
+/// Access to a range over a slice.
+/// The api is a little awkward, but it to compose without
+/// lifetime issues.
 pub trait DataSliceRanges<S> {
 	/// Get reference to the value from which this slice can be build.
 	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>>;
@@ -202,7 +210,7 @@ default_item!(u64);
 default_item!(u128);
 
 /// Trait for mutable historied data.
-pub trait DataMut<V: Value>: Data<V> + Context {
+pub trait DataMut<V: Value>: DataBasis + Context {
 	/// State to use for changing value.
 	/// We use a different state than
 	/// for querying as it can use different
@@ -252,6 +260,35 @@ pub trait DataRefMut<V: Value>: DataMut<V> {
 	/// Similar to value set but returning a pointer on replaced or deleted value.
 	/// If the value is change but history is kept (new state), no pointer is returned.
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>>;
+}
+
+#[cfg(feature = "indexed-access")]
+/// Historied data is usually implemented using
+/// backend module. This trait allows access to
+/// such backend internal index.
+/// While using append only operation, those
+/// index could be use to index directly into the
+/// data.
+/// Be carefull that this access only stay consistent
+/// under particular condition.
+/// Eg `ForceDataMut` usually shift the index and
+/// invalidate those. But this will really depend
+/// on the backend implementation.
+pub trait IndexedData<V>: IndexedDataBasis {
+	/// Access value from internal index.
+	/// Internal index are subject to change and do
+	/// not have the same guarantees as actual state.
+	/// So using this on should be extra careful.
+	fn get_by_internal_index(&self, at: Self::I) -> V;
+}
+
+/// Basis component of IndexedData.
+pub trait IndexedDataBasis: DataBasis {
+	/// Backend internal associated index.
+	type I;
+
+	/// Get current internal struct index depending on state.
+	fn index(&self, at: &Self::S) -> Option<Self::I>;
 }
 
 /// An entry at a given history index.

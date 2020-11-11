@@ -21,7 +21,10 @@
 
 use super::{HistoriedValue, Data, DataMut, DataRef, DataRefMut,
 	DataSlices, DataSliceRanges, UpdateResult, Value, ValueRef,
+	DataBasis, IndexedDataBasis,
 	aggregate::{Sum as DataSum, SumValue}};
+#[cfg(feature = "indexed-access")]
+use super::IndexedData;
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC, aggregate::Sum as LinearSum};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
@@ -48,7 +51,7 @@ use core::default::Default;
 // Call second linear historied value afterward.
 macro_rules! tree_get {
 	($fn_name: ident, $return_type: ty, $branch_query: ident, $value_query: expr, $post_process: expr) => {
-	fn $fn_name<'a>(&'a self, at: &<Self as Data<V>>::S) -> Option<$return_type> {
+	fn $fn_name<'a>(&'a self, at: &<Self as DataBasis>::S) -> Option<$return_type> {
 		// note that we expect branch index to be linearily set
 		// along a branch (no state containing unordered branch_index
 		// and no history containing unorderd branch_index).
@@ -64,7 +67,7 @@ macro_rules! tree_get {
 					upper_bound -= BI::one();
 					let branch = self.branches.$branch_query(branch_ix).value;
 					if let Some(result) = $value_query(&branch, &upper_bound) {
-						return Some($post_process(result, branch))
+						return Some($post_process(result, branch, branch_ix))
 					}
 				}
 				next_branch_index = self.branches.previous_index(branch_ix);
@@ -77,7 +80,7 @@ macro_rules! tree_get {
 			if branch_index <= &at.composite_treshold.0 {
 				let branch = self.branches.$branch_query(branch_ix).value;
 				if let Some(result) = $value_query(&branch, &at.composite_treshold.1) {
-					return Some($post_process(result, branch))
+					return Some($post_process(result, branch, branch_ix))
 				}
 			}
 			next_branch_index = self.branches.previous_index(branch_ix);
@@ -170,10 +173,8 @@ impl<
 	V: Value + Clone,
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 	BD: LinearStorage<V::Storage, BI>,
-> Data<V> for Tree<I, BI, V, D, BD> {
+> DataBasis for Tree<I, BI, V, D, BD> {
 	type S = ForkPlan<I, BI>;
-
-	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _| r);
 
 	fn contains(&self, at: &Self::S) -> bool {
 		self.get(at).is_some() // TODO avoid clone??
@@ -185,8 +186,41 @@ impl<
 	}
 }
 
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Value + Clone,
+	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+	BD: LinearStorage<V::Storage, BI>,
+> IndexedDataBasis for Tree<I, BI, V, D, BD> {
+	type I = (D::Index, BD::Index);
+	// Not really used, but it would make sense to implement variants with get_ref.
+	tree_get!(index, Self::I, get, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r));
+}
 
+#[cfg(feature = "indexed-access")]
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Value + Clone,
+	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+	BD: LinearStorage<V::Storage, BI>,
+> IndexedData<V> for Tree<I, BI, V, D, BD> {
+	fn get_by_internal_index(&self, at: Self::I) -> V {
+		let branch = self.branches.get(at.0).value;
+		branch.get_by_internal_index(at.1)
+	}
+}
 
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + One,
+	V: Value + Clone,
+	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+	BD: LinearStorage<V::Storage, BI>,
+> Data<V> for Tree<I, BI, V, D, BD> {
+	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _, _| r);
+}
 
 impl<
 	I: Default + Eq + Ord + Clone,
@@ -195,7 +229,7 @@ impl<
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI>,
 > DataRef<V> for Tree<I, BI, V, D, BD> {
-	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _| r );
+	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _, _| r );
 }
 
 impl<
@@ -616,16 +650,16 @@ impl Tree<u32, u64, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 impl<
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone + AsRef<[u8]> + AsMut<[u8]>,
+	V: Value + Clone + AsRef<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
-	BD: AsRef<[u8]> + AsMut<[u8]> + LinearStorageRange<V::Storage, BI>,
+	BD: AsRef<[u8]> + LinearStorageRange<V::Storage, BI>,
 > DataSlices<V> for Tree<I, BI, V, D, BD> {
 	tree_get!(
 		get_slice,
 		&[u8],
 		get_slice,
 		|b: &'a [u8], ix| <Linear<V, BI, BD>>::get_range(b, ix),
-		|result, b: &'a [u8]| &b[result]
+		|result, b: &'a [u8], _| &b[result]
 	);
 }
 
@@ -649,7 +683,7 @@ pub mod aggregate {
 		}
 	}
 
-	impl<'a, I, BI, V, D, BD> Data<V::Value> for Sum<'a, I, BI, V, D, BD>
+	impl<'a, I, BI, V, D, BD> DataBasis for Sum<'a, I, BI, V, D, BD>
 		where
 			I: Default + Eq + Ord + Clone,
 			BI: LinearState + SubAssign<BI> + One,
@@ -660,16 +694,26 @@ pub mod aggregate {
 	{
 		type S = ForkPlan<I, BI>;
 
-		fn get(&self, at: &Self::S) -> Option<V::Value> {
-			self.0.get(at)
-		}
-
 		fn contains(&self, at: &Self::S) -> bool {
 			self.0.contains(at)
 		}
 
 		fn is_empty(&self) -> bool {
 			self.0.is_empty()
+		}
+	}
+
+	impl<'a, I, BI, V, D, BD> Data<V::Value> for Sum<'a, I, BI, V, D, BD>
+		where
+			I: Default + Eq + Ord + Clone,
+			BI: LinearState + SubAssign<BI> + One,
+			V: SumValue,
+			V::Value: Value + Clone,
+			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
+			BD: LinearStorage<<V::Value as Value>::Storage, BI>,
+	{
+		fn get(&self, at: &Self::S) -> Option<V::Value> {
+			self.0.get(at)
 		}
 	}
 

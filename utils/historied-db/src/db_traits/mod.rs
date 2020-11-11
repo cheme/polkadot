@@ -19,20 +19,23 @@
 
 use hash_db::{PlainDBRef, PlainDB};
 use crate::{UpdateResult, Context, StateIndex,
-	historied::{DataMut, Data, DataRef, Value}};
+	historied::{DataBasis, DataMut, Data, DataRef, Value}};
 use sp_std::marker::PhantomData;
 
-/// Trait for immutable reference of a plain key value db.
-pub trait StateDB<K, V> {
+/// Basis trait for state db.
+pub trait StateDBBasis<K> {
 	/// State for this db.
 	type S;
 
+	/// Check for the existance of a hash-key.
+	fn contains(&self, key: &K, at: &Self::S) -> bool;
+}
+
+/// Trait for immutable reference of a plain key value db.
+pub trait StateDB<K, V>: StateDBBasis<K> {
 	/// Look up a given hash into the bytes that hash to it, returning None if the
 	/// hash is not known.
 	fn get(&self, key: &K, at: &Self::S) -> Option<V>;
-
-	/// Check for the existance of a hash-key.
-	fn contains(&self, key: &K, at: &Self::S) -> bool;
 }
 
 /// Variant of `StateDB` to return value without copy.
@@ -45,7 +48,7 @@ pub trait StateDBRef<K, V> {
 	fn get_ref(&self, key: &K, at: &Self::S) -> Option<&V>;
 }
 
-pub trait StateDBMut<K, V>: StateDB<K, V> {
+pub trait StateDBMut<K, V>: StateDBBasis<K> {
 		// TODO associated type from DataMut??
 	/// State to use here.
 	/// We use a different state than
@@ -84,18 +87,20 @@ impl<K: Ord, V, D: Context> BTreeMap<K, V, D> {
 	}
 }
 
-impl<K: Ord, V: Value + Clone, D: Data<V> + Context> StateDB<K, V> for BTreeMap<K, V, D> {
+impl<K: Ord, V, D: DataBasis + Context> StateDBBasis<K> for BTreeMap<K, V, D> {
 	type S = D::S;
-
-	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
-		self.0.get(key)
-			.and_then(|h| h.get(at))
-	}
 
 	fn contains(&self, key: &K, at: &Self::S) -> bool {
 		self.0.get(key)
 			.map(|h| h.contains(at))
 			.unwrap_or(false)
+	}
+}
+
+impl<K: Ord, V: Value + Clone, D: Data<V> + Context> StateDB<K, V> for BTreeMap<K, V, D> {
+	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
+		self.0.get(key)
+			.and_then(|h| h.get(at))
 	}
 }
 
@@ -168,13 +173,8 @@ pub struct PlainDBState<K, DB, D, S> {
 	_ph: PhantomData<D>,
 }
 
-impl<K, V: Value + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for PlainDBState<K, DB, D, S> {
+impl<K, D: DataBasis, DB: PlainDBRef<K, D>, S> StateDBBasis<K> for PlainDBState<K, DB, D, S> {
 	type S = D::S;
-
-	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
-		self.db.get(key)
-			.and_then(|h| h.get(at))
-	}
 
 	fn contains(&self, key: &K, at: &Self::S) -> bool {
 		self.db.get(key)
@@ -182,6 +182,14 @@ impl<K, V: Value + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for
 			.unwrap_or(false)
 	}
 }
+
+impl<K, V: Value + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for PlainDBState<K, DB, D, S> {
+	fn get(&self, key: &K, at: &Self::S) -> Option<V> {
+		self.db.get(key)
+			.and_then(|h| h.get(at))
+	}
+}
+
 
 impl<
 	K: Ord + Clone,
