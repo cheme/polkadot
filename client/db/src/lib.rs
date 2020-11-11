@@ -445,13 +445,13 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 				} {
 					use historied_db::historied::aggregate::{Substract};
 					let mut builder = BytesSubstract::new();
-					let v_diff = builder.substract(&previous, &v.clone().into());
+//					let v_diff = builder.substract(&previous, &v.clone().into());
 					new_value = histo;
-					if v_diff.len() < v.len() {
-						new_value.set(v_diff, &self.current_state)
-					} else {
+//					if v_diff.len() < v.len() {
+//						new_value.set(v_diff, &self.current_state)
+//					} else {
 						new_value.set(bytesdiff_value(v), &self.current_state)
-					}
+//					}
 				} else {
 					new_value = histo;
 					new_value.set(bytesdiff_value(v.into()), &self.current_state)
