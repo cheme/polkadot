@@ -126,6 +126,12 @@ pub mod xdelta {
 		}
 	}
 
+	impl Into<Vec<u8>> for BytesDelta {
+		fn into(self) -> Vec<u8> {
+			self.0
+		}
+	}
+
 	impl<'a> From<&'a [u8]> for BytesDelta {
 		fn from(v: &'a [u8]) -> Self {
 			BytesDelta(v.to_vec())
@@ -220,6 +226,8 @@ pub mod xdelta {
 			} else {
 				// write as standalone
 				let mut result = target.0.clone();
+				// TODO put type of byte diff at the end of the vec and avoid storing it in bytesdiff
+				// representation!!!
 				result.insert(0, 1u8);
 				BytesDiff::Value(result)
 			}
