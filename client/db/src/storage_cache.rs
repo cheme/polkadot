@@ -17,7 +17,7 @@
 //! Global cache state.
 
 use historied_db::{
-	db_traits::{StateDB, StateDBRef, StateDBMut},
+	db_traits::{StateDBBasis, StateDB, StateDBRef, StateDBMut},
 	management::{Management, ManagementMut, ForkableManagement},
 	Latest, UpdateResult,
 	historied::{DataRef, DataMut},
@@ -67,25 +67,31 @@ pub struct Cache<B: BlockT> {
 }
 
 // TODO remove (useless) -> make the ExperimentalCache
-impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for SyncExperimentalCache<B> {
+impl<B: BlockT> StateDBBasis<StorageKey> for SyncExperimentalCache<B> {
 	type S = ForkPlan<u32, u64>;
-
-	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
-		use historied_db::historied::Data;
-		self.0.write().lru_storage.get(key).and_then(|history| history.get(at))
-	}
 
 	fn contains(&self, key: &StorageKey, at: &Self::S) -> bool {
 		self.get(key, at).is_some()
 	}
 }
 
-impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
-	type S = ForkPlan<u32, u64>;
+impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for SyncExperimentalCache<B> {
 	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
+		use historied_db::historied::Data;
+		self.0.write().lru_storage.get(key).and_then(|history| history.get(at))
+	}
+}
+
+
+impl<B: BlockT> StateDBBasis<StorageKey> for ExperimentalCache<B> {
+	type S = ForkPlan<u32, u64>;
+	fn contains(&self, key: &StorageKey, at: &Self::S) -> bool {
 		unreachable!("dummy implementation for state db implementation")
 	}
-	fn contains(&self, key: &StorageKey, at: &Self::S) -> bool {
+}
+
+impl<B: BlockT> StateDB<StorageKey, Option<StorageValue>> for ExperimentalCache<B> {
+	fn get(&self, key: &StorageKey, at: &Self::S) -> Option<Option<StorageValue>> {
 		unreachable!("dummy implementation for state db implementation")
 	}
 }
