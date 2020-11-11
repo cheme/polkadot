@@ -126,27 +126,34 @@ pub struct HistoriedDB {
 	do_assert: bool,
 }
 
+type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
+	Vec<u8>,
+	u64,
+>;
+/*
 type LinearBackend<'a> = historied_db::backend::encoded_array::EncodedArray<
 	'a,
 	Vec<u8>,
 	historied_db::backend::encoded_array::NoVersion,
 >;
+*/
 /*
 type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 	'a,
-	historied_db::historied::linear::Linear<Vec<u8>, u32, LinearBackend<'a>>,
+	historied_db::historied::linear::Linear<Vec<u8>, u64, LinearBackend<'a>>,
 	historied_db::historied::encoded_array::NoVersion,
 >;
 */
-type TreeBackend<'a> = historied_db::backend::in_memory::MemoryOnly<
-	historied_db::historied::linear::Linear<Vec<u8>, u64, LinearBackend<'a>>,
+type TreeBackend = historied_db::backend::in_memory::MemoryOnly4<
+	historied_db::historied::linear::Linear<Vec<u8>, u64, LinearBackend>,
 	u32,
 >;
 
 // Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
 // None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
 /// Historied value with multiple parallel branches.
-pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
+pub type HValue = Tree<u32, u64, Vec<u8>, TreeBackend, LinearBackend>;
+//pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 impl HistoriedDB {
 	fn storage_inner(&self, key: &[u8], column: u32) -> Result<Option<Vec<u8>>, String> {
