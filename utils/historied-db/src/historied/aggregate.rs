@@ -155,6 +155,16 @@ pub mod xdelta {
 		}
 	}
 
+	impl BytesDiff {
+		pub fn len(&self) -> usize {
+			match self {
+				BytesDiff::None => 1,
+				BytesDiff::VcDiff(b) => 1 + b.len(),
+				BytesDiff::Value(b) => 1 + b.len(),
+			}
+		}
+	}
+
 	impl Value for BytesDiff {
 		const NEUTRAL: bool = true;
 		type Storage = Vec<u8>;
