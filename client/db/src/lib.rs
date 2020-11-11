@@ -206,7 +206,7 @@ impl trie_db::partial_db::KVBackend for HistoriedDB {
 	}
 }
 fn decode_index(mut encoded: Vec<u8>) -> trie_db::partial_db::Index {
-	let mut buff: [u8; 4] = [0, 0, 0, 0]; 
+	let mut buff: [u8; 4] = [0, 0, 0, 0];
 	let start = encoded.len() - 9;
 	buff.copy_from_slice(&encoded[start..start + 4]);
 	let actual_depth = u32::from_le_bytes(buff) as usize;
@@ -275,7 +275,7 @@ mod impl_index_backend {
 				start.truncate(truncate + base);
 				let unaligned = depth_base % trie_db::nibble_ops::NIBBLE_PER_BYTE;
 				if unaligned != 0 {
-					start.last_mut().map(|l| 
+					start.last_mut().map(|l|
 						*l = *l & !(255 >> (unaligned * trie_db::nibble_ops::BIT_PER_NIBBLE))
 					);
 				}
@@ -283,7 +283,7 @@ mod impl_index_backend {
 			} else {
 				index_tree_key(depth, &[])
 			};
-	
+
 			let iter = self.iter_from(&start, crate::columns::StateIndexes);
 			// TODO switch to IndexPosition instead of vecs
 			let end = value_prefix_index(depth_base, start.to_vec(), base);
@@ -457,7 +457,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			historied_db::UpdateResult::Cleared(()) => {
 				change_set.remove(column, k);
 			},
-			historied_db::UpdateResult::Unchanged => (), 
+			historied_db::UpdateResult::Unchanged => (),
 		}
 	}
 
@@ -1652,7 +1652,7 @@ impl<Block: BlockT> Backend<Block> {
 	) -> Self {
 		Self::new_test_with_experimental_cache(keep_blocks, canonicalization_delay, Default::default())
 	}
-	
+
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
@@ -1974,7 +1974,7 @@ impl<Block: BlockT> Backend<Block> {
 			} else {
 				None
 			};
-		
+
 			operation.apply_offchain(&mut transaction, historied_db.as_mut(), journals);
 		}
 
@@ -2358,7 +2358,7 @@ impl<Block: BlockT> Backend<Block> {
 			use historied_db::management::Management;
 			self.historied_management.write().get_db_state(hash)
 		};
-		
+
 		if let (Some(switch_index), Some(path)) = (switch_index, path) {
 			self.historied_management.write().canonicalize(path, switch_index, prune_index);
 			// do migrate data
@@ -2502,7 +2502,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 						self.historied_pruning(&hash, number)?;
 					}
 				}
-	
+
 				Ok(())
 			},
 			e @ Err(_) => {
