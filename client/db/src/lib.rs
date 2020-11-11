@@ -1411,6 +1411,20 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 
 		self.db_updates = transaction;
 		self.changes_trie_config_update = Some(changes_trie_config);
+
+		let storage_top: StorageCollection = storage.top.into_iter()
+			.map(|(k, v)| (k, Some(v))).collect();
+		let mut storage_child = ChildStorageCollection::default();
+		for (_child_key, collection) in storage.children_default.into_iter() {
+			let child_key = collection.child_info.into_prefixed_storage_key()
+				.into_inner();
+			let storage: StorageCollection = collection.data.into_iter()
+				.map(|(k, v)| (k, Some(v))).collect();
+			storage_child.push((child_key, storage));
+		}
+		// feed cache but more importantly the historied db
+		self.update_storage(storage_top, storage_child);
+
 		self.commit_state = true;
 		Ok(root)
 	}
