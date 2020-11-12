@@ -207,7 +207,6 @@ fn inject_non_canonical<Block: BlockT>(
 				let db_histo: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
 				let mut historied_db = crate::HistoriedDBMut {
 					current_state: state,
-					current_state_read: unimplemented!(),
 					db: db_histo,
 				};
 				let mut tx = historied_db.transaction();
@@ -410,7 +409,6 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let db_tmp: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
 	let mut kv_db = crate::HistoriedDBMut {
 		current_state: state,
-		current_state_read: unimplemented!(),
 		db: db_tmp,
 	};
 	let mut tx = kv_db.transaction();
@@ -478,7 +476,6 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 			let db_tmp: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
 			let mut historied_db = crate::HistoriedDBMut {
 				current_state: state,
-				current_state_read: unimplemented!(),
 				db: db_tmp,
 			};
 			let mut tx = historied_db.transaction();
