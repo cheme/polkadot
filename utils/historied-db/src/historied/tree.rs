@@ -1493,10 +1493,10 @@ mod test {
 		let mut item: Tree<u32, u32, BytesDiff, D, BD> = InitFrom::init_from(((), ()));
 
 		let successive_values: Vec<BytesDelta> = vec![
-			[0u8, 1, 2, 3][..].into(), // (1, 1)
-			[1, 1, 2, 3][..].into(), // (1,2)
-			[1, 3][..].into(), // (3, 3)
-			[][..].into(), // 4, 3 (follow) (1, 2)
+			Some(&[0u8, 1, 2, 3][..]).into(), // (1, 1)
+			Some(&[1, 1, 2, 3][..]).into(), // (1,2)
+			Some(&[1, 3][..]).into(), // (3, 3)
+			BytesDelta::default(), // aka None, 4, 3 (follow) (1, 2)
 		];
 
 		let mut successive_deltas: Vec<BytesDiff> = Vec::with_capacity(successive_values.len());

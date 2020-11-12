@@ -170,7 +170,7 @@ impl HistoriedDB {
 
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into());
+			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
 			if v != vw {
 				println!("v: {:?}, sum: {:?}", &vw, &v);
 			}
@@ -328,7 +328,7 @@ impl HistoriedDB {
 			};
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into());
+			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
 			if v != vw {
 				println!("v: {:?}, sum: {:?}", &vw, &v);
 			}
@@ -355,7 +355,7 @@ impl HistoriedDB {
 			};
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into());
+			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
 			if v != vw {
 				println!("v2: {:?}, sum: {:?}", &vw, &v);
 			}
