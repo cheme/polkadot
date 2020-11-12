@@ -157,10 +157,10 @@ pub mod xdelta {
 
 	impl BytesDiff {
 		pub fn len(&self) -> usize {
-			match self {
-				BytesDiff::None => 1,
-				BytesDiff::VcDiff(b) => 1 + b.len(),
-				BytesDiff::Value(b) => 1 + b.len(),
+			1 + match self {
+				BytesDiff::None => 0,
+				BytesDiff::VcDiff(b) => b.len(),
+				BytesDiff::Value(b) => b.len(),
 			}
 		}
 	}
@@ -181,27 +181,26 @@ pub mod xdelta {
 			storage.as_slice() == &[0u8]
 		}
 
-		fn from_storage(storage: Self::Storage) -> Self {
-			debug_assert!(storage.len() > 0);
-			match storage[0] {
-				0u8 => {
-					debug_assert!(storage.len() == 1);
+		fn from_storage(mut storage: Self::Storage) -> Self {
+			match storage.pop() {
+				Some(0u8) => {
+					debug_assert!(storage.len() == 0);
 					BytesDiff::None
 				},
-				1u8 => BytesDiff::Value(storage),
-				2u8 => BytesDiff::VcDiff(storage),
+				Some(1u8) => BytesDiff::Value(storage),
+				Some(2u8) => BytesDiff::VcDiff(storage),
 				_ => unreachable!("Value trait does not allow undefined content"),
 			}
 		}
 
 		fn into_storage(self) -> Self::Storage {
 			match self {
-				BytesDiff::Value(storage) => {
-					debug_assert!(storage[0] == 1u8);
+				BytesDiff::Value(mut storage) => {
+					storage.push(1u8);
 					storage
 				},
-				BytesDiff::VcDiff(storage) => {
-					debug_assert!(storage[0] == 2u8);
+				BytesDiff::VcDiff(mut storage) => {
+					storage.push(2u8);
 					storage
 				},
 				BytesDiff::None => vec![0], 
@@ -226,20 +225,17 @@ pub mod xdelta {
 				return BytesDiff::None;
 			}
 			if previous.0.len() == 0 {
-				let mut result = target.0.clone();
-				result.insert(0, 1u8);
-				return BytesDiff::Value(result);
+				return BytesDiff::Value(target.0.clone());
 			}
 			if let Some(mut result) = xdelta3::encode(target.0.as_slice(), previous.0.as_slice()) {
-				result.insert(0, 2u8);
-				BytesDiff::VcDiff(result)
+				if result.len() < target.len() {
+					BytesDiff::VcDiff(result)
+				} else {
+					BytesDiff::Value(target.0.clone())
+				}
 			} else {
 				// write as standalone
-				let mut result = target.0.clone();
-				// TODO put type of byte diff at the end of the vec and avoid storing it in bytesdiff
-				// representation!!!
-				result.insert(0, 1u8);
-				BytesDiff::Value(result)
+				BytesDiff::Value(target.0.clone())
 			}
 		}
 	}
@@ -254,15 +250,13 @@ pub mod xdelta {
 		}
 		fn add(&mut self, diff: <Self::SumValue as SumValue>::Value) {
 			match diff {
-				BytesDiff::Value(mut val) => {
-					val.remove(0);
-					self.0 = val;
+				BytesDiff::Value(mut val) => { self.0 = val;
 				},
 				BytesDiff::None => {
 					self.0.clear();
 				},
 				BytesDiff::VcDiff(diff) => {
-					self.0 = xdelta3::decode(&diff[1..], self.0.as_slice())
+					self.0 = xdelta3::decode(&diff[..], self.0.as_slice())
 						.expect("diff build only from diff builder");
 				}
 			}
