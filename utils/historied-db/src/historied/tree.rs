@@ -1478,9 +1478,9 @@ mod test {
 		use crate::historied::aggregate::xdelta::{BytesDelta, BytesDiff, BytesSubstract}; 
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
-		type BD = crate::backend::in_memory::MemoryOnly8<Vec<u8>, u64>;
+		type BD = crate::backend::in_memory::MemoryOnly8<Vec<u8>, u32>;
 		type D = crate::backend::in_memory::MemoryOnly4<
-			crate::historied::linear::Linear<BytesDiff, u64, BD>,
+			crate::historied::linear::Linear<BytesDiff, u32, BD>,
 			u32,
 		>;
 
@@ -1490,7 +1490,7 @@ mod test {
 		// |		 |> 5: 1
 		// |> 2: _
 		let mut states = test_states();
-		let mut item: Tree<u32, u64, BytesDiff, D, BD> = InitFrom::init_from(((), ()));
+		let mut item: Tree<u32, u32, BytesDiff, D, BD> = InitFrom::init_from(((), ()));
 
 		let successive_values: Vec<BytesDelta> = vec![
 			[0u8, 1, 2, 3][..].into(), // (1, 1)
