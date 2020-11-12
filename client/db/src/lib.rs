@@ -161,20 +161,9 @@ impl HistoriedDB {
 		if let Some(v) = self.db.get(column, key) {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
-			use historied_db::historied::Data;
-			let vw: Option<Vec<u8>> = if let Some(v) = v.get(&self.current_state) {
-				v.into()
-			} else {
-				None
-			};
-
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
-			if v != vw {
-				println!("v: {:?}, sum: {:?}", &vw, &v);
-			}
-			Ok(v)
+			Ok(v.map(|v| v.into()).flatten())
 		} else {
 			Ok(None)
 		}
@@ -318,20 +307,8 @@ impl HistoriedDB {
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			//if let Some(v) = v.get_sum(&current_state) {
-			use historied_db::historied::Data;
-			let vw = if let Some(v) = v.get(&current_state) {
-				let v: Option<Vec<u8>> = v.into();
-				v
-			} else {
-				None
-			};
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			let v = v.get_sum(&self.current_state);
 			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
-			if v != vw {
-				println!("v: {:?}, sum: {:?}", &vw, &v);
-			}
 			v.map(|v| (k, v))
 		})
 	}
@@ -345,20 +322,8 @@ impl HistoriedDB {
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			//if let Some(v) = v.get_sum(&current_state) {
-			use historied_db::historied::Data;
-			let vw = if let Some(v) = v.get(&current_state) {
-				let v: Option<Vec<u8>> = v.into();
-				v
-			} else {
-				None
-			};
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			let v = v.get_sum(&self.current_state);
 			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
-			if v != vw {
-				println!("v2: {:?}, sum: {:?}", &vw, &v);
-			}
 			v.map(|v| (k, v))
 		})
 	}
@@ -468,15 +433,11 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 					// current state will always return previous state
 					h.get_sum(&self.current_state_read)
 				} {
-//					use historied_db::historied::aggregate::{Substract};
-//					let mut builder = BytesSubstract::new();
-//					let v_diff = builder.substract(&previous, &v.clone().into());
+					use historied_db::historied::aggregate::{Substract};
+					let mut builder = BytesSubstract::new();
+					let v_diff = builder.substract(&previous, &Some(v.clone()).into());
 					new_value = histo;
-//					if v_diff.len() < v.len() {
-//						new_value.set(v_diff, &self.current_state)
-//					} else {
-						new_value.set(BytesDiff::Value(v), &self.current_state)
-//					}
+					new_value.set(v_diff, &self.current_state)
 				} else {
 					new_value = histo;
 					new_value.set(BytesDiff::Value(v), &self.current_state)
