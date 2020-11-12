@@ -165,6 +165,17 @@ pub mod xdelta {
 		}
 	}
 
+	// TODO remove just for testing
+	impl Into<Option<Vec<u8>>> for BytesDiff {
+		fn into(self) -> Option<Vec<u8>> {
+			match self {
+				BytesDiff::None => None,
+				BytesDiff::VcDiff(b) => unreachable!(),
+				BytesDiff::Value(b) => Some(b),
+			}
+		}
+	}
+
 	impl Value for BytesDiff {
 		const NEUTRAL: bool = true;
 		type Storage = Vec<u8>;

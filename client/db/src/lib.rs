@@ -162,8 +162,13 @@ impl HistoriedDB {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			let v = v.get_sum(&self.current_state);
-			Ok(v.map(|v| v.into()))
+			//let v = v.get_sum(&self.current_state);
+			use historied_db::historied::Data;
+			if let Some(v) = v.get(&self.current_state) {
+				Ok(v.into())
+			} else {
+				Ok(None)
+			}
 		} else {
 			Ok(None)
 		}
@@ -307,8 +312,11 @@ impl HistoriedDB {
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			if let Some(v) = v.get_sum(&current_state) {
-				Some((k, v.into()))
+			//if let Some(v) = v.get_sum(&current_state) {
+			use historied_db::historied::Data;
+			if let Some(v) = v.get(&current_state) {
+				let v: Option<Vec<u8>> = v.into();
+				v.map(|v| (k, v))
 			} else {
 				None
 			}
@@ -324,8 +332,11 @@ impl HistoriedDB {
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			if let Some(v) = v.get_sum(&current_state) {
-				Some((k, v.into()))
+			//if let Some(v) = v.get_sum(&current_state) {
+			use historied_db::historied::Data;
+			if let Some(v) = v.get(&current_state) {
+				let v: Option<Vec<u8>> = v.into();
+				v.map(|v| (k, v))
 			} else {
 				None
 			}
