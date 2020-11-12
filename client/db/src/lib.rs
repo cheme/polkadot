@@ -48,13 +48,14 @@ mod parity_db;
 use historied_db::{
 	DecodeWithContext,
 	management::{ManagementMut, ForkableManagement, Management},
-	historied::{DataMut, DataRef},
+	historied::{DataMut, DataRef, aggregate::Sum as _},
 	mapped_db::TransactionalMappedDB,
 	db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
 	Latest, UpdateResult,
-	historied::tree::Tree,
+	historied::tree::{Tree, aggregate::Sum as TreeSum},
 	management::tree::{Tree as TreeMgmt, ForkPlan},
 	backend::nodes::ContextHead,
+	historied::aggregate::xdelta::{BytesDelta, BytesDiff, BytesSubstract},
 };
 
 use std::sync::Arc;
@@ -127,7 +128,7 @@ pub struct HistoriedDB {
 }
 
 type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
-	Option<Vec<u8>>,
+	Vec<u8>,
 	u64,
 >;
 /*
@@ -145,14 +146,14 @@ type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
 >;
 */
 type TreeBackend = historied_db::backend::in_memory::MemoryOnly4<
-	historied_db::historied::linear::Linear<Option<Vec<u8>>, u64, LinearBackend>,
+	historied_db::historied::linear::Linear<BytesDiff, u64, LinearBackend>,
 	u32,
 >;
 
 // Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
 // None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
 /// Historied value with multiple parallel branches.
-pub type HValue = Tree<u32, u64, Option<Vec<u8>>, TreeBackend, LinearBackend>;
+pub type HValue = Tree<u32, u64, BytesDiff, TreeBackend, LinearBackend>;
 //pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 impl HistoriedDB {
@@ -160,8 +161,9 @@ impl HistoriedDB {
 		if let Some(v) = self.db.get(column, key) {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
-			use historied_db::historied::Data;
-			Ok(v.get(&self.current_state).flatten())
+			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+			let v = v.get_sum(&self.current_state);
+			Ok(v.map(|v| v.into()))
 		} else {
 			Ok(None)
 		}
@@ -304,8 +306,12 @@ impl HistoriedDB {
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
-			use historied_db::historied::Data;
-			v.get(&current_state).flatten().map(|v| (k, v))
+			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+			if let Some(v) = v.get_sum(&current_state) {
+				Some((k, v.into()))
+			} else {
+				None
+			}
 		})
 	}
 	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
@@ -317,8 +323,12 @@ impl HistoriedDB {
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
-			use historied_db::historied::Data;
-			v.get(&current_state).flatten().map(|v| (k, v))
+			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+			if let Some(v) = v.get_sum(&current_state) {
+				Some((k, v.into()))
+			} else {
+				None
+			}
 		})
 	}
 }
@@ -327,6 +337,8 @@ impl HistoriedDB {
 pub struct HistoriedDBMut<DB> {
 	/// Branch head indexes to change values of a latest block.
 	pub current_state: historied_db::Latest<(u32, u64)>,
+	/// Branch head indexes to change values of a latest block.
+	pub current_state_read: historied_db::management::tree::ForkPlan<u32, u64>,
 	/// Inner database to modify historied values.
 	pub db: DB,
 }
@@ -418,15 +430,33 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		let mut new_value;
 		match if let Some(mut v) = change {
 			if let Some(histo) = histo {
-				new_value = histo;
-				new_value.set(Some(v), &self.current_state)
+				if let Some(previous) = {
+					let h = TreeSum::<_, _, BytesDelta, _, _>(&histo);
+					// we should use previous state, but since we know this
+					// is a first write for this state (write only once per keys)
+					// current state will always return previous state
+					h.get_sum(&self.current_state_read)
+				} {
+//					use historied_db::historied::aggregate::{Substract};
+//					let mut builder = BytesSubstract::new();
+//					let v_diff = builder.substract(&previous, &v.clone().into());
+					new_value = histo;
+//					if v_diff.len() < v.len() {
+//						new_value.set(v_diff, &self.current_state)
+//					} else {
+						new_value.set(BytesDiff::Value(v), &self.current_state)
+//					}
+				} else {
+					new_value = histo;
+					new_value.set(BytesDiff::Value(v), &self.current_state)
+				}
 			} else {
-				new_value = HValue::new(Some(v), &self.current_state, ((), ()));
+				new_value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
 				historied_db::UpdateResult::Changed(())
 			}
 		} else {
 			new_value = histo.expect("returned above.");
-			new_value.set(None, &self.current_state)
+			new_value.set(BytesDiff::None, &self.current_state)
 		} {
 			historied_db::UpdateResult::Changed(()) => {
 				change_set.set_from_vec(column, k, new_value.encode());
@@ -447,7 +477,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateIndexes)
 	}
 	pub fn unchecked_new_single_inner(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
-		let value = HValue::new(Some(v), &self.current_state, ((), ()));
+		let value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
 		let value = value.encode();
 		change_set.set_from_vec(column, k, value);
 		// no need for no value set
@@ -1910,7 +1940,7 @@ impl<Block: BlockT> Backend<Block> {
 
 			// Ensure pending layer is clean
 			let _ = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
-			let update_plan = {
+			let (query_plan, update_plan) = {
 				// lock does notinclude update of value as we do not have concurrent block creation
 				let mut management = self.historied_management.write();
 				if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
@@ -1921,20 +1951,27 @@ impl<Block: BlockT> Backend<Block> {
 						management.latest_state_fork()
 					}))
 				{
-					let _query_plan = management.append_external_state(hash.clone(), &state)
+					// TODO could use result as update plan (need to check if true)
+					let _ = management.append_external_state(hash.clone(), &state)
+						.ok_or(ClientError::Msg("correct state resolution".into()))?;
+					// TODO could make sense to use previous query plan since it
+					// should mainly be use to read previous value.
+					let query_plan = management.get_db_state(&hash)
 						.ok_or(ClientError::Msg("correct state resolution".into()))?;
 					let update_plan = management.get_db_state_mut(&hash)
 						.ok_or(ClientError::Msg("correct state resolution".into()))?;
-					update_plan
+					(query_plan, update_plan)
 				} else {
 					return Err("missing update plan".into());
 				}
 			};
 			(Some(HistoriedDBMut {
 				current_state: update_plan.clone(),
+				current_state_read: query_plan.clone(),
 				db: self.blockchain.db.clone(),
 			}), Some(HistoriedDBMut {
 				current_state: update_plan,
+				current_state_read: query_plan,
 				db: self.blockchain.ordered_db.clone(),
 			}))
 		} else {
