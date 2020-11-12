@@ -320,12 +320,19 @@ impl HistoriedDB {
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			//if let Some(v) = v.get_sum(&current_state) {
 			use historied_db::historied::Data;
-			if let Some(v) = v.get(&current_state) {
+			let vw = if let Some(v) = v.get(&current_state) {
 				let v: Option<Vec<u8>> = v.into();
-				v.map(|v| (k, v))
+				v
 			} else {
 				None
+			};
+			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+			let v = v.get_sum(&self.current_state);
+			let v: Option<Vec<u8>> = v.map(|v| v.into());
+			if v != vw {
+				println!("v: {:?}, sum: {:?}", &vw, &v);
 			}
+			v.map(|v| (k, v))
 		})
 	}
 	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
@@ -340,12 +347,19 @@ impl HistoriedDB {
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			//if let Some(v) = v.get_sum(&current_state) {
 			use historied_db::historied::Data;
-			if let Some(v) = v.get(&current_state) {
+			let vw = if let Some(v) = v.get(&current_state) {
 				let v: Option<Vec<u8>> = v.into();
-				v.map(|v| (k, v))
+				v
 			} else {
 				None
+			};
+			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+			let v = v.get_sum(&self.current_state);
+			let v: Option<Vec<u8>> = v.map(|v| v.into());
+			if v != vw {
+				println!("v2: {:?}, sum: {:?}", &vw, &v);
 			}
+			v.map(|v| (k, v))
 		})
 	}
 }
