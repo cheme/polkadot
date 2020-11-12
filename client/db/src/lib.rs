@@ -161,9 +161,20 @@ impl HistoriedDB {
 		if let Some(v) = self.db.get(column, key) {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
+			use historied_db::historied::Data;
+			let vw: Option<Vec<u8>> = if let Some(v) = v.get(&self.current_state) {
+				v.into()
+			} else {
+				None
+			};
+
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
 			let v = v.get_sum(&self.current_state);
-			Ok(v.map(|v| v.into()))
+			let v: Option<Vec<u8>> = v.map(|v| v.into());
+			if v != vw {
+				println!("v: {:?}, sum: {:?}", &vw, &v);
+			}
+			Ok(v)
 		} else {
 			Ok(None)
 		}
