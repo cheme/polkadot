@@ -105,10 +105,10 @@ pub mod xdelta {
 	use super::*;
 
 	#[derive(Clone, PartialEq, Eq, Debug, Default)]
-	pub struct BytesDelta(Vec<u8>);
+	pub struct BytesDelta(Option<Vec<u8>>);
 
 	impl std::ops::Deref for BytesDelta {
-		type Target = Vec<u8>;
+		type Target = Option<Vec<u8>>;
 		fn deref(&self) -> &Self::Target {
 			&self.0
 		}
@@ -120,21 +120,21 @@ pub mod xdelta {
 		}
 	}
 
-	impl From<Vec<u8>> for BytesDelta {
-		fn from(v: Vec<u8>) -> Self {
+	impl From<Option<Vec<u8>>> for BytesDelta {
+		fn from(v: Option<Vec<u8>>) -> Self {
 			BytesDelta(v)
 		}
 	}
 
-	impl Into<Vec<u8>> for BytesDelta {
-		fn into(self) -> Vec<u8> {
+	impl Into<Option<Vec<u8>>> for BytesDelta {
+		fn into(self) -> Option<Vec<u8>> {
 			self.0
 		}
 	}
 
-	impl<'a> From<&'a [u8]> for BytesDelta {
-		fn from(v: &'a [u8]) -> Self {
-			BytesDelta(v.to_vec())
+	impl<'a> From<Option<&'a [u8]>> for BytesDelta {
+		fn from(v: Option<&'a [u8]>) -> Self {
+			BytesDelta(v.map(|v| v.to_vec()))
 		}
 	}
 
@@ -221,26 +221,26 @@ pub mod xdelta {
 			previous: &Self::SumValue,
 			target: &Self::SumValue,
 		) -> <Self::SumValue as SumValue>::Value {
-			if target.0.len() == 0 {
-				return BytesDiff::None;
-			}
-			if previous.0.len() == 0 {
-				return BytesDiff::Value(target.0.clone());
-			}
-			if let Some(mut result) = xdelta3::encode(target.0.as_slice(), previous.0.as_slice()) {
-				if result.len() < target.len() {
-					BytesDiff::VcDiff(result)
-				} else {
-					BytesDiff::Value(target.0.clone())
-				}
-			} else {
-				// write as standalone
-				BytesDiff::Value(target.0.clone())
+			match (target.0.as_ref(), previous.0.as_ref()) {
+				(None, _) => BytesDiff::None,
+				(Some(target), None) => BytesDiff::Value(target.clone()),
+				(Some(target), Some(previous)) => {
+					if let Some(mut result) = xdelta3::encode(target.as_slice(), previous.as_slice()) {
+						if result.len() < target.len() {
+							BytesDiff::VcDiff(result)
+						} else {
+							BytesDiff::Value(target.clone())
+						}
+					} else {
+						// write as standalone
+						BytesDiff::Value(target.clone())
+					}
+				},
 			}
 		}
 	}
 
-	pub struct BytesSumBuilder(Vec<u8>);
+	pub struct BytesSumBuilder(Option<Vec<u8>>);
 
 	impl SumBuilder for BytesSumBuilder {
 		type SumValue = BytesDelta;
@@ -250,19 +250,22 @@ pub mod xdelta {
 		}
 		fn add(&mut self, diff: <Self::SumValue as SumValue>::Value) {
 			match diff {
-				BytesDiff::Value(mut val) => { self.0 = val;
+				BytesDiff::Value(mut val) => {
+					self.0 = Some(val);
 				},
 				BytesDiff::None => {
-					self.0.clear();
+					self.0 = None;
 				},
 				BytesDiff::VcDiff(diff) => {
-					self.0 = xdelta3::decode(&diff[..], self.0.as_slice())
-						.expect("diff build only from diff builder");
+					self.0 = Some(
+						xdelta3::decode(&diff[..], self.0.as_ref().map(|v| v.as_slice()).unwrap_or(&[]))
+							.expect("diff build only from diff builder")
+					);
 				}
 			}
 		}
 		fn result(&mut self) -> Self::SumValue {
-			BytesDelta(sp_std::mem::replace(&mut self.0, Vec::new()))
+			BytesDelta(sp_std::mem::replace(&mut self.0, None))
 		}
 	}
 
