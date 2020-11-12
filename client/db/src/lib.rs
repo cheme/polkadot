@@ -55,7 +55,6 @@ use historied_db::{
 	historied::tree::Tree,
 	management::tree::{Tree as TreeMgmt, ForkPlan},
 	backend::nodes::ContextHead,
-	historied::aggregate::xdelta::{BytesDelta, BytesDiff, BytesSubstract},
 };
 
 use std::sync::Arc;

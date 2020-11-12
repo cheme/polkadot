@@ -37,7 +37,7 @@ sp-blockchain = { version = "2.0.0", path = "../../primitives/blockchain" }
 sp-database = { version = "2.0.0", path = "../../primitives/database" }
 parity-db = { version = "0.1.2", optional = true }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", version = "0.8.0", path = "../../utils/prometheus" }
-historied-db = { version = "0.8.0", path = "../../utils/historied-db", features = ["force-data", "db-traits", "encoded-array-backend", "temp-size-impl", "xdelta3-diff"] }
+historied-db = { version = "0.8.0", path = "../../utils/historied-db", features = ["force-data", "db-traits", "encoded-array-backend", "temp-size-impl"] }
 tempfile = "3"
 
 trie-db = { version = "0.22.0", default-features = false } # TODO remove, just for testing in upgrade
