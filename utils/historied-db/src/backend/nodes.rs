@@ -866,14 +866,14 @@ impl<'a, D, M, B, NI> EncodedArrayValue<'a> for Head<Vec<u8>, u64, D, M, B, NI>
 	where
 		D: EncodedArrayValue<'a>,
 {
-	fn from_slice(_slice: &[u8]) -> Self {
+	fn from_slice_owned(_slice: &[u8]) -> Self {
 		// requires passing around the init item (the key need to be derived): this implementation is needed when we
 		// EncodeArrayValue a head that refers to multiple head (those one needs to be instantiated)
 		// from_slice & backend + base key. TODO start  by changing from_slice to use a init from
 		// param.
 		unimplemented!("Require a backend : similar to switch from default to init from, also required to parse meta: using specific size of version would allow fix length meta encode")
 	}
-	fn from_slice_ref(_slice: &'a [u8]) -> Self {
+	fn from_slice(_slice: &'a [u8]) -> Self {
 		unimplemented!("See `from_slice`")
 	}
 }

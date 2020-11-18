@@ -673,12 +673,12 @@ pub mod force {
 
 #[cfg(feature = "encoded-array-backend")]
 impl<'a, V, S, D: EncodedArrayValue<'a>> EncodedArrayValue<'a> for Linear<V, S, D> {
-	fn from_slice(slice: &[u8]) -> Self {
-		let v = D::from_slice(slice);
+	fn from_slice_owned(slice: &[u8]) -> Self {
+		let v = D::from_slice_owned(slice);
 		Linear(v, PhantomData)
 	}
-	fn from_slice_ref(slice: &'a [u8]) -> Self {
-		let v = D::from_slice_ref(slice);
+	fn from_slice(slice: &'a [u8]) -> Self {
+		let v = D::from_slice(slice);
 		Linear(v, PhantomData)
 	}
 }

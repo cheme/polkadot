@@ -56,26 +56,30 @@ impl<'a, V, F> Clone for EncodedArray<'a, V, F> {
 }
 
 pub trait EncodedArrayValue<'a>: AsRef<[u8]> + Sized {
-	fn from_slice(slice: &[u8]) -> Self;
-	// TODO this non owned variant is not really use
-	// but would need to be default.
-	fn from_slice_ref(slice: &'a [u8]) -> Self;
+	/// Create value from a slice, the value will be
+	/// owned.
+	fn from_slice_owned(slice: &[u8]) -> Self;
+	/// Create value from a slice, getting lifetime of
+	/// slice.
+	/// If the implementation allows it the slice will
+	/// not be copied.
+	fn from_slice(slice: &'a [u8]) -> Self;
 }
 
 impl<'a> EncodedArrayValue<'a> for Vec<u8> {
-	fn from_slice(slice: &[u8]) -> Self {
+	fn from_slice_owned(slice: &[u8]) -> Self {
 		slice.to_vec()
 	}
-	fn from_slice_ref(slice: &'a [u8]) -> Self {
+	fn from_slice(slice: &'a [u8]) -> Self {
 		slice.to_vec()
 	}
 }
 
 impl<'a, V, F> EncodedArrayValue<'a> for EncodedArray<'a, V, F> {
-	fn from_slice(slice: &[u8]) -> Self {
+	fn from_slice_owned(slice: &[u8]) -> Self {
 		EncodedArray(EncodedArrayBuff::Cow(Cow::Owned(slice.to_vec())), PhantomData)
 	}
-	fn from_slice_ref(slice: &'a [u8]) -> Self {
+	fn from_slice(slice: &'a [u8]) -> Self {
 		EncodedArray(EncodedArrayBuff::Cow(Cow::Borrowed(slice)), PhantomData)
 	}
 }
@@ -479,7 +483,9 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 	}
 
 	fn get(&self, index: Self::Index) -> HistoriedValue<V, u64> {
-		self.get_state(index).map(|v| V::from_slice(v.as_ref()))
+		// TODO implement get_ref variant that do not owned value
+		// (currently we use slice index).
+		self.get_state(index).map(|v| V::from_slice_owned(v.as_ref()))
 	}
 	fn get_state(&self, index: Self::Index) -> u64 {
 		self.get_state_only(index)
@@ -496,7 +502,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 		let start_ix = self.index_element(len - 1);
 		let end_ix = self.index_start();
 		let state = self.read_le_u64(start_ix);
-		let value = V::from_slice(&self.0[start_ix + SIZE_BYTE_LEN..end_ix]);
+		let value = V::from_slice_owned(&self.0[start_ix + SIZE_BYTE_LEN..end_ix]);
 		if len - 1 == 0 {
 			self.clear();
 			return Some(HistoriedValue { value, state })	
@@ -636,7 +642,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<V, u64> for Encod
 		}
 	}
 	fn from_slice(slice: &[u8]) -> Option<Self> {
-		Some(<Self as EncodedArrayValue<'a>>::from_slice(slice))
+		Some(<Self as EncodedArrayValue<'a>>::from_slice_owned(slice))
 	}
 }
 
