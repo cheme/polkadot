@@ -40,7 +40,7 @@ pub trait EstimateSize {
 	fn estimate_size(&self) -> usize;
 }
 
-/// Node storage metadata
+/// Node storage metadata.
 pub trait NodesMeta: Sized {
 	/// If true, and value got an active `EstimateSize`
 	/// implementation, then we apply a content size limit,
@@ -56,10 +56,17 @@ pub trait NodesMeta: Sized {
 
 /// Backend storing nodes.
 pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
+	/// Get a node containing a fragement of history.
+	///
+	/// The scheme uses a relative indexing, the index is only incremented and
+	/// should stay valid except if migrating (simplify some concurency questions).
 	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>>;
 
-	/// a default addressing scheme for storage that natively works
-	/// as a simple key value storage.
+	/// Addressing scheme for key value backend.
+	///
+	/// This may not be needed (non key value backend will
+	/// probably use different strategy), but gives a default
+	/// addressing scheme implementation.
 	fn vec_address(reference_key: &[u8], relative_index: u64) -> Vec<u8> {
 		let storage_prefix = M::STORAGE_PREFIX;
 		let mut result = Vec::with_capacity(reference_key.len() + storage_prefix.len() + 12);
@@ -71,12 +78,28 @@ pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
 	}
 }
 
+/// Access to node modification.
 pub trait NodeStorageMut<V, S, D, M> {
+	/// Insert a new node or update value of an existing one.
+	///
+	/// Same as for `NodeStorage`, addressing is done by `relative_index`.
+	/// Note that this change to be effective in the backend might require a call
+	/// to `trigger_flush`.
 	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &Node<V, S, D, M>);
+
+	/// Remove an existing node.
+	///
+	/// If node does not exists, just ignore it.
+	/// Note that this change is always directly applied.
+	/// In case where we delay writting with a flush, the actual removal
+	/// only happen on flush (by comparing old indexes used by the head of
+	/// this node).
 	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64);
 }
 
-// Note that this should not be use out of test as it clone the whole btree map many times.
+// Note that this should not be use out of test, because clones will happen
+// many times. It can still be use as primitive for a synch backend with
+// inner mutability.
 impl<V, S, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
 	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>> {
 		let key = Self::vec_address(reference_key, relative_index);
@@ -147,14 +170,16 @@ pub struct Head<V, S, D, M, B, NI> {
 	/// Accessed nodes are kept in memory.
 	/// This is a reversed ordered `Vec`, starting at end 'index - 1' and
 	/// finishing at most at the very first historied node.
-	fetched: RefCell<Vec<Node<V, S, D, M>>>, // TODO consider smallvec
+	fetched: RefCell<Vec<Node<V, S, D, M>>>,
 	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u64,
 	/// Keep trace of initial index end to apply change lazilly.
 	old_end_node_index: u64,
 	/// The index of the first node, inclusive.
 	start_node_index: u64,
-	/// The index of the last node, non inclusive (next index to use)
+	/// The index of the last node, non inclusive (next index to use).
+	/// It can also be seen as the head index (but head is not stored
+	/// on the node backend).
 	end_node_index: u64,
 	/// Number of historied values stored in head and all past nodes.
 	len: usize,
@@ -168,8 +193,8 @@ pub struct Head<V, S, D, M, B, NI> {
 }
 
 #[derive(Encode, Decode)]
-/// Codec fragment for node
-pub struct HeadCodec {
+/// Codec fragment for head.
+struct HeadCodec {
 	/// The index of the first node, inclusive.
 	start_node_index: u64,
 	/// The index of the last node, non inclusive (next index to use)
@@ -229,47 +254,16 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 		})
 	}
 }
-/*
-impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
-	where
-		D: DecodeWithContext<Context = NI>,
-		B: Clone,
-		NI: Clone,
-{
-	/// Decode with init for this head but also for its inner nodes.
-	/// TODO see if we should no just use tait impl
-	pub fn decode_with_context_2(mut input: &[u8], init: &ContextHead<B, NI>) -> Option<Self> {
-		// This contains len from additionaly struct but it is considered
-		// negligable.
-		let reference_len = input.len();
-		let input = &mut input;
-		D::decode_with_context(input, &init.node_init_from).and_then(|data| {
-			let head_decoded = HeadCodec::decode(input).ok();
-			head_decoded.map(|head_decoded| {
-				Head {
-					inner: Node::new(data, reference_len),
-					fetched: RefCell::new(Vec::new()),
-					old_start_node_index: head_decoded.start_node_index,
-					old_end_node_index: head_decoded.end_node_index,
-					start_node_index: head_decoded.start_node_index,
-					end_node_index: head_decoded.end_node_index,
-					len: head_decoded.len as usize,
-					reference_key: init.key.clone(),
-					backend: init.backend.clone(),
-					node_init_from: init.node_init_from.clone(),
-				}
-			})
-		})
-	}
-}
-*/
+
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
 		D: Clone + Trigger,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
-	pub fn flush_changes(&mut self, trigger: bool) {
+	/// Changes must always be flushed to be effective.
+	/// This is used with `Trigger` `trigger_flush` method.
+	fn flush_changes(&mut self, trigger: bool) {
 		for d in self.old_start_node_index .. self.start_node_index {
 			if trigger {
 				if let Some(mut node) = self.backend.get_node(&self.reference_key[..], d) {
@@ -278,10 +272,11 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 			}
 			self.backend.remove_node(&self.reference_key[..], d);
 		}
-		// this comparison is needed for the case we clear to 0 nodes indexes.
-		let start_end = sp_std::cmp::max(self.end_node_index, self.old_start_node_index);
+		// this comparison is needed in case we completly clear the initial range,
+		// then we avoid deleting nodes that got created.
+		let end_node_index = sp_std::cmp::max(self.end_node_index, self.old_start_node_index);
 		self.old_start_node_index = self.start_node_index;
-		for d in start_end .. self.old_end_node_index {
+		for d in end_node_index .. self.old_end_node_index {
 			if trigger {
 				if let Some(mut node) = self.backend.get_node(&self.reference_key[..], d) {
 					node.trigger_flush();
@@ -301,6 +296,18 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 		}
 	}
 }
+// TODO require test with flush/rebuild on a tree with two head levels where we change value of 
+// - head1 -> head2 (do not need trigger but for completness)
+// - head1 -> node2
+// - node1 -> head1
+// - node1 -> node2
+//
+// and delete of node2
+// - head1 -> node2
+// - node1 -> node2
+//
+// plus unflushed restore working.
+
 
 /// Information needed to initialize a new `Head`.
 #[derive(Clone)]
@@ -320,10 +327,12 @@ impl<V, S, D, M, B, NI> Trigger for Head<V, S, D, M, B, NI>
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
-	/// Always transmit trigger for fetch nodes and possibly inner data.
+	/// Always transmit trigger for fetched nodes and possibly inner data
+	/// containing Triggered data.
 	const TRIGGER: bool = true;
 
 	fn trigger_flush(&mut self) {
+		// first apply to inner data.
 		if D::TRIGGER {
 			self.inner.trigger_flush();
 		}
@@ -860,8 +869,6 @@ impl<V, S, D, M> EstimateSize for Node<V, S, D, M> {
 }
 
 #[cfg(feature = "encoded-array-backend")]
-//D is backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>
-// B is std::collections::BTreeMap<std::vec::Vec<u8>, backend::nodes::Node<std::vec::Vec<u8>, u64, backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>, backend::nodes::test::MetaSize>>
 impl<'a, D, M, B, NI> EncodedArrayValue<'a> for Head<Vec<u8>, u64, D, M, B, NI>
 	where
 		D: EncodedArrayValue<'a>,

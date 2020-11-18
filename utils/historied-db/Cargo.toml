@@ -36,6 +36,7 @@ conditional-data = []
 # is not compatible with aggregate
 force-data = []
 # Would need benches to be use with confidence.
+# Also still incomplete.
 encoded-array-backend = []
 # temp size implementation specific to a use case
 temp-size-impl = []

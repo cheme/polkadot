@@ -56,6 +56,14 @@ pub trait Context: Sized {
 
 
 /// Trigger action on changed data.
+///
+/// This allow recursive call.
+/// Currently the only example of this
+/// use is the `Head` backend requires
+/// to flush its changes.
+/// Calling this in context of a tree
+/// containing head will flush those
+/// heads changes.
 pub trait Trigger {
 	/// Define if we can trigger.
 	const TRIGGER: bool;
