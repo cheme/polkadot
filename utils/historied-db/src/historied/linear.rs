@@ -288,9 +288,9 @@ impl<V: ValueRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> Da
 }
 
 // TODO should it be ValueRef?
-impl<V: Value, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRanges<S> for Linear<V, S, D> {
-	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>> {
-		if let Some(inner) = D::from_slice(slice) {
+impl<'a, V: Value, S: LinearState, D: LinearStorageRange<'a, V::Storage, S>> DataSliceRanges<'a, S> for Linear<V, S, D> {
+	fn get_range(slice: &'a [u8], at: &S) -> Option<Range<usize>> {
+		if let Some(inner) = D::from_slice_ref(slice) {
 			for index in inner.rev_index_iter() {
 				if let Some(HistoriedValue { value, state }) = D::get_range_from_slice(slice, index) {
 					if state.exists(at) {
@@ -303,8 +303,8 @@ impl<V: Value, S: LinearState, D: LinearStorageRange<V::Storage, S>> DataSliceRa
 	}
 }
 
-impl<S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> DataSlices<Vec<u8>> for Linear<Vec<u8>, S, D> {
-	fn get_slice(&self, at: &Self::S) -> Option<&[u8]> {
+impl<'a, S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> DataSlices<'a, Vec<u8>> for Linear<Vec<u8>, S, D> {
+	fn get_slice(&'a self, at: &Self::S) -> Option<&'a [u8]> {
 		self.get_adapt::<_, SliceAdapter>(at)
 	}
 }

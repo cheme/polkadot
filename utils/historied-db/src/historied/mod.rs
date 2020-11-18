@@ -56,17 +56,17 @@ pub trait DataRef<V: Value>: DataBasis {
 }
 
 /// Access to slice of byte representing a value.
-pub trait DataSlices<V: Value>: DataBasis {
+pub trait DataSlices<'a, V: Value>: DataBasis {
 	/// Get reference to the value at this state.
-	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
+	fn get_slice(&'a self, at: &Self::S) -> Option<&'a [u8]>;
 }
 
 /// Access to a range over a slice.
 /// The api is a little awkward, but it to compose without
 /// lifetime issues.
-pub trait DataSliceRanges<S> {
+pub trait DataSliceRanges<'a, S> {
 	/// Get reference to the value from which this slice can be build.
-	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>>;
+	fn get_range(slice: &'a [u8], at: &S) -> Option<Range<usize>>;
 }
 
 /// An item of historied value.

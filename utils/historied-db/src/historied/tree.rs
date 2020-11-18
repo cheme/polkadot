@@ -50,8 +50,8 @@ use core::default::Default;
 // Lookup first linear storage in parallel (until incorrect state ordering).
 // Call second linear historied value afterward.
 macro_rules! tree_get {
-	($fn_name: ident, $return_type: ty, $branch_query: ident, $value_query: expr, $post_process: expr) => {
-	fn $fn_name<'a>(&'a self, at: &<Self as DataBasis>::S) -> Option<$return_type> {
+	($fn_name: ident, $return_type: ty, $branch_query: ident, $value_query: expr, $post_process: expr, $b: lifetime) => {
+	fn $fn_name<$b>(&'a self, at: &<Self as DataBasis>::S) -> Option<$return_type> {
 		// note that we expect branch index to be linearily set
 		// along a branch (no state containing unordered branch_index
 		// and no history containing unorderd branch_index).
@@ -90,6 +90,7 @@ macro_rules! tree_get {
 	}
 	}
 }
+
 
 #[derive(Derivative, Debug, Clone, Encode)]
 #[derivative(PartialEq(bound="D: PartialEq"))]
@@ -195,7 +196,7 @@ impl<
 > IndexedDataBasis for Tree<I, BI, V, D, BD> {
 	type I = (D::Index, BD::Index);
 	// Not really used, but it would make sense to implement variants with get_ref.
-	tree_get!(index, Self::I, get, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r));
+	tree_get!(index, Self::I, get, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r), 'a);
 }
 
 #[cfg(feature = "indexed-access")]
@@ -219,7 +220,7 @@ impl<
 	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 	BD: LinearStorage<V::Storage, BI>,
 > Data<V> for Tree<I, BI, V, D, BD> {
-	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _, _| r);
+	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _, _| r, 'a);
 }
 
 impl<
@@ -229,7 +230,7 @@ impl<
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
 	BD: LinearStorageMem<V::Storage, BI>,
 > DataRef<V> for Tree<I, BI, V, D, BD> {
-	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _, _| r );
+	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _, _| r, 'a);
 }
 
 impl<
@@ -648,18 +649,20 @@ impl Tree<u32, u64, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 }
 
 impl<
+	'a,
 	I: Default + Eq + Ord + Clone,
 	BI: LinearState + SubAssign<BI> + One,
 	V: Value + Clone + AsRef<[u8]>,
 	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
-	BD: AsRef<[u8]> + LinearStorageRange<V::Storage, BI>,
-> DataSlices<V> for Tree<I, BI, V, D, BD> {
+	BD: AsRef<[u8]> + LinearStorageRange<'a, V::Storage, BI>,
+> DataSlices<'a, V> for Tree<I, BI, V, D, BD> {
 	tree_get!(
 		get_slice,
 		&[u8],
 		get_slice,
 		|b: &'a [u8], ix| <Linear<V, BI, BD>>::get_range(b, ix),
-		|result, b: &'a [u8], _| &b[result]
+		|result, b: &'a [u8], _| &b[result],
+		'b
 	);
 }
 

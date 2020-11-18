@@ -240,7 +240,6 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 		let len = self.len();
 		let start_ix = self.index_start();
 		let end_ix = self.0.len();
-		let mut new_ix = self.0[start_ix..end_ix].to_vec();
 		let to_write = SIZE_BYTE_LEN + val.value.len() + extra.len();
 		self.0.to_mut().resize(end_ix + to_write, 0);
 		// move the index
@@ -623,11 +622,11 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageSlice<V, u64> for Encod
 	}
 }
 
-impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<V, u64> for EncodedArray<'a, V, F>
+impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<'a, V, u64> for EncodedArray<'a, V, F>
 	where for<'b> V: EncodedArrayValue<'b>,
 {
 	fn get_range_from_slice<'b>(slice: &'b [u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, u64>> {
-		let ear = EncodedArray::<'b, V, F>(EncodedArrayBuff::Cow(Cow::Borrowed(slice)), PhantomData);
+		let ear = EncodedArray::<'b, V, F>::from_slice(slice);
 		let (start, end, state) = ear.get_range(index);
 		Some(HistoriedValue {
 			state,
@@ -641,8 +640,11 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<V, u64> for Encod
 			value: start..end,
 		}
 	}
-	fn from_slice(slice: &[u8]) -> Option<Self> {
+	fn from_slice_owned(slice: &[u8]) -> Option<Self> {
 		Some(<Self as EncodedArrayValue<'a>>::from_slice_owned(slice))
+	}
+	fn from_slice_ref(slice: &'a [u8]) -> Option<Self> {
+		Some(<Self as EncodedArrayValue<'a>>::from_slice(slice))
 	}
 }
 

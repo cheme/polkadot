@@ -143,14 +143,18 @@ pub trait LinearStorageSlice<V: AsRef<[u8]>, S>: LinearStorage<V, S> {
 
 /// Technical trait to use for composing without
 /// the lifetime issue that can occurs with `LinearStorageSlice`.
-pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
+pub trait LinearStorageRange<'a, V, S>: LinearStorage<V, S> {
 	/// Instantiate from an existing slice.
-	fn from_slice(slice: &[u8]) -> Option<Self>;
+	fn from_slice_owned(slice: &[u8]) -> Option<Self>;
+	/// Instantiate from an existing slice, keeping
+	/// its lifetime and potentially not copying its
+	/// data.
+	fn from_slice_ref(slice: &'a [u8]) -> Option<Self>;
 	/// Return the range for the value in slice.
 	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, S>;
 	/// Get the range from a slice without using a `LinearStorageRange` instance.
-	fn get_range_from_slice(slice: &[u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, S>> {
-		Self::from_slice(slice).map(|inner| inner.get_range(index))
+	fn get_range_from_slice(slice: &'a [u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, S>> {
+		Self::from_slice_ref(slice).map(|inner| inner.get_range(index))
 	}
 }
 
