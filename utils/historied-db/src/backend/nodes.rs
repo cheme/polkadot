@@ -862,9 +862,9 @@ impl<V, S, D, M> EstimateSize for Node<V, S, D, M> {
 #[cfg(feature = "encoded-array-backend")]
 //D is backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>
 // B is std::collections::BTreeMap<std::vec::Vec<u8>, backend::nodes::Node<std::vec::Vec<u8>, u64, backend::encoded_array::EncodedArray<'_, std::vec::Vec<u8>, backend::encoded_array::DefaultVersion>, backend::nodes::test::MetaSize>>
-impl<D, M, B, NI> EncodedArrayValue for Head<Vec<u8>, u64, D, M, B, NI>
+impl<'a, D, M, B, NI> EncodedArrayValue<'a> for Head<Vec<u8>, u64, D, M, B, NI>
 	where
-		D: EncodedArrayValue,
+		D: EncodedArrayValue<'a>,
 {
 	fn from_slice(_slice: &[u8]) -> Self {
 		// requires passing around the init item (the key need to be derived): this implementation is needed when we
@@ -872,6 +872,9 @@ impl<D, M, B, NI> EncodedArrayValue for Head<Vec<u8>, u64, D, M, B, NI>
 		// from_slice & backend + base key. TODO start  by changing from_slice to use a init from
 		// param.
 		unimplemented!("Require a backend : similar to switch from default to init from, also required to parse meta: using specific size of version would allow fix length meta encode")
+	}
+	fn from_slice_ref(_slice: &'a [u8]) -> Self {
+		unimplemented!("See `from_slice`")
 	}
 }
 
