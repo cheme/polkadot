@@ -41,7 +41,7 @@ pub trait EstimateSize {
 }
 
 /// Node storage metadata.
-pub trait NodesMeta: Sized {
+pub trait NodesMeta: Sized + Copy {
 	/// If true, and value got an active `EstimateSize`
 	/// implementation, then we apply a content size limit,
 	/// otherwhise we use the number of node limit.
@@ -115,6 +115,34 @@ impl<V, S, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for BTreeMap<Vec<u
 	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64) {
 		let key = Self::vec_address(reference_key, relative_index);
 		self.remove(&key);
+	}
+}
+
+/// Simple example implementation of backend.
+#[derive(Clone)]
+pub struct InMemoryNoThreadBackend<V, S, D, M>(sp_std::rc::Rc<sp_std::cell::RefCell<BTreeMap<Vec<u8>, Node<V, S, D, M>>>>);
+
+impl<V, S, D, M> InMemoryNoThreadBackend<V, S, D, M> {
+	pub fn new() -> Self {
+		InMemoryNoThreadBackend(sp_std::rc::Rc::new(sp_std::cell::RefCell::new(BTreeMap::new())))
+	}
+}
+
+impl<V: Clone, S: Clone, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for InMemoryNoThreadBackend<V, S, D, M> {
+	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>> {
+		let key = Self::vec_address(reference_key, relative_index);
+		self.0.borrow().get(&key).cloned()
+	}
+}
+
+impl<V: Clone, S: Clone, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for InMemoryNoThreadBackend<V, S, D, M> {
+	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &Node<V, S, D, M>) {
+		let key = Self::vec_address(reference_key, relative_index);
+		self.0.borrow_mut().insert(key, node.clone());
+	}
+	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64) {
+		let key = Self::vec_address(reference_key, relative_index);
+		self.0.borrow_mut().remove(&key);
 	}
 }
 
@@ -387,7 +415,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 {
 	// return node index (if node index is end_node_index this is in head),
 	// and index in it.
-	// Fetch is done backward
+	// Fetch is done backward.
 	fn fetch_node(&self, index: usize) -> Option<(usize, usize)> {
 		if self.len > index {
 			let mut start = self.len as usize - self.inner.data.len();
@@ -398,12 +426,18 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 			while i > self.start_node_index as usize {
 				i -= 1;
 				let fetch_index = self.end_node_index as usize - i - 1;
-				if let Some(node) = self.fetched.borrow().get(fetch_index) {
-					start -= node.data.len();
-					if index >= start {
-						return Some((fetch_index, index - start));
+				let has_node = {
+					if let Some(node) = self.fetched.borrow().get(fetch_index) {
+						start -= node.data.len();
+						if index >= start {
+							return Some((fetch_index, index - start));
+						}
+						true
+					} else {
+						false
 					}
-				} else {
+				};
+				if !has_node {
 					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u64) {
 						start -= node.data.len();
 						let r = if index >= start {
@@ -618,9 +652,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		}
 
 		// New head
-		let add_size = additional_size.unwrap_or_else(||
-			value.value.estimate_size() + value.state.estimate_size()
-		);
+		let add_size = additional_size.unwrap_or_else(|| 0);
 		self.end_node_index += 1;
 		let mut data = D::init_from(self.node_init_from.clone());
 		data.push(value);
@@ -893,7 +925,7 @@ pub(crate) mod test {
 	#[cfg(feature = "encoded-array-backend")]
 	use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
 
-	#[derive(Clone)]
+	#[derive(Clone, Copy)]
 	pub(crate) struct MetaSize;
 	impl NodesMeta for MetaSize {
 		const APPLY_SIZE_LIMIT: bool = true;
@@ -901,7 +933,7 @@ pub(crate) mod test {
 		const MAX_NODE_ITEMS: usize = 8;
 		const STORAGE_PREFIX: &'static [u8] = b"nodes1";
 	}
-	#[derive(Clone)]
+	#[derive(Clone, Copy)]
 	pub(crate) struct MetaNb;
 	impl NodesMeta for MetaNb {
 		const APPLY_SIZE_LIMIT: bool = false;
@@ -957,7 +989,7 @@ pub(crate) mod test {
 	fn test_linear_storage_inner<D, M>()
 		where
 			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone,
-			M: NodesMeta + Clone,
+			M: NodesMeta,
 	{
 		use crate::backend::test::{Value, State};
 		let init_head = ContextHead {
@@ -967,5 +999,113 @@ pub(crate) mod test {
 		};
 		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head);
 		crate::backend::test::test_linear_storage(&mut head);
+	}
+
+	#[test]
+	fn test_change_with_backend() {
+		use crate::backend::test::{Value, State};
+		use crate::Trigger;
+		type D = MemoryOnly<Vec<u8>, u64>;
+		type M = MetaNb;
+		let backend = InMemoryNoThreadBackend::<Vec<u8>, u64, D, M>::new();
+		let mut init_head = ContextHead {
+			backend: backend.clone(),
+			key: b"any".to_vec(),
+			node_init_from: (),
+		};
+		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head.clone());
+		assert_eq!(backend.0.borrow().len(), 0);
+		let push_n = |head: &mut Head::<Vec<u8>, u64, D, M, _, _>, n| {
+			for i in 0u8..n {
+				head.push(HistoriedValue {
+					value: vec![i],
+					state: i as u64,
+				});
+			}
+		};
+		push_n(&mut head, 3);
+		assert_eq!(backend.0.borrow().len(), 0);
+		head.trigger_flush();
+		// 3 fit in head (meta sized at 3)
+		assert_eq!(backend.0.borrow().len(), 0);
+		push_n(&mut head, 6);
+		assert_eq!(backend.0.borrow().len(), 0);
+		head.trigger_flush();
+		assert_eq!(backend.0.borrow().len(), 2);
+
+		// first index is fetched node index which is reversed (TODO could reimplement
+		// to keep natural order)
+		let index2 = (1, 1);
+		let index3 = (1, 2);
+		let index6 = (0, 2);
+		// and head is at nb node (not fetched node)
+		let index8 = (2, 1);
+		let value2 = head.get(index2).value;
+		assert_eq!(value2, vec![1]);
+		assert_eq!(head.get(index6).value, vec![2]);
+		// flushed change
+		head.remove(index2);
+		head.insert(index2, HistoriedValue{
+			value: vec![8],
+			state: 8,
+		});
+		let value2 = head.get(index2).value;
+		assert_eq!(value2, vec![8]);
+		head.trigger_flush();
+		// unflushed one
+		head.remove(index3);
+		head.insert(index3, HistoriedValue{
+			value: vec![9],
+			state: 9,
+		});
+		let value2 = head.get(index2).value;
+		assert_eq!(value2, vec![8]);
+		let value3 = head.get(index3).value;
+		assert_eq!(value3, vec![9]);
+		// unflushed but in head
+		head.remove(index8);
+		head.insert(index8, HistoriedValue{
+			value: vec![7],
+			state: 7,
+		});
+		let value8 = head.get(index8).value;
+		assert_eq!(value8, vec![7]);
+
+		// encode head and rebuild then query.
+		let encoded_head = head.encode();
+		head = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head).unwrap();
+
+		assert_eq!(backend.0.borrow_mut().len(), 2);
+		// lookup is needed to fetch
+		assert_eq!(head.lookup(1), Some(index2));
+		let value2 = head.get(index2).value;
+		assert_eq!(value2, vec![8]);
+		assert_eq!(head.lookup(2), Some(index3));
+		let value3 = head.get(index3).value;
+		assert_eq!(value3, vec![2]); // original value
+		// non need for lookup (in head), still testing
+		assert_eq!(head.lookup(7), Some(index8));
+		assert_eq!(head.get(index8).value, vec![7]);
+
+
+		// remove node: size now is 9 - 5 4
+		head.truncate_until(5);
+		assert_eq!(head.lookup(4), None);
+		assert_eq!(head.lookup(5), None);
+		let index1 = (0, 0);
+		assert_eq!(head.lookup(0), Some(index1));
+		// end node index do not change
+		let index3 = (2, 1);
+		assert_eq!(head.lookup(2), Some(index3));
+		assert_eq!(head.get(index1).value, vec![2]); // refer to previous index 6
+		assert_eq!(head.get(index3).value, vec![7]); // refer to previous index 8
+		assert_eq!(backend.0.borrow().len(), 2);
+		head.trigger_flush();
+		assert_eq!(backend.0.borrow().len(), 1);
+		let encoded_head = head.encode();
+		head = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head).unwrap();
+		assert_eq!(head.get(index3).value, vec![7]); // refer to previous index 8
+		assert_eq!(head.lookup(0), Some(index1)); // non head, fetch
+		assert_eq!(head.get(index1).value, vec![2]); // refer to previous index 6
 	}
 }
