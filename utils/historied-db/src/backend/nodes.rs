@@ -702,6 +702,9 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 		}
 		node.data.remove(index.1);
+		// we don't manage empty head as it will likely be written again.
+		// Similarily this could have been skip as we expect truncate until
+		// to happen.
 		if first && node.data.len() == 0 {
 			self.start_node_index += 1;
 			self.fetched.borrow_mut().pop();
@@ -1115,5 +1118,34 @@ pub(crate) mod test {
 		assert_eq!(head.get(index3).value, vec![7]); // refer to previous index 8
 		assert_eq!(head.lookup(0), Some(index1)); // non head, fetch
 		assert_eq!(head.get(index1).value, vec![2]); // refer to previous index 6
+	}
+
+
+	#[test]
+	fn test_change_with_backend_two_levels() {
+		use crate::backend::test::{Value, State};
+		use crate::Trigger;
+		type BD = MemoryOnly<Vec<u8>, u64>;
+		type M = MetaNb;
+		type Backend1 = InMemoryNoThreadBackend::<Vec<u8>, u64, BD, M>;
+		type Head1 = Head::<Vec<u8>, u64, BD, M, Backend1, ()>;
+		type D = MemoryOnly<Head1, u64>;
+		type Backend2 = InMemoryNoThreadBackend::<Head1, u64, D, M>;
+		type Head2 = Head::<Head1, u64, D, M, Backend2, ContextHead<Backend1, ()>>;
+		let backend1 = Backend1::new();
+		let mut init_head1: ContextHead<Backend1, ()> = ContextHead {
+			backend: backend1.clone(),
+			key: b"any".to_vec(),
+			node_init_from: (),
+		};
+		let mut head1 = Head1::init_from(init_head1.clone());
+		let backend2 = Backend2::new();
+		let mut init_head2 = ContextHead {
+			backend: backend2.clone(),
+			key: b"any".to_vec(),
+			node_init_from: init_head1.clone(),
+		};
+		let mut head2 = Head2::init_from(init_head2.clone());
+
 	}
 }
