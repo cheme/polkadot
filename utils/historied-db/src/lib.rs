@@ -51,9 +51,45 @@ pub mod db_traits;
 /// Main use case here is a backend to fetch
 /// additional information.
 pub trait Context: Sized {
-	type Context: Clone;
+	type Context: ContextBuilder;
 }
 
+/// A context can be obtain by clone or
+/// from a parent index byte representation.
+pub trait ContextBuilder: Clone {
+	/// If set to false, some conversion of index to bytes can be skipped.
+	const ACTIVE: bool = true;
+
+	/// Here parent index is build from all previous parent
+	/// index.
+	fn with_parent(&self, parent_index: Option<&[u8]>, index: &[u8]) -> Self;
+
+	/// Get current index to be use in `with_parent`.
+	fn current_index(&self) -> Option<&[u8]>;
+}
+
+/// For pair implementation, first component should be the hierarchical one.
+/// This is use by `Tree`.
+impl<A: ContextBuilder, B: ContextBuilder> ContextBuilder for (A, B) {
+	fn with_parent(&self, parent_index: Option<&[u8]>, index: &[u8]) -> Self {
+		let first = self.0.with_parent(parent_index, index);
+		(first, self.1.clone())
+	}
+	fn current_index(&self) -> Option<&[u8]> {
+		self.1.current_index()
+	}
+}
+
+impl ContextBuilder for () {
+	const ACTIVE: bool = false;
+
+	fn with_parent(&self, _parent_index: Option<&[u8]>, _index: &[u8]) -> Self {
+		()
+	}
+	fn current_index(&self) -> Option<&[u8]> {
+		None
+	}
+}
 
 /// Trigger action on changed data.
 ///

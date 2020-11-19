@@ -24,7 +24,7 @@ use sp_std::vec::Vec;
 use super::{LinearStorage};
 use crate::historied::HistoriedValue;
 use derivative::Derivative;
-use crate::{Context, InitFrom, DecodeWithContext, Trigger};
+use crate::{Context, ContextBuilder, InitFrom, DecodeWithContext, Trigger};
 #[cfg(feature = "encoded-array-backend")]
 use crate::backend::encoded_array::EncodedArrayValue;
 use codec::{Encode, Decode, Input};
@@ -253,7 +253,7 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 	where
 		D: DecodeWithContext<Context = NI> + EstimateSize,
 		B: Clone,
-		NI: Clone,
+		NI: ContextBuilder,
 {
 	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
 		// This contains len from additionaly struct but it is considered
@@ -262,6 +262,9 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 			Ok(len) => len,
 			_ => return None,
 		};
+//		let index: &[u8] = unimplemented!("TODO pass index as parameter when recursive call");
+//		let node_init_from = init.node_init_from.with_parent(init.current_index(), index);
+		let node_init_from = init.node_init_from.clone();
 		D::decode_with_context(input, &init.node_init_from).and_then(|data| {
 			let head_decoded = HeadCodec::decode(input).ok();
 			head_decoded.map(|head_decoded| {
@@ -276,7 +279,7 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 					len: head_decoded.len as usize,
 					reference_key: init.key.clone(),
 					backend: init.backend.clone(),
-					node_init_from: init.node_init_from.clone(),
+					node_init_from,
 				}
 			})
 		})
@@ -324,29 +327,35 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 		}
 	}
 }
-// TODO require test with flush/rebuild on a tree with two head levels where we change value of 
-// - head1 -> head2 (do not need trigger but for completness)
-// - head1 -> node2
-// - node1 -> head1
-// - node1 -> node2
-//
-// and delete of node2
-// - head1 -> node2
-// - node1 -> node2
-//
-// plus unflushed restore working.
-
 
 /// Information needed to initialize a new `Head`.
 #[derive(Clone)]
 pub struct ContextHead<B, NI> {
 	/// The key of the historical value stored in nodes.
-	/// TODO use Arc<Vec<u8> since this is cloned around a lot
 	pub key: Vec<u8>,
 	/// The nodes backend.
 	pub backend: B,
 	/// Int type for internal node content.
 	pub node_init_from: NI,
+}
+
+impl<B: Clone, NI: ContextBuilder> ContextBuilder for ContextHead<B, NI> {
+	fn with_parent(&self, parent_index: Option<&[u8]>, index: &[u8]) -> Self {
+
+		let mut key = self.key.clone();
+		parent_index.map(|b| key.extend_from_slice(b));
+		key.extend_from_slice(&(index.len() as u32).to_be_bytes()[..]);
+		key.extend_from_slice(index);
+		ContextHead {
+			key,
+			backend: self.backend.clone(),
+			node_init_from: self.node_init_from.clone(),
+		}
+	}
+
+	fn current_index(&self) -> Option<&[u8]> {
+		Some(self.key.as_slice())
+	}
 }
 
 impl<V, S, D, M, B, NI> Trigger for Head<V, S, D, M, B, NI>
@@ -372,7 +381,7 @@ impl<V, S, D, M, B, NI> Context for Head<V, S, D, M, B, NI>
 	where
 		D: Context<Context = NI>,
 		B: Clone,
-		NI: Clone,
+		NI: ContextBuilder,
 {
 	type Context = ContextHead<B, NI>; // TODO key to clone and backend refcell.
 }
@@ -381,7 +390,7 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 	where
 		D: InitFrom<Context = NI>,
 		B: Clone,
-		NI: Clone,
+		NI: ContextBuilder,
 {
 	fn init_from(init: Self::Context) -> Self {
 		Head {
@@ -470,7 +479,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize,
-		NI: Clone,
+		NI: ContextBuilder,
 {
 	// Fetched node index (end_node_index is head).
 	// If true the node needs to be inserted.
@@ -1135,17 +1144,57 @@ pub(crate) mod test {
 		let backend1 = Backend1::new();
 		let mut init_head1: ContextHead<Backend1, ()> = ContextHead {
 			backend: backend1.clone(),
-			key: b"any".to_vec(),
+			key: b"any".to_vec(), // should use conflict free key here, but fine for test
 			node_init_from: (),
 		};
-		let mut head1 = Head1::init_from(init_head1.clone());
 		let backend2 = Backend2::new();
 		let mut init_head2 = ContextHead {
 			backend: backend2.clone(),
-			key: b"any".to_vec(),
+			key: Vec::new(),
 			node_init_from: init_head1.clone(),
 		};
 		let mut head2 = Head2::init_from(init_head2.clone());
+		for i in 0u8..9 {
+			let mut head1 = Head1::init_from(init_head1.with_parent(init_head2.current_index(), &[i]));
+			for j in 0u8..9 {
+				head1.push(HistoriedValue{
+					value: vec![j, i],
+					state: 8 as u64,
+				});
+			}
+			head2.push(HistoriedValue{
+				value: head1,
+				state: i as u64,
+			});
+		}
 
+		assert_eq!(backend1.0.borrow_mut().len(), 0);
+		assert_eq!(backend2.0.borrow_mut().len(), 0);
+		// query
+		for i in 0u8..9 {
+			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
+			for j in 0u8..9 {
+				let value = head1.get(head1.lookup(j as usize).unwrap()).value;
+				assert_eq!(value, vec![j, i]);
+			}
+		}
+
+		head2.trigger_flush();
+		// 9 size, 3 per nodes - 1 head
+		assert_eq!(backend2.0.borrow_mut().len(), 2);
+		// (9 size, 3 per nodes - 1 head) * 9
+		assert_eq!(backend1.0.borrow_mut().len(), 18);
+
+
+		let encoded_head = head2.encode();
+		head2 = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head2).unwrap();
+		// query
+		for i in 6u8..9 {
+			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
+			for j in 0u8..9 {
+				let value = head1.get(head1.lookup(j as usize).unwrap()).value;
+				assert_eq!(value, vec![j, i]);
+			}
+		}
 	}
 }
