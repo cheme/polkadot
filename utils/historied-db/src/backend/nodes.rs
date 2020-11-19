@@ -684,11 +684,14 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	}
 	fn remove(&mut self, index: Self::Index) {
 		let mut fetched_mut;
-		let node = if index.0 == self.end_node_index {
-			&mut self.inner
+		let (node, first) = if index.0 == self.end_node_index {
+			(&mut self.inner, false)
 		} else {
 			fetched_mut = self.fetched.borrow_mut();
-			&mut fetched_mut[index.0 as usize]
+			let len = fetched_mut.len();
+			 
+			(&mut fetched_mut[index.0 as usize], index.0 as usize == len - 1 &&
+				len as u64 == self.end_node_index - self.start_node_index)
 		};
 
 		node.changed = true;
@@ -699,6 +702,10 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 		}
 		node.data.remove(index.1);
+		if first && node.data.len() == 0 {
+			self.start_node_index += 1;
+			self.fetched.borrow_mut().pop();
+		}
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
 		if self.len == 0 {
@@ -734,6 +741,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			if self.fetched.borrow().len() > 0 {
 				let removed = self.fetched.borrow_mut().remove(0);
 				self.inner = removed;
+				self.end_node_index -= 1;
 				self.pop()
 			} else {
 				None
