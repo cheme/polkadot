@@ -94,8 +94,13 @@ impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
 }
 
 impl<V, S, D: DecodeWithContext> DecodeWithContext for Linear<V, S, D> {
-	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
-		D::decode_with_context(input, init).map(|d| Linear(d, Default::default()))
+	fn decode_with_context<I: Input>(
+		input: &mut I,
+		init: &Self::Context,
+		index: Option<usize>,
+	) -> Option<Self> {
+		D::decode_with_context(input, init, index)
+			.map(|d| Linear(d, Default::default()))
 	}
 }
 

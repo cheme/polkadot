@@ -240,12 +240,12 @@ impl<V, S, D, M, B, NI> Encode for Head<V, S, D, M, B, NI>
 	}
 
 	fn encode_to<T: codec::Output>(&self, dest: &mut T) {
-		self.inner.data.encode_to(dest);
 		HeadCodec {
 			start_node_index: self.start_node_index,
 			end_node_index: self.end_node_index,
 			len: self.len as u64,
-		}.encode_to(dest)
+		}.encode_to(dest);
+		self.inner.data.encode_to(dest);
 	}
 }
 
@@ -255,18 +255,25 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 		B: Clone,
 		NI: ContextBuilder,
 {
-	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+	fn decode_with_context<I: Input>(
+		input: &mut I,
+		init: &Self::Context,
+		index: Option<usize>,
+	) -> Option<Self> {
 		// This contains len from additionaly struct but it is considered
 		// negligable.
 		let reference_len = match input.remaining_len() {
 			Ok(len) => len,
 			_ => return None,
 		};
-//		let index: &[u8] = unimplemented!("TODO pass index as parameter when recursive call");
-//		let node_init_from = init.node_init_from.with_parent(init.current_index(), index);
+
+		let head_decoded = HeadCodec::decode(input).ok();
+	//		let index: &[u8] = unimplemented!("TODO pass index as parameter when recursive call + add
+	//		start_node_index");
+	//		let node_init_from = init.node_init_from.with_parent(init.current_index(), index);
 		let node_init_from = init.node_init_from.clone();
-		D::decode_with_context(input, &init.node_init_from).and_then(|data| {
-			let head_decoded = HeadCodec::decode(input).ok();
+
+		D::decode_with_context(input, &init.node_init_from, index).and_then(|data| {
 			head_decoded.map(|head_decoded| {
 				let reference_len = reference_len.unwrap_or_else(|| data.estimate_size());
 				Head {
@@ -1093,7 +1100,7 @@ pub(crate) mod test {
 
 		// encode head and rebuild then query.
 		let encoded_head = head.encode();
-		head = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head).unwrap();
+		head = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head, None).unwrap();
 
 		assert_eq!(backend.0.borrow_mut().len(), 2);
 		// lookup is needed to fetch
@@ -1123,7 +1130,7 @@ pub(crate) mod test {
 		head.trigger_flush();
 		assert_eq!(backend.0.borrow().len(), 1);
 		let encoded_head = head.encode();
-		head = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head).unwrap();
+		head = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head, None).unwrap();
 		assert_eq!(head.get(index3).value, vec![7]); // refer to previous index 8
 		assert_eq!(head.lookup(0), Some(index1)); // non head, fetch
 		assert_eq!(head.get(index1).value, vec![2]); // refer to previous index 6
@@ -1187,7 +1194,7 @@ pub(crate) mod test {
 
 
 		let encoded_head = head2.encode();
-		head2 = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head2).unwrap();
+		head2 = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head2, None).unwrap();
 		// query
 		for i in 6u8..9 {
 			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
