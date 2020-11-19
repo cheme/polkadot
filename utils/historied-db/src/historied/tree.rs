@@ -111,18 +111,15 @@ impl<I, BI, V, D, BD> DecodeWithContext for Tree<I, BI, V, D, BD>
 		D: DecodeWithContext,
 		BD: DecodeWithContext,
 {
-	fn decode_with_context<IN: Input>(
-		input: &mut IN,
-		init: &Self::Context,
-		index: Option<usize>,
-	) -> Option<Self> {
-		D::decode_with_context(input, &init.0, index)
-			.map(|branches|	Tree {
+	fn decode_with_context<IN: Input>(input: &mut IN, init: &Self::Context) -> Option<Self> {
+		D::decode_with_context(input, &init.0).map(|branches|
+			Tree {
 				branches,
 				init: init.0.clone(),
 				init_child: init.1.clone(),
 				_ph: PhantomData,
-			})
+			}
+		)
 	}
 }
 

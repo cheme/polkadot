@@ -325,12 +325,8 @@ impl<V, S> DecodeWithContext for HistoriedValue<V, S>
 		V: DecodeWithContext,
 		S: Decode,
 {
-	fn decode_with_context<I: Input>(
-		input: &mut I,
-		init: &Self::Context,
-		index: Option<usize>,
-	) -> Option<Self> {
-		V::decode_with_context(input, init, index)
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+		V::decode_with_context(input, init)
 			.and_then(|value| S::decode(input).ok()
 				.map(|state| HistoriedValue {
 					value,

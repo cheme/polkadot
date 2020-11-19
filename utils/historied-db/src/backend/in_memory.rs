@@ -57,19 +57,14 @@ impl<V, S> DecodeWithContext for $memory_only<V, S>
 		V: DecodeWithContext,
 		S: Decode,
 {
-	fn decode_with_context<I: Input>(
-		input: &mut I,
-		init: &Self::Context,
-		index: Option<usize>,
-	) -> Option<Self> {
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
 		// this align on scale codec inner implementation (DecodeWithContext trait
 		// could be a scale trait).
 		<codec::Compact<u32>>::decode(input).ok().and_then(|len| {
 			let len = len.0 as usize;
 			let mut result = smallvec::SmallVec::with_capacity(len);
-			for i in 0..len {
-				let index = index.unwrap_or(0) + i;
-				if let Some(value) = HistoriedValue::decode_with_context(input, init, Some(index)) {
+			for _ in 0..len {
+				if let Some(value) = HistoriedValue::decode_with_context(input, init) {
 					result.push(value);
 				} else {
 					return None;

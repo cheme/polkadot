@@ -121,7 +121,6 @@ impl<'a, V: Context, A> DecodeWithContext for EncodedArray<'a, V, A> {
 	fn decode_with_context<I: CodecInput>(
 		value: &mut I,
 		_context: &V::Context,
-		_index: Option<usize>,
 	) -> Option<Self> {
 		let v: Vec<u8> = Vec::decode(value).ok()?;
 		let cow_value = Cow::Owned(v);
