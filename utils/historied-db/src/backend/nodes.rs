@@ -261,9 +261,6 @@ pub struct Head<V, S, D, M, B, NI> {
 	/// This is a reversed ordered `Vec`, starting at end 'index - 1' and
 	/// finishing at most at the very first historied node.
 	fetched: RefCell<Vec<Node<V, S, D, M>>>,
-	/// Remove nodes with an internal value that require trigger are kept
-	/// here for triggering.
-	removed_untriggered_values: Vec<V>,
 	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u64,
 	/// Keep trace of initial index end to apply change lazilly.
@@ -342,7 +339,6 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 				Head {
 					inner: Node::new(data, reference_len),
 					fetched: RefCell::new(Vec::new()),
-					removed_untriggered_values: Vec::new(),
 					old_start_node_index: head_decoded.start_node_index,
 					old_end_node_index: head_decoded.end_node_index,
 					start_node_index: head_decoded.start_node_index,
@@ -361,17 +357,12 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
 		D: Clone + Trigger,
-		V: Trigger,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
 	/// Changes must always be flushed to be effective.
 	/// This is used with `Trigger` `trigger_flush` method.
 	fn flush_changes(&mut self, trigger: bool) {
-		for mut removed in self.removed_untriggered_values.drain(..) {
-			debug_assert!(D::TRIGGER);
-			removed.trigger_flush();
-		}
 		for d in self.old_start_node_index .. self.start_node_index {
 			if trigger {
 				if let Some(mut node) = self.backend.get_node(
@@ -462,7 +453,6 @@ impl<B: Clone, NI: ContextBuilder> ContextBuilder for ContextHead<B, NI> {
 impl<V, S, D, M, B, NI> Trigger for Head<V, S, D, M, B, NI>
 	where
 		D: Clone + Trigger,
-		V: Trigger,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
@@ -504,7 +494,6 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 				_ph: PhantomData,
 			},
 			fetched: RefCell::new(Vec::new()),
-			removed_untriggered_values: Vec::new(),
 			old_start_node_index: 0,
 			old_end_node_index: 0,
 			start_node_index: 0,
@@ -582,7 +571,6 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
 		D: Clone + Trigger,
-		V: Trigger,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
@@ -845,8 +833,6 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			}
 			if V::TRIGGER {
 				let old_data = node.data.get(index.1);
-				// TODO a real remove could avoid this get.
-				self.removed_untriggered_values.push(old_data.value);
 			}
 			node.data.remove(index.1);
 			first && node.data.len() == 0
@@ -1366,8 +1352,12 @@ pub(crate) mod test {
 				head1.value.pop();
 			} TODO make it work for pop too
 */
-//		head1.trigger_flush();
-			head2.emplace(head2.lookup(i as usize).unwrap(), head1);
+			// It is responsability of calling code to flush on removal.
+			// TODO change tree code to flush on branch removal
+			// when V::TRIGGER (and copy this test on tree).
+			// In practice this is related to intention of caller
+			// eg get change pop push do not need flush.
+			head1.trigger_flush();
 		}
 
 		for _ in 0u8..3 {
