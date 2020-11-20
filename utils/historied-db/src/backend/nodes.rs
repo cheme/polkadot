@@ -263,7 +263,6 @@ pub struct Head<V, S, D, M, B, NI> {
 	fetched: RefCell<Vec<Node<V, S, D, M>>>,
 	/// Remove nodes with an internal value that require trigger are kept
 	/// here for triggering.
-	removed_untriggered: Vec<Node<V, S, D, M>>,
 	removed_untriggered_values: Vec<V>,
 	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u64,
@@ -343,7 +342,6 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 				Head {
 					inner: Node::new(data, reference_len),
 					fetched: RefCell::new(Vec::new()),
-					removed_untriggered: Vec::new(),
 					removed_untriggered_values: Vec::new(),
 					old_start_node_index: head_decoded.start_node_index,
 					old_end_node_index: head_decoded.end_node_index,
@@ -371,11 +369,6 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	/// This is used with `Trigger` `trigger_flush` method.
 	fn flush_changes(&mut self, trigger: bool) {
 		for mut removed in self.removed_untriggered_values.drain(..) {
-			debug_assert!(D::TRIGGER);
-			removed.trigger_flush();
-		}
-		for mut removed in self.removed_untriggered.drain(..) {
-			debug_assert!(removed.changed);
 			debug_assert!(D::TRIGGER);
 			removed.trigger_flush();
 		}
@@ -511,7 +504,6 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 				_ph: PhantomData,
 			},
 			fetched: RefCell::new(Vec::new()),
-			removed_untriggered: Vec::new(),
 			removed_untriggered_values: Vec::new(),
 			old_start_node_index: 0,
 			old_end_node_index: 0,
@@ -590,20 +582,14 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
 		D: Clone + Trigger,
+		V: Trigger,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
 	fn clear_fetch_nodes(&mut self) {
+		// cannot clear if there is pending changes.
+		self.trigger_flush();
 		self.fetched.borrow_mut().clear();
-		if D::TRIGGER {
-			for node in self.fetched.borrow_mut().drain(..) {
-				if node.changed {
-					self.removed_untriggered.push(node);
-				}
-			}
-		} else {
-			self.fetched.borrow_mut().clear();
-		}
 	}
 }
 
@@ -612,11 +598,11 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 /// operation to rewrite correctly the sizes.
 impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	where
-		D: Context<Context = NI> + LinearStorage<V, S> + Trigger,
+		D: Context<Context = NI> + LinearStorage<V, S>,
 		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
 		S: EstimateSize,
-		V: EstimateSize,
+		V: EstimateSize + Trigger,
 		NI: ContextBuilder,
 {
 	// Fetched node index (end_node_index is head).
@@ -783,16 +769,8 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			}
 			i
 		};
-		if D::TRIGGER {
-			for node in self.fetched.borrow_mut().drain(i + 1 ..) {
-				if node.changed {
-					self.removed_untriggered.push(node);
-				}
-			}
-		} else {
-			// reversed ordered.
-			self.fetched.borrow_mut().truncate(i + 1);
-		}
+		// reversed ordered.
+		self.fetched.borrow_mut().truncate(i + 1);
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
 		self.len += 1;
@@ -865,7 +843,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				let h = node.data.get(index.1);
 				node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 			}
-			if D::TRIGGER {
+			if V::TRIGGER {
 				let old_data = node.data.get(index.1);
 				// TODO a real remove could avoid this get.
 				self.removed_untriggered_values.push(old_data.value);
@@ -878,11 +856,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		// to happen.
 		if pop {
 			self.start_node_index += 1;
-			if let Some(node) = self.fetched.borrow_mut().pop() {
-				if D::TRIGGER && node.changed {
-					self.removed_untriggered.push(node);
-				}
-			}
+			self.fetched.borrow_mut().pop();
 		}
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
@@ -905,11 +879,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				}
 				if self.fetched.borrow().len() > 0 {
 					let removed = self.fetched.borrow_mut().remove(0);
-					let mut inner = sp_std::mem::replace(&mut self.inner, removed);
-					inner.changed = true;
-					if D::TRIGGER {
-						self.removed_untriggered.push(inner);
-					}
+					self.inner = removed;
 				}
 			}
 
@@ -922,11 +892,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			}
 			if self.fetched.borrow().len() > 0 {
 				let removed = self.fetched.borrow_mut().remove(0);
-				let mut inner = sp_std::mem::replace(&mut self.inner, removed);
-				inner.changed = true;
-				if D::TRIGGER {
-					self.removed_untriggered.push(inner);
-				}
+				self.inner = removed;
 				self.end_node_index -= 1;
 				self.pop()
 			} else {
@@ -938,15 +904,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		self.start_node_index = 0;
 		self.end_node_index = 0;
 		self.len = 0;
-		if D::TRIGGER {
-			for node in self.fetched.borrow_mut().drain(..) {
-				if node.changed {
-					self.removed_untriggered.push(node);
-				}
-			}
-		} else {
-			self.fetched.borrow_mut().clear();
-		}
+		self.fetched.borrow_mut().clear();
 		self.inner.reference_len = 0;
 		self.inner.changed = true;
 		self.inner.data.clear();
@@ -998,14 +956,8 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			// reversed ordered.
 			for i in 0..fetch_index + 1 {
 				let removed = fetched_mut.remove(0);
-				let mut removed = if i == fetch_index {
-					sp_std::mem::replace(&mut self.inner, removed)
-				} else {
-					removed
-				};
-				if D::TRIGGER {
-					removed.changed = true;
-					self.removed_untriggered.push(removed);
+				if i == fetch_index {
+					self.inner = removed;
 				}
 			}
 			self.inner.changed = true;
@@ -1162,7 +1114,7 @@ pub(crate) mod test {
 
 	fn nodes_push_and_query_inner<D, M>()
 		where
-			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone + Trigger,
+			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone,
 			M: NodesMeta + Clone,
 	{
 		let init_head = ContextHead {
@@ -1197,7 +1149,7 @@ pub(crate) mod test {
 	}
 	fn test_linear_storage_inner<D, M>()
 		where
-			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone + Trigger,
+			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone,
 			M: NodesMeta,
 	{
 		use crate::backend::test::{Value, State};
