@@ -567,6 +567,20 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	}
 }
 
+#[cfg(test)]
+impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
+	where
+		D: Clone + Trigger,
+		M: NodesMeta,
+		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
+{
+	fn clear_fetch_nodes(&mut self) {
+		// cannot clear if there is pending changes.
+		self.trigger_flush();
+		self.fetched.borrow_mut().clear();
+	}
+}
+
 /// Notice that all max node operation are only for push and pop operation.
 /// 'insert' and 'remove' operation would need to use a call to 'realign'
 /// operation to rewrite correctly the sizes.
@@ -1296,11 +1310,12 @@ pub(crate) mod test {
 		// (9 size, 3 per nodes - 1 head) * 9
 		assert_eq!(backend1.0.borrow_mut().len(), 18);
 
+		head2.clear_fetch_nodes();
 
 		let encoded_head = head2.encode();
 		head2 = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head2).unwrap();
 		// query
-		for i in 6u8..9 {
+		for i in 0u8..9 {
 			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
 			for j in 0u8..9 {
 				let value = head1.get(head1.lookup(j as usize).unwrap()).value;
