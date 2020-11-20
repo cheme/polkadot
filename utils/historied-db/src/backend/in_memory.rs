@@ -98,7 +98,7 @@ impl<V: Clone + Context + Trigger, S: Clone> Trigger for $memory_only<V, S> {
 	fn trigger_flush(&mut self) {
 		if Self::TRIGGER {
 			for i in 0 .. self.len() {
-				self.get(i as u64).trigger_flush()
+				self.get_ref_mut(i as u64).as_mut().value.trigger_flush()
 			}
 		}
 	}

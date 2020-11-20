@@ -357,6 +357,12 @@ impl<'a, V: 'a, S: Clone> HistoriedValue<V, S> {
 		HistoriedValue { value: &value, state: state.clone() }
 	}
 
+	/// Get historied mutable reference to the value.
+	pub fn as_mut(&mut self) -> HistoriedValue<&mut V, S> {
+		HistoriedValue { value: &mut self.value, state: self.state.clone() }
+	}
+
+
 	/// Map over a reference of value.
 	pub fn map_ref<V2: 'a, F: Fn(&'a V) -> V2>(&'a self, f: F) -> HistoriedValue<V2, S> {
 		let HistoriedValue { value, state } = self;

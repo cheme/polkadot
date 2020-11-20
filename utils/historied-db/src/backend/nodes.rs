@@ -812,29 +812,32 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		node.data.insert(index.1, h);
 	}
 	fn remove(&mut self, index: Self::Index) {
-		let mut fetched_mut;
-		let (node, first) = if index.0 == self.end_node_index {
-			(&mut self.inner, false)
-		} else {
-			fetched_mut = self.fetched.borrow_mut();
-			let len = fetched_mut.len();
-			 
-			(&mut fetched_mut[index.0 as usize], index.0 as usize == len - 1 &&
-				len as u64 == self.end_node_index - self.start_node_index)
+		let pop = {
+			let mut fetched_mut;
+			let (node, first) = if index.0 == self.end_node_index {
+				(&mut self.inner, false)
+			} else {
+				fetched_mut = self.fetched.borrow_mut();
+				let len = fetched_mut.len();
+				
+				(&mut fetched_mut[index.0 as usize], index.0 as usize == len - 1 &&
+					len as u64 == self.end_node_index - self.start_node_index)
+			};
+
+			node.changed = true;
+			self.len -= 1;
+
+			if M::APPLY_SIZE_LIMIT && V::ACTIVE {
+				let h = node.data.get(index.1);
+				node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
+			}
+			node.data.remove(index.1);
+			first && node.data.len() == 0
 		};
-
-		node.changed = true;
-		self.len -= 1;
-
-		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-			let h = node.data.get(index.1);
-			node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
-		}
-		node.data.remove(index.1);
 		// we don't manage empty head as it will likely be written again.
 		// Similarily this could have been skip as we expect truncate until
 		// to happen.
-		if first && node.data.len() == 0 {
+		if pop {
 			self.start_node_index += 1;
 			self.fetched.borrow_mut().pop();
 		}
@@ -1322,5 +1325,42 @@ pub(crate) mod test {
 				assert_eq!(value, vec![j, i]);
 			}
 		}
+
+		
+		// single level 2 rem
+		let mut head1 = head2.get(head2.lookup(4).unwrap());
+		head1.value.remove(head1.value.lookup(0).unwrap());;
+		head1.value.remove(head1.value.lookup(0).unwrap());;
+		head1.value.remove(head1.value.lookup(0).unwrap());
+		head2.emplace(head2.lookup(4).unwrap(), head1);
+		assert_eq!(backend2.0.borrow_mut().len(), 2);
+		assert_eq!(backend1.0.borrow_mut().len(), 18);
+
+		head2.trigger_flush();
+
+		assert_eq!(backend2.0.borrow_mut().len(), 2);
+		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1);
+
+		// single level 1 rem
+		for i in 0u8..3 {
+			let mut head1 = head2.get(head2.lookup(i as usize).unwrap());
+			head1.value.clear();
+/*			for j in 0u8..9 {
+				head1.value.pop();
+			} TODO make it work for pop too
+*/
+//		head1.trigger_flush();
+			head2.emplace(head2.lookup(i as usize).unwrap(), head1);
+		}
+
+		for _ in 0u8..3 {
+			// delete these empty heads
+			head2.remove(head2.lookup(0 as usize).unwrap());
+		}
+
+		head2.trigger_flush();
+
+		assert_eq!(backend2.0.borrow_mut().len(), 1);
+		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1 - 6);
 	}
 }
