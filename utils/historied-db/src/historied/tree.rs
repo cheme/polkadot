@@ -33,7 +33,7 @@ use num_traits::One;
 use sp_std::vec::Vec;
 use sp_std::marker::PhantomData;
 use crate::Latest;
-use crate::{Context, InitFrom, DecodeWithContext, Trigger};
+use crate::{Context, ContextBuilder, InitFrom, DecodeWithContext, Trigger};
 use codec::{Encode, Input};
 use derivative::Derivative;
 use core::default::Default;
@@ -151,15 +151,22 @@ impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
 type Branch<I, BI, V, BD> = HistoriedValue<Linear<V, BI, BD>, I>;
 
 impl<
-	I: Clone,
+	I: Clone + Encode,
 	BI: LinearState + SubAssign<BI>,
 	V: Value + Clone + Eq,
 	BD: LinearStorage<V::Storage, BI>,
 > Branch<I, BI, V, BD>
 {
-	pub fn new(value: V, state: &(I, BI), init: BD::Context) -> Self {
+	pub fn new(value: V, state: &(I, BI), init: &BD::Context) -> Self {
 		let (branch_index, index) = state.clone();
 		let index = Latest::unchecked_latest(index); // TODO cast ptr?
+		let init = if BD::Context::USE_INDEXES {
+			let index = state.0.encode(); // TODO force compact encode?
+			// parent index set at build.
+			init.with_indexes(&[], index.as_slice())
+		} else {
+			init.clone()
+		};
 		let history = Linear::new(value, &index, init);
 		Branch {
 			state: branch_index,
@@ -234,7 +241,7 @@ impl<
 }
 
 impl<
-	I: Default + Eq + Ord + Clone,
+	I: Default + Eq + Ord + Clone + Encode,
 	BI: LinearState + SubAssign<BI> + One,
 	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -247,7 +254,7 @@ impl<
 
 	fn new(value: V, at: &Self::SE, init: Self::Context) -> Self {
 		let mut v = D::init_from(init.0.clone());
-		v.push(Branch::new(value, at.latest(), init.1.clone()));
+		v.push(Branch::new(value, at.latest(), &init.1));
 		Tree {
 			branches: v,
 			init: init.0,
@@ -287,7 +294,7 @@ impl<
 			}
 			insert_at = Some(branch_ix);
 		}
-		let branch = Branch::new(value, at.latest(), self.init_child.clone());
+		let branch = Branch::new(value, at.latest(), &self.init_child);
 		if let Some(index) = insert_at {
 			self.branches.insert(index, branch);
 		} else {
@@ -577,7 +584,7 @@ impl<
 
 
 impl<
-	I: Default + Eq + Ord + Clone,
+	I: Default + Eq + Ord + Clone + Encode,
 	BI: LinearState + SubAssign<BI> + One,
 	V: ValueRef + Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
@@ -618,7 +625,7 @@ impl<
 			insert_at = Some(branch_ix);
 			next_branch_index = self.branches.previous_index(branch_ix);
 		}
-		let branch = Branch::new(value, at.latest(), self.init_child.clone());
+		let branch = Branch::new(value, at.latest(), &self.init_child);
 		if let Some(index) = insert_at {
 			self.branches.insert(index, branch);
 		} else {
@@ -774,7 +781,7 @@ pub mod force {
 	use super::*;
 	use crate::historied::force::ForceDataMut;
 	impl<
-		I: Default + Eq + Ord + Clone,
+		I: Default + Eq + Ord + Clone + Encode,
 		BI: LinearState + SubAssign<BI> + One,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -813,7 +820,7 @@ pub mod force {
 				}
 				insert_at = Some(branch_ix);
 			}
-			let branch = Branch::new(value, at, self.init_child.clone());
+			let branch = Branch::new(value, at, &self.init_child);
 			if let Some(index) = insert_at {
 				self.branches.insert(index, branch);
 			} else {
@@ -835,7 +842,7 @@ pub mod conditional {
 	// Then we still apply only at designated (I, BI) but any value in the plan are
 	// skipped.
 	impl<
-		I: Default + Eq + Ord + Clone,
+		I: Default + Eq + Ord + Clone + Encode,
 		BI: LinearState + SubAssign<BI> + One,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -860,7 +867,7 @@ pub mod conditional {
 	}
 
 	impl<
-		I: Default + Eq + Ord + Clone,
+		I: Default + Eq + Ord + Clone + Encode,
 		BI: LinearState + SubAssign<BI> + One,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -903,7 +910,7 @@ pub mod conditional {
 				}
 				insert_at = Some(branch_ix);
 			}
-			let branch = Branch::new(value, at, self.init_child.clone());
+			let branch = Branch::new(value, at, &self.init_child);
 			if let Some(index) = insert_at {
 				self.branches.insert(index, branch);
 			} else {
@@ -991,11 +998,13 @@ mod test {
 			backend: Backend::new(),
 			key: b"any".to_vec(),
 			node_init_from: (),
+			encoded_indexes: Vec::new(),
 		};
 		let init_head = ContextHead {
 			backend: Backend2::new(),
 			key: b"any".to_vec(),
 			node_init_from: init_head_child.clone(),
+			encoded_indexes: Vec::new(),
 		};
 		let item: Tree<u64, u64, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
 		let at: ForkPlan<u64, u64> = Default::default();
@@ -1039,11 +1048,13 @@ mod test {
 			backend: Backend::new(),
 			key: b"any".to_vec(),
 			node_init_from: (),
+			encoded_indexes: Vec::new(),
 		};
 		let init_head = ContextHead {
 			backend: Backend2::new(),
 			key: b"any".to_vec(),
 			node_init_from: init_head_child.clone(),
+			encoded_indexes: Vec::new(),
 		};
 		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
 		let at: ForkPlan<u32, u32> = Default::default();

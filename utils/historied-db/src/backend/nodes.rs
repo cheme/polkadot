@@ -21,6 +21,7 @@ use sp_std::marker::PhantomData;
 use sp_std::collections::btree_map::BTreeMap;
 use sp_std::cell::RefCell;
 use sp_std::vec::Vec;
+use sp_std::borrow::Cow;
 use super::{LinearStorage};
 use crate::historied::HistoriedValue;
 use derivative::Derivative;
@@ -60,20 +61,37 @@ pub trait NodeStorage<V, S, D, M: NodesMeta>: Clone {
 	///
 	/// The scheme uses a relative indexing, the index is only incremented and
 	/// should stay valid except if migrating (simplify some concurency questions).
-	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>>;
+	fn get_node(
+		&self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+	) -> Option<Node<V, S, D, M>>;
 
 	/// Addressing scheme for key value backend.
 	///
 	/// This may not be needed (non key value backend will
 	/// probably use different strategy), but gives a default
 	/// addressing scheme implementation.
-	fn vec_address(reference_key: &[u8], relative_index: u64) -> Vec<u8> {
+	///
+	/// Note that this addressing scheme can be replace by a single unique
+	/// id store into every `Head`.
+	fn vec_address(
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_node_index: u64,
+	) -> Vec<u8> {
 		let storage_prefix = M::STORAGE_PREFIX;
-		let mut result = Vec::with_capacity(reference_key.len() + storage_prefix.len() + 12);
+		let mut result = Vec::with_capacity(
+			reference_key.len()
+			+ parent_encoded_indexes.len()
+			+ storage_prefix.len()
+			+ 12);
 		result.extend_from_slice(storage_prefix);
 		result.extend_from_slice(&(reference_key.len() as u64).to_be_bytes());
 		result.extend_from_slice(reference_key);
-		result.extend_from_slice(&relative_index.to_be_bytes());
+		result.extend_from_slice(parent_encoded_indexes);
+		result.extend_from_slice(&relative_node_index.to_be_bytes());
 		result
 	}
 }
@@ -85,7 +103,13 @@ pub trait NodeStorageMut<V, S, D, M> {
 	/// Same as for `NodeStorage`, addressing is done by `relative_index`.
 	/// Note that this change to be effective in the backend might require a call
 	/// to `trigger_flush`.
-	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &Node<V, S, D, M>);
+	fn set_node(
+		&mut self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+		node: &Node<V, S, D, M>,
+	);
 
 	/// Remove an existing node.
 	///
@@ -94,26 +118,48 @@ pub trait NodeStorageMut<V, S, D, M> {
 	/// In case where we delay writting with a flush, the actual removal
 	/// only happen on flush (by comparing old indexes used by the head of
 	/// this node).
-	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64);
+	fn remove_node(
+		&mut self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+	);
 }
 
 // Note that this should not be use out of test, because clones will happen
 // many times. It can still be use as primitive for a synch backend with
 // inner mutability.
 impl<V, S, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
-	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>> {
-		let key = Self::vec_address(reference_key, relative_index);
+	fn get_node(
+		&self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+	) -> Option<Node<V, S, D, M>> {
+		let key = Self::vec_address(reference_key, parent_encoded_indexes, relative_index);
 		self.get(&key).cloned()
 	}
 }
 
 impl<V, S, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for BTreeMap<Vec<u8>, Node<V, S, D, M>> {
-	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &Node<V, S, D, M>) {
-		let key = Self::vec_address(reference_key, relative_index);
+	fn set_node(
+		&mut self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+		node: &Node<V, S, D, M>,
+	) {
+		let key = Self::vec_address(reference_key, parent_encoded_indexes, relative_index);
 		self.insert(key, node.clone());
 	}
-	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64) {
-		let key = Self::vec_address(reference_key, relative_index);
+
+	fn remove_node(
+		&mut self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+	) {
+		let key = Self::vec_address(reference_key, parent_encoded_indexes, relative_index);
 		self.remove(&key);
 	}
 }
@@ -129,19 +175,35 @@ impl<V, S, D, M> InMemoryNoThreadBackend<V, S, D, M> {
 }
 
 impl<V: Clone, S: Clone, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for InMemoryNoThreadBackend<V, S, D, M> {
-	fn get_node(&self, reference_key: &[u8], relative_index: u64) -> Option<Node<V, S, D, M>> {
-		let key = Self::vec_address(reference_key, relative_index);
+	fn get_node(
+		&self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+	) -> Option<Node<V, S, D, M>> {
+		let key = Self::vec_address(reference_key, parent_encoded_indexes, relative_index);
 		self.0.borrow().get(&key).cloned()
 	}
 }
 
 impl<V: Clone, S: Clone, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for InMemoryNoThreadBackend<V, S, D, M> {
-	fn set_node(&mut self, reference_key: &[u8], relative_index: u64, node: &Node<V, S, D, M>) {
-		let key = Self::vec_address(reference_key, relative_index);
+	fn set_node(
+		&mut self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+		node: &Node<V, S, D, M>,
+	) {
+		let key = Self::vec_address(reference_key, parent_encoded_indexes, relative_index);
 		self.0.borrow_mut().insert(key, node.clone());
 	}
-	fn remove_node(&mut self, reference_key: &[u8], relative_index: u64) {
-		let key = Self::vec_address(reference_key, relative_index);
+	fn remove_node(
+		&mut self,
+		reference_key: &[u8],
+		parent_encoded_indexes: &[u8],
+		relative_index: u64,
+	) {
+		let key = Self::vec_address(reference_key, parent_encoded_indexes, relative_index);
 		self.0.borrow_mut().remove(&key);
 	}
 }
@@ -214,6 +276,10 @@ pub struct Head<V, S, D, M, B, NI> {
 	/// Backend key used for this head, or any unique identifying key
 	/// that we can use to calculate location key of `Node`s from  `Head`.
 	reference_key: Vec<u8>,
+	/// When stacking multiple head like in `Tree` we store
+	/// parent indexes encoded and concatenated (for tree there is only
+	/// two levels so it is just encoded index).
+	parent_encoded_indexes: Vec<u8>,
 	/// All nodes are persisted under this backend storage.
 	backend: B,
 	/// New node initializing contant.
@@ -222,13 +288,15 @@ pub struct Head<V, S, D, M, B, NI> {
 
 #[derive(Encode, Decode)]
 /// Codec fragment for head.
-struct HeadCodec {
+struct HeadCodec<'a> {
 	/// The index of the first node, inclusive.
 	start_node_index: u64,
 	/// The index of the last node, non inclusive (next index to use)
 	end_node_index: u64,
 	/// Number of historied values stored in head and all past nodes.
 	len: u64,
+	/// The encoded indexes if needed (empty array otherwhise).
+	parent_encoded_indexes: Cow<'a, Vec<u8>>,
 }
 
 impl<V, S, D, M, B, NI> Encode for Head<V, S, D, M, B, NI>
@@ -245,6 +313,7 @@ impl<V, S, D, M, B, NI> Encode for Head<V, S, D, M, B, NI>
 			start_node_index: self.start_node_index,
 			end_node_index: self.end_node_index,
 			len: self.len as u64,
+			parent_encoded_indexes: Cow::Borrowed(&self.parent_encoded_indexes),
 		}.encode_to(dest)
 	}
 }
@@ -262,8 +331,6 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 			Ok(len) => len,
 			_ => return None,
 		};
-//		let index: &[u8] = unimplemented!("TODO pass index as parameter when recursive call");
-//		let node_init_from = init.node_init_from.with_parent(init.current_index(), index);
 		let node_init_from = init.node_init_from.clone();
 		D::decode_with_context(input, &init.node_init_from).and_then(|data| {
 			let head_decoded = HeadCodec::decode(input).ok();
@@ -280,6 +347,7 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 					reference_key: init.key.clone(),
 					backend: init.backend.clone(),
 					node_init_from,
+					parent_encoded_indexes: head_decoded.parent_encoded_indexes.into_owned(),
 				}
 			})
 		})
@@ -297,11 +365,19 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	fn flush_changes(&mut self, trigger: bool) {
 		for d in self.old_start_node_index .. self.start_node_index {
 			if trigger {
-				if let Some(mut node) = self.backend.get_node(&self.reference_key[..], d) {
+				if let Some(mut node) = self.backend.get_node(
+					&self.reference_key[..],
+					&self.parent_encoded_indexes[..],
+					d,
+				) {
 					node.trigger_flush();
 				}
 			}
-			self.backend.remove_node(&self.reference_key[..], d);
+			self.backend.remove_node(
+				&self.reference_key[..],
+				&self.parent_encoded_indexes[..],
+				d,
+			);
 		}
 		// this comparison is needed in case we completly clear the initial range,
 		// then we avoid deleting nodes that got created.
@@ -309,11 +385,19 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 		self.old_start_node_index = self.start_node_index;
 		for d in end_node_index .. self.old_end_node_index {
 			if trigger {
-				if let Some(mut node) = self.backend.get_node(&self.reference_key[..], d) {
+				if let Some(mut node) = self.backend.get_node(
+					&self.reference_key[..],
+					&self.parent_encoded_indexes[..],
+					d,
+				) {
 					node.trigger_flush();
 				}
 			}
-			self.backend.remove_node(&self.reference_key[..], d);
+			self.backend.remove_node(
+				&self.reference_key[..],
+				&self.parent_encoded_indexes[..],
+				d,
+			);
 		}
 		self.old_end_node_index = self.end_node_index;
 		for (index, mut node) in self.fetched.borrow_mut().iter_mut().enumerate() {
@@ -321,7 +405,12 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 				if trigger {
 					node.trigger_flush();
 				}
-				self.backend.set_node(&self.reference_key[..], self.end_node_index - 1 - index as u64 , node);
+				self.backend.set_node(
+					&self.reference_key[..],
+					&self.parent_encoded_indexes[..],
+					self.end_node_index - 1 - index as u64,
+					node,
+				);
 				node.changed = false;
 			}
 		}
@@ -333,6 +422,9 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 pub struct ContextHead<B, NI> {
 	/// The key of the historical value stored in nodes.
 	pub key: Vec<u8>,
+	/// The encoded indexes (empty Vec for no indexes).
+	/// TODO is it needed?
+	pub encoded_indexes: Vec<u8>,
 	/// The nodes backend.
 	pub backend: B,
 	/// Int type for internal node content.
@@ -340,21 +432,21 @@ pub struct ContextHead<B, NI> {
 }
 
 impl<B: Clone, NI: ContextBuilder> ContextBuilder for ContextHead<B, NI> {
-	fn with_parent(&self, parent_index: Option<&[u8]>, index: &[u8]) -> Self {
+	const USE_INDEXES: bool = true;
 
-		let mut key = self.key.clone();
-		parent_index.map(|b| key.extend_from_slice(b));
-		key.extend_from_slice(&(index.len() as u32).to_be_bytes()[..]);
-		key.extend_from_slice(index);
+	fn with_indexes(&self, parent_indexes: &[u8], index: &[u8]) -> Self {
+		let mut encoded_indexes = parent_indexes.to_vec();
+		encoded_indexes.extend_from_slice(index);
 		ContextHead {
-			key,
+			key: self.key.clone(),
 			backend: self.backend.clone(),
 			node_init_from: self.node_init_from.clone(),
+			encoded_indexes,
 		}
 	}
 
-	fn current_index(&self) -> Option<&[u8]> {
-		Some(self.key.as_slice())
+	fn indexes(&self) -> &[u8] {
+		self.encoded_indexes.as_slice()
 	}
 }
 
@@ -393,6 +485,7 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 		NI: ContextBuilder,
 {
 	fn init_from(init: Self::Context) -> Self {
+		let parent_encoded_indexes = init.indexes().to_vec();
 		Head {
 			inner: Node {
 				data: D::init_from(init.node_init_from.clone()),
@@ -409,6 +502,7 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 			reference_key: init.key,
 			backend: init.backend,
 			node_init_from: init.node_init_from,
+			parent_encoded_indexes,
 		}
 	}
 }
@@ -447,7 +541,11 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 					}
 				};
 				if !has_node {
-					if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i as u64) {
+					if let Some(node) = self.backend.get_node(
+						self.reference_key.as_slice(),
+						self.parent_encoded_indexes.as_slice(),
+						i as u64,
+					) {
 						start -= node.data.len();
 						let r = if index >= start {
 							Some((self.fetched.borrow().len(), index - start))
@@ -500,7 +598,11 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			let inner_index = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
 				node.data.last()
 			} else {
-				if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), i) {
+				if let Some(node) = self.backend.get_node(
+					self.reference_key.as_slice(),
+					self.parent_encoded_indexes.as_slice(),
+					i,
+				) {
 					let inner_index = node.data.last();
 					self.fetched.borrow_mut().push(node);
 					inner_index
@@ -543,7 +645,11 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				(true, None)
 			};
 			let inner_index = if past {
-				if let Some(node) = self.backend.get_node(self.reference_key.as_slice(), index.0) {
+				if let Some(node) = self.backend.get_node(
+					self.reference_key.as_slice(),
+					self.parent_encoded_indexes.as_slice(),
+					index.0,
+				) {
 					debug_assert!(switched);
 					let inner_index = node.data.last();
 					self.fetched.borrow_mut().push(node);
@@ -980,6 +1086,7 @@ pub(crate) mod test {
 		let init_head = ContextHead {
 			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u64, D, M>>::new(),
 			key: b"any".to_vec(),
+			encoded_indexes: Vec::new(),
 			node_init_from: (),
 		};
 		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head);
@@ -1015,6 +1122,7 @@ pub(crate) mod test {
 		let init_head = ContextHead {
 			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u64, D, M>>::new(),
 			key: b"any".to_vec(),
+			encoded_indexes: Vec::new(),
 			node_init_from: (),
 		};
 		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head);
@@ -1031,6 +1139,7 @@ pub(crate) mod test {
 		let mut init_head = ContextHead {
 			backend: backend.clone(),
 			key: b"any".to_vec(),
+			encoded_indexes: Vec::new(),
 			node_init_from: (),
 		};
 		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head.clone());
@@ -1144,18 +1253,20 @@ pub(crate) mod test {
 		let backend1 = Backend1::new();
 		let mut init_head1: ContextHead<Backend1, ()> = ContextHead {
 			backend: backend1.clone(),
-			key: b"any".to_vec(), // should use conflict free key here, but fine for test
+			key: b"any".to_vec(),
+			encoded_indexes: Vec::new(),
 			node_init_from: (),
 		};
 		let backend2 = Backend2::new();
 		let mut init_head2 = ContextHead {
 			backend: backend2.clone(),
 			key: Vec::new(),
+			encoded_indexes: Vec::new(),
 			node_init_from: init_head1.clone(),
 		};
 		let mut head2 = Head2::init_from(init_head2.clone());
 		for i in 0u8..9 {
-			let mut head1 = Head1::init_from(init_head1.with_parent(init_head2.current_index(), &[i]));
+			let mut head1 = Head1::init_from(init_head1.with_indexes(init_head2.indexes(), &[i]));
 			for j in 0u8..9 {
 				head1.push(HistoriedValue{
 					value: vec![j, i],
