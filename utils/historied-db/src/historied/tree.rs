@@ -1134,13 +1134,11 @@ mod test {
 		}
 
 		// setting value respecting branch build order
-		for i in 1..4 {
-		//for i in 1..6 {
+		for i in 1..6 {
 			item.set(i.into(), &states.unchecked_latest_at(i.into()).unwrap());
 		}
 
-		for i in 1..4 {
-		//for i in 1..6 {
+		for i in 1..6 {
 			assert_eq!(item.get(&states.query_plan(i.into())), Some(i.into()));
 		}
 
@@ -1594,14 +1592,14 @@ mod test {
 		test_force_set_get::<Tree, u32>(((), ()));
 	}
 
-	#[test]
-	fn test_with_trigger() {
+	macro_rules! test_with_trigger_inner {
+		($meta: ty) => {{
 		use crate::backend::nodes::{Head, Node, ContextHead, InMemoryNoThreadBackend};
 		use crate::backend::in_memory::MemoryOnly;
 		use crate::Trigger;
 
+		type M = $meta;
 		type Value = u16;
-		type M = crate::backend::nodes::test::MetaNb1;
 		type MemOnly = MemoryOnly<Value, u32>;
 		type Backend1 = InMemoryNoThreadBackend::<Value, u32, MemOnly, M>;
 		type BD = Head<Value, u32, MemOnly, M, Backend1, ()>;
@@ -1719,7 +1717,15 @@ mod test {
 		assert_eq!(backend2.0.borrow_mut().len(), 1);
 		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1 - 6);
 		*/
+	}}}
+
+	#[test]
+	fn test_with_trigger() {
+		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb1);
+		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb2);
+		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb);
 	}
+
 
 	#[cfg(feature = "xdelta3-diff")]
 	#[test]

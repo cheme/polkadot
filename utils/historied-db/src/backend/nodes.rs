@@ -528,6 +528,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 			let mut i = self.end_node_index as usize;
 			while i > self.start_node_index as usize {
 				i -= 1;
+				// fetch_index is 0..(self.end_node_index - self.start_node_index)
 				let fetch_index = self.end_node_index as usize - i - 1;
 				let has_node = {
 					if let Some(node) = self.fetched.borrow().get(fetch_index) {
@@ -632,22 +633,18 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	}
 	fn previous_index(&self, mut index: Self::Index) -> Option<Self::Index> {
 		let mut switched = false;
-		if index.0 == self.end_node_index {
+		if index.0 >= self.end_node_index {
 			if let Some(inner_index) = self.inner.data.previous_index(index.1) {
 				index.1 = inner_index;
 				return Some(index);
 			} else {
-				if index.0 > self.start_node_index {
-					index.0 -= 1;
-					switched = true;
-				} else {
-					return None;
-				}
+				switched = true;
+				index.0 = 0;
 			}
 		}
-		loop {
-			let fetch_index = self.end_node_index - index.0 - 1;
-			let (past, inner_index) = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
+
+		while index.0 + self.start_node_index < self.end_node_index {
+			let (try_fetch, inner_index) = if let Some(node) = self.fetched.borrow().get(index.0 as usize) {
 				let inner_index = if switched {
 					switched = false;
 					node.data.last()
@@ -658,32 +655,31 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			} else {
 				(true, None)
 			};
-			let inner_index = if past {
-				if let Some(node) = self.backend.get_node(
-					self.reference_key.as_slice(),
-					self.parent_encoded_indexes.as_slice(),
-					index.0,
-				) {
-					debug_assert!(switched);
-					let inner_index = node.data.last();
-					self.fetched.borrow_mut().push(node);
-					inner_index
-				} else {
-					None
-				}
-			} else {
-				inner_index
-			};
-			if let Some(inner_index) = inner_index {
-				index.1 = inner_index;
-				return Some(index);
+			match (try_fetch, inner_index) {
+				(true, None) => {
+					// could memoize this access.
+					if let Some(node) = self.backend.get_node(
+						self.reference_key.as_slice(),
+						self.parent_encoded_indexes.as_slice(),
+						self.end_node_index - 1 - index.0,
+					) {
+						debug_assert!(switched);
+						self.fetched.borrow_mut().push(node);
+						continue;
+					} else {
+						return None;
+					}
+				},
+				(false, None) => {
+				},
+				(_, Some(inner_index)) => {
+					index.1 = inner_index;
+					return Some(index);
+				},
 			}
-			if index.0 > self.start_node_index {
-				index.0 -= 1;
-				switched = true;
-			} else {
-				break;
-			}
+
+			index.0 += 1;
+			switched = true;
 		}
 		None
 	}
@@ -830,9 +826,6 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 				let h = node.data.get(index.1);
 				node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
-			}
-			if V::TRIGGER {
-				let old_data = node.data.get(index.1);
 			}
 			node.data.remove(index.1);
 			first && node.data.len() == 0
@@ -1149,6 +1142,7 @@ pub(crate) mod test {
 		#[cfg(feature = "encoded-array-backend")]
 		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb>();
 	}
+
 	fn test_linear_storage_inner<D, M>()
 		where
 			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone,
