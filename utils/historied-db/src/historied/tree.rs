@@ -1596,11 +1596,11 @@ mod test {
 	fn test_with_trigger() {
 		use crate::backend::nodes::{Head, Node, ContextHead, InMemoryNoThreadBackend};
 		use crate::backend::in_memory::MemoryOnly;
-		use crate::backend::nodes::test::MetaNb2;
+		use crate::backend::nodes::test::MetaNb;
 		use crate::Trigger;
 
 		type Value = u16;
-		type M = MetaNb2;
+		type M = MetaNb;
 		type MemOnly = MemoryOnly<Value, u32>;
 		type Backend1 = InMemoryNoThreadBackend::<Value, u32, MemOnly, M>;
 		type BD = Head<Value, u32, MemOnly, M, Backend1, ()>;
@@ -1629,7 +1629,7 @@ mod test {
 		context2.0.key = b"other".to_vec();
 		context2.1.key = context2.0.key.clone();
 		test_set_get::<Tree, u16>(context1.clone());
-/*		test_migrate::<Tree, u32>(context1.clone(), context2.clone()) */
+		test_migrate::<Tree, u16>(context1.clone(), context2.clone());
 
 		/*
 		let mut head2 = Head2::init_from(init_head2.clone());
