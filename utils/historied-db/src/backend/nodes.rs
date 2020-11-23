@@ -1085,8 +1085,17 @@ pub(crate) mod test {
 		const APPLY_SIZE_LIMIT: bool = false;
 		const MAX_NODE_LEN: usize = 0;
 		const MAX_NODE_ITEMS: usize = 3;
+		const STORAGE_PREFIX: &'static [u8] = b"nodes3";
+	}
+	#[derive(Clone, Copy)]
+	pub(crate) struct MetaNb2;
+	impl NodesMeta for MetaNb2 {
+		const APPLY_SIZE_LIMIT: bool = false;
+		const MAX_NODE_LEN: usize = 0;
+		const MAX_NODE_ITEMS: usize = 2;
 		const STORAGE_PREFIX: &'static [u8] = b"nodes2";
 	}
+
 
 	#[test]
 	fn nodes_push_and_query() {

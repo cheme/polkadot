@@ -1065,21 +1065,69 @@ mod test {
 		let _a: Option<HistoriedValue<V2, u32>> = bd.get_lookup(1usize);
 	}
 
-	#[test]
-	fn test_set_get() {
-		// TODO EMCH parameterize test
-		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
-		type D = crate::backend::in_memory::MemoryOnly<
-			crate::historied::linear::Linear<u32, u32, BD>,
-			u32,
-		>;
+	fn test_set_get_ref<T, V>(context: T::Context)
+		where
+			V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
+			T: InitFrom,
+			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
+			T: crate::historied::DataRef<V>,
+			T: crate::historied::Data<V>,
+			T: crate::historied::DataMut<
+				V,
+				Index = (u32, u32),
+				SE = Latest<(u32, u32)>,
+			>,
+	{
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _
 		let mut states = test_states();
-		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+
+		let mut item: T = InitFrom::init_from(context.clone());
+
+		// could rand shuffle if rand get imported later.
+		let disordered = [
+			[1u16,2,3,5,4],
+			[2,5,1,3,4],
+			[5,3,2,4,1],
+		];
+		for r in disordered.iter() {
+			for i in r {
+				let v: V = i.clone().into();
+				let i: u32 = i.clone().into();
+				item.set(v, &states.unchecked_latest_at(i).unwrap());
+			}
+			for i in r {
+				let v: V = i.clone().into();
+				let i: u32 = i.clone().into();
+				assert_eq!(item.get_ref(&states.query_plan(i)), Some(&v));
+			}
+		}
+	}
+
+
+	fn test_set_get<T, V>(context: T::Context)
+		where
+			V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
+			T: InitFrom,
+			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
+			T: crate::historied::Data<V>,
+			T: crate::historied::DataMut<
+				V,
+				Index = (u32, u32),
+				SE = Latest<(u32, u32)>,
+			>,
+	{
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+
+		let mut item: T = InitFrom::init_from(context.clone());
 
 		for i in 0..6 {
 			assert_eq!(item.get(&states.query_plan(i)), None);
@@ -1087,63 +1135,82 @@ mod test {
 
 		// setting value respecting branch build order
 		for i in 1..6 {
-			item.set(i, &states.unchecked_latest_at(i).unwrap());
+			item.set(i.into(), &states.unchecked_latest_at(i.into()).unwrap());
 		}
 
 		for i in 1..6 {
-			assert_eq!(item.get_ref(&states.query_plan(i)), Some(&i));
+			assert_eq!(item.get(&states.query_plan(i.into())), Some(i.into()));
 		}
 
-		let ref_1 = states.query_plan(1);
+		let ref_1 = states.query_plan(1u16.into());
 		assert_eq!(Some(false), states.branch_state_mut(&1, |ls| ls.drop_state()));
 
 		let ref_1_bis = states.query_plan(1);
-		assert_eq!(item.get(&ref_1), Some(1));
+		assert_eq!(item.get(&ref_1), Some(1.into()));
 		assert_eq!(item.get(&ref_1_bis), None);
-		item.set(11, &states.unchecked_latest_at(1).unwrap());
+		item.set(11.into(), &states.unchecked_latest_at(1).unwrap());
 		// lazy linear clean of drop state on insert
-		assert_eq!(item.get(&ref_1), Some(11));
-		assert_eq!(item.get(&ref_1_bis), Some(11));
+		assert_eq!(item.get(&ref_1), Some(11.into()));
+		assert_eq!(item.get(&ref_1_bis), Some(11.into()));
 
-		item = InitFrom::init_from(((), ()));
+		item = InitFrom::init_from(context.clone());
 
 		// need fresh state as previous modification leaves unattached branches
 		let mut states = test_states();
 		// could rand shuffle if rand get imported later.
 		let disordered = [
-			[1,2,3,5,4],
+			[1u16,2,3,5,4],
 			[2,5,1,3,4],
 			[5,3,2,4,1],
 		];
 		for r in disordered.iter() {
 			for i in r {
-				item.set(*i, &states.unchecked_latest_at(*i).unwrap());
+				let v: V = i.clone().into();
+				let i: u32 = i.clone().into();
+				item.set(v, &states.unchecked_latest_at(i).unwrap());
 			}
 			for i in r {
-				assert_eq!(item.get_ref(&states.query_plan(*i)), Some(i));
+				let v: V = i.clone().into();
+				let i: u32 = i.clone().into();
+				assert_eq!(item.get(&states.query_plan(i)), Some(v));
 			}
 		}
 	}
 
+	#[cfg(not(feature = "conditional-data"))]
+	fn test_conditional_set_get<T, V>(_context: T::Context, _context2: T::Context)
+		where T: crate::historied::DataMut<u32> {
+	}
+
 	#[cfg(feature = "conditional-data")]
-	#[test]
-	fn test_conditional_set_get() {
+	fn test_conditional_set_get<T, V>(context: T::Context, context2: T::Context)
+		where
+			V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
+			T: InitFrom,
+			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
+			T: crate::historied::DataRef<V>,
+			T: crate::historied::Data<V>,
+			T: crate::historied::DataMut<
+				V,
+				Index = (u32, u32),
+				SE = Latest<(u32, u32)>,
+			>,
+			T: crate::historied::conditional::ConditionalDataMut<
+				V,
+				IndexConditional = (u32, u32),
+			>,
+	{
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::historied::conditional::ConditionalDataMut;
 		use crate::test::StateInput;
-		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
-		type D = crate::backend::in_memory::MemoryOnly<
-			crate::historied::linear::Linear<u32, u32, BD>,
-			u32,
-		>;
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _
 		let mut states = test_states();
-		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
-		let mut item2: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+		let mut item: T = InitFrom::init_from(context.clone());
+		let mut item2: T = InitFrom::init_from(context2.clone());
 
 		for i in 0..6 {
 			assert_eq!(item.get(&states.query_plan(i)), None);
@@ -1151,21 +1218,21 @@ mod test {
 
 		// setting value not respecting branch build order
 		// set in past (latest is 1, 2) is fine
-		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(1, &(1, 1)));
-		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(1, &(1, 2)));
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(1.into(), &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(1.into(), &(1, 2)));
 		// but not with another value
-		assert_eq!(None, item.set_if_possible(8, &(1, 0)));
-		assert_eq!(None, item2.set_if_possible(8, &(1, 1)));
+		assert_eq!(None, item.set_if_possible(8.into(), &(1, 0)));
+		assert_eq!(None, item2.set_if_possible(8.into(), &(1, 1)));
 		// can overwrite
-		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(2, &(1, 1)));
-		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(2, &(1, 2)));
+		assert_eq!(Some(UpdateResult::Changed(())), item.set_if_possible(2.into(), &(1, 1)));
+		assert_eq!(Some(UpdateResult::Changed(())), item2.set_if_possible(2.into(), &(1, 2)));
 		// not if not allowed
-		assert_eq!(None, item.set_if_possible_no_overwrite(3, &(1, 1)));
-		assert_eq!(None, item2.set_if_possible_no_overwrite(3, &(1, 2)));
+		assert_eq!(None, item.set_if_possible_no_overwrite(3.into(), &(1, 1)));
+		assert_eq!(None, item2.set_if_possible_no_overwrite(3.into(), &(1, 2)));
 		// unchanged is allowed
-		assert_eq!(Some(UpdateResult::Unchanged), item.set_if_possible(2, &(1, 1)));
-		assert_eq!(Some(UpdateResult::Unchanged), item2.set_if_possible(2, &(1, 2)));
-		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&2));
+		assert_eq!(Some(UpdateResult::Unchanged), item.set_if_possible(2.into(), &(1, 1)));
+		assert_eq!(Some(UpdateResult::Unchanged), item2.set_if_possible(2.into(), &(1, 2)));
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&2.into()));
 		states.drop_state(&1u32);
 		states.drop_state(&1u32);
 		assert_eq!(item.get_ref(&states.query_plan(1)), None);
@@ -1173,45 +1240,60 @@ mod test {
 		// no longer allowd to change the branch TODO we should be able to, but
 		// with blockchain tree use case with removal only on canonicalisation
 		// and pruning it should be fine.
-		assert_eq!(None, item2.set_if_possible(3, &(1, 1)));
+		assert_eq!(None, item2.set_if_possible(3.into(), &(1, 1)));
+	}
+
+	#[cfg(not(feature = "force-data"))]
+	fn test_force_set_get<T, V>(context: T::Context)
+		where T: crate::historied::DataMut<u32> {
 	}
 
 	#[cfg(feature = "force-data")]
-	#[test]
-	fn test_force_set_get() {
+	fn test_force_set_get<T, V>(context: T::Context)
+		where
+			V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
+			T: InitFrom,
+			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
+			T: crate::historied::DataRef<V>,
+			T: crate::historied::Data<V>,
+			T: crate::historied::DataMut<
+				V,
+				Index = (u32, u32),
+				SE = Latest<(u32, u32)>,
+			>,
+			T: crate::historied::force::ForceDataMut<
+				V,
+				IndexForce = (u32, u32),
+			>,
+	{
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		use crate::historied::force::ForceDataMut;
-		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
-		type D = crate::backend::in_memory::MemoryOnly<
-			crate::historied::linear::Linear<u32, u32, BD>,
-			u32,
-		>;
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _
 		let mut states = test_states();
-		let mut item: Tree<u32, u32, u32, D, BD> = InitFrom::init_from(((), ()));
+		let mut item: T = InitFrom::init_from(context.clone());
 
 		for i in 0..6 {
 			assert_eq!(item.get(&states.query_plan(i)), None);
 		}
 
 		// setting value not respecting branch build order
-		assert_eq!(UpdateResult::Changed(()), item.force_set(0, &(1, 2)));
-		assert_eq!(UpdateResult::Changed(()), item.force_set(1, &(1, 1)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(0.into(), &(1, 2)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(1.into(), &(1, 1)));
 		// out of range
-		assert_eq!(UpdateResult::Changed(()), item.force_set(8, &(1, 0)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(8.into(), &(1, 0)));
 		// can set in invalid range too
-		assert_eq!(UpdateResult::Changed(()), item.force_set(3, &(2, 5)));
-		assert_eq!(UpdateResult::Changed(()), item.force_set(2, &(2, 1)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(3.into(), &(2, 5)));
+		assert_eq!(UpdateResult::Changed(()), item.force_set(2.into(), &(2, 1)));
 
-		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&0));
-		assert_eq!(item.get_ref(&states.query_plan(2)), Some(&2));
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&0.into()));
+		assert_eq!(item.get_ref(&states.query_plan(2)), Some(&2.into()));
 		states.drop_state(&1u32);
-		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&1));
+		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&1.into()));
 		states.drop_state(&1u32);
 		assert_eq!(item.get_ref(&states.query_plan(1)), None);
 	}
@@ -1287,8 +1369,18 @@ mod test {
 		}
 	}
 
-	#[test]
-	fn test_migrate() {
+	fn test_migrate<T, V>(context: T::Context, context2: T::Context)
+		where
+			V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
+			T: InitFrom,
+			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
+			T: crate::historied::Data<V>,
+			T: crate::historied::DataMut<
+				V,
+				Index = (u32, u32),
+				SE = Latest<(u32, u32)>,
+			>,
+	{
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<u16, u32>;
@@ -1409,10 +1501,10 @@ mod test {
 
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
-			assert_eq!(gc_item1.get_ref(&fp), item1.get_ref(&fp));
-			assert_eq!(gc_item2.get_ref(&fp), item2.get_ref(&fp));
-			assert_eq!(gc_item3.get_ref(&fp), item3.get_ref(&fp));
-			assert_eq!(gc_item4.get_ref(&fp), item4.get_ref(&fp));
+			assert_eq!(gc_item1.get(&fp), item1.get(&fp));
+			assert_eq!(gc_item2.get(&fp), item2.get(&fp));
+			assert_eq!(gc_item3.get(&fp), item3.get(&fp));
+			assert_eq!(gc_item4.get(&fp), item4.get(&fp));
 		}
 //		panic!("{:?}", (gc, item1, gc_item1));
 
@@ -1436,10 +1528,10 @@ mod test {
 
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
-			assert_eq!(gc_item1.get_ref(&fp), item1.get_ref(&fp));
-			assert_eq!(gc_item2.get_ref(&fp), item2.get_ref(&fp));
-			assert_eq!(gc_item3.get_ref(&fp), item3.get_ref(&fp));
-			assert_eq!(gc_item4.get_ref(&fp), item4.get_ref(&fp));
+			assert_eq!(gc_item1.get(&fp), item1.get(&fp));
+			assert_eq!(gc_item2.get(&fp), item2.get(&fp));
+			assert_eq!(gc_item3.get(&fp), item3.get(&fp));
+			assert_eq!(gc_item4.get(&fp), item4.get(&fp));
 		}
 		assert_eq!(gc_item1.nb_internal_history(), 8);
 		assert_eq!(gc_item2.nb_internal_history(), 4);
@@ -1470,10 +1562,10 @@ mod test {
 		}
 		for i in filter_in.iter() {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
-			assert_eq!(gc_item1.get_ref(&fp), item1.get_ref(&fp));
-			assert_eq!(gc_item2.get_ref(&fp), item2.get_ref(&fp));
-			assert_eq!(gc_item3.get_ref(&fp), None); // neutral element
-			assert_eq!(gc_item4.get_ref(&fp), item4.get_ref(&fp));
+			assert_eq!(gc_item1.get(&fp), item1.get(&fp));
+			assert_eq!(gc_item2.get(&fp), item2.get(&fp));
+			assert_eq!(gc_item3.get(&fp), None); // neutral element
+			assert_eq!(gc_item4.get(&fp), item4.get(&fp));
 		}
 		assert_eq!(gc_item1.nb_internal_history(), 3);
 		assert_eq!(gc_item2.nb_internal_history(), 2);
@@ -1483,6 +1575,149 @@ mod test {
 		assert_eq!(gc_item2.nb_internal_branch(), 1);
 		assert_eq!(gc_item3.nb_internal_branch(), 0);
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
+	}
+
+	#[test]
+	fn test_memory_only() {
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		type Tree = super::Tree<u32, u32, u32, D, BD>;
+		test_set_get::<Tree, u32>(((), ()));
+		test_set_get_ref::<Tree, u32>(((), ()));
+		test_migrate::<Tree, u32>(((), ()), ((), ()));
+		test_conditional_set_get::<Tree, u32>(((), ()), ((), ()));
+		test_force_set_get::<Tree, u32>(((), ()));
+	}
+
+	#[test]
+	fn test_with_trigger() {
+		use crate::backend::nodes::{Head, Node, ContextHead, InMemoryNoThreadBackend};
+		use crate::backend::in_memory::MemoryOnly;
+		use crate::backend::nodes::test::MetaNb2;
+		use crate::Trigger;
+
+		type Value = u16;
+		type M = MetaNb2;
+		type MemOnly = MemoryOnly<Value, u32>;
+		type Backend1 = InMemoryNoThreadBackend::<Value, u32, MemOnly, M>;
+		type BD = Head<Value, u32, MemOnly, M, Backend1, ()>;
+
+		type V2 = crate::historied::linear::Linear<Value, u32, BD>;
+		type MemOnly2 = MemoryOnly<V2, u32>;
+		type Backend2 = InMemoryNoThreadBackend::<V2, u32, MemOnly2, M>;
+		type D = Head<V2, u32, MemOnly2, M, Backend2, ContextHead<Backend1, ()>>;
+		let backend1 = Backend1::new();
+		let init_head_child = ContextHead {
+			backend: backend1.clone(),
+			key: b"any".to_vec(),
+			node_init_from: (),
+			encoded_indexes: Vec::new(),
+		};
+		let backend2 = Backend2::new();
+		let init_head = ContextHead {
+			backend: backend2.clone(),
+			key: b"any".to_vec(),
+			node_init_from: init_head_child.clone(),
+			encoded_indexes: Vec::new(),
+		};
+		type Tree = super::Tree<u32, u32, Value, D, BD>;
+		let context1 = (init_head, init_head_child);
+		let mut context2 = context1.clone();
+		context2.0.key = b"other".to_vec();
+		context2.1.key = context2.0.key.clone();
+		test_set_get::<Tree, u16>(context1.clone());
+/*		test_migrate::<Tree, u32>(context1.clone(), context2.clone()) */
+
+		/*
+		let mut head2 = Head2::init_from(init_head2.clone());
+		for i in 0u8..9 {
+			let mut head1 = Head1::init_from(init_head1.with_indexes(init_head2.indexes(), &[i]));
+			for j in 0u8..9 {
+				head1.push(HistoriedValue{
+					value: vec![j, i],
+					state: 8 as u64,
+				});
+			}
+			head2.push(HistoriedValue{
+				value: head1,
+				state: i as u64,
+			});
+		}
+
+		assert_eq!(backend1.0.borrow_mut().len(), 0);
+		assert_eq!(backend2.0.borrow_mut().len(), 0);
+		// query
+		for i in 0u8..9 {
+			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
+			for j in 0u8..9 {
+				let value = head1.get(head1.lookup(j as usize).unwrap()).value;
+				assert_eq!(value, vec![j, i]);
+			}
+		}
+
+		head2.trigger_flush();
+		// 9 size, 3 per nodes - 1 head
+		assert_eq!(backend2.0.borrow_mut().len(), 2);
+		// (9 size, 3 per nodes - 1 head) * 9
+		assert_eq!(backend1.0.borrow_mut().len(), 18);
+
+		head2.clear_fetch_nodes();
+
+		let encoded_head = head2.encode();
+		head2 = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head2).unwrap();
+		// query
+		for i in 0u8..9 {
+			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
+			for j in 0u8..9 {
+				let value = head1.get(head1.lookup(j as usize).unwrap()).value;
+				assert_eq!(value, vec![j, i]);
+			}
+		}
+
+		
+		// single level 2 rem
+		let mut head1 = head2.get(head2.lookup(4).unwrap());
+		head1.value.remove(head1.value.lookup(0).unwrap());;
+		head1.value.remove(head1.value.lookup(0).unwrap());;
+		head1.value.remove(head1.value.lookup(0).unwrap());
+		head2.emplace(head2.lookup(4).unwrap(), head1);
+		assert_eq!(backend2.0.borrow_mut().len(), 2);
+		assert_eq!(backend1.0.borrow_mut().len(), 18);
+
+		head2.trigger_flush();
+
+		assert_eq!(backend2.0.borrow_mut().len(), 2);
+		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1);
+
+		// single level 1 rem
+		for i in 0u8..3 {
+			let mut head1 = head2.get(head2.lookup(i as usize).unwrap());
+			head1.value.clear();
+/*			for j in 0u8..9 {
+				head1.value.pop();
+			} TODO make it work for pop too
+*/
+			// It is responsability of calling code to flush on removal.
+			// TODO change tree code to flush on branch removal
+			// when V::TRIGGER (and copy this test on tree).
+			// In practice this is related to intention of caller
+			// eg get change pop push do not need flush.
+			head1.trigger_flush();
+		}
+
+		for _ in 0u8..3 {
+			// delete these empty heads
+			head2.remove(head2.lookup(0 as usize).unwrap());
+		}
+
+		head2.trigger_flush();
+
+		assert_eq!(backend2.0.borrow_mut().len(), 1);
+		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1 - 6);
+		*/
 	}
 
 	#[cfg(feature = "xdelta3-diff")]
