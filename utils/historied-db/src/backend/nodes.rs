@@ -749,7 +749,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			self.start_node_index = if i as u64 == self.end_node_index {
 				self.end_node_index
 			} else {
-				self.start_node_index + self.end_node_index - i as u64 - 1
+				self.end_node_index - i as u64 - 1
 			};
 			if self.len > split_off {
 				self.len -= split_off;

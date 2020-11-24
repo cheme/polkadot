@@ -316,6 +316,18 @@ mod test {
 				assert_eq!(storage2.get_state_lookup(j), None);
 			}
 		}
+		for i in 0usize..30 {
+			let mut storage2 = storage.clone();
+			storage2.remove_lookup(i);
+			for j in 0usize..i {
+				assert_eq!(storage2.get_state_lookup(j), Some(j as State));
+			}
+			for j in i..29 {
+				assert_eq!(storage2.get_state_lookup(j), Some(j as State + 1));
+			}
+			assert_eq!(storage2.get_state_lookup(29), None);
+		}
+
 		storage.truncate_until(5);
 		for i in 0usize..25 {
 			assert_eq!(storage.get_state_lookup(i), Some(i as State + 5));
