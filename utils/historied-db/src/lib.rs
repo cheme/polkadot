@@ -122,6 +122,13 @@ macro_rules! empty_init {
 			const TRIGGER: bool = false;
 			fn trigger_flush(&mut self) { }
 		}
+
+		impl DecodeWithContext for $type {
+			fn decode_with_context<I: codec::Input>(input: &mut I, _init: &Self::Context) -> Option<Self> {
+				use codec::Decode;
+				Self::decode(input).ok()
+			}
+		}
 	}
 }
 empty_init!(u8);

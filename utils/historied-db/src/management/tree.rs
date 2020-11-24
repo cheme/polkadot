@@ -1511,10 +1511,16 @@ impl<
 pub(crate) mod test {
 	use super::*;
 
-	pub(crate) fn test_states() -> Tree<u32, u32, ()> {
+	/// Test state used by management test, no mappings.
+	pub(crate) type TestState = Tree<u32, u32, ()>;
+	/// Test state used by management test, with test mappings.
+	pub(crate) type TestStateMapping = Tree<u32, u32, crate::test::MappingTests>;
+
+	pub(crate) fn test_states() -> TestState {
 		test_states_inner()
 	}
-	pub(crate) fn test_states_st() -> Tree<u32, u32, crate::test::MappingTests> {
+
+	pub(crate) fn test_states_st() -> TestStateMapping {
 		test_states_inner()
 	}
 	

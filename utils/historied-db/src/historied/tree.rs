@@ -944,7 +944,7 @@ pub mod conditional {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::management::tree::test::{test_states, test_states_st};
+	use crate::management::tree::test::{test_states, test_states_st, TestState};
 	use crate::InitFrom;
 	use super::aggregate::Sum as TreeSum;
 
@@ -1253,8 +1253,10 @@ mod test {
 		where
 			V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
 			T: InitFrom,
+			T: codec::Encode,
+			T: DecodeWithContext,
+			T: crate::Trigger,
 			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
-			T: crate::historied::DataRef<V>,
 			T: crate::historied::Data<V>,
 			T: crate::historied::DataMut<
 				V,
@@ -1290,12 +1292,27 @@ mod test {
 		assert_eq!(UpdateResult::Changed(()), item.force_set(3.into(), &(2, 5)));
 		assert_eq!(UpdateResult::Changed(()), item.force_set(2.into(), &(2, 1)));
 
-		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&0.into()));
-		assert_eq!(item.get_ref(&states.query_plan(2)), Some(&2.into()));
-		states.drop_state(&1u32);
-		assert_eq!(item.get_ref(&states.query_plan(1)), Some(&1.into()));
-		states.drop_state(&1u32);
-		assert_eq!(item.get_ref(&states.query_plan(1)), None);
+		let mut states2 = states.clone();
+
+		let check = |states: &mut TestState, item: &T| {
+			assert_eq!(item.get(&states.query_plan(1)), Some(0.into()));
+			assert_eq!(item.get(&states.query_plan(2)), Some(2.into()));
+			states.drop_state(&1u32);
+			assert_eq!(item.get(&states.query_plan(1)), Some(1.into()));
+			states.drop_state(&1u32);
+			assert_eq!(item.get(&states.query_plan(1)), None);
+		};
+		check(&mut states, &item);
+
+		if T::TRIGGER {
+			// Using the item from fresh state
+			// reqires trigger first
+			item.trigger_flush();
+		}
+
+		let encoded = item.encode();
+		let item = T::decode_with_context(&mut encoded.as_slice(), &context).unwrap();
+		check(&mut states2, &item);
 	}
 
 	use ref_cast::RefCast;
@@ -1628,7 +1645,8 @@ mod test {
 		context2.0.key = b"other".to_vec();
 		context2.1.key = context2.0.key.clone();
 		test_set_get::<Tree, u16>(context1.clone());
-//		test_migrate::<Tree, u16>(context1.clone(), context2.clone());
+		test_migrate::<Tree, u16>(context1.clone(), context2.clone());
+		test_force_set_get::<Tree, u16>(context1.clone());
 
 		/*
 		let mut head2 = Head2::init_from(init_head2.clone());
