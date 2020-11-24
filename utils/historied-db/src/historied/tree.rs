@@ -566,8 +566,22 @@ impl<
 
 		result
 	}
+}
 
-	#[cfg(test)]
+#[cfg(test)]
+pub(crate) trait TreeTestMethods {
+	fn nb_internal_history(&self) -> usize;
+	fn nb_internal_branch(&self) -> usize;
+}
+
+#[cfg(test)]
+impl<
+	I: Default + Eq + Ord + Clone,
+	BI: LinearState + SubAssign<BI> + Clone,
+	V: Value + Clone + Eq,
+	D: LinearStorage<Linear<V, BI, BD>, I>,
+	BD: LinearStorage<V::Storage, BI>,
+> TreeTestMethods for Tree<I, BI, V, D, BD> {
 	fn nb_internal_history(&self) -> usize {
 		let mut nb = 0;
 		for index in self.branches.rev_index_iter() {
@@ -576,12 +590,11 @@ impl<
 		}
 		nb
 	}
-	#[cfg(test)]
+
 	fn nb_internal_branch(&self) -> usize {
 		self.branches.len()
 	}
 }
-
 
 impl<
 	I: Default + Eq + Ord + Clone + Encode,
@@ -1386,25 +1399,28 @@ mod test {
 		}
 	}
 
-	fn test_migrate<T, V>(context: T::Context, context2: T::Context)
-		where
-			V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
-			T: InitFrom,
-			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
-			T: crate::historied::Data<V>,
-			T: crate::historied::DataMut<
-				V,
-				Index = (u32, u32),
-				SE = Latest<(u32, u32)>,
-			>,
+	fn test_migrate<T, V> (
+		context1: T::Context,
+		context2: T::Context,
+		context3: T::Context,
+		context4: T::Context,
+	)	where
+		V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
+		T: InitFrom,
+		T: Clone,
+		T: TreeTestMethods,
+		T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
+		T: crate::historied::Data<V>,
+		T: crate::historied::DataMut<
+			V,
+			Index = (u32, u32),
+			SE = Latest<(u32, u32)>,
+			GC = MultipleGc<u32, u32>,
+			Migrate = MultipleMigrate<u32, u32>,
+		>,
 	{
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
-		type BD = crate::backend::in_memory::MemoryOnly<u16, u32>;
-		type D = crate::backend::in_memory::MemoryOnly<
-			crate::historied::linear::Linear<U16Neutral, u32, BD>,
-			u32,
-		>;
 
 		let check_state = |states: &mut crate::test::InMemoryMgmtSer, target: Vec<(u32, u32)>| {
 			let mut gc = states.get_migrate();
@@ -1422,8 +1438,8 @@ mod test {
 		let mut states = crate::test::InMemoryMgmtSer::default();
 		let s0 = states.latest_state_fork();
 
-		let mut item1: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
-		let mut item2: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		let mut item1: T = InitFrom::init_from(context1.clone());
+		let mut item2: T = InitFrom::init_from(context2.clone());
 		let s1 = states.append_external_state(StateInput(1), &s0).unwrap();
 		item1.set(1.into(), &states.get_db_state_mut(&StateInput(1)).unwrap());
 		item2.set(1.into(), &states.get_db_state_mut(&StateInput(1)).unwrap());
@@ -1455,8 +1471,8 @@ mod test {
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _ _
-		let mut item3: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
-		let mut item4: Tree<u32, u32, U16Neutral, D, BD> = InitFrom::init_from(((), ()));
+		let mut item3: T = InitFrom::init_from(context3.clone());
+		let mut item4: T = InitFrom::init_from(context4.clone());
 		item1.set(15.into(), &states.get_db_state_mut(&StateInput(5)).unwrap());
 		item2.set(15.into(), &states.get_db_state_mut(&StateInput(5)).unwrap());
 		item1.set(12.into(), &states.get_db_state_mut(&StateInput(2)).unwrap());
@@ -1581,16 +1597,28 @@ mod test {
 			let fp = states.get_db_state(&StateInput(*i)).unwrap();
 			assert_eq!(gc_item1.get(&fp), item1.get(&fp));
 			assert_eq!(gc_item2.get(&fp), item2.get(&fp));
-			assert_eq!(gc_item3.get(&fp), None); // neutral element
+			if V::NEUTRAL {
+				assert_eq!(gc_item3.get(&fp), None);
+			} else {
+				assert_eq!(gc_item3.get(&fp), item3.get(&fp));
+			}
 			assert_eq!(gc_item4.get(&fp), item4.get(&fp));
 		}
 		assert_eq!(gc_item1.nb_internal_history(), 3);
 		assert_eq!(gc_item2.nb_internal_history(), 2);
-		assert_eq!(gc_item3.nb_internal_history(), 0);
+		if V::NEUTRAL {
+			assert_eq!(gc_item3.nb_internal_history(), 0);
+		} else {
+			assert_eq!(gc_item3.nb_internal_history(), 1);
+		}
 		assert_eq!(gc_item4.nb_internal_history(), 2);
 		assert_eq!(gc_item1.nb_internal_branch(), 2);
 		assert_eq!(gc_item2.nb_internal_branch(), 1);
-		assert_eq!(gc_item3.nb_internal_branch(), 0);
+		if V::NEUTRAL {
+			assert_eq!(gc_item3.nb_internal_branch(), 0);
+		} else {
+			assert_eq!(gc_item3.nb_internal_branch(), 1);
+		}
 		assert_eq!(gc_item4.nb_internal_branch(), 1);
 	}
 
@@ -1604,7 +1632,7 @@ mod test {
 		type Tree = super::Tree<u32, u32, u32, D, BD>;
 		test_set_get::<Tree, u32>(((), ()));
 		test_set_get_ref::<Tree, u32>(((), ()));
-		test_migrate::<Tree, u32>(((), ()), ((), ()));
+		test_migrate::<Tree, u32>(((), ()), ((), ()), ((), ()), ((), ()));
 		test_conditional_set_get::<Tree, u32>(((), ()), ((), ()));
 		test_force_set_get::<Tree, u32>(((), ()));
 	}
@@ -1644,8 +1672,15 @@ mod test {
 		let mut context2 = context1.clone();
 		context2.0.key = b"other".to_vec();
 		context2.1.key = context2.0.key.clone();
+		let mut context3 = context1.clone();
+		context3.0.key = b"othe3".to_vec();
+		context3.1.key = context3.0.key.clone();
+		let mut context4 = context1.clone();
+		context4.0.key = b"othe4".to_vec();
+		context4.1.key = context4.0.key.clone();
+
 		test_set_get::<Tree, u16>(context1.clone());
-		test_migrate::<Tree, u16>(context1.clone(), context2.clone());
+		//test_migrate::<Tree, u16>(context1.clone(), context2.clone(), context3.clone(), context4.clone());
 		test_force_set_get::<Tree, u16>(context1.clone());
 
 		/*
