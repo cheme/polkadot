@@ -279,7 +279,7 @@ impl<
 						UpdateResult::Changed(())
 					},
 					UpdateResult::Cleared(_) => {
-						self.branches.remove(branch_ix);
+						self.remove_branch(branch_ix);
 						if self.branches.len() == 0 {
 							UpdateResult::Cleared(())
 						} else {
@@ -316,7 +316,7 @@ impl<
 						UpdateResult::Changed(v)
 					},
 					UpdateResult::Cleared(v) => {
-						self.branches.remove(branch_ix);
+						self.remove_branch(branch_ix);
 						if self.branches.len() == 0 {
 							UpdateResult::Cleared(v)
 						} else {
@@ -407,8 +407,8 @@ impl<
 						self.branches.clear();
 						self.branches.push(new_branch);
 					} else {
-						self.branches.truncate_until(i - 1);
-						self.branches.emplace_lookup(0, new_branch);
+						self.truncate_branches_until(i);
+						self.branches.insert_lookup(0, new_branch);
 					}
 				}
 			},
@@ -463,7 +463,7 @@ impl<
 						result = UpdateResult::Changed(());
 					},
 					UpdateResult::Cleared(_) => {
-						self.branches.remove(index);
+						self.remove_branch(index);
 						result = UpdateResult::Changed(());
 					}
 				}
@@ -472,7 +472,7 @@ impl<
 
 				o_branch = next_branch_index.map(|i| (i, self.branches.get_state(i)));
 			} else if gc.0 < &branch_index {
-				self.branches.remove(index);
+				self.remove_branch(index);
 				result = UpdateResult::Changed(());
 				o_branch = next_branch_index.map(|i| (i, self.branches.get_state(i)));
 			} else {
@@ -503,13 +503,7 @@ impl<
 					None => None,
 					Some(n_start) => {
 						if first_new_start {
-/*							if BD::TRIGGER {
-								let mut branch = self.branches.get(branch_ix); // TODO have a
-								// variant of remove that return old value.
-								branch.value.storage_mut().clear();
-								branch.trigger_flush();
-							}*/
-							self.branches.remove(branch_ix);
+							self.remove_branch(branch_ix);
 							result = UpdateResult::Changed(());
 							next_branch_index = self.branches.previous_index(branch_ix);
 							continue;
@@ -530,7 +524,7 @@ impl<
 
 			if let Some(mut gc) = if let Some(change) = gc.storage.get(&branch.state) {
 				if change.0.is_none() {
-					self.branches.remove(branch_ix);
+					self.remove_branch(branch_ix);
 					result = UpdateResult::Changed(());
 					None
 				} else {
@@ -556,7 +550,7 @@ impl<
 						result = UpdateResult::Changed(());
 					},
 					UpdateResult::Cleared(_) => {
-						self.branches.remove(branch_ix);
+						self.remove_branch(branch_ix);
 						result = UpdateResult::Changed(());
 					}
 				}
@@ -571,6 +565,42 @@ impl<
 		}
 
 		result
+	}
+
+	fn trigger_clear_branch(&mut self, branch_ix: D::Index) {
+		let mut branch = self.branches.get(branch_ix); // TODO have a
+		// variant of remove that return old value.
+		// Also TODO a get_ref_mut version
+		branch.value.storage_mut().clear();
+		branch.trigger_flush();
+	}
+
+	// any removal of branch need to trigger its old value.
+	fn remove_branch(&mut self, branch_ix: D::Index) {
+		if BD::TRIGGER {
+			self.trigger_clear_branch(branch_ix);
+		}
+		self.branches.remove(branch_ix);
+	}
+
+	// trigger when we truncate or truncate_until.
+	// Warning all indexes are inclusive
+	fn truncate_branches_until(&mut self, end: usize) {
+		if BD::TRIGGER {
+			let nb = end;
+			if nb > 0 {
+				let mut index = self.branches.lookup(end - 1);
+				for _ in 0..nb {
+					if let Some(branch_index) = index {
+						self.trigger_clear_branch(branch_index);
+						index = self.branches.previous_index(branch_index);
+					} else {
+						break;
+					}
+				}
+			}
+		}
+		self.branches.truncate_until(end);
 	}
 }
 
@@ -824,7 +854,7 @@ pub mod force {
 							UpdateResult::Changed(())
 						},
 						UpdateResult::Cleared(_) => {
-							self.branches.remove(branch_ix);
+							self.remove_branch(branch_ix);
 							if self.branches.len() == 0 {
 								UpdateResult::Cleared(())
 							} else {
@@ -914,7 +944,7 @@ pub mod conditional {
 							Some(UpdateResult::Changed(()))
 						},
 						Some(UpdateResult::Cleared(_)) => {
-							self.branches.remove(branch_ix);
+							self.remove_branch(branch_ix);
 							if self.branches.len() == 0 {
 								Some(UpdateResult::Cleared(()))
 							} else {
@@ -1715,12 +1745,15 @@ mod test {
 		let mut context2 = context1.clone();
 		context2.0.key = b"other".to_vec();
 		context2.1.key = context2.0.key.clone();
+		context2.0.node_init_from = context2.1.clone();
 		let mut context3 = context1.clone();
 		context3.0.key = b"othe3".to_vec();
 		context3.1.key = context3.0.key.clone();
+		context3.0.node_init_from = context3.1.clone();
 		let mut context4 = context1.clone();
 		context4.0.key = b"othe4".to_vec();
 		context4.1.key = context4.0.key.clone();
+		context4.0.node_init_from = context4.1.clone();
 
 		test_set_get::<Tree, u16>(context1.clone());
 		test_migrate::<Tree, u16>(context1.clone(), context2.clone(), context3.clone(), context4.clone());
