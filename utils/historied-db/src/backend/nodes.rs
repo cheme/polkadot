@@ -626,7 +626,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				}
 			};
 			if let Some(inner_index) = inner_index {
-				return Some((i, inner_index));
+				return Some((fetch_index, inner_index));
 			}
 		}
 		None
@@ -909,7 +909,6 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			};
 
 			if ix < node.data.len() {
-
 				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					let mut add_size = 0;
 					for i in ix..node.data.len() {
@@ -928,6 +927,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		if self.len > at {
 			self.len = at;
 		}
+		// indicates head is empty and all index up to i
 		if !in_head {
 			let fetch_index = i as u64;
 			self.end_node_index -= fetch_index + 1;	
@@ -1073,8 +1073,8 @@ pub(crate) mod test {
 		const STORAGE_PREFIX: &'static [u8] = b"nodesS";
 	}
 	#[derive(Clone, Copy)]
-	pub(crate) struct MetaNb;
-	impl NodesMeta for MetaNb {
+	pub(crate) struct MetaNb3;
+	impl NodesMeta for MetaNb3 {
 		const APPLY_SIZE_LIMIT: bool = false;
 		const MAX_NODE_LEN: usize = 0;
 		const MAX_NODE_ITEMS: usize = 3;
@@ -1100,11 +1100,11 @@ pub(crate) mod test {
 	#[test]
 	fn nodes_push_and_query() {
 		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u64>, MetaSize>();
-		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb>();
+		nodes_push_and_query_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb3>();
 		#[cfg(feature = "encoded-array-backend")]
 		nodes_push_and_query_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
 		#[cfg(feature = "encoded-array-backend")]
-		nodes_push_and_query_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb>();
+		nodes_push_and_query_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb3>();
 	}
 
 	fn nodes_push_and_query_inner<D, M>()
@@ -1136,11 +1136,13 @@ pub(crate) mod test {
 	#[test]
 	fn test_linear_storage() {
 		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u64>, MetaSize>();
-		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb>();
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb1>();
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb2>();
+		test_linear_storage_inner::<MemoryOnly<Vec<u8>, u64>, MetaNb3>();
 		#[cfg(feature = "encoded-array-backend")]
 		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaSize>();
 		#[cfg(feature = "encoded-array-backend")]
-		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb>();
+		test_linear_storage_inner::<EncodedArray<Vec<u8>, DefaultVersion>, MetaNb3>();
 	}
 
 	fn test_linear_storage_inner<D, M>()
@@ -1164,7 +1166,7 @@ pub(crate) mod test {
 		use crate::backend::test::{Value, State};
 		use crate::Trigger;
 		type D = MemoryOnly<Vec<u8>, u64>;
-		type M = MetaNb;
+		type M = MetaNb3;
 		let backend = InMemoryNoThreadBackend::<Vec<u8>, u64, D, M>::new();
 		let mut init_head = ContextHead {
 			backend: backend.clone(),
@@ -1268,13 +1270,12 @@ pub(crate) mod test {
 		assert_eq!(head.get(index1).value, vec![2]); // refer to previous index 6
 	}
 
-
 	#[test]
 	fn test_change_with_backend_two_levels() {
 		use crate::backend::test::{Value, State};
 		use crate::Trigger;
 		type BD = MemoryOnly<Vec<u8>, u64>;
-		type M = MetaNb;
+		type M = MetaNb3;
 		type Backend1 = InMemoryNoThreadBackend::<Vec<u8>, u64, BD, M>;
 		type Head1 = Head::<Vec<u8>, u64, BD, M, Backend1, ()>;
 		type D = MemoryOnly<Head1, u64>;

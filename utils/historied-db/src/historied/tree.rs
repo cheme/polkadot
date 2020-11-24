@@ -245,7 +245,7 @@ impl<
 	BI: LinearState + SubAssign<BI> + One,
 	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V::Storage, BI>,
+	BD: LinearStorage<V::Storage, BI> + Trigger,
 > DataMut<V> for Tree<I, BI, V, D, BD> {
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
@@ -430,7 +430,7 @@ impl<
 	BI: LinearState + SubAssign<BI> + Clone,
 	V: Value + Clone + Eq,
 	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V::Storage, BI>,
+	BD: LinearStorage<V::Storage, BI> + Trigger,
 > Tree<I, BI, V, D, BD> {
 	fn state_gc(&mut self, gc: &TreeStateGc<I, BI>) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
@@ -458,7 +458,7 @@ impl<
 				let mut branch = self.branches.get(index);
 				match branch.value.gc(&mut gc) {
 					UpdateResult::Unchanged => (),
-					UpdateResult::Changed(_) => { 
+					UpdateResult::Changed(_) => {
 						self.branches.emplace(index, branch);
 						result = UpdateResult::Changed(());
 					},
@@ -503,6 +503,12 @@ impl<
 					None => None,
 					Some(n_start) => {
 						if first_new_start {
+/*							if BD::TRIGGER {
+								let mut branch = self.branches.get(branch_ix); // TODO have a
+								// variant of remove that return old value.
+								branch.value.storage_mut().clear();
+								branch.trigger_flush();
+							}*/
 							self.branches.remove(branch_ix);
 							result = UpdateResult::Changed(());
 							next_branch_index = self.branches.previous_index(branch_ix);
@@ -601,7 +607,7 @@ impl<
 	BI: LinearState + SubAssign<BI> + One,
 	V: ValueRef + Clone + Eq,
 	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V::Storage, BI, Context = D::Context>,
+	BD: LinearStorageMem<V::Storage, BI, Context = D::Context> + Trigger,
 > DataRefMut<V> for Tree<I, BI, V, D, BD> {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
@@ -798,7 +804,7 @@ pub mod force {
 		BI: LinearState + SubAssign<BI> + One,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
-		BD: LinearStorage<V::Storage, BI>,
+		BD: LinearStorage<V::Storage, BI> + Trigger,
 	> ForceDataMut<V> for Tree<I, BI, V, D, BD> {
 		type IndexForce = Self::Index;
 
@@ -859,7 +865,7 @@ pub mod conditional {
 		BI: LinearState + SubAssign<BI> + One,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
-		BD: LinearStorage<V::Storage, BI>,
+		BD: LinearStorage<V::Storage, BI> + Trigger,
 	> ConditionalDataMut<V> for Tree<I, BI, V, D, BD> {
 		// TODO this would require to get all branch index that are children
 		// of this index, and also their current upper bound.
@@ -884,7 +890,7 @@ pub mod conditional {
 		BI: LinearState + SubAssign<BI> + One,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
-		BD: LinearStorage<V::Storage, BI>,
+		BD: LinearStorage<V::Storage, BI> + Trigger,
 	> Tree<I, BI, V, D, BD> {
 		fn set_if_inner(
 			&mut self,
@@ -994,7 +1000,7 @@ mod test {
 	fn compile_double_encoded_node() {
 		use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
 		use crate::backend::nodes::{Head, Node, ContextHead};
-		use crate::backend::nodes::test::{MetaNb, MetaSize};
+		use crate::backend::nodes::test::{MetaNb3, MetaSize};
 		use crate::historied::Data;
 		use sp_std::collections::btree_map::BTreeMap;
 
@@ -1045,7 +1051,7 @@ mod test {
 	fn compile_double_encoded_node_2() {
 		use crate::backend::in_memory::MemoryOnly;
 		use crate::backend::nodes::{Head, Node, ContextHead};
-		use crate::backend::nodes::test::{MetaNb, MetaSize};
+		use crate::backend::nodes::test::{MetaNb3, MetaSize};
 		use crate::historied::Data;
 		use sp_std::collections::btree_map::BTreeMap;
 
@@ -1509,7 +1515,7 @@ mod test {
 		states.canonicalize(fp, *s3tmp.latest(), None);
 		// other drops from filter_out
 		check_state(&mut states, filter_qp.clone());
-		let filter_in = [1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
+		let filter_in = [103, 1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
 		let no_qp = [14];
 
 		let check_gc = |item1: &T, item2: &T, item3: &T, item4: &T, states: &mut crate::test::InMemoryMgmtSer| {
@@ -1805,7 +1811,7 @@ mod test {
 	fn test_with_trigger() {
 		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb1);
 		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb2);
-		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb);
+		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb3);
 	}
 
 	#[cfg(feature = "xdelta3-diff")]

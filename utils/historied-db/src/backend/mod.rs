@@ -263,7 +263,7 @@ mod test {
 	pub(crate) type Value = Vec<u8>;
 
 	// basic test for linear storage usage
-	pub(crate) fn test_linear_storage<L: LinearStorage<Value, State>>(storage: &mut L) {
+	pub(crate) fn test_linear_storage<L: LinearStorage<Value, State> + Clone>(storage: &mut L) {
 		// empty storage
 		assert!(storage.pop().is_none());
 		assert!(storage.get_state_lookup(0).is_none());
@@ -295,6 +295,16 @@ mod test {
 		}
 		for i in 0usize..30 {
 			assert_eq!(storage.get_state_lookup(i), Some(i as State));
+		}
+		for i in 0usize..30 {
+			let mut storage2 = storage.clone();
+			storage2.truncate(i);
+			for j in 0usize..i {
+				assert_eq!(storage2.get_state_lookup(j), Some(j as State));
+			}
+			for j in i..30 {
+				assert_eq!(storage2.get_state_lookup(j), None);
+			}
 		}
 		storage.truncate_until(5);
 		for i in 0usize..25 {
