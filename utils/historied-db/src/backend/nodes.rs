@@ -715,7 +715,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		let i = {
 			let mut fetched_mut;
 			let (node, i, ix) = match self.fetch_node(split_off) {
-				Some((i, ix)) if i == self.end_node_index as usize =>  {
+				Some((i, ix)) if i >= self.end_node_index as usize =>  {
 					(&mut self.inner, i, ix)
 				},
 				Some((i, ix)) => {
@@ -731,6 +731,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				},
 			};
 
+
 			if ix > 0 {
 				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					let mut add_size = 0;
@@ -743,9 +744,13 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					node.reference_len -= add_size;
 				}
 				node.changed = true;
-				node.data.truncate_until(ix)
+				node.data.truncate_until(ix);
 			}
-			self.start_node_index += self.end_node_index - i as u64 - 1;
+			self.start_node_index = if i as u64 == self.end_node_index {
+				self.end_node_index
+			} else {
+				self.start_node_index + self.end_node_index - i as u64 - 1
+			};
 			if self.len > split_off {
 				self.len -= split_off;
 			} else {

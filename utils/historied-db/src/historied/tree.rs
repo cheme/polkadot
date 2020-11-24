@@ -1413,7 +1413,7 @@ mod test {
 		context4: T::Context,
 	)	where
 		V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
-		T: InitFrom,
+		T: InitFrom + Trigger,
 		T: Clone + codec::Encode + DecodeWithContext,
 		T: TreeTestMethods,
 		T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
@@ -1515,7 +1515,7 @@ mod test {
 		states.canonicalize(fp, *s3tmp.latest(), None);
 		// other drops from filter_out
 		check_state(&mut states, filter_qp.clone());
-		let filter_in = [103, 1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
+		let filter_in = [1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
 		let no_qp = [14];
 
 		let check_gc = |item1: &T, item2: &T, item3: &T, item4: &T, states: &mut crate::test::InMemoryMgmtSer| {
@@ -1548,19 +1548,23 @@ mod test {
 				assert_eq!(gc_item3.get(&fp), item3.get(&fp));
 				assert_eq!(gc_item4.get(&fp), item4.get(&fp));
 			}
-	//		panic!("{:?}", (gc, item1, gc_item1));
+			//panic!("{:?}", (gc, item1, gc_item1));
 		};
 
 		check_gc(&item1, &item2, &item3, &item4, &mut states.clone());
+		item1.trigger_flush();
 		let encoded = item1.encode();
 		item1 = T::decode_with_context(&mut encoded.as_slice(), &context1).unwrap();
+		item2.trigger_flush();
 		let encoded = item2.encode();
 		item2 = T::decode_with_context(&mut encoded.as_slice(), &context2).unwrap();
+		item3.trigger_flush();
 		let encoded = item3.encode();
 		item3 = T::decode_with_context(&mut encoded.as_slice(), &context3).unwrap();
+		item4.trigger_flush();
 		let encoded = item4.encode();
 		item4 = T::decode_with_context(&mut encoded.as_slice(), &context4).unwrap();
-//		check_gc(&item1, &item2, &item3, &item4, &mut states.clone());
+		check_gc(&item1, &item2, &item3, &item4, &mut states.clone());
 
 		let check_migrate = |item1: &T, item2: &T, item3: &T, item4: &T, states: &mut crate::test::InMemoryMgmtSer| {
 			let old_state = states.clone();
@@ -1646,15 +1650,19 @@ mod test {
 		};
 
 		check_migrate(&item1, &item2, &item3, &item4, &mut states.clone());
+		item1.trigger_flush();
 		let encoded = item1.encode();
 		item1 = T::decode_with_context(&mut encoded.as_slice(), &context1).unwrap();
+		item2.trigger_flush();
 		let encoded = item2.encode();
 		item2 = T::decode_with_context(&mut encoded.as_slice(), &context2).unwrap();
+		item3.trigger_flush();
 		let encoded = item3.encode();
 		item3 = T::decode_with_context(&mut encoded.as_slice(), &context3).unwrap();
+		item4.trigger_flush();
 		let encoded = item4.encode();
 		item4 = T::decode_with_context(&mut encoded.as_slice(), &context4).unwrap();
-//		check_migrate(&item1, &item2, &item3, &item4, &mut states.clone());
+		check_migrate(&item1, &item2, &item3, &item4, &mut states.clone());
 	}
 
 	#[test]
