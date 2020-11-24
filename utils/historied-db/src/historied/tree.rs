@@ -1257,9 +1257,10 @@ mod test {
 	}
 
 	#[cfg(not(feature = "force-data"))]
-	fn test_force_set_get<T, V>(context: T::Context)
-		where T: crate::historied::DataMut<u32> {
-	}
+	fn test_force_set_get<T, V>(context: T::Context) where
+		T: crate::historied::DataMut<V>,
+		V: crate::historied::Value,
+	{ }
 
 	#[cfg(feature = "force-data")]
 	fn test_force_set_get<T, V>(context: T::Context)
