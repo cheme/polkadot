@@ -1407,7 +1407,7 @@ mod test {
 	)	where
 		V: crate::historied::Value + std::fmt::Debug + From<u16> + Eq,
 		T: InitFrom,
-		T: Clone,
+		T: Clone + codec::Encode + DecodeWithContext,
 		T: TreeTestMethods,
 		T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
 		T: crate::historied::Data<V>,
@@ -1493,7 +1493,7 @@ mod test {
 		item4.set(0.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
 		item1.set(0.into(), &states.get_db_state_mut(&StateInput(6)).unwrap());
 
-		let old_state = states.clone();
+		//let old_state = states.clone();
 		// Apply change of composite to 33
 		let filter_out = [101, 104, 2, 4, 5];
 		let mut filter_qp = vec![qp14.latest_index()];
@@ -1510,116 +1510,144 @@ mod test {
 		check_state(&mut states, filter_qp.clone());
 		let filter_in = [1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
 		let no_qp = [14];
-		//panic!("{:?} \n {:?}", old_state, states);
-		let mut gc_item1 = item1.clone();
-		let mut gc_item2 = item2.clone();
-		let mut gc_item3 = item3.clone();
-		let mut gc_item4 = item4.clone();
-		{
-			let gc = states.get_gc().unwrap();
-			gc_item1.gc(gc.as_ref());
-			gc_item2.gc(gc.as_ref());
-			gc_item3.gc(gc.as_ref());
-			gc_item4.gc(gc.as_ref());
-			//panic!("{:?}", (gc.as_ref(), item4, gc_item4));
-		}
-		assert_eq!(gc_item1.nb_internal_history(), 8);
-		assert_eq!(gc_item2.nb_internal_history(), 4);
-		assert_eq!(gc_item3.nb_internal_history(), 2); // actually untouched
-		assert_eq!(gc_item4.nb_internal_history(), 2); // actually untouched
-		assert_eq!(gc_item1.nb_internal_branch(), 5);
-		assert_eq!(gc_item2.nb_internal_branch(), 3);
-		assert_eq!(gc_item3.nb_internal_branch(), 1);
-		assert_eq!(gc_item4.nb_internal_branch(), 1);
 
-		for i in filter_in.iter() {
-			let fp = states.get_db_state(&StateInput(*i)).unwrap();
-			assert_eq!(gc_item1.get(&fp), item1.get(&fp));
-			assert_eq!(gc_item2.get(&fp), item2.get(&fp));
-			assert_eq!(gc_item3.get(&fp), item3.get(&fp));
-			assert_eq!(gc_item4.get(&fp), item4.get(&fp));
-		}
-//		panic!("{:?}", (gc, item1, gc_item1));
-
-		// migrate 
-		let filter_in = [33, 34, 35, 6];
-		let mut gc_item1 = item1.clone();
-		let mut gc_item2 = item2.clone();
-		let mut gc_item3 = item3.clone();
-		let mut gc_item4 = item4.clone();
-		let mut states = states;
-		{
-			let mut gc = states.get_migrate();
-			gc_item1.migrate(gc.migrate());
-			gc_item2.migrate(gc.migrate());
-			gc_item3.migrate(gc.migrate());
-			gc_item4.migrate(gc.migrate());
-			gc.applied_migrate();
-		}
-		// empty (applied_migrate ran)
-		check_state(&mut states, vec![]);
-
-		for i in filter_in.iter() {
-			let fp = states.get_db_state(&StateInput(*i)).unwrap();
-			assert_eq!(gc_item1.get(&fp), item1.get(&fp));
-			assert_eq!(gc_item2.get(&fp), item2.get(&fp));
-			assert_eq!(gc_item3.get(&fp), item3.get(&fp));
-			assert_eq!(gc_item4.get(&fp), item4.get(&fp));
-		}
-		assert_eq!(gc_item1.nb_internal_history(), 8);
-		assert_eq!(gc_item2.nb_internal_history(), 4);
-		assert_eq!(gc_item3.nb_internal_history(), 2);
-		assert_eq!(gc_item4.nb_internal_history(), 2);
-		assert_eq!(gc_item1.nb_internal_branch(), 2);
-		assert_eq!(gc_item2.nb_internal_branch(), 1);
-		assert_eq!(gc_item3.nb_internal_branch(), 1);
-		assert_eq!(gc_item4.nb_internal_branch(), 1);
-
-		// on previous state set migrate with pruning_treshold 
-		let filter_in = [33, 34, 35, 6];
-		let mut gc_item1 = item1.clone();
-		let mut gc_item2 = item2.clone();
-		let mut gc_item3 = item3.clone();
-		let mut gc_item4 = item4.clone();
-		let mut states = old_state;
-		let fp = states.get_db_state(&StateInput(35)).unwrap();
-		states.canonicalize(fp, *s3tmp.latest(), Some(s3tmp.latest().1));
-		{
-			let mut gc = states.get_migrate();
-			gc_item1.migrate(gc.migrate());
-			gc_item2.migrate(gc.migrate());
-			gc_item3.migrate(gc.migrate());
-			gc_item4.migrate(gc.migrate());
-			gc.applied_migrate();
-			//panic!("{:?}", (gc, item3, gc_item3));
-		}
-		for i in filter_in.iter() {
-			let fp = states.get_db_state(&StateInput(*i)).unwrap();
-			assert_eq!(gc_item1.get(&fp), item1.get(&fp));
-			assert_eq!(gc_item2.get(&fp), item2.get(&fp));
-			if V::NEUTRAL {
-				assert_eq!(gc_item3.get(&fp), None);
-			} else {
-				assert_eq!(gc_item3.get(&fp), item3.get(&fp));
+		let check_gc = |item1: &T, item2: &T, item3: &T, item4: &T, states: &mut crate::test::InMemoryMgmtSer| {
+			//panic!("{:?} \n {:?}", old_state, states);
+			let mut gc_item1 = item1.clone();
+			let mut gc_item2 = item2.clone();
+			let mut gc_item3 = item3.clone();
+			let mut gc_item4 = item4.clone();
+			{
+				let gc = states.get_gc().unwrap();
+				gc_item1.gc(gc.as_ref());
+				gc_item2.gc(gc.as_ref());
+				gc_item3.gc(gc.as_ref());
+				gc_item4.gc(gc.as_ref());
+				//panic!("{:?}", (gc.as_ref(), item4, gc_item4));
 			}
-			assert_eq!(gc_item4.get(&fp), item4.get(&fp));
-		}
-		assert_eq!(gc_item1.nb_internal_history(), 3);
-		assert_eq!(gc_item2.nb_internal_history(), 2);
-		if V::NEUTRAL {
-			assert_eq!(gc_item3.nb_internal_history(), 0);
-		} else {
-			assert_eq!(gc_item3.nb_internal_history(), 1);
-		}
-		assert_eq!(gc_item4.nb_internal_history(), 2);
-		assert_eq!(gc_item1.nb_internal_branch(), 2);
-		assert_eq!(gc_item2.nb_internal_branch(), 1);
-		if V::NEUTRAL {
-			assert_eq!(gc_item3.nb_internal_branch(), 0);
-		} else {
+			assert_eq!(gc_item1.nb_internal_history(), 8);
+			assert_eq!(gc_item2.nb_internal_history(), 4);
+			assert_eq!(gc_item3.nb_internal_history(), 2); // actually untouched
+			assert_eq!(gc_item4.nb_internal_history(), 2); // actually untouched
+			assert_eq!(gc_item1.nb_internal_branch(), 5);
+			assert_eq!(gc_item2.nb_internal_branch(), 3);
 			assert_eq!(gc_item3.nb_internal_branch(), 1);
-		}
-		assert_eq!(gc_item4.nb_internal_branch(), 1);
+			assert_eq!(gc_item4.nb_internal_branch(), 1);
+
+			for i in filter_in.iter() {
+				let fp = states.get_db_state(&StateInput(*i)).unwrap();
+				assert_eq!(gc_item1.get(&fp), item1.get(&fp));
+				assert_eq!(gc_item2.get(&fp), item2.get(&fp));
+				assert_eq!(gc_item3.get(&fp), item3.get(&fp));
+				assert_eq!(gc_item4.get(&fp), item4.get(&fp));
+			}
+	//		panic!("{:?}", (gc, item1, gc_item1));
+		};
+
+		check_gc(&item1, &item2, &item3, &item4, &mut states.clone());
+		let encoded = item1.encode();
+		item1 = T::decode_with_context(&mut encoded.as_slice(), &context1).unwrap();
+		let encoded = item2.encode();
+		item2 = T::decode_with_context(&mut encoded.as_slice(), &context2).unwrap();
+		let encoded = item3.encode();
+		item3 = T::decode_with_context(&mut encoded.as_slice(), &context3).unwrap();
+		let encoded = item4.encode();
+		item4 = T::decode_with_context(&mut encoded.as_slice(), &context4).unwrap();
+//		check_gc(&item1, &item2, &item3, &item4, &mut states.clone());
+
+		let check_migrate = |item1: &T, item2: &T, item3: &T, item4: &T, states: &mut crate::test::InMemoryMgmtSer| {
+			let old_state = states.clone();
+			// migrate 
+			let filter_in = [33, 34, 35, 6];
+			let mut gc_item1 = item1.clone();
+			let mut gc_item2 = item2.clone();
+			let mut gc_item3 = item3.clone();
+			let mut gc_item4 = item4.clone();
+			let mut states = states;
+			{
+				let mut gc = states.get_migrate();
+				gc_item1.migrate(gc.migrate());
+				gc_item2.migrate(gc.migrate());
+				gc_item3.migrate(gc.migrate());
+				gc_item4.migrate(gc.migrate());
+				gc.applied_migrate();
+			}
+			// empty (applied_migrate ran)
+			check_state(&mut states, vec![]);
+
+			for i in filter_in.iter() {
+				let fp = states.get_db_state(&StateInput(*i)).unwrap();
+				assert_eq!(gc_item1.get(&fp), item1.get(&fp));
+				assert_eq!(gc_item2.get(&fp), item2.get(&fp));
+				assert_eq!(gc_item3.get(&fp), item3.get(&fp));
+				assert_eq!(gc_item4.get(&fp), item4.get(&fp));
+			}
+			assert_eq!(gc_item1.nb_internal_history(), 8);
+			assert_eq!(gc_item2.nb_internal_history(), 4);
+			assert_eq!(gc_item3.nb_internal_history(), 2);
+			assert_eq!(gc_item4.nb_internal_history(), 2);
+			assert_eq!(gc_item1.nb_internal_branch(), 2);
+			assert_eq!(gc_item2.nb_internal_branch(), 1);
+			assert_eq!(gc_item3.nb_internal_branch(), 1);
+			assert_eq!(gc_item4.nb_internal_branch(), 1);
+
+			// on previous state set migrate with pruning_treshold 
+			let filter_in = [33, 34, 35, 6];
+			let mut gc_item1 = item1.clone();
+			let mut gc_item2 = item2.clone();
+			let mut gc_item3 = item3.clone();
+			let mut gc_item4 = item4.clone();
+			let mut states = old_state;
+			let fp = states.get_db_state(&StateInput(35)).unwrap();
+			states.canonicalize(fp, *s3tmp.latest(), Some(s3tmp.latest().1));
+			{
+				let mut gc = states.get_migrate();
+				gc_item1.migrate(gc.migrate());
+				gc_item2.migrate(gc.migrate());
+				gc_item3.migrate(gc.migrate());
+				gc_item4.migrate(gc.migrate());
+				gc.applied_migrate();
+				//panic!("{:?}", (gc, item3, gc_item3));
+			}
+			for i in filter_in.iter() {
+				let fp = states.get_db_state(&StateInput(*i)).unwrap();
+				assert_eq!(gc_item1.get(&fp), item1.get(&fp));
+				assert_eq!(gc_item2.get(&fp), item2.get(&fp));
+				if V::NEUTRAL {
+					assert_eq!(gc_item3.get(&fp), None);
+				} else {
+					assert_eq!(gc_item3.get(&fp), item3.get(&fp));
+				}
+				assert_eq!(gc_item4.get(&fp), item4.get(&fp));
+			}
+			assert_eq!(gc_item1.nb_internal_history(), 3);
+			assert_eq!(gc_item2.nb_internal_history(), 2);
+			if V::NEUTRAL {
+				assert_eq!(gc_item3.nb_internal_history(), 0);
+			} else {
+				assert_eq!(gc_item3.nb_internal_history(), 1);
+			}
+			assert_eq!(gc_item4.nb_internal_history(), 2);
+			assert_eq!(gc_item1.nb_internal_branch(), 2);
+			assert_eq!(gc_item2.nb_internal_branch(), 1);
+			if V::NEUTRAL {
+				assert_eq!(gc_item3.nb_internal_branch(), 0);
+			} else {
+				assert_eq!(gc_item3.nb_internal_branch(), 1);
+			}
+			assert_eq!(gc_item4.nb_internal_branch(), 1);
+		};
+
+		check_migrate(&item1, &item2, &item3, &item4, &mut states.clone());
+		let encoded = item1.encode();
+		item1 = T::decode_with_context(&mut encoded.as_slice(), &context1).unwrap();
+		let encoded = item2.encode();
+		item2 = T::decode_with_context(&mut encoded.as_slice(), &context2).unwrap();
+		let encoded = item3.encode();
+		item3 = T::decode_with_context(&mut encoded.as_slice(), &context3).unwrap();
+		let encoded = item4.encode();
+		item4 = T::decode_with_context(&mut encoded.as_slice(), &context4).unwrap();
+//		check_migrate(&item1, &item2, &item3, &item4, &mut states.clone());
 	}
 
 	#[test]
@@ -1680,7 +1708,7 @@ mod test {
 		context4.1.key = context4.0.key.clone();
 
 		test_set_get::<Tree, u16>(context1.clone());
-		//test_migrate::<Tree, u16>(context1.clone(), context2.clone(), context3.clone(), context4.clone());
+		test_migrate::<Tree, u16>(context1.clone(), context2.clone(), context3.clone(), context4.clone());
 		test_force_set_get::<Tree, u16>(context1.clone());
 
 		/*
@@ -1778,7 +1806,6 @@ mod test {
 		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb2);
 		test_with_trigger_inner!(crate::backend::nodes::test::MetaNb);
 	}
-
 
 	#[cfg(feature = "xdelta3-diff")]
 	#[test]
