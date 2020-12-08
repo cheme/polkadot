@@ -275,7 +275,7 @@ pub enum MultipleGc<I, BI> {
 }
 
 impl<I: Clone, BI: Clone + Ord + AddAssign<BI> + One> MultipleMigrate<I, BI> {
-	/// Return upper limit (all sate before it are touched),
+	/// Return upper limit (all state before it are touched),
 	/// and explicit touched state.
 	pub fn touched_state(&self) -> (Option<BI>, impl Iterator<Item = (I, BI)>) {
 

@@ -181,14 +181,22 @@ impl<'a, H, M: ManagementMut<H>> Migrate<'a, H, M> {
  	}
 }
 
-/// Dynamic trait to register historied db
-/// implementation in order to allow migration
-/// (state global change requires to update all associated dbs).
+/// Allows to consume event from the state management.
+///
+/// Current usage is mostly ensuring that migration occurs
+/// on every compenent using the state (by registering these
+/// components on the state management and implementing `migrate`).
 pub trait ManagementConsumer<H, M: ManagementMut<H>>: Send + Sync + 'static {
+	/// A migration runing on the state management,
+	/// notice that the migrate parameter can be modified
+	/// in case it contains data relative to this particular
+	/// consumer. It is responsibility of the implementation
+	/// to avoid changing this parameter in a way that would
+	/// impact others consumer calls.
 	fn migrate(&self, migrate: &mut Migrate<H, M>);
 }
 
-/// Register db, this associate treemanagement.
+/// Cast the consumer to a dyn rust object.
 pub fn consumer_to_register<H, M: ManagementMut<H>, C: ManagementConsumer<H, M> + Clone>(c: &C) -> Box<dyn ManagementConsumer<H, M>> {
 	Box::new(c.clone())
 }
@@ -230,6 +238,7 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		mapping.remove(state)
 	}
 
+	// TODO rename drain_changes_before?
 	pub fn remove_changes_before(
 		&mut self,
 		db: &mut Db,

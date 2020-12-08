@@ -423,7 +423,6 @@ pub struct ContextHead<B, NI> {
 	/// The key of the historical value stored in nodes.
 	pub key: Vec<u8>,
 	/// The encoded indexes (empty Vec for no indexes).
-	/// TODO is it needed?
 	pub encoded_indexes: Vec<u8>,
 	/// The nodes backend.
 	pub backend: B,
@@ -475,7 +474,7 @@ impl<V, S, D, M, B, NI> Context for Head<V, S, D, M, B, NI>
 		B: Clone,
 		NI: ContextBuilder,
 {
-	type Context = ContextHead<B, NI>; // TODO key to clone and backend refcell.
+	type Context = ContextHead<B, NI>;
 }
 
 impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
@@ -684,7 +683,6 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		None
 	}
 	fn lookup(&self, index: usize) -> Option<Self::Index> {
-		// TODO see if could replace all fetch node with handle use and replace this.
 		self.fetch_node(index).and_then(|(node_index, inner_node_index)| {
 			if node_index == self.end_node_index as usize {
 				self.inner.data.lookup(inner_node_index).map(|index| (node_index as u64, index))
@@ -864,6 +862,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				if self.fetched.borrow().len() > 0 {
 					let removed = self.fetched.borrow_mut().remove(0);
 					self.inner = removed;
+					self.end_node_index -= 1;
 				}
 			}
 
@@ -1199,8 +1198,7 @@ pub(crate) mod test {
 		head.trigger_flush();
 		assert_eq!(backend.0.borrow().len(), 2);
 
-		// first index is fetched node index which is reversed (TODO could reimplement
-		// to keep natural order)
+		// first index is fetched node index which is reversed
 		let index2 = (1, 1);
 		let index3 = (1, 2);
 		let index6 = (0, 2);
@@ -1363,16 +1361,12 @@ pub(crate) mod test {
 		// single level 1 rem
 		for i in 0u8..3 {
 			let mut head1 = head2.get(head2.lookup(i as usize).unwrap());
-			head1.value.clear();
-/*			for j in 0u8..9 {
+			//head1.value.clear();
+			for j in 0u8..9 {
 				head1.value.pop();
-			} TODO make it work for pop too
-*/
+			}
+
 			// It is responsability of calling code to flush on removal.
-			// TODO change tree code to flush on branch removal
-			// when V::TRIGGER (and copy this test on tree).
-			// In practice this is related to intention of caller
-			// eg get change pop push do not need flush.
 			head1.trigger_flush();
 		}
 
