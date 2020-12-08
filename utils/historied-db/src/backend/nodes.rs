@@ -1154,7 +1154,6 @@ pub(crate) mod test {
 			D: InitFrom<Context = ()> + LinearStorage<Vec<u8>, u64> + Clone,
 			M: NodesMeta,
 	{
-		use crate::backend::test::{Value, State};
 		let init_head = ContextHead {
 			backend: BTreeMap::<Vec<u8>, Node<Vec<u8>, u64, D, M>>::new(),
 			key: b"any".to_vec(),
@@ -1167,12 +1166,11 @@ pub(crate) mod test {
 
 	#[test]
 	fn test_change_with_backend() {
-		use crate::backend::test::{Value, State};
 		use crate::Trigger;
 		type D = MemoryOnly<Vec<u8>, u64>;
 		type M = MetaNb3;
 		let backend = InMemoryNoThreadBackend::<Vec<u8>, u64, D, M>::new();
-		let mut init_head = ContextHead {
+		let init_head = ContextHead {
 			backend: backend.clone(),
 			key: b"any".to_vec(),
 			encoded_indexes: Vec::new(),
@@ -1275,7 +1273,6 @@ pub(crate) mod test {
 
 	#[test]
 	fn test_change_with_backend_two_levels() {
-		use crate::backend::test::{Value, State};
 		use crate::Trigger;
 		type BD = MemoryOnly<Vec<u8>, u64>;
 		type M = MetaNb3;
@@ -1285,14 +1282,14 @@ pub(crate) mod test {
 		type Backend2 = InMemoryNoThreadBackend::<Head1, u64, D, M>;
 		type Head2 = Head::<Head1, u64, D, M, Backend2, ContextHead<Backend1, ()>>;
 		let backend1 = Backend1::new();
-		let mut init_head1: ContextHead<Backend1, ()> = ContextHead {
+		let init_head1: ContextHead<Backend1, ()> = ContextHead {
 			backend: backend1.clone(),
 			key: b"any".to_vec(),
 			encoded_indexes: Vec::new(),
 			node_init_from: (),
 		};
 		let backend2 = Backend2::new();
-		let mut init_head2 = ContextHead {
+		let init_head2 = ContextHead {
 			backend: backend2.clone(),
 			key: Vec::new(),
 			encoded_indexes: Vec::new(),
@@ -1346,8 +1343,8 @@ pub(crate) mod test {
 		
 		// single level 2 rem
 		let mut head1 = head2.get(head2.lookup(4).unwrap());
-		head1.value.remove(head1.value.lookup(0).unwrap());;
-		head1.value.remove(head1.value.lookup(0).unwrap());;
+		head1.value.remove(head1.value.lookup(0).unwrap());
+		head1.value.remove(head1.value.lookup(0).unwrap());
 		head1.value.remove(head1.value.lookup(0).unwrap());
 		head2.emplace(head2.lookup(4).unwrap(), head1);
 		assert_eq!(backend2.0.borrow_mut().len(), 2);
