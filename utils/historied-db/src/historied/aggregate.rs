@@ -16,18 +16,17 @@
 // limitations under the License.
 
 //! Historied data that can aggregate their inner values.
-//! Trait `Sum` is the result of this values aggragation,
-//! while the general data structure is a regular one
-//! containing the associated `Value` type for a `SummableValue`.
 
 use super::*;
 
-/// Trait for historied value build from
-/// adding multiple item together.
-pub trait Sum<V: SumValue>: Data<V::Value> {
+/// Result of values aggregation.
+///
+/// This is a supertrait for historied data build from
+/// adding multiple sequentially historied item together.
+pub trait Sum<V: SummableValue>: Data<V::Value> {
 	/// Get value at this state.
 	fn get_sum(&self, at: &Self::S) -> Option<V> {
-		let mut builder = V::new();
+		let mut builder = V::new_builder();
 		let mut changes = Vec::new();
 		if !self.get_sum_values(at, &mut changes) {
 			debug_assert!(changes.len() == 0); // Incoherent state no origin for diff
@@ -42,37 +41,44 @@ pub trait Sum<V: SumValue>: Data<V::Value> {
 	}
 
 	/// Accumulate all changes for this state.
+	///
 	/// Changes are written in reverse order into `changes`.
-	/// Return `true` if a complete change was written.
+	/// Return `true` if the changes fetched for this state can build a
+	/// sum.
 	fn get_sum_values(&self, at: &Self::S, changes: &mut Vec<V::Value>) -> bool;
 }
 
 /// An item that can be build from consecutives
-/// diffs. TODO rename (itemDiff should be the inner type)
-pub trait SumValue: Sized {
-	/// Internal Value stored.
-	/// Default is the empty value (a neutral value
-	/// indicating that there is no content).
-	type Value: Value + Default;
+/// diffs.
+pub trait SummableValue: Sized {
+	/// Internal Value stored in the historied data.
+	type Value: Value;
 
 	/// Internal type to build items.
-	type SumBuilder: SumBuilder<SumValue = Self>;
+	type SumBuilder: SumBuilder<SummableValue = Self>;
 
-	fn new() -> Self::SumBuilder {
+	/// Get a new builder item.
+	fn new_builder() -> Self::SumBuilder {
 		Self::SumBuilder::new()
 	}
 
-	/// Check if the item can be a building source for 
-	/// TODO consider a trait specific to diff inner item.
+	/// Check if the item can be a building source,
+	/// one that does not require to fetch previous states.
 	fn is_complete(diff: &Self::Value) -> bool;
 }
 
+/// Trait with logic implementation for the aggregation.
 pub trait SumBuilder {
-	type SumValue: SumValue;
+	type SummableValue: SummableValue;
 
+	/// Instantiate a new builder.
 	fn new() -> Self;
-	fn add(&mut self, diff: <Self::SumValue as SumValue>::Value);
-	fn result(&mut self) -> Self::SumValue;
+
+	/// Append a new item.
+	fn add(&mut self, diff: <Self::SummableValue as SummableValue>::Value);
+
+	/// Build result.
+	fn result(&mut self) -> Self::SummableValue;
 }
 
 /// TODO rewrite comment (renamed)
@@ -85,18 +91,18 @@ pub trait SumBuilder {
 /// at this point this is how we should proceed (even if it means
 /// a redundant query for modifying.
 ///
-/// We could consider merging this trait with `SumValue`, and
+/// We could consider merging this trait with `SummableValue`, and
 /// have an automated update for the case where we did not fetch
 /// the value first.
 pub trait Substract {
-	type SumValue: SumValue;
+	type SummableValue: SummableValue;
 
 	fn new() -> Self;
 	fn substract(
 		&mut self,
-		previous: &Self::SumValue,
-		target: &Self::SumValue,
-	) -> <Self::SumValue as SumValue>::Value;
+		previous: &Self::SummableValue,
+		target: &Self::SummableValue,
+	) -> <Self::SummableValue as SummableValue>::Value;
 }
 
 #[cfg(feature = "xdelta3-diff")]
@@ -211,16 +217,16 @@ pub mod xdelta {
 	pub struct BytesSubstract;
 
 	impl Substract for BytesSubstract {
-		type SumValue = BytesDelta;
+		type SummableValue = BytesDelta;
 
 		fn new() -> Self {
 			BytesSubstract
 		}
 		fn substract(
 			&mut self,
-			previous: &Self::SumValue,
-			target: &Self::SumValue,
-		) -> <Self::SumValue as SumValue>::Value {
+			previous: &Self::SummableValue,
+			target: &Self::SummableValue,
+		) -> <Self::SummableValue as SummableValue>::Value {
 			match (target.0.as_ref(), previous.0.as_ref()) {
 				(None, _) => BytesDiff::None,
 				(Some(target), None) => BytesDiff::Value(target.clone()),
@@ -243,12 +249,12 @@ pub mod xdelta {
 	pub struct BytesSumBuilder(Option<Vec<u8>>);
 
 	impl SumBuilder for BytesSumBuilder {
-		type SumValue = BytesDelta;
+		type SummableValue = BytesDelta;
 
 		fn new() -> Self {
 			BytesSumBuilder(Default::default())
 		}
-		fn add(&mut self, diff: <Self::SumValue as SumValue>::Value) {
+		fn add(&mut self, diff: <Self::SummableValue as SummableValue>::Value) {
 			match diff {
 				BytesDiff::Value(mut val) => {
 					self.0 = Some(val);
@@ -264,12 +270,12 @@ pub mod xdelta {
 				}
 			}
 		}
-		fn result(&mut self) -> Self::SumValue {
+		fn result(&mut self) -> Self::SummableValue {
 			BytesDelta(sp_std::mem::replace(&mut self.0, None))
 		}
 	}
 
-	impl SumValue for BytesDelta {
+	impl SummableValue for BytesDelta {
 		type Value = BytesDiff;
 		type SumBuilder = BytesSumBuilder;
 
@@ -354,12 +360,12 @@ pub mod map_delta {
 	pub struct MapSumBuilder<K, V>(BTreeMap<K, V>);
 
 	impl<K: Ord + Codec, V: Codec> SumBuilder for MapSumBuilder<K, V> {
-		type SumValue = MapDelta<K, V>;
+		type SummableValue = MapDelta<K, V>;
 
 		fn new() -> Self {
 			MapSumBuilder(BTreeMap::default())
 		}
-		fn add(&mut self, diff: <Self::SumValue as SumValue>::Value) {
+		fn add(&mut self, diff: <Self::SummableValue as SummableValue>::Value) {
 			match diff {
 				MapDiff::Insert(k, v) => {
 					self.0.insert(k, v);
@@ -372,12 +378,12 @@ pub mod map_delta {
 				},
 			}
 		}
-		fn result(&mut self) -> Self::SumValue {
+		fn result(&mut self) -> Self::SummableValue {
 			MapDelta(sp_std::mem::replace(&mut self.0, BTreeMap::new()))
 		}
 	}
 
-	impl<K: Ord + Codec, V: Codec> SumValue for MapDelta<K, V> {
+	impl<K: Ord + Codec, V: Codec> SummableValue for MapDelta<K, V> {
 		type Value = MapDiff<K, V>;
 		type SumBuilder = MapSumBuilder<K, V>;
 

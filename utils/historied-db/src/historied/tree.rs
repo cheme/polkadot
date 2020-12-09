@@ -22,7 +22,7 @@
 use super::{HistoriedValue, Data, DataMut, DataRef, DataRefMut,
 	DataSlices, DataSliceRanges, UpdateResult, Value, ValueRef,
 	DataBasis, IndexedDataBasis,
-	aggregate::{Sum as DataSum, SumValue}};
+	aggregate::{Sum as DataSum, SummableValue}};
 #[cfg(feature = "indexed-access")]
 use super::IndexedData;
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
@@ -732,9 +732,9 @@ pub mod aggregate {
 	/// from oldest zero item to the target state).
 	/// Good for diff, but can be use for other use case
 	/// with simple implementation (eg list). 
-	pub struct Sum<'a, I, BI, V: SumValue, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Value, D, BD>);
+	pub struct Sum<'a, I, BI, V: SummableValue, D: Context, BD: Context>(pub &'a Tree<I, BI, V::Value, D, BD>);
 
-	impl<'a, I, BI, V: SumValue, D: Context, BD: Context> sp_std::ops::Deref for Sum<'a, I, BI, V, D, BD> {
+	impl<'a, I, BI, V: SummableValue, D: Context, BD: Context> sp_std::ops::Deref for Sum<'a, I, BI, V, D, BD> {
 		type Target = Tree<I, BI, V::Value, D, BD>;
 
 		fn deref(&self) -> &Tree<I, BI, V::Value, D, BD> {
@@ -746,7 +746,7 @@ pub mod aggregate {
 		where
 			I: Default + Eq + Ord + Clone,
 			BI: LinearState + SubAssign<BI> + One,
-			V: SumValue,
+			V: SummableValue,
 			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
 			BD: LinearStorage<<V::Value as Value>::Storage, BI>,
@@ -766,7 +766,7 @@ pub mod aggregate {
 		where
 			I: Default + Eq + Ord + Clone,
 			BI: LinearState + SubAssign<BI> + One,
-			V: SumValue,
+			V: SummableValue,
 			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
 			BD: LinearStorage<<V::Value as Value>::Storage, BI>,
@@ -780,7 +780,7 @@ pub mod aggregate {
 		where
 			I: Default + Eq + Ord + Clone,
 			BI: LinearState + SubAssign<BI> + One,
-			V: SumValue,
+			V: SummableValue,
 			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
 			BD: LinearStorage<<V::Value as Value>::Storage, BI>,

@@ -25,7 +25,7 @@
 
 use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
 	DataSlices, DataRefMut, Value, ValueRef, DataBasis, IndexedDataBasis,
-	aggregate::{Sum as DataSum, SumValue}};
+	aggregate::{Sum as DataSum, SummableValue}};
 #[cfg(feature = "indexed-access")]
 use super::IndexedData;
 use crate::{UpdateResult, Latest};
@@ -487,12 +487,12 @@ pub mod aggregate {
 
 	/// Use linear as linear diff. TODO put in its own module?
 	///
-	/// If at some point `SumValue` and `Value` get merged, this would not be needed.
-	/// (there is already need to have some const related to `SumValue` in `Value`
+	/// If at some point `SummableValue` and `Value` get merged, this would not be needed.
+	/// (there is already need to have some const related to `SummableValue` in `Value`
 	/// to forbid some operations (gc and migrate)).
-	pub struct Sum<'a, V: SumValue, S, D>(pub &'a Linear<V::Value, S, D>);
+	pub struct Sum<'a, V: SummableValue, S, D>(pub &'a Linear<V::Value, S, D>);
 
-	impl<'a, V: SumValue, S, D> sp_std::ops::Deref for Sum<'a, V, S, D> {
+	impl<'a, V: SummableValue, S, D> sp_std::ops::Deref for Sum<'a, V, S, D> {
 		type Target = Linear<V::Value, S, D>;
 
 		fn deref(&self) -> &Linear<V::Value, S, D> {
@@ -502,7 +502,7 @@ pub mod aggregate {
 
 	impl<'a, V, S, D> DataBasis for Sum<'a, V, S, D>
 		where
-			V: SumValue,
+			V: SummableValue,
 			V::Value: Clone,
 			S: LinearState,
 			D: LinearStorage<<V::Value as Value>::Storage, S>,
@@ -520,7 +520,7 @@ pub mod aggregate {
 
 	impl<'a, V, S, D> Data<V::Value> for Sum<'a, V, S, D>
 		where
-			V: SumValue,
+			V: SummableValue,
 			V::Value: Clone,
 			S: LinearState,
 			D: LinearStorage<<V::Value as Value>::Storage, S>,
@@ -532,7 +532,7 @@ pub mod aggregate {
 
 	impl<'a, V, S, D> DataSum<V> for Sum<'a, V, S, D>
 		where
-			V: SumValue,
+			V: SummableValue,
 			V::Value: Clone,
 			S: LinearState,
 			D: LinearStorage<<V::Value as Value>::Storage, S>,
