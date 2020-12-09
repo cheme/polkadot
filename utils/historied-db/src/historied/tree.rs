@@ -1908,7 +1908,7 @@ mod test {
 
 	#[test]
 	fn test_diff2() {
-		use crate::historied::aggregate::map_delta::{MapDelta, MapDiff}; 
+		use crate::historied::aggregate::map_delta::{MapDelta, MapDiff, UnitDiff}; 
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
@@ -1933,10 +1933,10 @@ mod test {
 		];
 
 		let successive_deltas: Vec<MapDiff<u8, u8>> = vec![
-			MapDiff::Reset,
-			MapDiff::Insert(0, 1),
-			MapDiff::Insert(1, 3),
-			MapDiff::Remove(0),
+			MapDiff::Reset(vec![]),
+			MapDiff::Changes(vec![UnitDiff::Insert(0, 1)]),
+			MapDiff::Changes(vec![UnitDiff::Insert(1, 3)]),
+			MapDiff::Changes(vec![UnitDiff::Remove(0)]),
 		];
 
 		item.set(successive_deltas[0].clone(), &Latest::unchecked_latest((1, 1)));

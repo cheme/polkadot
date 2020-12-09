@@ -99,10 +99,16 @@ impl<V: SummableValue> SumBuilder<V> {
 }
 
 #[cfg(feature = "xdelta3-diff")]
-/// Diff using xdelta 3 lib
+/// Diff using xdelta 3 lib.
+///
+/// This is mainly experimental and would require some benchmarking.
+/// It uses external C dependency and is not no_std compatible.
 pub mod xdelta {
 	use super::*;
 
+	/// Aggregate sum for optional byte value that
+	/// uses xdelta 3 to produce diff as changes to aggregate
+	/// a byte value.
 	#[derive(Clone, PartialEq, Eq, Debug, Default)]
 	pub struct BytesDelta(Option<Vec<u8>>);
 
@@ -138,6 +144,7 @@ pub mod xdelta {
 	}
 
 	#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
+	/// Different state of diff that can be seen.
 	pub enum BytesDiff {
 		/// Encoded vc diff (contains enum encoding first byte)
 		VcDiff(Vec<u8>),
@@ -232,6 +239,7 @@ pub mod xdelta {
 
 	impl SummableValue for BytesDelta {
 		type Value = BytesDiff;
+
 		type SumBuilder = Option<Vec<u8>>;
 
 		fn is_complete(diff: &Self::Value) -> bool {
@@ -270,13 +278,17 @@ pub mod xdelta {
 }
 
 /// Set delta.
-/// TODO even if just an implementation sample, allow multiple changes.
+///
+/// Example of an aggregate for a structured data.
+/// Here a simple key value map.
 pub mod map_delta {
 	use super::*;
 	use codec::Codec;
 	use sp_std::collections::btree_map::BTreeMap;
+	use sp_std::vec::Vec;
 
 	#[derive(Clone, PartialEq, Eq, Debug, Default)]
+	/// Aggregate map, we only store delta (see `MapDiff`) between two states.
 	pub struct MapDelta<K: Ord, V>(pub BTreeMap<K, V>);
 
 	impl<K: Ord, V> sp_std::ops::Deref for MapDelta<K, V> {
@@ -299,15 +311,22 @@ pub mod map_delta {
 	}
 
 	#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
+	/// Possible changes between two states.
 	pub enum MapDiff<K, V> {
-		Reset,
+		Reset(Vec<(K, V)>),
+		Changes(Vec<UnitDiff<K, V>>),
+	}
+
+	#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
+	/// A unit change between two states (partial).
+	pub enum UnitDiff<K, V> {
 		Insert(K, V),
 		Remove(K),
 	}
 
 	impl<K, V> Default for MapDiff<K, V> {
 		fn default() -> Self {
-			MapDiff::Reset
+			MapDiff::Reset(Vec::new())
 		}
 	}
 
@@ -316,8 +335,8 @@ pub mod map_delta {
 		type Storage = Vec<u8>;
 
 		fn is_neutral(&self) -> bool {
-			if let MapDiff::Reset = self {
-				true
+			if let MapDiff::Reset(values) = self {
+				values.is_empty()
 			} else {
 				false
 			}
@@ -343,9 +362,8 @@ pub mod map_delta {
 
 		fn is_complete(diff: &Self::Value) -> bool {
 			match diff {
-				MapDiff::Reset => true,
-				MapDiff::Insert(..)
-				| MapDiff::Remove(_) => false,
+				MapDiff::Reset(..) => true,
+				MapDiff::Changes(..) => false,
 			}
 		}
 
@@ -355,14 +373,21 @@ pub mod map_delta {
 
 		fn builder_add(builder: &mut Self::SumBuilder, diff: Self::Value) {
 			match diff {
-				MapDiff::Insert(k, v) => {
-					builder.insert(k, v);
+				MapDiff::Changes(changes) => {
+					for change in changes.into_iter() {
+						match change {
+							UnitDiff::Insert(k, v) => {
+								builder.insert(k, v);
+							},
+							UnitDiff::Remove(k) => {
+								builder.remove(&k);
+							},
+						}
+					}
 				},
-				MapDiff::Remove(k) => {
-					builder.remove(&k);
-				},
-				MapDiff::Reset => {
-					builder.clear();
+				MapDiff::Reset(content) => {
+					let state: BTreeMap<K, V> = content.into_iter().collect();
+					*builder = state;
 				},
 			}
 		}
