@@ -1858,8 +1858,7 @@ mod test {
 	#[cfg(feature = "xdelta3-diff")]
 	#[test]
 	fn test_diff1() {
-		use crate::historied::aggregate::{Substract};
-		use crate::historied::aggregate::xdelta::{BytesDelta, BytesDiff, BytesSubstract}; 
+		use crate::historied::aggregate::xdelta::{BytesDelta, BytesDiff, substract}; 
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly8<Vec<u8>, u32>;
@@ -1885,11 +1884,10 @@ mod test {
 
 		let mut successive_deltas: Vec<BytesDiff> = Vec::with_capacity(successive_values.len());
 
-		let mut builder = BytesSubstract::new();
-		successive_deltas.push(builder.substract(&Default::default(), &successive_values[0]));
-		successive_deltas.push(builder.substract(&successive_values[0], &successive_values[1]));
-		successive_deltas.push(builder.substract(&successive_values[1], &successive_values[2]));
-		successive_deltas.push(builder.substract(&successive_values[1], &successive_values[3]));
+		successive_deltas.push(substract(&Default::default(), &successive_values[0]));
+		successive_deltas.push(substract(&successive_values[0], &successive_values[1]));
+		successive_deltas.push(substract(&successive_values[1], &successive_values[2]));
+		successive_deltas.push(substract(&successive_values[1], &successive_values[3]));
 
 		let successive_deltas = successive_deltas;
 
