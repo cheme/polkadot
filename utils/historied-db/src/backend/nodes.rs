@@ -172,6 +172,10 @@ impl<V, S, D, M> InMemoryNoThreadBackend<V, S, D, M> {
 	pub fn new() -> Self {
 		InMemoryNoThreadBackend(sp_std::rc::Rc::new(sp_std::cell::RefCell::new(BTreeMap::new())))
 	}
+	#[cfg(test)]
+	pub fn inner_len(&self) -> usize {
+		self.0.borrow().len()
+	}
 }
 
 impl<V: Clone, S: Clone, D: Clone, M: NodesMeta> NodeStorage<V, S, D, M> for InMemoryNoThreadBackend<V, S, D, M> {
@@ -1310,8 +1314,8 @@ pub(crate) mod test {
 			});
 		}
 
-		assert_eq!(backend1.0.borrow_mut().len(), 0);
-		assert_eq!(backend2.0.borrow_mut().len(), 0);
+		assert_eq!(backend1.inner_len(), 0);
+		assert_eq!(backend2.inner_len(), 0);
 		// query
 		for i in 0u8..9 {
 			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
@@ -1323,9 +1327,9 @@ pub(crate) mod test {
 
 		head2.trigger_flush();
 		// 9 size, 3 per nodes - 1 head
-		assert_eq!(backend2.0.borrow_mut().len(), 2);
+		assert_eq!(backend2.inner_len(), 2);
 		// (9 size, 3 per nodes - 1 head) * 9
-		assert_eq!(backend1.0.borrow_mut().len(), 18);
+		assert_eq!(backend1.inner_len(), 18);
 
 		head2.clear_fetch_nodes();
 
@@ -1347,13 +1351,13 @@ pub(crate) mod test {
 		head1.value.remove(head1.value.lookup(0).unwrap());
 		head1.value.remove(head1.value.lookup(0).unwrap());
 		head2.emplace(head2.lookup(4).unwrap(), head1);
-		assert_eq!(backend2.0.borrow_mut().len(), 2);
-		assert_eq!(backend1.0.borrow_mut().len(), 18);
+		assert_eq!(backend2.inner_len(), 2);
+		assert_eq!(backend1.inner_len(), 18);
 
 		head2.trigger_flush();
 
-		assert_eq!(backend2.0.borrow_mut().len(), 2);
-		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1);
+		assert_eq!(backend2.inner_len(), 2);
+		assert_eq!(backend1.inner_len(), 18 - 1);
 
 		// single level 1 rem
 		for i in 0u8..3 {
@@ -1374,7 +1378,7 @@ pub(crate) mod test {
 
 		head2.trigger_flush();
 
-		assert_eq!(backend2.0.borrow_mut().len(), 1);
-		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1 - 6);
+		assert_eq!(backend2.inner_len(), 1);
+		assert_eq!(backend1.inner_len(), 18 - 1 - 6);
 	}
 }

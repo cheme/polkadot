@@ -1042,7 +1042,7 @@ mod test {
 	fn compile_double_encoded_node() {
 		use crate::backend::encoded_array::{EncodedArray, DefaultVersion};
 		use crate::backend::nodes::{Head, Node, ContextHead};
-		use crate::backend::nodes::test::{MetaNb3, MetaSize};
+		use crate::backend::nodes::test::MetaSize;
 		use crate::historied::Data;
 		use sp_std::collections::btree_map::BTreeMap;
 
@@ -1093,7 +1093,7 @@ mod test {
 	fn compile_double_encoded_node_2() {
 		use crate::backend::in_memory::MemoryOnly;
 		use crate::backend::nodes::{Head, Node, ContextHead};
-		use crate::backend::nodes::test::{MetaNb3, MetaSize};
+		use crate::backend::nodes::test::MetaSize;
 		use crate::historied::Data;
 		use sp_std::collections::btree_map::BTreeMap;
 
@@ -1261,7 +1261,6 @@ mod test {
 				IndexConditional = (u32, u32),
 			>,
 	{
-		use crate::historied::conditional::ConditionalDataMut;
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
@@ -1327,9 +1326,6 @@ mod test {
 			>,
 			T: crate::historied::force::ForceDataMut<V>,
 	{
-		use crate::management::{ManagementMut, Management, ForkableManagement};
-		use crate::test::StateInput;
-		use crate::historied::force::ForceDataMut;
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
@@ -1721,9 +1717,8 @@ mod test {
 
 	macro_rules! test_with_trigger_inner {
 		($meta: ty) => {{
-		use crate::backend::nodes::{Head, Node, ContextHead, InMemoryNoThreadBackend};
+		use crate::backend::nodes::{Head, ContextHead, InMemoryNoThreadBackend};
 		use crate::backend::in_memory::MemoryOnly;
-		use crate::Trigger;
 
 		type M = $meta;
 		type Value = u16;
@@ -1765,96 +1760,9 @@ mod test {
 		context4.0.node_init_from = context4.1.clone();
 
 		test_set_get::<Tree, u16>(context1.clone());
+		// trigger flush test is into test_migrate
 		test_migrate::<Tree, u16>(context1.clone(), context2.clone(), context3.clone(), context4.clone());
 		test_force_set_get::<Tree, u16>(context1.clone());
-
-		/*
-		let mut head2 = Head2::init_from(init_head2.clone());
-		for i in 0u8..9 {
-			let mut head1 = Head1::init_from(init_head1.with_indexes(init_head2.indexes(), &[i]));
-			for j in 0u8..9 {
-				head1.push(HistoriedValue{
-					value: vec![j, i],
-					state: 8 as u64,
-				});
-			}
-			head2.push(HistoriedValue{
-				value: head1,
-				state: i as u64,
-			});
-		}
-
-		assert_eq!(backend1.0.borrow_mut().len(), 0);
-		assert_eq!(backend2.0.borrow_mut().len(), 0);
-		// query
-		for i in 0u8..9 {
-			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
-			for j in 0u8..9 {
-				let value = head1.get(head1.lookup(j as usize).unwrap()).value;
-				assert_eq!(value, vec![j, i]);
-			}
-		}
-
-		head2.trigger_flush();
-		// 9 size, 3 per nodes - 1 head
-		assert_eq!(backend2.0.borrow_mut().len(), 2);
-		// (9 size, 3 per nodes - 1 head) * 9
-		assert_eq!(backend1.0.borrow_mut().len(), 18);
-
-		head2.clear_fetch_nodes();
-
-		let encoded_head = head2.encode();
-		head2 = DecodeWithContext::decode_with_context(&mut encoded_head.as_slice(), &init_head2).unwrap();
-		// query
-		for i in 0u8..9 {
-			let head1 = head2.get(head2.lookup(i as usize).unwrap()).value;
-			for j in 0u8..9 {
-				let value = head1.get(head1.lookup(j as usize).unwrap()).value;
-				assert_eq!(value, vec![j, i]);
-			}
-		}
-
-		
-		// single level 2 rem
-		let mut head1 = head2.get(head2.lookup(4).unwrap());
-		head1.value.remove(head1.value.lookup(0).unwrap());;
-		head1.value.remove(head1.value.lookup(0).unwrap());;
-		head1.value.remove(head1.value.lookup(0).unwrap());
-		head2.emplace(head2.lookup(4).unwrap(), head1);
-		assert_eq!(backend2.0.borrow_mut().len(), 2);
-		assert_eq!(backend1.0.borrow_mut().len(), 18);
-
-		head2.trigger_flush();
-
-		assert_eq!(backend2.0.borrow_mut().len(), 2);
-		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1);
-
-		// single level 1 rem
-		for i in 0u8..3 {
-			let mut head1 = head2.get(head2.lookup(i as usize).unwrap());
-			head1.value.clear();
-/*			for j in 0u8..9 {
-				head1.value.pop();
-			} TODO make it work for pop too
-*/
-			// It is responsability of calling code to flush on removal.
-			// TODO change tree code to flush on branch removal
-			// when V::TRIGGER (and copy this test on tree).
-			// In practice this is related to intention of caller
-			// eg get change pop push do not need flush.
-			head1.trigger_flush();
-		}
-
-		for _ in 0u8..3 {
-			// delete these empty heads
-			head2.remove(head2.lookup(0 as usize).unwrap());
-		}
-
-		head2.trigger_flush();
-
-		assert_eq!(backend2.0.borrow_mut().len(), 1);
-		assert_eq!(backend1.0.borrow_mut().len(), 18 - 1 - 6);
-		*/
 	}}}
 
 	#[test]
@@ -1868,8 +1776,6 @@ mod test {
 	#[test]
 	fn test_diff1() {
 		use crate::historied::aggregate::xdelta::{BytesDelta, BytesDiff, substract}; 
-		use crate::management::{ManagementMut, Management, ForkableManagement};
-		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly8<Vec<u8>, u32>;
 		type D = crate::backend::in_memory::MemoryOnly4<
 			crate::historied::linear::Linear<BytesDiff, u32, BD>,
@@ -1918,8 +1824,6 @@ mod test {
 	#[test]
 	fn test_diff2() {
 		use crate::historied::aggregate::map_delta::{MapDelta, MapDiff, UnitDiff}; 
-		use crate::management::{ManagementMut, Management, ForkableManagement};
-		use crate::test::StateInput;
 		type BD = crate::backend::in_memory::MemoryOnly<Vec<u8>, u32>;
 		type D = crate::backend::in_memory::MemoryOnly<
 			crate::historied::linear::Linear<MapDiff<u8, u8>, u32, BD>,

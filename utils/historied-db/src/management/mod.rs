@@ -30,13 +30,6 @@ pub mod tree;
 /// Linear state management implementations.
 pub mod linear;
 
-/*
-#[cfg(feature = "std")]
-use std::sync::Arc;
-#[cfg(not(feature = "std"))]
-use alloc::sync::Arc;
-*/
-
 use sp_std::{vec::Vec, boxed::Box, marker::PhantomData};
 use crate::Ref;
 
@@ -299,7 +292,7 @@ mod test {
 	#[test]
 	fn test_merge_keys() {
 		let mut set1 = vec![b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"ab".to_vec()];
-		let mut set2 = vec![b"rb".to_vec(), b"bc".to_vec(), b"rb".to_vec(), b"ab".to_vec()];
+		let set2 = vec![b"rb".to_vec(), b"bc".to_vec(), b"rb".to_vec(), b"ab".to_vec()];
 		// note that set1 should not have duplicate, so they are kept, while for set 2 they are removed.
 		let res = vec![b"ab".to_vec(), b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"rb".to_vec()];
 		merge_keys(&mut set1, set2);

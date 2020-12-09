@@ -26,7 +26,17 @@ use std::hash::Hash;
 use crate::{Latest, Ref};
 use crate::management::{ManagementMut, Management, ForkableManagement, Migrate};
 use crate::db_traits::{StateDBBasis, StateDBMut, StateDBRef, StateDB};
-use super::{StateInput, StateIndex};
+use super::StateInput;
+
+
+/// External State (eg hash of block of a blockchain).
+pub type StateIndex = u32;
+
+impl StateInput {
+	fn to_index(&self) -> StateIndex {
+		self.0
+	}
+}
 
 struct DbElt<K, V> {
 	values: HashMap<K, V>,

@@ -27,18 +27,10 @@ pub mod fuzz;
 
 use codec::{Encode, Decode};
 
-/// state index.
-type StateIndex = u32;
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Encode, Decode)]
 /// State Input (aka hash).
 pub struct StateInput(pub u32);
-
-impl StateInput {
-	fn to_index(&self) -> StateIndex {
-		self.0
-	}
-}
 
 pub type InMemoryMgmt = crate::management::tree::TreeManagement<StateInput, u32, u32, ()>;
 pub type InMemoryMgmtSer = crate::management::tree::TreeManagement<StateInput, u32, u32, MappingTests>;
@@ -93,7 +85,6 @@ impl crate::management::tree::TreeManagementStorage for MappingTests {
 
 macro_rules! InMemSimpleDB {
 	($name: ident, $size: expr, $inner_module: ident) => {
-
 
 	pub use $inner_module::InMemory as $name;
 	mod $inner_module {

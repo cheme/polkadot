@@ -223,7 +223,7 @@ pub mod xdelta {
 			(None, _) => BytesDiff::None,
 			(Some(target), None) => BytesDiff::Value(target.clone()),
 			(Some(target), Some(previous)) => {
-				if let Some(mut result) = xdelta3::encode(target.as_slice(), previous.as_slice()) {
+				if let Some(result) = xdelta3::encode(target.as_slice(), previous.as_slice()) {
 					if result.len() < target.len() {
 						BytesDiff::VcDiff(result)
 					} else {
@@ -256,7 +256,7 @@ pub mod xdelta {
 
 		fn builder_add(builder: &mut Self::SumBuilder, diff: Self::Value) {
 			match diff {
-				BytesDiff::Value(mut val) => {
+				BytesDiff::Value(val) => {
 					*builder = Some(val);
 				},
 				BytesDiff::None => {
