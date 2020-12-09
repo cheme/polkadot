@@ -184,6 +184,7 @@ impl<I, BI, V, D, BD> DataBasis for Tree<I, BI, V, D, BD>
 		BD: LinearStorage<V::Storage, BI>,
 {
 	type S = ForkPlan<I, BI>;
+	type Index = (I, BI);
 
 	fn contains(&self, at: &Self::S) -> bool {
 		self.get(at).is_some() // TODO avoid clone??
@@ -254,7 +255,6 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 		BD: LinearStorage<V::Storage, BI> + Trigger,
 {
 	type SE = Latest<(I, BI)>;
-	type Index = (I, BI);
 	type GC = MultipleGc<I, BI>;
 	type Migrate = MultipleMigrate<I, BI>;
 
@@ -762,6 +762,7 @@ pub mod aggregate {
 			BD: LinearStorage<<V::Value as Value>::Storage, BI>,
 	{
 		type S = ForkPlan<I, BI>;
+		type Index = (I, BI);
 
 		fn contains(&self, at: &Self::S) -> bool {
 			self.0.contains(at)
@@ -839,16 +840,15 @@ pub mod aggregate {
 pub mod force {
 	use super::*;
 	use crate::historied::force::ForceDataMut;
+
 	impl<I, BI, V, D, BD> ForceDataMut<V> for Tree<I, BI, V, D, BD>
 		where
-			i: default + eq + ord + clone + encode,
-			bi: linearstate,
-			v: value + clone + eq,
-			d: linearstorage<linear<v, bi, bd>, i>,
-			bd: linearstorage<v::storage, bi> + trigger,
+			I: Default + Eq + Ord + Clone + Encode,
+			BI: LinearState,
+			V: Value + Clone + Eq,
+			D: LinearStorage<Linear<V, BI, BD>, I>,
+			BD: LinearStorage<V::Storage, BI> + Trigger,
 	{
-		type IndexForce = Self::Index;
-
 		fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()> {
 			// Warn dup code, just different linear function call from fn set,
 			// and using directly index, TODO factor result handle at least.
@@ -939,7 +939,7 @@ pub mod conditional {
 		fn set_if_inner(
 			&mut self,
 			value: V,
-			at: &<Self as DataMut<V>>::Index,
+			at: &<Self as DataBasis>::Index,
 			no_overwrite: bool,
 		) -> Option<UpdateResult<()>> {
 			let (branch_index, index) = at;
@@ -985,7 +985,7 @@ pub mod conditional {
 		fn can_if_inner(
 			&self,
 			value: Option<&V>,
-			at: &<Self as DataMut<V>>::Index,
+			at: &<Self as DataBasis>::Index,
 		) -> bool {
 			let (branch_index, index) = at;
 			for branch_ix in self.branches.rev_index_iter() {
@@ -1320,17 +1320,16 @@ mod test {
 			T: codec::Encode,
 			T: DecodeWithContext,
 			T: crate::Trigger,
-			T: crate::historied::DataBasis<S = ForkPlan<u32, u32>>,
+			T: crate::historied::DataBasis<
+				S = ForkPlan<u32, u32>,
+				Index = (u32, u32),
+			>,
 			T: crate::historied::Data<V>,
 			T: crate::historied::DataMut<
 				V,
-				Index = (u32, u32),
 				SE = Latest<(u32, u32)>,
 			>,
-			T: crate::historied::force::ForceDataMut<
-				V,
-				IndexForce = (u32, u32),
-			>,
+			T: crate::historied::force::ForceDataMut<V>,
 	{
 		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::test::StateInput;

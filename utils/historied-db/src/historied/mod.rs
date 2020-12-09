@@ -33,6 +33,9 @@ pub trait DataBasis {
 	/// State to query for this value.
 	type S;
 
+	/// Internal index for a single history item.
+	type Index;
+
 	/// Check if a value exists at this state.
 	fn contains(&self, at: &Self::S) -> bool;
 
@@ -216,11 +219,6 @@ pub trait DataMut<V: Value>: DataBasis + Context {
 	/// for querying as it can use different
 	/// constraints.
 	type SE: StateIndex<Self::Index>;
-
-	/// Index a single history item.
-	/// TODO this type and trait StateIndex are not very relevant.
-	/// TODO move to Data?
-	type Index;
 
 	/// GC strategy that can be applied.
 	/// GC can be run in parallel, it does not
@@ -409,10 +407,7 @@ pub mod force {
 	/// This trait allow setting values in the past, this is usually
 	/// not a good idea to maintain state coherency.
 	pub trait ForceDataMut<V: Value>: DataMut<V> {
-		/// Internal index.
-		type IndexForce;
-
 		/// Do update if state allows it, otherwhise return None.
-		fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()>;
+		fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()>;
 	}
 }

@@ -132,9 +132,8 @@ impl<V, S, D: Clone> Clone for Linear<V, S, D> {
 	}
 }
 
-/// Adapter for storage (allows to factor code while keeping simple types).
-/// VR is the reference to value that is used, and I the initial state.
-pub trait StorageAdapter<'a, S, V, D, H> {
+/// Adapter for storage (allows to factor code without macro).
+trait StorageAdapter<'a, S, V, D, H> {
 	fn get_adapt(inner: D, index: H) -> HistoriedValue<V, S>;
 }
 
@@ -148,19 +147,6 @@ impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
 > for RefVecAdapter {
 	fn get_adapt(inner: &'a D, index: D::Index) -> HistoriedValue<&'a V, S> {
 		inner.get_ref(index)
-	}
-}
-
-struct RefVecAdapterMut;
-impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
-	'a,
-	S,
-	&'a mut V,
-	&'a mut D,
-	D::Index,
-> for RefVecAdapterMut {
-	fn get_adapt(inner: &'a mut D, index: D::Index) -> HistoriedValue<&'a mut V, S> {
-		inner.get_ref_mut(index)
 	}
 }
 
@@ -205,19 +191,6 @@ impl<V, S, D> Linear<V, S, D>
 		}
 		None
 	}
-
-	// TODO use only once, consider removal
-	fn get_adapt_mut<
-		'a,
-		VR,
-		A: StorageAdapter<'a, S, VR, &'a mut D, D::Index>,
-	>(&'a mut self, at: &S)	-> Option<HistoriedValue<VR, S>> {
-		if let Some(index) = self.index(at) {
-			Some(A::get_adapt(&mut self.0, index))
-		} else {
-			None
-		}
-	}
 }
 
 impl<V, S, D> Linear<V, S, D>
@@ -251,7 +224,6 @@ impl<V, S, D> Linear<V, S, D>
 		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
 		UpdateResult::Changed(None)
 	}
-
 }
 
 impl<V, S, D> DataBasis for Linear<V, S, D>
@@ -261,6 +233,7 @@ impl<V, S, D> DataBasis for Linear<V, S, D>
 		D: LinearStorage<V::Storage, S>,
 {
 	type S = S;
+	type Index = S;
 
 	fn contains(&self, at: &Self::S) -> bool {
 		self.index(at).is_some()
@@ -315,7 +288,6 @@ impl<V, S, D> DataRef<V> for Linear<V, S, D>
 	}
 }
 
-// TODO should it be ValueRef?
 impl<'a, V, S, D> DataSliceRanges<'a, S> for Linear<V, S, D>
 	where
 		V: Value,
@@ -364,7 +336,6 @@ impl<V, S, D> DataMut<V> for Linear<V, S, D>
 		D: LinearStorage<V::Storage, S>,
 {
 	type SE = Latest<S>;
-	type Index = S;
 	type GC = LinearGC<S>;
 	/// Migrate will act as GC but also align state to 0.
 	/// The index index in second position is the old start state
@@ -382,8 +353,6 @@ impl<V, S, D> DataMut<V> for Linear<V, S, D>
 		self.set_inner(value, at).map(|_| ())
 	}
 
-	// TODO not sure discard is of any use (revert is most likely
-	// using some migrate as it breaks expectations).
 	fn discard(&mut self, at: &Self::SE) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		if let Some(last) = self.0.last() {
@@ -500,7 +469,11 @@ impl<V, S, D> DataRefMut<V> for Linear<V, S, D>
 {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
-		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| V::from_storage_ref_mut(h.value))
+		if let Some(index) = self.index(at) {
+			Some(V::from_storage_ref_mut(self.0.get_ref_mut(index).value))
+		} else {
+			None
+		}
 	}
 
 	fn set_mut(&mut self, value: V, at: &Self::SE) -> UpdateResult<Option<V>> {
@@ -537,7 +510,7 @@ impl Linear<Option<Vec<u8>>, u64, crate::backend::in_memory::MemoryOnly<Option<V
 pub mod aggregate {
 	use super::*;
 
-	/// Use linear as linear diff. TODO put in its own module?
+	/// Use linear as linear diff.
 	///
 	/// If at some point `SummableValue` and `Value` get merged, this would not be needed.
 	/// (there is already need to have some const related to `SummableValue` in `Value`
@@ -560,6 +533,7 @@ pub mod aggregate {
 			D: LinearStorage<<V::Value as Value>::Storage, S>,
 	{
 		type S = S;
+		type Index = S;
 
 		fn contains(&self, at: &Self::S) -> bool {
 			self.0.contains(at)
@@ -622,6 +596,7 @@ pub mod conditional {
 			D: LinearStorage<V::Storage, S>,
 	{
 		type IndexConditional = Self::Index;
+
 		fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
 			self.can_if_inner(no_overwrite, at)
 		}
@@ -698,9 +673,7 @@ pub mod force {
 			S: LinearState,
 			D: LinearStorage<V::Storage, S>,
 	{
-		type IndexForce = Self::Index;
-
-		fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
+		fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()> {
 			self.force_set(value, at)
 		}
 	}
@@ -793,7 +766,6 @@ mod test {
 
 	#[test]
 	fn test_gc() {
-		// TODO non consecutive state.
 		// [1, 2, 3, 4]
 		let mut first_storage = MemoryOnly::<Vec<u8>, u32>::default();
 		for i in 1..5 {
