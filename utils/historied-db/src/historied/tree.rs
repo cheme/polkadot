@@ -150,12 +150,12 @@ impl<I, BI, V, D: InitFrom, BD: InitFrom> InitFrom for Tree<I, BI, V, D, BD> {
 
 type Branch<I, BI, V, BD> = HistoriedValue<Linear<V, BI, BD>, I>;
 
-impl<
-	I: Clone + Encode,
-	BI: LinearState + SubAssign<BI>,
-	V: Value + Clone + Eq,
-	BD: LinearStorage<V::Storage, BI>,
-> Branch<I, BI, V, BD>
+impl<I, BI, V, BD> Branch<I, BI, V, BD>
+	where
+		I: Clone + Encode,
+		BI: LinearState,
+		V: Value + Clone + Eq,
+		BD: LinearStorage<V::Storage, BI>,
 {
 	pub fn new(value: V, state: &(I, BI), init: &BD::Context) -> Self {
 		let (branch_index, index) = state.clone();
@@ -175,13 +175,14 @@ impl<
 	}
 }
 
-impl<
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone,
-	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
-	BD: LinearStorage<V::Storage, BI>,
-> DataBasis for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> DataBasis for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: Value + Clone,
+		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+		BD: LinearStorage<V::Storage, BI>,
+{
 	type S = ForkPlan<I, BI>;
 
 	fn contains(&self, at: &Self::S) -> bool {
@@ -194,59 +195,64 @@ impl<
 	}
 }
 
-impl<
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone,
-	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
-	BD: LinearStorage<V::Storage, BI>,
-> IndexedDataBasis for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> IndexedDataBasis for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: Value + Clone,
+		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+		BD: LinearStorage<V::Storage, BI>,
+{
 	type I = (D::Index, BD::Index);
 	// Not really used, but it would make sense to implement variants with get_ref.
 	tree_get!(index, Self::I, get, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r), 'a);
 }
 
 #[cfg(feature = "indexed-access")]
-impl<
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone,
-	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
-	BD: LinearStorage<V::Storage, BI>,
-> IndexedData<V> for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> IndexedData<V> for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: Value + Clone,
+		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+		BD: LinearStorage<V::Storage, BI>,
+{
 	fn get_by_internal_index(&self, at: Self::I) -> V {
 		let branch = self.branches.get(at.0).value;
 		branch.get_by_internal_index(at.1)
 	}
 }
 
-impl<
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone,
-	D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
-	BD: LinearStorage<V::Storage, BI>,
-> Data<V> for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> Data<V> for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: Value + Clone,
+		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
+		BD: LinearStorage<V::Storage, BI>,
+{
 	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _, _| r, 'a);
 }
 
-impl<
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + One,
-	V: ValueRef + Clone,
-	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V::Storage, BI>,
-> DataRef<V> for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> DataRef<V> for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: ValueRef + Clone,
+		D: LinearStorageMem<Linear<V, BI, BD>, I>,
+		BD: LinearStorageMem<V::Storage, BI>,
+{
 	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _, _| r, 'a);
 }
 
-impl<
-	I: Default + Eq + Ord + Clone + Encode,
-	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone + Eq,
-	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V::Storage, BI> + Trigger,
-> DataMut<V> for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone + Encode,
+		BI: LinearState,
+		V: Value + Clone + Eq,
+		D: LinearStorage<Linear<V, BI, BD>, I>,
+		BD: LinearStorage<V::Storage, BI> + Trigger,
+{
 	type SE = Latest<(I, BI)>;
 	type Index = (I, BI);
 	type GC = MultipleGc<I, BI>;
@@ -425,13 +431,15 @@ impl<
 	}
 }
 
-impl<
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + Clone,
-	V: Value + Clone + Eq,
-	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V::Storage, BI> + Trigger,
-> Tree<I, BI, V, D, BD> {
+
+impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: Value + Clone + Eq,
+		D: LinearStorage<Linear<V, BI, BD>, I>,
+		BD: LinearStorage<V::Storage, BI> + Trigger,
+{
 	fn state_gc(&mut self, gc: &TreeStateGc<I, BI>) -> UpdateResult<()> {
 		let mut result = UpdateResult::Unchanged;
 		let start_history = &gc.pruning_treshold;
@@ -611,13 +619,14 @@ pub(crate) trait TreeTestMethods {
 }
 
 #[cfg(test)]
-impl<
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + Clone,
-	V: Value + Clone + Eq,
-	D: LinearStorage<Linear<V, BI, BD>, I>,
-	BD: LinearStorage<V::Storage, BI>,
-> TreeTestMethods for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> TreeTestMethods for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: Value + Clone + Eq,
+		D: LinearStorage<Linear<V, BI, BD>, I>,
+		BD: LinearStorage<V::Storage, BI>,
+{
 	fn nb_internal_history(&self) -> usize {
 		let mut nb = 0;
 		for index in self.branches.rev_index_iter() {
@@ -632,13 +641,14 @@ impl<
 	}
 }
 
-impl<
-	I: Default + Eq + Ord + Clone + Encode,
-	BI: LinearState + SubAssign<BI> + One,
-	V: ValueRef + Clone + Eq,
-	D: LinearStorageMem<Linear<V, BI, BD>, I>,
-	BD: LinearStorageMem<V::Storage, BI, Context = D::Context> + Trigger,
-> DataRefMut<V> for Tree<I, BI, V, D, BD> {
+impl<I, BI, V, D, BD> DataRefMut<V> for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone + Encode,
+		BI: LinearState,
+		V: ValueRef + Clone + Eq,
+		D: LinearStorageMem<Linear<V, BI, BD>, I>,
+		BD: LinearStorageMem<V::Storage, BI, Context = D::Context> + Trigger,
+{
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
 		for branch_ix in self.branches.rev_index_iter() {
@@ -704,14 +714,14 @@ impl Tree<u32, u64, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 	}
 }
 
-impl<
-	'a,
-	I: Default + Eq + Ord + Clone,
-	BI: LinearState + SubAssign<BI> + One,
-	V: Value + Clone + AsRef<[u8]>,
-	D: LinearStorageSlice<Linear<V, BI, BD>, I>,
-	BD: AsRef<[u8]> + LinearStorageRange<'a, V::Storage, BI>,
-> DataSlices<'a, V> for Tree<I, BI, V, D, BD> {
+impl<'a, I, BI, V, D, BD> DataSlices<'a, V> for Tree<I, BI, V, D, BD>
+	where
+		I: Default + Eq + Ord + Clone,
+		BI: LinearState,
+		V: Value + Clone + AsRef<[u8]>,
+		D: LinearStorageSlice<Linear<V, BI, BD>, I>,
+		BD: AsRef<[u8]> + LinearStorageRange<'a, V::Storage, BI>,
+{
 	tree_get!(
 		get_slice,
 		&[u8],
@@ -745,7 +755,7 @@ pub mod aggregate {
 	impl<'a, I, BI, V, D, BD> DataBasis for Sum<'a, I, BI, V, D, BD>
 		where
 			I: Default + Eq + Ord + Clone,
-			BI: LinearState + SubAssign<BI> + One,
+			BI: LinearState,
 			V: SummableValue,
 			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
@@ -765,7 +775,7 @@ pub mod aggregate {
 	impl<'a, I, BI, V, D, BD> Data<V::Value> for Sum<'a, I, BI, V, D, BD>
 		where
 			I: Default + Eq + Ord + Clone,
-			BI: LinearState + SubAssign<BI> + One,
+			BI: LinearState,
 			V: SummableValue,
 			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
@@ -779,7 +789,7 @@ pub mod aggregate {
 	impl<'a, I, BI, V, D, BD> DataSum<V> for Sum<'a, I, BI, V, D, BD>
 		where
 			I: Default + Eq + Ord + Clone,
-			BI: LinearState + SubAssign<BI> + One,
+			BI: LinearState,
 			V: SummableValue,
 			V::Value: Value + Clone,
 			D: LinearStorage<Linear<V::Value, BI, BD>, I>,
@@ -829,13 +839,14 @@ pub mod aggregate {
 pub mod force {
 	use super::*;
 	use crate::historied::force::ForceDataMut;
-	impl<
-		I: Default + Eq + Ord + Clone + Encode,
-		BI: LinearState + SubAssign<BI> + One,
-		V: Value + Clone + Eq,
-		D: LinearStorage<Linear<V, BI, BD>, I>,
-		BD: LinearStorage<V::Storage, BI> + Trigger,
-	> ForceDataMut<V> for Tree<I, BI, V, D, BD> {
+	impl<I, BI, V, D, BD> ForceDataMut<V> for Tree<I, BI, V, D, BD>
+		where
+			i: default + eq + ord + clone + encode,
+			bi: linearstate,
+			v: value + clone + eq,
+			d: linearstorage<linear<v, bi, bd>, i>,
+			bd: linearstorage<v::storage, bi> + trigger,
+	{
 		type IndexForce = Self::Index;
 
 		fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()> {
@@ -890,13 +901,14 @@ pub mod conditional {
 	// struct). Element prior (I, BI) are not needed (only children).
 	// Then we still apply only at designated (I, BI) but any value in the plan are
 	// skipped.
-	impl<
-		I: Default + Eq + Ord + Clone + Encode,
-		BI: LinearState + SubAssign<BI> + One,
-		V: Value + Clone + Eq,
-		D: LinearStorage<Linear<V, BI, BD>, I>,
-		BD: LinearStorage<V::Storage, BI> + Trigger,
-	> ConditionalDataMut<V> for Tree<I, BI, V, D, BD> {
+	impl<I, BI, V, D, BD> ConditionalDataMut<V> for Tree<I, BI, V, D, BD>
+		where
+			I: Default + Eq + Ord + Clone + Encode,
+			BI: LinearState,
+			V: Value + Clone + Eq,
+			D: LinearStorage<Linear<V, BI, BD>, I>,
+			BD: LinearStorage<V::Storage, BI> + Trigger,
+	{
 		// TODO this would require to get all branch index that are children
 		// of this index, and also their current upper bound.
 		// That can be fairly costy.
@@ -915,13 +927,15 @@ pub mod conditional {
 		}
 	}
 
-	impl<
-		I: Default + Eq + Ord + Clone + Encode,
-		BI: LinearState + SubAssign<BI> + One,
-		V: Value + Clone + Eq,
-		D: LinearStorage<Linear<V, BI, BD>, I>,
-		BD: LinearStorage<V::Storage, BI> + Trigger,
-	> Tree<I, BI, V, D, BD> {
+	impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
+		where
+			I: Default + Eq + Ord + Clone + Encode,
+			BI: LinearState,
+			V: Value + Clone + Eq,
+			D: LinearStorage<Linear<V, BI, BD>, I>,
+			BD: LinearStorage<V::Storage, BI> + Trigger,
+	{
+
 		fn set_if_inner(
 			&mut self,
 			value: V,

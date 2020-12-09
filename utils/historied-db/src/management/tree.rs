@@ -1341,12 +1341,13 @@ impl<
 	}
 }
 	
-impl<
-	H: Ord + Clone + Codec,
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
-	S: TreeManagementStorage,
-> Management<H> for TreeManagement<H, I, BI, S> {
+impl<H, I, BI, S> Management<H> for TreeManagement<H, I, BI, S>
+	where
+		H: Ord + Clone + Codec,
+		I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+		BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+		S: TreeManagementStorage,
+{
 	type S = ForkPlan<I, BI>;
 	/// Garbage collect over current
 	/// state or registered changes.

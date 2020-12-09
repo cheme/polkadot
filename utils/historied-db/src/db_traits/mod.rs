@@ -114,7 +114,13 @@ impl<K: Ord, V: Value, D: DataRef<V> + Context> StateDBRef<K, V> for BTreeMap<K,
 	}
 }
 
-impl<K: Ord + Clone, V: Value + Clone + Eq, D: DataMut<V>> StateDBMut<K, V> for BTreeMap<K, V, D> {
+impl<K, V, D> StateDBMut<K, V> for BTreeMap<K, V, D>
+	where
+		K: Ord + Clone,
+		V: Value + Clone + Eq,
+		D: DataMut<V>,
+{
+
 	type SE = D::SE;
 	type GC = D::GC;
 	type Migrate = D::Migrate;
@@ -191,14 +197,13 @@ impl<K, V: Value + Clone, D: Data<V>, DB: PlainDBRef<K, D>, S> StateDB<K, V> for
 }
 
 
-impl<
-	K: Ord + Clone,
-	V: Value + Clone + Eq,
-	D: DataMut<V, Context = ()>,
-	DB: PlainDBRef<K, D> + PlainDB<K, D>,
-> StateDBMut<K, V> for PlainDBState<K, DB, D, D::Index>
+impl<K, V, D, DB> StateDBMut<K, V> for PlainDBState<K, DB, D, D::Index>
 	where
-			D::Index: Clone + Ord,
+		K: Ord + Clone,
+		V: Value + Clone + Eq,
+		D: DataMut<V, Context = ()>,
+		DB: PlainDBRef<K, D> + PlainDB<K, D>,
+		D::Index: Clone + Ord,
 {
 	type SE = D::SE;
 	type GC = D::GC;

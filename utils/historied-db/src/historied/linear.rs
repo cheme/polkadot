@@ -16,12 +16,6 @@
 // limitations under the License.
 
 //! Linear historied data historied db implementations.
-//!
-//! Current implementation is limited to a simple array indexing
-//! with modification at the end only.
-//! This is a sequential indexing.
-//!
-//! All api are assuming that the state used when modifying is indeed the latest state.
 
 use super::{HistoriedValue, Data, DataMut, DataSliceRanges, DataRef,
 	DataSlices, DataRefMut, Value, ValueRef, DataBasis, IndexedDataBasis,
@@ -39,20 +33,22 @@ use crate::backend::encoded_array::EncodedArrayValue;
 use crate::{Context, InitFrom, DecodeWithContext, Trigger};
 use derivative::Derivative;
 use crate::backend::nodes::EstimateSize;
+use num_traits::One;
 
-/// Basic usage case should be integers and byte representation, but
-/// only integer should really be use.
+/// Trait required for a state.
 ///
-/// This state is a simple ordered sequence.
+/// This is a simple ordered index.
+/// Common implementation should be integers and ordered bytes (if unbound
+/// indexing is needed).
 pub trait LinearState:
 	Default
 	+ Clone
 	+ Ord
 	+ PartialOrd
+	+ One
+	+ SubAssign<Self>
 {
-	// stored state and query state are
-	// the same for linear state.
-	/// Test if a state is valid given a current one.
+	/// Test if a state is valid relatively to another one.
 	///
 	/// For linear (sequential) it is true if less or
 	/// equal than current state.
@@ -66,6 +62,8 @@ impl<S> LinearState for S where S:
 	+ Clone
 	+ Ord
 	+ PartialOrd
+	+ One
+	+ SubAssign<Self>
 { }
 
 /// Implementation of linear value history storage.
@@ -192,7 +190,12 @@ impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	}
 }
 
-impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V, S, D> Linear<V, S, D>
+	where
+		V: Value,
+		S: LinearState,
+		D: LinearStorage<V::Storage, S>,
+{
 	fn get_adapt<'a, VR, A: StorageAdapter<'a, S, VR, &'a D, D::Index>>(&'a self, at: &S) -> Option<VR> {
 		for index in self.0.rev_index_iter() {
 			let HistoriedValue { value, state } = A::get_adapt(&self.0, index);
@@ -217,7 +220,12 @@ impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> 
 	}
 }
 
-impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+impl<V, S, D> Linear<V, S, D>
+	where
+		V: Value + Eq,
+		S: LinearState,
+		D: LinearStorage<V::Storage, S>,
+{
 	fn set_inner(&mut self, value: V, at: &Latest<S>) -> UpdateResult<Option<V>> {
 		let at = at.latest();
 		loop {
@@ -246,7 +254,12 @@ impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S
 
 }
 
-impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> DataBasis for Linear<V, S, D> {
+impl<V, S, D> DataBasis for Linear<V, S, D>
+	where
+		V: Value,
+		S: LinearState,
+		D: LinearStorage<V::Storage, S>,
+{
 	type S = S;
 
 	fn contains(&self, at: &Self::S) -> bool {
@@ -258,7 +271,12 @@ impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> DataBasis for Li
 	}
 }
 
-impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedDataBasis for Linear<V, S, D> {
+impl<V, S, D> IndexedDataBasis for Linear<V, S, D>
+	where
+		V: Value,
+		S: LinearState,
+		D: LinearStorage<V::Storage, S>,
+{
 	type I = D::Index;
 
 	fn index(&self, at: &Self::S) -> Option<Self::I> {
@@ -275,20 +293,35 @@ impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedDataBasis
 }
 
 #[cfg(feature = "indexed-access")]
-impl<V: Value, S: LinearState, D: LinearStorage<V::Storage, S>> IndexedData<V> for Linear<V, S, D> {
+impl<V, S, D> IndexedData<V> for Linear<V, S, D>
+	where
+		V: Value,
+		S: LinearState,
+		D: LinearStorage<V::Storage, S>,
+{
 	fn get_by_internal_index(&self, at: Self::I) -> V {
 		V::from_storage(self.0.get(at).value)
 	}
 }
 
-impl<V: ValueRef + Clone, S: LinearState, D: LinearStorageMem<V::Storage, S>> DataRef<V> for Linear<V, S, D> {
+impl<V, S, D> DataRef<V> for Linear<V, S, D>
+	where
+		V: ValueRef + Clone,
+		S: LinearState,
+		D: LinearStorageMem<V::Storage, S>,
+{
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
 		self.get_adapt::<_, RefVecAdapter>(at).map(ValueRef::from_storage_ref)
 	}
 }
 
 // TODO should it be ValueRef?
-impl<'a, V: Value, S: LinearState, D: LinearStorageRange<'a, V::Storage, S>> DataSliceRanges<'a, S> for Linear<V, S, D> {
+impl<'a, V, S, D> DataSliceRanges<'a, S> for Linear<V, S, D>
+	where
+		V: Value,
+		S: LinearState,
+		D: LinearStorageRange<'a, V::Storage, S>,
+{
 	fn get_range(slice: &'a [u8], at: &S) -> Option<Range<usize>> {
 		if let Some(inner) = D::from_slice_ref(slice) {
 			for index in inner.rev_index_iter() {
@@ -303,19 +336,33 @@ impl<'a, V: Value, S: LinearState, D: LinearStorageRange<'a, V::Storage, S>> Dat
 	}
 }
 
-impl<'a, S: LinearState, D: LinearStorageSlice<Vec<u8>, S>> DataSlices<'a, Vec<u8>> for Linear<Vec<u8>, S, D> {
+impl<'a, S, D> DataSlices<'a, Vec<u8>> for Linear<Vec<u8>, S, D>
+	where
+		S: LinearState,
+		D: LinearStorageSlice<Vec<u8>, S>,
+{
 	fn get_slice(&'a self, at: &Self::S) -> Option<&'a [u8]> {
 		self.get_adapt::<_, SliceAdapter>(at)
 	}
 }
 
-impl<V: Value + Clone, S: LinearState, D: LinearStorage<V::Storage, S>> Data<V> for Linear<V, S, D> {
+impl<V, S, D> Data<V> for Linear<V, S, D>
+	where
+		V: Value + Clone,
+		S: LinearState,
+		D: LinearStorage<V::Storage, S>,
+{
 	fn get(&self, at: &Self::S) -> Option<V> {
 		self.get_adapt::<_, ValueVecAdapter>(at).map(V::from_storage)
 	}
 }
 
-impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> DataMut<V> for Linear<V, S, D> {
+impl<V, S, D> DataMut<V> for Linear<V, S, D>
+	where
+		V: Value + Clone + Eq,
+		S: LinearState,
+		D: LinearStorage<V::Storage, S>,
+{
 	type SE = Latest<S>;
 	type Index = S;
 	type GC = LinearGC<S>;
@@ -445,7 +492,12 @@ impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::S
 	}
 }
 
-impl<V: ValueRef + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorageMem<V::Storage, S>> DataRefMut<V> for Linear<V, S, D> {
+impl<V, S, D> DataRefMut<V> for Linear<V, S, D>
+	where
+		V: ValueRef + Clone + Eq,
+		S: LinearState,
+		D: LinearStorageMem<V::Storage, S>,
+{
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();
 		self.get_adapt_mut::<_, RefVecAdapterMut>(at).map(|h| V::from_storage_ref_mut(h.value))
@@ -563,7 +615,12 @@ pub mod conditional {
 	use super::*;
 	use crate::historied::conditional::ConditionalDataMut;
 
-	impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ConditionalDataMut<V> for Linear<V, S, D> {
+	impl<V, S, D> ConditionalDataMut<V> for Linear<V, S, D>
+		where
+			V: Value + Clone + Eq,
+			S: LinearState,
+			D: LinearStorage<V::Storage, S>,
+	{
 		type IndexConditional = Self::Index;
 		fn can_set(&self, no_overwrite: Option<&V>, at: &Self::IndexConditional) -> bool {
 			self.can_if_inner(no_overwrite, at)
@@ -577,7 +634,12 @@ pub mod conditional {
 		}
 	}
 
-	impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+	impl<V, S, D> Linear<V, S, D>
+		where
+			V: Value + Eq,
+			S: LinearState,
+			D: LinearStorage<V::Storage, S>,
+	{
 		fn set_if_inner(&mut self, value: V, at: &S, allow_overwrite: bool) -> Option<UpdateResult<()>> {
 			if let Some(index) = self.0.last() {
 				let last = self.0.get_state(index);
@@ -630,7 +692,12 @@ pub mod force {
 	use super::*;
 	use crate::historied::force::ForceDataMut;
 
-	impl<V: Value + Clone + Eq, S: LinearState + SubAssign<S>, D: LinearStorage<V::Storage, S>> ForceDataMut<V> for Linear<V, S, D> {
+	impl<V, S, D> ForceDataMut<V> for Linear<V, S, D>
+		where
+			V: Value + Clone + Eq,
+			S: LinearState,
+			D: LinearStorage<V::Storage, S>,
+	{
 		type IndexForce = Self::Index;
 
 		fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()> {
@@ -638,7 +705,12 @@ pub mod force {
 		}
 	}
 
-	impl<V: Value + Eq, S: LinearState, D: LinearStorage<V::Storage, S>> Linear<V, S, D> {
+	impl<V, S, D> Linear<V, S, D>
+		where
+			V: Value + Eq,
+			S: LinearState,
+			D: LinearStorage<V::Storage, S>,
+	{
 		fn force_set(&mut self, value: V, at: &S) -> UpdateResult<()> {
 			let mut position = self.0.last();
 			let mut insert_index =  None;
