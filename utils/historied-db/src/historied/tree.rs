@@ -1005,7 +1005,7 @@ pub mod conditional {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::management::tree::test::{test_states, test_states_st, TestState};
+	use crate::management::tree::test::test_states;
 	use crate::InitFrom;
 	use super::aggregate::Sum as TreeSum;
 
@@ -1261,9 +1261,7 @@ mod test {
 				IndexConditional = (u32, u32),
 			>,
 	{
-		use crate::management::{ManagementMut, Management, ForkableManagement};
 		use crate::historied::conditional::ConditionalDataMut;
-		use crate::test::StateInput;
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
@@ -1305,7 +1303,7 @@ mod test {
 	}
 
 	#[cfg(not(feature = "force-data"))]
-	fn test_force_set_get<T, V>(context: T::Context) where
+	fn test_force_set_get<T, V>(_context: T::Context) where
 		T: crate::historied::DataMut<V>,
 		V: crate::historied::Value,
 	{ }
@@ -1472,7 +1470,7 @@ mod test {
 
 		let check_state = |states: &mut crate::test::InMemoryMgmtSer, target: Vec<(u32, u32)>| {
 			let mut gc = states.get_migrate();
-			let (pruning, mut iter) = gc.migrate().touched_state();
+			let (pruning, iter) = gc.migrate().touched_state();
 			assert_eq!(pruning, None);
 			let mut set = std::collections::BTreeSet::new();
 			for s in iter {
@@ -1505,15 +1503,15 @@ mod test {
 		item1.set(6.into(), &states.get_db_state_mut(&StateInput(105)).unwrap());
 		item2.set(6.into(), &states.get_db_state_mut(&StateInput(105)).unwrap());
 		// end fusing (shift following branch index by 2)
-		let s2 = states.append_external_state(StateInput(2), &s0).unwrap();
+		let _s2 = states.append_external_state(StateInput(2), &s0).unwrap();
 		let s1b = states.append_external_state(StateInput(12), s1.latest()).unwrap();
 		let s1 = states.append_external_state(StateInput(13), s1b.latest()).unwrap();
 		let sx = states.append_external_state(StateInput(14), s1.latest()).unwrap();
 		let qp14 = states.get_db_state(&StateInput(14)).unwrap();
 		assert_eq!(states.drop_state(sx.latest(), true).unwrap().len(), 1);
 		let s3 = states.append_external_state(StateInput(3), s1.latest()).unwrap();
-		let s4 = states.append_external_state(StateInput(4), s1.latest()).unwrap();
-		let s5 = states.append_external_state(StateInput(5), s1b.latest()).unwrap();
+		let _s4 = states.append_external_state(StateInput(4), s1.latest()).unwrap();
+		let _s5 = states.append_external_state(StateInput(5), s1b.latest()).unwrap();
 		// 0> 1: _ _ X
 		// |			 |> 3: 1
 		// |			 |> 4: 1
@@ -1534,8 +1532,8 @@ mod test {
 		item1.set(14.into(), &states.get_db_state_mut(&StateInput(33)).unwrap());
 		item3.set(0.into(), &states.get_db_state_mut(&StateInput(33)).unwrap());
 		let s3head = states.append_external_state(StateInput(34), s3tmp.latest()).unwrap();
-		let s6 = states.append_external_state(StateInput(6), s3tmp.latest()).unwrap();
-		let s3head = states.append_external_state(StateInput(35), s3head.latest()).unwrap();
+		let _s6 = states.append_external_state(StateInput(6), s3tmp.latest()).unwrap();
+		let _s3head = states.append_external_state(StateInput(35), s3head.latest()).unwrap();
 		item1.set(15.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
 		item2.set(15.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
 		item4.set(0.into(), &states.get_db_state_mut(&StateInput(35)).unwrap());
@@ -1556,8 +1554,8 @@ mod test {
 		states.canonicalize(fp, *s3tmp.latest(), None);
 		// other drops from filter_out
 		check_state(&mut states, filter_qp.clone());
+		// no query plan for 14
 		let filter_in = [1, 102, 103, 105, 12, 13, 32, 33, 34, 35, 6];
-		let no_qp = [14];
 
 		let check_gc = |item1: &T, item2: &T, item3: &T, item4: &T, states: &mut crate::test::InMemoryMgmtSer| {
 			//panic!("{:?} \n {:?}", old_state, states);

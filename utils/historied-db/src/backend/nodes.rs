@@ -1359,7 +1359,7 @@ pub(crate) mod test {
 		for i in 0u8..3 {
 			let mut head1 = head2.get(head2.lookup(i as usize).unwrap());
 			//head1.value.clear();
-			for j in 0u8..9 {
+			for _ in 0u8..9 {
 				head1.value.pop();
 			}
 
