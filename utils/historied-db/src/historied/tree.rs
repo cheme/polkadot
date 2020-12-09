@@ -28,8 +28,6 @@ use super::IndexedData;
 use crate::backend::{LinearStorage, LinearStorageRange, LinearStorageSlice, LinearStorageMem};
 use crate::historied::linear::{Linear, LinearState, LinearGC, aggregate::Sum as LinearSum};
 use crate::management::tree::{ForkPlan, BranchesContainer, TreeStateGc, DeltaTreeStateGc, MultipleGc, MultipleMigrate};
-use sp_std::ops::SubAssign;
-use num_traits::One;
 use sp_std::vec::Vec;
 use sp_std::marker::PhantomData;
 use crate::Latest;

@@ -1551,8 +1551,18 @@ pub(crate) mod test {
 		// |			 |> 4: 1
 		// |		 |> 5: 1
 		// |> 2: _ _
-
 		states
+	}
+
+	#[test]
+	fn test_serialize() {
+		let states = test_states_st();
+		let storage = states.serialize.clone();
+		let mut states = TestStateMapping::from_ser(storage);
+		// just replaying the three last test of test_states_inner
+		assert!(states.branch_state(&1).unwrap().state.exists(&1));
+		assert!(states.branch_state(&1).unwrap().state.exists(&2));
+		assert!(!states.branch_state(&1).unwrap().state.exists(&3));
 	}
 
 	#[test]
