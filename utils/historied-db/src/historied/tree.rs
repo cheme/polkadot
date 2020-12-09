@@ -1353,7 +1353,7 @@ mod test {
 
 		let mut states2 = states.clone();
 
-		let check = |states: &mut TestState, item: &T| {
+		let check = |states: &mut crate::management::tree::test::TestState, item: &T| {
 			assert_eq!(item.get(&states.query_plan(1)), Some(0.into()));
 			assert_eq!(item.get(&states.query_plan(2)), Some(2.into()));
 			states.drop_state(&1u32);
