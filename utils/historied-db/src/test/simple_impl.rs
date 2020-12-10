@@ -126,12 +126,16 @@ impl<K: Hash + Eq, V: Clone> StateDBMut<K, V> for Db<K, V> {
 }
 
 impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
+	type Index = StateIndex;
 	type S = Query;
 	type GC = ();
-	type Migrate = ();
 
-	fn get_db_state(&mut self, state: &StateInput) -> Option<Self::S> {
-		if let Some(mut ix) = self.get_state(state) {
+	fn get_internal_index(&mut self, tag: &StateInput) -> Option<Self::Index> {
+		self.get_state(tag)
+	}
+
+	fn get_db_state(&mut self, tag: &StateInput) -> Option<Self::S> {
+		if let Some(mut ix) = self.get_state(tag) {
 			let mut query = vec![ix];
 			loop {
 				let next = self.db[ix as usize].as_ref().map(|elt| elt.previous).unwrap_or(ix);
@@ -171,11 +175,12 @@ impl<K: Eq + Hash, V> Default for Db<K, V> {
 
 impl<K: Eq + Hash, V> ManagementMut<StateInput> for Db<K, V> {
 	type SE = Latest<StateIndex>;
+	type Migrate = ();
 
-	fn get_db_state_mut(&mut self, state: &StateInput) -> Option<Self::SE> {
-//		if let Some(s) = self.get_state(state) {
-		if self.is_latest(&state.to_index()) {
-			return Some(Latest::unchecked_latest(state.to_index()))
+	fn get_db_state_mut(&mut self, tag: &StateInput) -> Option<Self::SE> {
+//		if let Some(s) = self.get_state(tag) {
+		if self.is_latest(&tag.to_index()) {
+			return Some(Latest::unchecked_latest(tag.to_index()))
 		}
 //		}
 		None
@@ -192,8 +197,8 @@ impl<K: Eq + Hash, V> ManagementMut<StateInput> for Db<K, V> {
 
 	fn force_latest_external_state(&mut self, _state: StateInput) { }
 
-	fn reverse_lookup(&mut self, state: &Self::S) -> Option<StateInput> {
-		if let Some(state) = state.first() {
+	fn reverse_lookup(&mut self, tag: &Self::S) -> Option<StateInput> {
+		if let Some(state) = tag.first() {
 			// TODO wrong cast.
 			let state = StateInput(*state as u32);
 			if self.contains(&state) {

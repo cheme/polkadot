@@ -1348,17 +1348,19 @@ impl<H, I, BI, S> Management<H> for TreeManagement<H, I, BI, S>
 		BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 		S: TreeManagementStorage,
 {
+	type Index = (I, BI);
 	type S = ForkPlan<I, BI>;
 	/// Garbage collect over current
 	/// state or registered changes.
 	/// Choice is related to `TreeManagementStorage::JOURNAL_DELETE`.
 	type GC = MultipleGc<I, BI>;
-	/// TODO this needs some branch index ext_statess.
-	type Migrate = MultipleMigrate<I, BI>;
-	//type Migrate = TreeMigrate<I, BI, V>;
 
-	fn get_db_state(&mut self, state: &H) -> Option<Self::S> {
-		self.ext_states.mapping(self.state.ser()).get(state).cloned().map(|i| self.state.query_plan_at(i))
+	fn get_internal_index(&mut self, tag: &H) -> Option<Self::Index> {
+		self.ext_states.mapping(self.state.ser()).get(tag).cloned()
+	}
+
+	fn get_db_state(&mut self, tag: &H) -> Option<Self::S> {
+		self.ext_states.mapping(self.state.ser()).get(tag).cloned().map(|i| self.state.query_plan_at(i))
 	}
 
 	fn get_gc(&self) -> Option<crate::Ref<Self::GC>> {
@@ -1376,8 +1378,12 @@ impl<
 	// on set and on get_mut
 	type SE = Latest<(I, BI)>;
 
-	fn get_db_state_mut(&mut self, state: &H) -> Option<Self::SE> {
-		self.ext_states.mapping(self.state.ser()).get(state).cloned().and_then(|(i, bi)| {
+	/// TODO this needs some branch index ext_statess.
+	type Migrate = MultipleMigrate<I, BI>;
+	//type Migrate = TreeMigrate<I, BI, V>;
+
+	fn get_db_state_mut(&mut self, tag: &H) -> Option<Self::SE> {
+		self.ext_states.mapping(self.state.ser()).get(tag).cloned().and_then(|(i, bi)| {
 			// enforce only latest
 			self.state.if_latest_at(i, bi)
 		})

@@ -41,12 +41,18 @@ impl<H, S: AddAssign<u32>> LinearInMemoryManagement<H, S> {
 }
 
 impl<H: Ord, S: Clone> Management<H> for LinearInMemoryManagement<H, S> {
+	type Index = S;
 	type S = S;
 	type GC = S;
-	type Migrate = (S, Self::GC);
-	fn get_db_state(&mut self, state: &H) -> Option<Self::S> {
-		self.mapping.get(state).cloned()
+
+	fn get_internal_index(&mut self, tag: &H) -> Option<Self::Index> {
+		self.mapping.get(tag).cloned()
 	}
+
+	fn get_db_state(&mut self, tag: &H) -> Option<Self::S> {
+		self.mapping.get(tag).cloned()
+	}
+
 	fn get_gc(&self) -> Option<crate::Ref<Self::GC>> {
 		if self.changed_treshold {
 			Some(crate::Ref::Owned(self.start_treshold.clone()))
@@ -79,9 +85,10 @@ H: Ord + Clone,
 S: Default + Clone + AddAssign<u32> + Ord,
 > ManagementMut<H> for LinearInMemoryManagement<H, S> {
 	type SE = Latest<S>;
+	type Migrate = (S, Self::GC);
 
-	fn get_db_state_mut(&mut self, state: &H) -> Option<Self::SE> {
-		if let Some(state) = self.mapping.get(state) {
+	fn get_db_state_mut(&mut self, tag: &H) -> Option<Self::SE> {
+		if let Some(state) = self.mapping.get(tag) {
 			let latest = self.mapping.values().max()
 				.map(Clone::clone)
 				.unwrap_or(S::default());
@@ -103,10 +110,10 @@ S: Default + Clone + AddAssign<u32> + Ord,
 
 	fn force_latest_external_state(&mut self, _state: H) { }
 
-	fn reverse_lookup(&mut self, state: &Self::S) -> Option<H> {
+	fn reverse_lookup(&mut self, tag: &Self::S) -> Option<H> {
 		// TODO could be the closest valid and return non optional!!!! TODO
 		self.mapping.iter()
-			.find(|(_k, v)| v == &state)
+			.find(|(_k, v)| v == &tag)
 			.map(|(k, _v)| k.clone())
 	}
 
@@ -126,12 +133,12 @@ impl<
 H: Ord + Clone,
 S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + One,
 > LinearManagement<H> for LinearInMemoryManagement<H, S> {
-	fn append_external_state(&mut self, state: H) -> Option<Self::S> {
+	fn append_external_state(&mut self, tag: H) -> Option<Self::S> {
 		if !self.can_append {
 			return None;
 		}
 		self.current_state += S::one();
-		self.mapping.insert(state, self.current_state.clone());
+		self.mapping.insert(tag, self.current_state.clone());
 		Some(self.current_state.clone())
 	}
 

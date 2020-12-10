@@ -19,10 +19,10 @@
 //!
 //! This associate a tag (for instance a block hash),
 //! with historical state index.
-//! Tags are usually associated with the generic parameter `H`.
+//! Tags are therefore usually associated with the generic parameter `H`.
 //!
-//! It allows building different states from state index
-//! for different operation on historical data.
+//! Given a tag, it allows building different states for different operation
+//! on historical data.
 
 /// Forkable state management implementations.
 pub mod tree;
@@ -35,22 +35,42 @@ use crate::Ref;
 
 /// Management maps a historical tag of type `H` with its different db states representation.
 pub trait Management<H> {
-	/// attached db state needed for query.
+	/// Internal index associated with a given tag.
+	type Index;
+
+	/// Attached db state needed for query operation
+	/// on historical data.
 	type S;
-	/// attached db gc strategy.
-	/// TODO at Mut level? also is having a mut variant of any use here?
+
+	/// Attached db gc strategy.
+	/// Can be applied on any historical data to
+	/// clean up.
 	type GC;
-	type Migrate;
-	/// Returns the historical state representation for a given historical tag.
+
+	/// Returns the associated inner index of a given historical tag.
+	///
+	/// Mutable access is for caching only.
+	fn get_internal_index(&mut self, tag: &H) -> Option<Self::Index>;
+
+	/// Returns the historical read state representation for a given historical tag.
+	///
+	/// Mutable access is for caching only.
 	fn get_db_state(&mut self, tag: &H) -> Option<Self::S>;
-	/// returns optional to avoid holding lock of do nothing GC.
-	/// TODO this would need RefMut or make the serialize cache layer inner mutable.
+
+	/// Returns a Gc to cleanup historical data.
+	/// If the Gc is not relevant (eg after a migration), simply return None.
 	fn get_gc(&self) -> Option<Ref<Self::GC>>;
 }
 
 pub trait ManagementMut<H>: Management<H> + Sized {
-	/// attached db state needed for update.
-	type SE; // TODO rename to latest or pending???
+	/// Attached db state needed for update operation
+	/// on historical data.
+	type SE;
+
+	/// Attached db migrate definition.
+	/// Can be applied on any historical data
+	/// to migrate to a post migration management state.
+	type Migrate;
 
 	/// Return state mut for state but only if state exists and is
 	/// a terminal writeable leaf (if not you need to create new branch 
