@@ -249,7 +249,7 @@ impl<I, BI> MultipleMigrate<I, BI>
 {
 	/// Return upper limit (all state before it are touched),
 	/// and explicit touched state.
-	#[cfg(test)]
+	/// Allows targetting journals when migrating.
 	pub fn touched_state(&self) -> (Option<BI>, impl Iterator<Item = (I, BI)>) {
 		let (pruning, touched) = match self {
 			MultipleMigrate::JournalGc(gc) => {
