@@ -439,7 +439,7 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManag
 impl<
 	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > TreeManagement<H, I, BI, S> {
 	/// Associate a state for the initial root (default index).
@@ -606,7 +606,7 @@ impl<
 
 impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	H: Clone + Ord + Codec,
 	S: TreeManagementStorage,
 > TreeManagementWithConsumer<H, I, BI, S> {
@@ -621,7 +621,7 @@ impl<
 
 impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	H: Clone + Ord + Codec,
 	S: TreeManagementStorage,
 > RegisteredConsumer<H, I, BI, S> {
@@ -652,7 +652,7 @@ impl<
 	
 impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Default + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+	BI: Ord + Default + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > Tree<I, BI, S> {
 	/// Return anchor index for this branch history:
@@ -1027,7 +1027,7 @@ impl<I: Clone, BI: Clone + SubAssign<BI> + One> ForkPlan<I, BI> {
 	}
 }
 
-impl<I, BI: Clone + Eq + SubAssign<BI> + One + Default + Ord> ForkPlan<I, BI> {
+impl<I, BI: Clone + SubAssign<BI> + One + Default + Ord> ForkPlan<I, BI> {
 	/// Calculate forkplan that does not include current state,
 	/// very usefull to produce diff of value at a given state
 	/// (we make the diff against the previous, not the current).
@@ -1067,7 +1067,7 @@ pub struct BranchPlan<I, BI> {
 	pub state: BranchRange<BI>,
 }
 
-impl<'a, I: Default + Eq + Ord + Clone, BI: SubAssign<BI> + Ord + Clone + One> BranchesContainer<I, BI> for &'a ForkPlan<I, BI> {
+impl<'a, I: Default + Ord + Clone, BI: SubAssign<BI> + Ord + Clone + One> BranchesContainer<I, BI> for &'a ForkPlan<I, BI> {
 	type Branch = &'a BranchRange<BI>;
 	type Iter = ForkPlanIter<'a, I, BI>;
 
@@ -1175,7 +1175,7 @@ impl<I: Default, BI: Default + AddAssign<u32>> Default for BranchState<I, BI> {
 	}
 }
 
-impl<I, BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI> {
+impl<I, BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI> {
 
 	pub fn query_plan(&self) -> BranchRange<BI> {
 		self.state.clone()
@@ -1295,7 +1295,7 @@ impl<I, BI> Default for TreeMigrate<I, BI> {
 impl<
 	H: Ord + Clone + Codec,
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > TreeManagement<H, I, BI, S> {
 	fn get_inner_gc(&self) -> Option<MultipleGc<I, BI>> {
@@ -1345,7 +1345,7 @@ impl<H, I, BI, S> Management<H> for TreeManagement<H, I, BI, S>
 	where
 		H: Ord + Clone + Codec,
 		I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-		BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+		BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 		S: TreeManagementStorage,
 {
 	type Index = (I, BI);
@@ -1379,7 +1379,7 @@ impl<H, I, BI, S> Management<H> for TreeManagement<H, I, BI, S>
 impl<
 	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > ManagementMut<H> for TreeManagement<H, I, BI, S> {
 	// TODO attach gc infos to allow some lazy cleanup (make it optional)
@@ -1456,7 +1456,7 @@ impl<
 impl<
 	H: Clone + Ord + Codec,
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Eq + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > ForkableManagement<H> for TreeManagement<H, I, BI, S> {
 	const JOURNAL_DELETE: bool = S::JOURNAL_DELETE;

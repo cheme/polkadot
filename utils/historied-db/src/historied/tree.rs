@@ -175,7 +175,7 @@ impl<I, BI, V, BD> Branch<I, BI, V, BD>
 
 impl<I, BI, V, D, BD> DataBasis for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: Value + Clone,
 		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
@@ -196,7 +196,7 @@ impl<I, BI, V, D, BD> DataBasis for Tree<I, BI, V, D, BD>
 
 impl<I, BI, V, D, BD> IndexedDataBasis for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: Value + Clone,
 		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
@@ -210,7 +210,7 @@ impl<I, BI, V, D, BD> IndexedDataBasis for Tree<I, BI, V, D, BD>
 #[cfg(feature = "indexed-access")]
 impl<I, BI, V, D, BD> IndexedData<V> for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: Value + Clone,
 		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
@@ -224,7 +224,7 @@ impl<I, BI, V, D, BD> IndexedData<V> for Tree<I, BI, V, D, BD>
 
 impl<I, BI, V, D, BD> Data<V> for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: Value + Clone,
 		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
@@ -235,7 +235,7 @@ impl<I, BI, V, D, BD> Data<V> for Tree<I, BI, V, D, BD>
 
 impl<I, BI, V, D, BD> DataRef<V> for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: ValueRef + Clone,
 		D: LinearStorageMem<Linear<V, BI, BD>, I>,
@@ -246,7 +246,7 @@ impl<I, BI, V, D, BD> DataRef<V> for Tree<I, BI, V, D, BD>
 
 impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone + Encode,
+		I: Default + Ord + Clone + Encode,
 		BI: LinearState,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -432,7 +432,7 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 
 impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -619,7 +619,7 @@ pub(crate) trait TreeTestMethods {
 #[cfg(test)]
 impl<I, BI, V, D, BD> TreeTestMethods for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: Value + Clone + Eq,
 		D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -641,7 +641,7 @@ impl<I, BI, V, D, BD> TreeTestMethods for Tree<I, BI, V, D, BD>
 
 impl<I, BI, V, D, BD> DataRefMut<V> for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone + Encode,
+		I: Default + Ord + Clone + Encode,
 		BI: LinearState,
 		V: ValueRef + Clone + Eq,
 		D: LinearStorageMem<Linear<V, BI, BD>, I>,
@@ -714,7 +714,7 @@ impl Tree<u32, u64, Option<Vec<u8>>, TreeBackendTempSize, LinearBackendTempSize>
 
 impl<'a, I, BI, V, D, BD> DataSlices<'a, V> for Tree<I, BI, V, D, BD>
 	where
-		I: Default + Eq + Ord + Clone,
+		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: Value + Clone + AsRef<[u8]>,
 		D: LinearStorageSlice<Linear<V, BI, BD>, I>,
@@ -752,7 +752,7 @@ pub mod aggregate {
 
 	impl<'a, I, BI, V, D, BD> DataBasis for Sum<'a, I, BI, V, D, BD>
 		where
-			I: Default + Eq + Ord + Clone,
+			I: Default + Ord + Clone,
 			BI: LinearState,
 			V: SummableValue,
 			V::Value: Value + Clone,
@@ -773,7 +773,7 @@ pub mod aggregate {
 
 	impl<'a, I, BI, V, D, BD> Data<V::Value> for Sum<'a, I, BI, V, D, BD>
 		where
-			I: Default + Eq + Ord + Clone,
+			I: Default + Ord + Clone,
 			BI: LinearState,
 			V: SummableValue,
 			V::Value: Value + Clone,
@@ -787,7 +787,7 @@ pub mod aggregate {
 
 	impl<'a, I, BI, V, D, BD> DataSum<V> for Sum<'a, I, BI, V, D, BD>
 		where
-			I: Default + Eq + Ord + Clone,
+			I: Default + Ord + Clone,
 			BI: LinearState,
 			V: SummableValue,
 			V::Value: Value + Clone,
@@ -841,7 +841,7 @@ pub mod force {
 
 	impl<I, BI, V, D, BD> ForceDataMut<V> for Tree<I, BI, V, D, BD>
 		where
-			I: Default + Eq + Ord + Clone + Encode,
+			I: Default + Ord + Clone + Encode,
 			BI: LinearState,
 			V: Value + Clone + Eq,
 			D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -901,7 +901,7 @@ pub mod conditional {
 	// skipped.
 	impl<I, BI, V, D, BD> ConditionalDataMut<V> for Tree<I, BI, V, D, BD>
 		where
-			I: Default + Eq + Ord + Clone + Encode,
+			I: Default + Ord + Clone + Encode,
 			BI: LinearState,
 			V: Value + Clone + Eq,
 			D: LinearStorage<Linear<V, BI, BD>, I>,
@@ -927,7 +927,7 @@ pub mod conditional {
 
 	impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		where
-			I: Default + Eq + Ord + Clone + Encode,
+			I: Default + Ord + Clone + Encode,
 			BI: LinearState,
 			V: Value + Clone + Eq,
 			D: LinearStorage<Linear<V, BI, BD>, I>,
