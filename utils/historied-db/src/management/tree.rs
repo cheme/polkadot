@@ -1075,28 +1075,6 @@ impl<I, BI> ForkPlan<I, BI>
 		I: Default + Ord + Clone,
 		BI: SubAssign<BI> + Ord + Clone + One,
 {
-	/// Get branch state for node at a given index.
-	pub fn get_branch(&self, i: &I) -> Option<&BranchRange<BI>> {
-		for (b, bi) in self.iter() {
-			if &bi == i {
-				return Some(b);
-			} else if &bi < i {
-				break;
-			}
-		}
-		None
-	}
-
-	/// Get the last branch, inclusive.
-	pub fn last_index(&self) -> I {
-		let l = self.history.len();
-		if l > 0 {
-			self.history[l - 1].branch_index.clone()
-		} else {
-			I::default()
-		}
-	}
-
 	/// Iterator over the branch states in query order
 	/// (more recent first).
 	pub fn iter(&self) -> ForkPlanIter<I, BI> {
@@ -1123,31 +1101,10 @@ impl<'a, I: Clone, BI> Iterator for ForkPlanIter<'a, I, BI> {
 	}
 }
 
-impl<I: Ord + SubAssign<I> + Clone + One> BranchRange<I> {
-	/// Get state for node at a given index.
-	pub fn exists(&self, i: &I) -> bool {
+impl<I: Ord> BranchRange<I> {
+	fn exists(&self, i: &I) -> bool {
 		i >= &self.start && i < &self.end
 	}
-
-	/// Get the last index for the state, inclusive.
-	pub fn last_index(&self) -> I {
-		let mut r = self.end.clone();
-		// underflow should not happen as long as branchstateref are not allowed to be empty.
-		r -= I::one();
-		r
-	}
-}
-
-impl<'a, I, B: BranchContainer<I>> BranchContainer<I> for &'a B {
-
-	fn exists(&self, i: &I) -> bool {
-		(*self).exists(i)
-	}
-
-	fn last_index(&self) -> I {
-		(*self).last_index()
-	}
-
 }
 
 impl<I: Default, BI: Default + AddAssign<u32>> Default for BranchState<I, BI> {
