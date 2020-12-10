@@ -302,38 +302,6 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, S: TreeManagementStorage> {
 	last_in_use_index: MappedDbVariable<((I, BI), Option<H>), S::Storage, S::LastIndex>, // TODO rename to last inserted as we do not rebase on query
 }
 
-#[derive(Derivative)]
-#[derivative(Debug(bound="H: Debug, I: Debug, BI: Debug, S::Storage: Debug"))]
-#[cfg_attr(test, derivative(PartialEq(bound="H: PartialEq, I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
-pub struct TreeManagementWithConsumer<H: Ord + 'static, I: Ord + 'static, BI: 'static, S: TreeManagementStorage + 'static> {
-	inner: TreeManagement<H, I, BI, S>,
-	#[derivative(Debug="ignore")]
-	#[derivative(PartialEq="ignore")]
-	registered_consumer: RegisteredConsumer<H, I, BI, S>,
-}
-
-impl<H: Ord, I: Ord, BI, S: TreeManagementStorage> sp_std::ops::Deref for TreeManagementWithConsumer<H, I, BI, S> {
-	type Target = TreeManagement<H, I, BI, S>;
-	fn deref(&self) -> &Self::Target {
-		&self.inner
-	}
-}
-
-impl<H: Ord, I: Ord, BI, S: TreeManagementStorage> sp_std::ops::DerefMut for TreeManagementWithConsumer<H, I, BI, S> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.inner
-	}
-}
-
-impl<H: Ord, I: Ord, BI, S: TreeManagementStorage> From<TreeManagement<H, I, BI, S>> for TreeManagementWithConsumer<H, I, BI, S> {
-	fn from(inner: TreeManagement<H, I, BI, S>) -> Self {
-		TreeManagementWithConsumer {
-			inner,
-			registered_consumer: RegisteredConsumer(Vec::new()),
-		}
-	}
-}
-
 pub struct RegisteredConsumer<H: Ord + 'static, I: Ord + 'static, BI: 'static, S: TreeManagementStorage + 'static>(
 	Vec<Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, S>>>>,
 );
@@ -559,21 +527,6 @@ impl<
 			change = true;
 		}
 		change
-	}
-}
-
-impl<
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
-	H: Clone + Ord + Codec,
-	S: TreeManagementStorage,
-> TreeManagementWithConsumer<H, I, BI, S> {
-	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, S>>>) {
-		self.registered_consumer.0.push(consumer);
-	}
-
-	pub fn migrate(&mut self) {
-		self.registered_consumer.migrate(&mut self.inner)
 	}
 }
 
