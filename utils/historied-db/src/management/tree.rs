@@ -1363,6 +1363,14 @@ impl<H, I, BI, S> Management<H> for TreeManagement<H, I, BI, S>
 		self.ext_states.mapping(self.state.ser()).get(tag).cloned().map(|i| self.state.query_plan_at(i))
 	}
 
+	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<H> {
+		// TODO Note, from a forkplan we need to use 'latest' to get same
+		// behavior as previous implementation.
+		self.ext_states.mapping(self.state.ser()).iter()
+			.find(|(_k, v)| v == index)
+			.map(|(k, _v)| k.clone())
+	}
+
 	fn get_gc(&self) -> Option<crate::Ref<Self::GC>> {
 		self.get_inner_gc().map(|gc| crate::Ref::Owned(gc))
 	}
@@ -1403,21 +1411,6 @@ impl<
 		let mut latest = self.last_in_use_index.mapping(self.state.ser()).get().clone();
 		latest.1 = Some(state);
 		self.last_in_use_index.mapping(self.state.ser()).set(latest);
-	}
-
-	// TODO the state parameter may not be the correct one.
-	fn reverse_lookup(&mut self, state: &Self::S) -> Option<H> {
-		// TODO should be the closest valid and return non optional!!!! TODO
-		let state = state.history.last()
-			.map(|b| (b.branch_index.clone(), b.state.end.clone()))
-			.map(|mut b| {
-				b.1 -= BI::one();
-				b
-			})
-			.unwrap_or((Default::default(), Default::default()));
-		self.ext_states.mapping(self.state.ser()).iter()
-			.find(|(_k, v)| v == &state)
-			.map(|(k, _v)| k.clone())
 	}
 
 	fn get_migrate(&mut self) -> Migrate<H, Self> {

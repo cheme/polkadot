@@ -40,7 +40,7 @@ impl<H, S: AddAssign<u32>> LinearInMemoryManagement<H, S> {
 	}
 }
 
-impl<H: Ord, S: Clone> Management<H> for LinearInMemoryManagement<H, S> {
+impl<H: Ord + Clone, S: Clone + Ord> Management<H> for LinearInMemoryManagement<H, S> {
 	type Index = S;
 	type S = S;
 	type GC = S;
@@ -51,6 +51,12 @@ impl<H: Ord, S: Clone> Management<H> for LinearInMemoryManagement<H, S> {
 
 	fn get_db_state(&mut self, tag: &H) -> Option<Self::S> {
 		self.mapping.get(tag).cloned()
+	}
+
+	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<H> {
+		self.mapping.iter()
+			.find(|(_k, v)| v == &index)
+			.map(|(k, _v)| k.clone())
 	}
 
 	fn get_gc(&self) -> Option<crate::Ref<Self::GC>> {
@@ -109,13 +115,6 @@ S: Default + Clone + AddAssign<u32> + Ord,
 	}
 
 	fn force_latest_external_state(&mut self, _state: H) { }
-
-	fn reverse_lookup(&mut self, tag: &Self::S) -> Option<H> {
-		// TODO could be the closest valid and return non optional!!!! TODO
-		self.mapping.iter()
-			.find(|(_k, v)| v == &tag)
-			.map(|(k, _v)| k.clone())
-	}
 
 	fn get_migrate(&mut self) -> Migrate<H, Self> {
 		unimplemented!()

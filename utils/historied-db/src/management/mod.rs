@@ -57,6 +57,11 @@ pub trait Management<H> {
 	/// Mutable access is for caching only.
 	fn get_db_state(&mut self, tag: &H) -> Option<Self::S>;
 
+	/// Reverse lookup fo a tag given an internal index.
+	/// This can be a slow implementation, and should not be
+	/// use for common operations.
+	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<H>;
+
 	/// Returns a Gc to cleanup historical data.
 	/// If the Gc is not relevant (eg after a migration), simply return None.
 	fn get_gc(&self) -> Option<Ref<Self::GC>>;
@@ -86,8 +91,6 @@ pub trait ManagementMut<H>: Management<H> + Sized {
 
 	/// Force change value of latest external state.
 	fn force_latest_external_state(&mut self, index: H);
-
-	fn reverse_lookup(&mut self, state: &Self::S) -> Option<H>;
 
 	/// see migrate. When running thes making a backup of this management
 	/// state is usually a good idea (this method does not manage

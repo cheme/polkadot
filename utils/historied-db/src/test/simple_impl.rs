@@ -152,6 +152,16 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 		}
 	}
 
+	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<StateInput> {
+		// TODO Note that for compatibility use state.first.
+		let state = StateInput(*index);
+		if self.contains(&state) {
+			Some(state)
+		} else {
+			None
+		}
+	}
+
 	fn get_gc(&self) -> Option<Ref<Self::GC>> {
 		None
 	}
@@ -196,20 +206,6 @@ impl<K: Eq + Hash, V> ManagementMut<StateInput> for Db<K, V> {
 	}
 
 	fn force_latest_external_state(&mut self, _state: StateInput) { }
-
-	fn reverse_lookup(&mut self, tag: &Self::S) -> Option<StateInput> {
-		if let Some(state) = tag.first() {
-			// TODO wrong cast.
-			let state = StateInput(*state as u32);
-			if self.contains(&state) {
-				Some(state)
-			} else {
-				None
-			}
-		} else {
-			None
-		}
-	}
 
 	fn get_migrate(&mut self) -> Migrate<StateInput, Self> {
 		Migrate::new(self, ())
