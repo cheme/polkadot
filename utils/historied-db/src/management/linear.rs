@@ -18,7 +18,7 @@
 
 //! Linear state management implementations.
 
-use crate::Latest;
+use crate::{Latest, StateIndex};
 use crate::management::{ManagementMut, Management, Migrate, LinearManagement};
 use sp_std::ops::{AddAssign, SubAssign};
 use num_traits::One;
@@ -40,7 +40,7 @@ impl<H, S: AddAssign<u32>> LinearInMemoryManagement<H, S> {
 	}
 }
 
-impl<H: Ord + Clone, S: Clone + Ord> Management<H> for LinearInMemoryManagement<H, S> {
+impl<H: Ord + Clone, S: Clone + Ord + StateIndex<S>> Management<H> for LinearInMemoryManagement<H, S> {
 	type Index = S;
 	type S = S;
 	type GC = S;
@@ -88,7 +88,7 @@ S: Default + Clone + AddAssign<u32> + Ord,
 
 impl<
 H: Ord + Clone,
-S: Default + Clone + AddAssign<u32> + Ord,
+S: Default + Clone + AddAssign<u32> + Ord + StateIndex<S>,
 > ManagementMut<H> for LinearInMemoryManagement<H, S> {
 	type SE = Latest<S>;
 	type Migrate = (S, Self::GC);
@@ -130,7 +130,7 @@ S: Default + Clone + AddAssign<u32> + Ord,
 
 impl<
 H: Ord + Clone,
-S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + One,
+S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + One + StateIndex<S>,
 > LinearManagement<H> for LinearInMemoryManagement<H, S> {
 	fn append_external_state(&mut self, tag: H) -> Option<Self::S> {
 		if !self.can_append {

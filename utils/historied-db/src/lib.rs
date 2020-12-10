@@ -284,14 +284,36 @@ pub trait StateIndex<I> {
 	/// Get individal state index.
 	fn index(&self) -> I;
 	/// Get reference to individal state index.
-	fn index_ref(&self) -> &I;
+	/// If some memory needs allocation, return `None`,
+	/// and user should fallback to using `index`.
+	/// TODO consider removal (index should be copy).
+	fn index_ref(&self) -> Option<&I>;
 }
 
 impl<S: Clone> StateIndex<S> for Latest<S> {
 	fn index(&self) -> S {
 		self.latest().clone()
 	}
-	fn index_ref(&self) -> &S {
-		self.latest()
+	fn index_ref(&self) -> Option<&S> {
+		Some(self.latest())
 	}
 }
+
+macro_rules! primitive_state_index {
+	($name: ty) => {
+		impl StateIndex<$name> for $name {
+			fn index(&self) -> $name {
+				self.clone()
+			}
+			fn index_ref(&self) -> Option<&$name> {
+				Some(self)
+			}
+		}
+	}
+}
+	
+primitive_state_index!(u8);
+primitive_state_index!(u32);
+primitive_state_index!(u64);
+primitive_state_index!(u128);
+primitive_state_index!(Vec<u8>);

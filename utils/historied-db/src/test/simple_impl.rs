@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use crate::{Latest, Ref};
+use crate::{Latest, Ref, StateIndex as _};
 use crate::management::{ManagementMut, Management, ForkableManagement, Migrate};
 use crate::db_traits::{StateDBBasis, StateDBMut, StateDBRef, StateDB};
 use super::StateInput;
@@ -32,9 +32,23 @@ use super::StateInput;
 /// External State (eg hash of block of a blockchain).
 pub type StateIndex = u32;
 
-impl StateInput {
-	fn to_index(&self) -> StateIndex {
+impl crate::StateIndex<StateIndex> for StateInput {
+	fn index(&self) -> StateIndex {
 		self.0
+	}
+
+	fn index_ref(&self) -> Option<&StateIndex> {
+		Some(&self.0)
+	}
+}
+
+impl crate::StateIndex<StateIndex> for Query {
+	fn index(&self) -> StateIndex {
+		self.first().cloned().unwrap_or_default()
+	}
+
+	fn index_ref(&self) -> Option<&StateIndex> {
+		self.first()
 	}
 }
 
@@ -56,12 +70,12 @@ impl<K, V> Db<K, V> {
 	}
 
 	fn contains(&self, ix: &StateInput) -> bool {
-		self.db.get(ix.to_index() as usize).map(|o_elt| o_elt.is_some()).unwrap_or(false)
+		self.db.get(ix.index() as usize).map(|o_elt| o_elt.is_some()).unwrap_or(false)
 	}
 
 	fn get_state(&self, state: &StateInput) -> Option<StateIndex> {
 		if self.contains(state) {
-			Some(state.to_index())
+			Some(state.index())
 		} else {
 			None
 		}
@@ -126,6 +140,7 @@ impl<K: Hash + Eq, V: Clone> StateDBMut<K, V> for Db<K, V> {
 }
 
 impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
+	// TODO try u32 as Index type!!
 	type Index = StateIndex;
 	type S = Query;
 	type GC = ();
@@ -189,8 +204,8 @@ impl<K: Eq + Hash, V> ManagementMut<StateInput> for Db<K, V> {
 
 	fn get_db_state_mut(&mut self, tag: &StateInput) -> Option<Self::SE> {
 //		if let Some(s) = self.get_state(tag) {
-		if self.is_latest(&tag.to_index()) {
-			return Some(Latest::unchecked_latest(tag.to_index()))
+		if self.is_latest(&tag.index()) {
+			return Some(Latest::unchecked_latest(tag.index()))
 		}
 //		}
 		None
@@ -219,17 +234,13 @@ impl<K: Eq + Hash, V> ForkableManagement<StateInput> for Db<K, V> {
 
 	type SF = StateIndex;
 
-	fn inner_fork_state(&self, s: Self::SE) -> Self::SF {
-		s.0
-	}
-
-	fn ref_state_fork(&self, s: &Self::S) -> Self::SF {
-		s.first().cloned().unwrap_or_default()
+	fn from_index(index: StateIndex) -> Self::SF {
+		index
 	}
 
 	fn init_state_fork(&mut self) -> Self::SF {
 		let se = Latest::unchecked_latest(0);
-		self.inner_fork_state(se)
+		Self::from_index(se.index())
 	}
 
 	fn get_db_state_for_fork(&mut self, state: &StateInput) -> Option<Self::SF> {
@@ -237,7 +248,7 @@ impl<K: Eq + Hash, V> ForkableManagement<StateInput> for Db<K, V> {
 	}
 
 	fn append_external_state(&mut self, state: StateInput, at: &Self::SF) -> Option<Self::SE> {
-		debug_assert!(state.to_index() as usize == self.db.len(), "Test simple implementation only allow sequential new identifier");
+		debug_assert!(state.index() as usize == self.db.len(), "Test simple implementation only allow sequential new identifier");
 		if self.db.get_mut(*at as usize).and_then(|v| v.as_mut().map(|v| {
 			v.is_latest = false;
 			()

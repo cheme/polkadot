@@ -28,7 +28,7 @@ use sp_std::boxed::Box;
 use sp_std::fmt::Debug;
 use num_traits::One;
 use crate::historied::linear::LinearGC;
-use crate::Latest;
+use crate::{StateIndex, Latest};
 use crate::management::{ManagementMut, Management, Migrate, ForkableManagement};
 use codec::{Codec, Encode, Decode};
 use crate::mapped_db::{MappedDB, Map as MappedDbMap, Variable as MappedDbVariable, MapInfo, VariableInfo};
@@ -448,6 +448,7 @@ impl<
 	}
 
 	// TODO consider removing drop_ext_states argument (is probably default)
+	// TODO this is unused (all apply_drop_state)
 	pub fn apply_drop_state(
 		&mut self,
 		state: &(I, BI),
@@ -461,8 +462,8 @@ impl<
 		let mut no_collect = Vec::new();
 		let collect_dropped = collect_dropped.unwrap_or(&mut no_collect);
 		let mut call_back = move |i: &I, bi: &BI, ser: &mut S::Storage| {
-			let mut ext_states = ext_states.mapping(ser);
 			if drop_ext_states {
+				let mut ext_states = ext_states.mapping(ser);
 				let state = (i.clone(), bi.clone());
 				let start = collect_dropped.len();
 				// TODO again cost of reverse lookup: consider double ext_states
@@ -498,7 +499,7 @@ impl<
 				((s.parent_branch_index.clone(), previous_index), s.state.end)
 			}) {
 			let mut bi = state.1.clone();
-			// TODO consider moving thit to tree `apply_drop_state`!! (others calls are at tree level)
+			// TODO consider moving this to tree `apply_drop_state`!! (others calls are at tree level)
 			while bi < branch_end { // TODO should be < branch_end - 1
 				call_back(&state.0, &bi, self.state.ser());
 				bi += BI::one();
@@ -601,7 +602,6 @@ impl<
 		}
 		change
 	}
-
 }
 
 impl<
@@ -632,8 +632,6 @@ impl<
 	pub fn migrate(&self, mgmt: &mut TreeManagement<H, I, BI, S>) {
 		// In this case (register consumer is design to run with sync backends), the management
 		// lock is very likely to be ineffective.
-		// TODO this get_migrate api is not really good, a locked write (depending on type of
-		// migration) would work better.
 		let mut migrate = mgmt.get_migrate();
 		let need_migrate = match &migrate.1 {
 			MultipleMigrate::Noops => false,
@@ -1011,6 +1009,33 @@ pub struct ForkPlan<I, BI> {
 	pub composite_treshold: (I, BI),
 }
 
+impl<I: Clone, BI: Clone + SubAssign<BI> + One> StateIndex<(I, BI)> for ForkPlan<I, BI> {
+	fn index(&self) -> (I, BI) {
+		// Extract latest state index use by the fork plan.
+		// In other words latest state index is use to obtain this
+		// plan.
+		self.latest()
+	}
+
+	fn index_ref(&self) -> Option<&(I, BI)> {
+		None
+	}
+}
+
+// Note that this is fairly incorrect (we should bound on I : StateIndex),
+// but very convenient.
+// Otherwhise, could put SF into a wrapper type.
+impl<I: Clone, BI: Clone> StateIndex<(I, BI)> for (I, BI) {
+	fn index(&self) -> (I, BI) {
+		self.clone()
+	}
+
+	fn index_ref(&self) -> Option<&(I, BI)> {
+		Some(self)
+	}
+}
+
+// TODO drop in favor of StateIndex impl.
 impl<I: Clone, BI: Clone + SubAssign<BI> + One> ForkPlan<I, BI> {
 	/// Extract latest state index use by the fork plan.
 	pub fn latest_index(&self) -> (I, BI) {
@@ -1463,17 +1488,13 @@ impl<
 
 	type SF = (I, BI);
 
-	fn inner_fork_state(&self, s: Self::SE) -> Self::SF {
-		s.0
-	}
-
-	fn ref_state_fork(&self, s: &Self::S) -> Self::SF {
-		s.latest()
+	fn from_index(index: (I, BI)) -> Self::SF {
+		index
 	}
 
 	fn init_state_fork(&mut self) -> Self::SF {
 		let se = Latest::unchecked_latest(self.state.meta.get().composite_treshold.clone());
-		self.inner_fork_state(se)
+		Self::from_index(se.index())
 	}
 
 	fn get_db_state_for_fork(&mut self, state: &H) -> Option<Self::SF> {
