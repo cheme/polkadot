@@ -111,7 +111,7 @@ pub trait ManagementMut<H>: Management<H> + Sized {
 /// This trait is for mapping a given state to the DB opaque inner state.
 pub trait ForkableManagement<H>: ManagementMut<H> {
 	/// Do we keep trace of changes.
-	const JOURNAL_DELETE: bool;
+	const JOURNAL_CHANGES: bool;
 
 	/// Fork state, the state to use for forking.
 	///

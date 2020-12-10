@@ -69,7 +69,7 @@ mod bindings {
 }
 
 impl crate::management::tree::TreeManagementStorage for MappingTests {
-	const JOURNAL_DELETE: bool = true;
+	const JOURNAL_CHANGES: bool = true;
 	type Storage = crate::test::InMemorySimpleDB5;
 	type Mapping = bindings::Mapping;
 	type JournalDelete = bindings::JournalDelete;

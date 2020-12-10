@@ -230,7 +230,7 @@ impl<K: Eq + Hash, V> ManagementMut<StateInput> for Db<K, V> {
 }
 
 impl<K: Eq + Hash, V> ForkableManagement<StateInput> for Db<K, V> {
-	const JOURNAL_DELETE: bool = false;
+	const JOURNAL_CHANGES: bool = false;
 
 	type SF = StateIndex;
 
