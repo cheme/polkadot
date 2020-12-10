@@ -111,7 +111,6 @@ macro_rules! InMemSimpleDB {
 				InMemory(inner)
 			}
 
-			// TODO with branch conditional could be const
 			pub fn resolve_collection(c: &'static [u8]) -> Option<usize> {
 				if c.len() != 4 {
 					return None;

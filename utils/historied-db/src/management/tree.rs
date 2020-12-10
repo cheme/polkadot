@@ -356,7 +356,7 @@ impl<H, I, BI, S> TreeManagement<H, I, BI, S>
 		BI: Default + Codec,
 		S: TreeManagementStorage,
 {
-	/// Initialize from a default ser
+	/// Initialize from a default serializing backend.
 	pub fn from_ser(serialize: S::Storage) -> Self {
 		let ext_states = MappedDbMap::default_from_db(&serialize);
 		TreeManagement {

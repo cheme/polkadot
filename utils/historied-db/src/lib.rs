@@ -19,9 +19,6 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-//#[cfg(feature = "std")]
-//use println;
-
 #[cfg(not(feature = "std"))]
 #[macro_export]
 macro_rules! println {

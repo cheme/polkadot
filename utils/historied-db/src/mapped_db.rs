@@ -389,7 +389,7 @@ impl<'a, K, V, S, I> EntryMap<'a, K, V, S, I>
 		self.entry.key()
 	}
 
-	// TODO EMCH change fn once to return bool depending on wether there
+	// TODO change fn once to return bool depending on wether there
 	// was change done on &mut v (and change need write dependingly)
 	pub fn and_modify(mut self, f: impl FnOnce(&mut V)) -> Self {
 		self.fetch();
