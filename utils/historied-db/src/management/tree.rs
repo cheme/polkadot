@@ -67,16 +67,6 @@ impl TreeManagementStorage for () {
 	type TreeState = ();
 }
 
-/// Trait defining a state for querying or modifying a branch.
-/// This is therefore the representation of a branch state.
-pub trait BranchContainer<I> {
-	/// Get state for node at a given index.
-	fn exists(&self, i: &I) -> bool;
-
-	/// Get the last index for the state, inclusive.
-	fn last_index(&self) -> I;
-}
-
 /// Stored states for a branch, it contains branch reference information,
 /// structural information (index of parent branch) and fork tree building
 /// information (is branch appendable).
@@ -530,7 +520,7 @@ impl<
 		for h in branch.history.into_iter() {
 			//if h.state.end > switch_index.1 {
 			if h.state.start < switch_index.1 {
-				filter.insert(h.branch_index, h.state);
+				filter.insert(h.index, h.state);
 			}
 		}
 		let mut change = false;
@@ -774,7 +764,7 @@ impl<
 					// vecdeque would be better suited
 					history.insert(0, BranchPlan {
 						state: branch_ref,
-						branch_index: branch_index.clone(),
+						index: branch_index.clone(),
 					});
 				}
 				branch_index = branch.parent_branch_index.clone();
@@ -1023,7 +1013,7 @@ impl<I: Clone, BI: Clone + SubAssign<BI> + One> ForkPlan<I, BI> {
 		if let Some(branch_plan) = self.history.last() {
 			let mut index = branch_plan.state.end.clone();
 			index -= BI::one();
-			(branch_plan.branch_index.clone(), index)
+			(branch_plan.index.clone(), index)
 		} else {
 			self.composite_treshold.clone()
 		}
@@ -1065,9 +1055,8 @@ impl<I: Default, BI: Default> Default for ForkPlan<I, BI> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Query plan element for a single branch.
 pub struct BranchPlan<I, BI> {
-	// TODO rename to index
-	pub branch_index: I,
-	pub state: BranchRange<BI>,
+	index: I,
+	 state: BranchRange<BI>,
 }
 
 impl<I, BI> ForkPlan<I, BI>
@@ -1093,7 +1082,7 @@ impl<'a, I: Clone, BI> Iterator for ForkPlanIter<'a, I, BI> {
 			self.1 -= 1;
 			Some((
 				&(self.0).history[self.1].state,
-				(self.0).history[self.1].branch_index.clone(),
+				(self.0).history[self.1].index.clone(),
 			))
 		} else {
 			None
@@ -1102,6 +1091,7 @@ impl<'a, I: Clone, BI> Iterator for ForkPlanIter<'a, I, BI> {
 }
 
 impl<I: Ord> BranchRange<I> {
+	#[cfg(test)]
 	fn exists(&self, i: &I) -> bool {
 		i >= &self.start && i < &self.end
 	}
@@ -1531,11 +1521,11 @@ pub(crate) mod test {
 		let mut states = test_states();
 		let ref_3 = vec![
 			BranchPlan {
-				branch_index: 1,
+				index: 1,
 				state: BranchRange { start: 1, end: 3 },
 			},
 			BranchPlan {
-				branch_index: 3,
+				index: 3,
 				state: BranchRange { start: 3, end: 4 },
 			},
 		];
@@ -1546,11 +1536,11 @@ pub(crate) mod test {
 		assert_eq!(states.add_state(1, 2), Some(6));
 		let ref_6 = vec![
 			BranchPlan {
-				branch_index: 1,
+				index: 1,
 				state: BranchRange { start: 1, end: 2 },
 			},
 			BranchPlan {
-				branch_index: 6,
+				index: 6,
 				state: BranchRange { start: 2, end: 3 },
 			},
 		];
