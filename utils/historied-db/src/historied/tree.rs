@@ -1007,7 +1007,7 @@ pub mod conditional {
 mod test {
 	use super::*;
 	use crate::management::tree::test::test_states;
-	use crate::InitFrom;
+	use crate::{InitFrom, StateIndex};
 	use super::aggregate::Sum as TreeSum;
 
 	#[cfg(feature = "encoded-array-backend")]
@@ -1539,12 +1539,12 @@ mod test {
 		//let old_state = states.clone();
 		// Apply change of composite to 33
 		let filter_out = [101, 104, 2, 4, 5];
-		let mut filter_qp = vec![qp14.latest_index()];
+		let mut filter_qp = vec![qp14.index()];
 		// dropped 14
 		check_state(&mut states, filter_qp.clone());
 		for i in filter_out.iter() {
 			let qp = states.get_db_state(&StateInput(*i)).unwrap();
-			filter_qp.push(qp.latest_index());
+			filter_qp.push(qp.index());
 		}
 
 		let fp = states.get_db_state(&StateInput(35)).unwrap();

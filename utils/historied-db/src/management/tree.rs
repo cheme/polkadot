@@ -169,7 +169,7 @@ impl<I: Default, BI: Default> Default for TreeMeta<I, BI> {
 	}
 }
 
-impl<I: Ord + Default, BI: Default, S: TreeManagementStorage> Default for Tree<I, BI, S>
+impl<I, BI, S> Default for Tree<I, BI, S>
 	where
 		I: Ord + Default,
 		BI: Default,
@@ -189,7 +189,12 @@ impl<I: Ord + Default, BI: Default, S: TreeManagementStorage> Default for Tree<I
 	}
 }
 
-impl<I: Ord + Default + Codec, BI: Default + Codec, S: TreeManagementStorage> Tree<I, BI, S> {
+impl<I, BI, S> Tree<I, BI, S>
+	where
+		I: Ord + Default + Codec,
+		BI: Default + Codec,
+		S: TreeManagementStorage,
+{
 	pub fn from_ser(mut serialize: S::Storage) -> Self {
 		let storage = MappedDbMap::default_from_db(&serialize);
 		let journal_delete = MappedDbMap::default_from_db(&serialize);
@@ -237,7 +242,11 @@ pub enum MultipleGc<I, BI> {
 	State(TreeStateGc<I, BI>),
 }
 
-impl<I: Clone, BI: Clone + Ord + AddAssign<BI> + One> MultipleMigrate<I, BI> {
+impl<I, BI> MultipleMigrate<I, BI>
+	where
+		I: Clone,
+		BI: Clone + Ord + AddAssign<BI> + One,
+{
 	/// Return upper limit (all state before it are touched),
 	/// and explicit touched state.
 	#[cfg(test)]
@@ -301,7 +310,12 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, S: TreeManagementStorage> {
 	last_added: MappedDbVariable<((I, BI), Option<H>), S::Storage, S::LastIndex>,
 }
 
-pub struct RegisteredConsumer<H: Ord + 'static, I: Ord + 'static, BI: 'static, S: TreeManagementStorage + 'static>(
+pub struct RegisteredConsumer<
+	H: Ord + 'static,
+	I: Ord + 'static,
+	BI: 'static,
+	S: TreeManagementStorage + 'static,
+>(
 	Vec<Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, S>>>>,
 );
 
@@ -335,7 +349,13 @@ impl<H, I, BI, S> Default for TreeManagement<H, I, BI, S>
 	}
 }
 
-impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManagementStorage> TreeManagement<H, I, BI, S> {
+impl<H, I, BI, S> TreeManagement<H, I, BI, S>
+	where
+		H: Ord + Codec,
+		I: Default + Ord + Codec,
+		BI: Default + Codec,
+		S: TreeManagementStorage,
+{
 	/// Initialize from a default ser
 	pub fn from_ser(serialize: S::Storage) -> Self {
 		let ext_states = MappedDbMap::default_from_db(&serialize);
@@ -363,12 +383,13 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManag
 	}
 }
 
-impl<
-	H: Clone + Ord + Codec,
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
-	S: TreeManagementStorage,
-> TreeManagement<H, I, BI, S> {
+impl<H, I, BI, S> TreeManagement<H, I, BI, S>
+	where
+		H: Clone + Ord + Codec,
+		I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+		BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+		S: TreeManagementStorage,
+{
 	/// Associate a state for the initial root (default index).
 	pub fn map_root_state(&mut self, root: H) {
 		self.ext_states.mapping(self.state.ser()).insert(root, Default::default());
@@ -543,12 +564,13 @@ impl<
 	}
 }
 
-impl<
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
-	H: Clone + Ord + Codec,
-	S: TreeManagementStorage,
-> RegisteredConsumer<H, I, BI, S> {
+impl<H, I, BI, S> RegisteredConsumer<H, I, BI, S>
+	where
+		I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+		BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+		H: Clone + Ord + Codec,
+		S: TreeManagementStorage,
+{
 	/// Register a consumer.
 	///
 	/// There is no check that a consumer is not registered twice.
@@ -576,11 +598,12 @@ impl<
 	}
 }
 
-impl<
-	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
-	BI: Ord + Default + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
-	S: TreeManagementStorage,
-> Tree<I, BI, S> {
+impl<I, BI, S> Tree<I, BI, S>
+	where
+		I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
+		BI: Ord + Default + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
+		S: TreeManagementStorage,
+{
 	/// Return anchor index for this branch history:
 	/// - same index as input if the branch was modifiable
 	/// - new index in case of branch range creation
@@ -943,7 +966,11 @@ pub struct ForkPlan<I, BI> {
 	pub composite_treshold: (I, BI),
 }
 
-impl<I: Clone, BI: Clone + SubAssign<BI> + One> StateIndex<(I, BI)> for ForkPlan<I, BI> {
+impl<I, BI> StateIndex<(I, BI)> for ForkPlan<I, BI>
+	where
+		I: Clone,
+		BI: Clone + SubAssign<BI> + One,
+{
 	fn index(&self) -> (I, BI) {
 		// Extract latest state index use by the fork plan.
 		// In other words latest state index is use to obtain this
@@ -969,12 +996,11 @@ impl<I: Clone, BI: Clone> StateIndex<(I, BI)> for (I, BI) {
 	}
 }
 
-// TODO drop in favor of StateIndex impl.
-impl<I: Clone, BI: Clone + SubAssign<BI> + One> ForkPlan<I, BI> {
-	/// Extract latest state index use by the fork plan.
-	pub fn latest_index(&self) -> (I, BI) {
-		self.latest()
-	}
+impl<I, BI> ForkPlan<I, BI>
+	where
+		I: Clone,
+		BI: Clone + SubAssign<BI> + One,
+{
 	fn latest(&self) -> (I, BI) {
 		if let Some(branch_plan) = self.history.last() {
 			let mut index = branch_plan.state.end.clone();
@@ -1212,9 +1238,6 @@ impl<
 		} else {
 			let mut storage: BTreeMap<I, BranchState<I, BI>> = Default::default();
 
-			// TODO can have a ref to the serialized collection instead (if S is ACTIVE)
-			// or TODO restor to ref of treestate if got non mutable interface for access.
-			//  + could remove default and codec of V
 			for (ix, v) in self.state.storage.iter(&self.state.serialize) {
 				storage.insert(ix, v);
 			}
@@ -1271,11 +1294,10 @@ impl<
 	BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
 	S: TreeManagementStorage,
 > ManagementMut<H> for TreeManagement<H, I, BI, S> {
-	// TODO attach gc infos to allow some lazy cleanup (make it optional)
-	// on set and on get_mut
+	// TODO we could also attach some gc infos to allow
+	// lazy cleanup on set and on get_mut.
 	type SE = Latest<(I, BI)>;
 
-	/// TODO this needs some branch index ext_statess.
 	type Migrate = MultipleMigrate<I, BI>;
 
 	fn get_db_state_mut(&mut self, tag: &H) -> Option<Self::SE> {
