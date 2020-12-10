@@ -23,8 +23,10 @@ use crate::management::{ManagementMut, Management, Migrate, LinearManagement};
 use sp_std::ops::{AddAssign, SubAssign};
 use num_traits::One;
 
-// This is for small state as there is no double
-// mapping an some operation goes through full scan.
+/// A linear only management.
+///
+/// Being in memory, it is only for small state and
+/// tests.
 pub struct LinearInMemoryManagement<H, S> {
 	mapping: sp_std::collections::btree_map::BTreeMap<H, S>,
 	start_treshold: S,
@@ -121,9 +123,7 @@ S: Default + Clone + AddAssign<u32> + Ord + StateIndex<S>,
 	}
 
 	fn applied_migrate(&mut self) {
-		self.changed_treshold = false;
-		//self.start_treshold = gc.0; // TODO from backed inner state
-
+		//self.changed_treshold = false;
 		unimplemented!()
 	}
 }

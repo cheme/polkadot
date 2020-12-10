@@ -33,27 +33,25 @@ use crate::management::{ManagementMut, Management, Migrate, ForkableManagement};
 use codec::{Codec, Encode, Decode};
 use crate::mapped_db::{MappedDB, Map as MappedDbMap, Variable as MappedDbVariable, MapInfo, VariableInfo};
 use derivative::Derivative;
-/*#[cfg(feature = "std")]
-use std::sync::Arc;
-#[cfg(not(feature = "std"))]
-use alloc::sync::Arc;
-*/
 
 // TODO try removing Send + Sync here.
+/// Base trait to give access to 'crate::mapped_db::MappedDB'
+/// storage for `TreeManagement`.
+///
+/// If no backend storage is needed, a blank implementation
+/// is provided for type '()'
 pub trait TreeManagementStorage: Sized {
 	/// Do we keep trace of changes. TODO rename JOURNAL_CHANGES
 	const JOURNAL_DELETE: bool;
-	type Storage: MappedDB + Send + Sync;
-	type Mapping: MapInfo + Send + Sync;
-	type JournalDelete: MapInfo + Send + Sync;
-	type TouchedGC: VariableInfo + Send + Sync;
-	type CurrentGC: VariableInfo + Send + Sync;
-	type LastIndex: VariableInfo + Send + Sync;
-	type NeutralElt: VariableInfo + Send + Sync;
-	type TreeMeta: VariableInfo + Send + Sync;
-	type TreeState: MapInfo + Send + Sync;
-
-	//fn init() -> Self::Storage;
+	type Storage: MappedDB;
+	type Mapping: MapInfo;
+	type JournalDelete: MapInfo;
+	type TouchedGC: VariableInfo;
+	type CurrentGC: VariableInfo;
+	type LastIndex: VariableInfo;
+	type NeutralElt: VariableInfo;
+	type TreeMeta: VariableInfo;
+	type TreeState: MapInfo;
 }
 
 impl TreeManagementStorage for () {
@@ -67,26 +65,6 @@ impl TreeManagementStorage for () {
 	type NeutralElt = ();
 	type TreeMeta = ();
 	type TreeState = ();
-
-	//fn init() -> Self { }
-}
-
-/// Trait defining a state for querying or modifying a tree.
-/// This is a collection of branches index, corresponding
-/// to a tree path.
-pub trait BranchesContainer<I, BI> {
-	type Branch: BranchContainer<BI>;
-	type Iter: Iterator<Item = (Self::Branch, I)>;
-
-	/// Get branch state for node at a given index.
-	fn get_branch(self, index: &I) -> Option<Self::Branch>;
-
-	/// Get the last branch, inclusive.
-	fn last_index(self) -> I;
-
-	/// Iterator over the branch states in query order
-	/// (more recent first).
-	fn iter(self) -> Self::Iter;
 }
 
 /// Trait defining a state for querying or modifying a branch.
@@ -1092,11 +1070,13 @@ pub struct BranchPlan<I, BI> {
 	pub state: BranchRange<BI>,
 }
 
-impl<'a, I: Default + Ord + Clone, BI: SubAssign<BI> + Ord + Clone + One> BranchesContainer<I, BI> for &'a ForkPlan<I, BI> {
-	type Branch = &'a BranchRange<BI>;
-	type Iter = ForkPlanIter<'a, I, BI>;
-
-	fn get_branch(self, i: &I) -> Option<Self::Branch> {
+impl<I, BI> ForkPlan<I, BI>
+	where
+		I: Default + Ord + Clone,
+		BI: SubAssign<BI> + Ord + Clone + One,
+{
+	/// Get branch state for node at a given index.
+	pub fn get_branch(&self, i: &I) -> Option<&BranchRange<BI>> {
 		for (b, bi) in self.iter() {
 			if &bi == i {
 				return Some(b);
@@ -1107,7 +1087,8 @@ impl<'a, I: Default + Ord + Clone, BI: SubAssign<BI> + Ord + Clone + One> Branch
 		None
 	}
 
-	fn last_index(self) -> I {
+	/// Get the last branch, inclusive.
+	pub fn last_index(&self) -> I {
 		let l = self.history.len();
 		if l > 0 {
 			self.history[l - 1].branch_index.clone()
@@ -1116,7 +1097,9 @@ impl<'a, I: Default + Ord + Clone, BI: SubAssign<BI> + Ord + Clone + One> Branch
 		}
 	}
 
-	fn iter(self) -> Self::Iter {
+	/// Iterator over the branch states in query order
+	/// (more recent first).
+	pub fn iter(&self) -> ForkPlanIter<I, BI> {
 		ForkPlanIter(self, self.history.len())
 	}
 }
@@ -1140,21 +1123,20 @@ impl<'a, I: Clone, BI> Iterator for ForkPlanIter<'a, I, BI> {
 	}
 }
 
-impl<I: Ord + SubAssign<I> + Clone + One> BranchContainer<I> for BranchRange<I> {
-
-	fn exists(&self, i: &I) -> bool {
+impl<I: Ord + SubAssign<I> + Clone + One> BranchRange<I> {
+	/// Get state for node at a given index.
+	pub fn exists(&self, i: &I) -> bool {
 		i >= &self.start && i < &self.end
 	}
 
-	fn last_index(&self) -> I {
+	/// Get the last index for the state, inclusive.
+	pub fn last_index(&self) -> I {
 		let mut r = self.end.clone();
 		// underflow should not happen as long as branchstateref are not allowed to be empty.
 		r -= I::one();
 		r
 	}
 }
-
-
 
 impl<'a, I, B: BranchContainer<I>> BranchContainer<I> for &'a B {
 
@@ -1167,21 +1149,7 @@ impl<'a, I, B: BranchContainer<I>> BranchContainer<I> for &'a B {
 	}
 
 }
-/*
-/// u64 is use a a state target so it is implemented as
-/// a upper bound.
-impl<'a, I: Clone + Ord> BranchContainer<I> for I {
 
-	fn exists(&self, i: &I) -> bool {
-		i <= self
-	}
-
-	fn last_index(&self) -> I {
-		self.clone()
-	}
-
-}
-*/
 impl<I: Default, BI: Default + AddAssign<u32>> Default for BranchState<I, BI> {
 
 	// initialize with one element
