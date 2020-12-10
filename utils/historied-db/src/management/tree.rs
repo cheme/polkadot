@@ -51,13 +51,13 @@ use derivative::Derivative;
 pub trait TreeManagementStorage: Sized {
 	/// Do we keep trace of changes.
 	const JOURNAL_CHANGES: bool;
-	type Storage: MappedDB;
-	type Mapping: MapInfo;
-	type JournalDelete: MapInfo;
-	type LastIndex: VariableInfo;
-	type NeutralElt: VariableInfo;
-	type TreeMeta: VariableInfo;
-	type TreeState: MapInfo;
+	type Storage: MappedDB + Send + Sync;
+	type Mapping: MapInfo + Send + Sync;
+	type JournalDelete: MapInfo + Send + Sync;
+	type LastIndex: VariableInfo + Send + Sync;
+	type NeutralElt: VariableInfo + Send + Sync;
+	type TreeMeta: VariableInfo + Send + Sync;
+	type TreeState: MapInfo + Send + Sync;
 }
 
 impl TreeManagementStorage for () {
