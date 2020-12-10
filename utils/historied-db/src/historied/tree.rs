@@ -450,7 +450,8 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 			let index = *index;
 			next_branch_index = self.branches.previous_index(index);
 			if gc.0 == branch_index {
-				let (start, end) = gc.1.range();
+				let start = gc.1.range().start.clone();
+				let end = gc.1.range().end.clone();
 				let start = start_history.as_ref().and_then(|start_history| if &start < start_history {
 					Some(start_history.clone())
 				} else {

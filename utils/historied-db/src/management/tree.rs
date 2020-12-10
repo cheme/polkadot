@@ -21,6 +21,15 @@
 //! State changes are limited so resulting tree is rather unbalance.
 //! This is best when there is not to many branch (fork)
 
+	// TODO some strategie to close a long branch that gets
+	// behind multiple fork? This should only be usefull
+	// for high number of modification, small number of
+	// fork. The purpose is to avoid history where meaningfull
+	// value is always in a low number branch behind a few fork.
+	// A longest branch pointer per history is also a viable
+	// strategy and avoid fragmenting the history to much.
+
+
 use sp_std::ops::{AddAssign, SubAssign};
 use sp_std::collections::btree_map::BTreeMap;
 use sp_std::vec::Vec;
@@ -46,8 +55,6 @@ pub trait TreeManagementStorage: Sized {
 	type Storage: MappedDB;
 	type Mapping: MapInfo;
 	type JournalDelete: MapInfo;
-	type TouchedGC: VariableInfo;
-	type CurrentGC: VariableInfo;
 	type LastIndex: VariableInfo;
 	type NeutralElt: VariableInfo;
 	type TreeMeta: VariableInfo;
@@ -59,43 +66,39 @@ impl TreeManagementStorage for () {
 	type Storage = ();
 	type Mapping = ();
 	type JournalDelete = ();
-	type TouchedGC = ();
-	type CurrentGC = ();
 	type LastIndex = ();
 	type NeutralElt = ();
 	type TreeMeta = ();
 	type TreeState = ();
 }
 
-/// Stored states for a branch, it contains branch reference information,
+/// States for a branch, it contains branch reference information,
 /// structural information (index of parent branch) and fork tree building
 /// information (is branch appendable).
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct BranchState<I, BI> {
+	/// Range of branch indexes for this 
 	state: BranchRange<BI>,
 	/// does a state get rollback.
 	can_append: bool,
 	/// is the branch latest.
 	is_latest: bool,
+	/// Branch index for this branch start index minus one.
 	parent_branch_index: I,
 }
 
-impl<I, BI: Clone> BranchState<I, BI> {
-	pub(crate) fn range(&self) -> (BI, BI) {
-		(self.state.start.clone(), self.state.end.clone())
+impl<I, BI> BranchState<I, BI> {
+	pub(crate) fn range(&self) -> &BranchRange<BI> {
+		&self.state
 	}
 }
 
-/// This is a simple range, end non inclusive.
-/// TODO type alias or use ops::Range? see next todo?
+/// This is a simple range of contiguous indexes.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Encode, Decode)]
 pub struct BranchRange<I> {
-	// TODO rewrite this to use as single linear index?
-	// we could always start at 0 but the state could not
-	// be compared between branch which is sad.
-	// Still start info is not that relevant, this is probably
-	// removable.
+	/// Start index, inclusive.
 	pub start: I,
+	/// End index, exclusive.
 	pub end: I,
 }
 
@@ -119,22 +122,16 @@ pub struct BranchRange<I> {
 #[derivative(Clone(bound="I: Clone, BI: Clone, S::Storage: Clone"))]
 #[cfg_attr(test, derivative(PartialEq(bound="I: PartialEq, BI: PartialEq, S::Storage: PartialEq")))]
 pub struct Tree<I: Ord, BI, S: TreeManagementStorage> {
-	// TODO this could probably be cleared depending on S::ACTIVE.
-	// -> on gc ?
 	/// Maps the different branches with their index.
 	pub(crate) storage: MappedDbMap<I, BranchState<I, BI>, S::Storage, S::TreeState>,
 	pub(crate) meta: MappedDbVariable<TreeMeta<I, BI>, S::Storage, S::TreeMeta>,
-	/// serialize implementation
+	/// serialization backend.
 	pub(crate) serialize: S::Storage,
-	// TODO some strategie to close a long branch that gets
-	// behind multiple fork? This should only be usefull
-	// for high number of modification, small number of
-	// fork. The purpose is to avoid history where meaningfull
-	// value is always in a low number branch behind a few fork.
-	// A longest branch pointer per history is also a viable
-	// strategy and avoid fragmenting the history to much.
-	//
-	// First optional BI is new end or delete, second is the previous range value.
+	/// Journal of changed indexes (only used when 'TreeManagementStorage::JOURNAL_DELETE' is true).
+	/// Indexed by changed branch index, it contains either new end index or delete ('None') and
+	/// previous range value.
+	///
+	/// This will be use to create Gc or Migrate.
 	pub(crate) journal_delete: MappedDbMap<I, (Option<BI>, BranchRange<BI>), S::Storage, S::JournalDelete>,
 }
 
@@ -142,14 +139,13 @@ pub struct Tree<I: Ord, BI, S: TreeManagementStorage> {
 #[derivative(Debug(bound="I: Debug, BI: Debug"))]
 #[derivative(Clone(bound="I: Clone, BI: Clone"))]
 #[cfg_attr(test, derivative(PartialEq(bound="I: PartialEq, BI: PartialEq")))]
+/// All meta for our tree management, in a single struct for serializing.
 pub(crate) struct TreeMeta<I, BI> {
-	// TODO pub(crate) storage: MappedDbMap<I, BranchState<I, BI>>,
+	/// Last branch index added, next new branch will increment it.
 	pub(crate) last_index: I,
-	/// treshold for possible node value, correspond
+	/// Treshold for possible node value, correspond
 	/// roughly to last cannonical block branch index.
 	/// If at default state value, we go through simple storage.
-	/// TODO move in tree management??
-	/// TODO only store BI, mgmt rule out all that is > bi and
 	pub(crate) composite_treshold: (I, BI),
 	/// Next value for composite treshold (requires data migration
 	/// to switch current treshold but can already be use by gc).
@@ -303,8 +299,6 @@ pub struct TreeManagement<H: Ord, I: Ord, BI, S: TreeManagementStorage> {
 	state: Tree<I, BI, S>,
 	/// Map a given tag to its state index.
 	ext_states: MappedDbMap<H, (I, BI), S::Storage, S::Mapping>,
-	touched_gc: MappedDbVariable<bool, S::Storage, S::TouchedGC>, // TODO currently damned unused thing??
-	current_gc: MappedDbVariable<TreeMigrate<I, BI>, S::Storage, S::CurrentGC>, // TODO currently unused??
 	last_in_use_index: MappedDbVariable<((I, BI), Option<H>), S::Storage, S::LastIndex>, // TODO rename to last inserted as we do not rebase on query
 }
 
@@ -369,8 +363,6 @@ impl<H, I, BI, S> Default for TreeManagement<H, I, BI, S>
 		TreeManagement {
 			state: tree,
 			ext_states,
-			touched_gc: Default::default(),
-			current_gc: Default::default(),
 			last_in_use_index: Default::default(),
 		}
 	}
@@ -382,8 +374,6 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManag
 		let ext_states = MappedDbMap::default_from_db(&serialize);
 		TreeManagement {
 			ext_states,
-			touched_gc: MappedDbVariable::from_ser(&serialize),
-			current_gc: MappedDbVariable::from_ser(&serialize),
 			last_in_use_index: MappedDbVariable::from_ser(&serialize),
 			state: Tree::from_ser(serialize),
 		}
@@ -1386,10 +1376,6 @@ impl<
 				mapping.set(tree_meta);
 			}
 		}
-		
-	//	self.current_gc.applied(gc); TODO pass back this reference: put it in buf more likely
-	//	(remove the associated type)
-		self.touched_gc.mapping(self.state.ser()).set(false);
 	}
 }
 

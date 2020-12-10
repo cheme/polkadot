@@ -63,8 +63,6 @@ mod bindings {
 	static_instance!(TreeState, &[1u8, 0, 0, 0]);
 	const CST: &'static[u8] = &[2u8, 0, 0, 0];
 	static_instance!(JournalDelete, &[3u8, 0, 0, 0]);
-	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
-	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
 	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
 	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
 	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
@@ -75,8 +73,6 @@ impl crate::management::tree::TreeManagementStorage for MappingTests {
 	type Storage = crate::test::InMemorySimpleDB5;
 	type Mapping = bindings::Mapping;
 	type JournalDelete = bindings::JournalDelete;
-	type TouchedGC = bindings::TouchedGC;
-	type CurrentGC = bindings::CurrentGC;
 	type LastIndex = bindings::LastIndex;
 	type NeutralElt = bindings::NeutralElt;
 	type TreeMeta = bindings::TreeMeta;
