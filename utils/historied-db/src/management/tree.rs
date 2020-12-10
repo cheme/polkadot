@@ -352,10 +352,12 @@ impl<H: Ord + Codec, I: Default + Ord + Codec, BI: Default + Codec, S: TreeManag
 		self.state.serialize
 	}
 
+	/// Access serializing backend.
 	pub fn ser(&mut self) -> &mut S::Storage {
 		&mut self.state.serialize
 	}
 
+	/// Read pointer access to serializing backend.
 	pub fn ser_ref(&self) -> &S::Storage {
 		&self.state.serialize
 	}
@@ -435,6 +437,7 @@ impl<
 		}
 	}
 
+	/// From latest state, apply drop n indexes backward.
 	pub fn apply_drop_from_latest(&mut self, back: BI, do_prune: bool) -> bool {
 		let latest = self.last_added.mapping(self.state.ser()).get().clone();
 		let mut switch_index = (latest.0).1.clone();
@@ -455,8 +458,7 @@ impl<
 		self.canonicalize(qp, (branch_index, switch_index.clone()), prune_index)
 	}
 
-	// TODO subfunction in tree (more tree related)? This is a migrate (we change
-	// composite_treshold).
+	/// Canonicalize a fork plan up to a given index.
 	pub fn canonicalize(&mut self, branch: ForkPlan<I, BI>, switch_index: (I, BI), prune_index: Option<BI>) -> bool {
 		// TODO makes last index the end of this canonicalize branch
 
@@ -511,7 +513,7 @@ impl<
 					remove_tag(&to_remove.0, &index, &mut self.state.serialize);
 					index += One::one();
 				}
-				self.state.register_drop(&to_remove.0, to_remove.1, None);
+				self.state.register_change(&to_remove.0, to_remove.1, None);
 				self.state.storage.mapping(&mut self.state.serialize).remove(&to_remove.0);
 			}
 		}
@@ -523,7 +525,7 @@ impl<
 					remove_tag(&branch_ix, &index, &mut self.state.serialize);
 					index += One::one();
 				}
-				self.state.register_drop(&branch_ix, old_branch, Some(branch.state.end.clone()));
+				self.state.register_change(&branch_ix, old_branch, Some(branch.state.end.clone()));
 				self.state.storage.mapping(&mut self.state.serialize).insert(branch_ix, branch);
 			}
 		}
@@ -547,10 +549,15 @@ impl<
 	H: Clone + Ord + Codec,
 	S: TreeManagementStorage,
 > RegisteredConsumer<H, I, BI, S> {
+	/// Register a consumer.
+	///
+	/// There is no check that a consumer is not registered twice.
 	pub fn register_consumer(&mut self, consumer: Box<dyn super::ManagementConsumer<H, TreeManagement<H, I, BI, S>>>) {
 		self.0.push(consumer);
 	}
 
+	/// Do migrate data from the registered consumer.
+	/// Apply migrate to the tree management when finished.
 	pub fn migrate(&self, mgmt: &mut TreeManagement<H, I, BI, S>) {
 		// In this case (register consumer is design to run with sync backends), the management
 		// lock is very likely to be ineffective.
@@ -569,7 +576,6 @@ impl<
 	}
 }
 
-	
 impl<
 	I: Clone + Default + SubAssign<I> + AddAssign<I> + Ord + Debug + Codec + One,
 	BI: Ord + Default + SubAssign<BI> + AddAssign<BI> + Clone + Default + Debug + Codec + One,
@@ -642,6 +648,8 @@ impl<
 		})
 	}
 
+	/// Access latest state for a branch.
+	/// There is no check that the given branch is a terminal branch.
 	#[cfg(test)]
 	pub fn unchecked_latest_at(&mut self, branch_index : I) -> Option<Latest<(I, BI)>> {
 		{
@@ -663,13 +671,13 @@ impl<
 		})
 	}
 	
-	// TODO this and is_latest is borderline useless, for management implementation only.
-	pub fn if_latest_at(&mut self, branch_index: I, seq_index: BI) -> Option<Latest<(I, BI)>> {
+	/// Get latest state for a branch and index only if it is a terminal leaf of the tree.
+	fn if_latest_at(&mut self, branch_index: I, seq_index: BI) -> Option<Latest<(I, BI)>> {
 		{
 			let mut mapping = self.meta.mapping(&mut self.serialize);
 			let meta = mapping.get();
 			if meta.composite_latest {
-				// composite
+				// composite is head
 				if branch_index <= meta.composite_treshold.0 && seq_index == meta.composite_treshold.1 {
 					return Some(Latest::unchecked_latest(meta.composite_treshold.clone()));
 				} else {
@@ -692,14 +700,16 @@ impl<
 		})
 	}
 	
-	/// TODO doc & switch to &I
-	pub fn query_plan_at(&mut self, (branch_index, mut index) : (I, BI)) -> ForkPlan<I, BI> {
+	/// Access read query.
+	fn query_plan_at(&mut self, (branch_index, mut index) : (I, BI)) -> ForkPlan<I, BI> {
 		// make index exclusive
 		index += BI::one();
 		self.query_plan_inner(branch_index, Some(index))
 	}
-	/// TODO doc & switch to &I
-	pub fn query_plan(&mut self, branch_index: I) -> ForkPlan<I, BI> {
+
+	///Access read query for a given branch (latest index of the branch).
+	#[cfg(test)]
+	pub(crate) fn query_plan(&mut self, branch_index: I) -> ForkPlan<I, BI> {
 		self.query_plan_inner(branch_index, None)
 	}
 
@@ -763,11 +773,14 @@ impl<
 		})
 	}
 
-	pub fn branch_state(&mut self, branch_index: &I) -> Option<BranchState<I, BI>> {
+	/// Access to internal branch state.
+	pub(crate) fn branch_state(&mut self, branch_index: &I) -> Option<BranchState<I, BI>> {
 		self.storage.mapping(&mut self.serialize).get(branch_index).cloned()
 	}
 
-	pub fn branch_state_mut<R, F: FnOnce(&mut BranchState<I, BI>) -> R>(&mut self, branch_index: &I, f: F) -> Option<R> {
+	/// Mutable access to internal branch state.
+	#[cfg(test)]
+	pub(crate) fn branch_state_mut<R, F: FnOnce(&mut BranchState<I, BI>) -> R>(&mut self, branch_index: &I, f: F) -> Option<R> {
 		let mut result: Option<R> = None;
 		self.storage.mapping(&mut self.serialize)
 			.entry(branch_index)
@@ -779,7 +792,7 @@ impl<
 
 	/// this function can go into deep recursion with full scan, it indicates
 	/// that the tree model use here should only be use for small data or
-	/// tests. TODO should apply call back here and remove from caller!!
+	/// tests.
 	pub fn apply_drop_state(&mut self,
 		branch_index: &I,
 		node_index: &BI,
@@ -815,7 +828,7 @@ impl<
 			self.storage.mapping(&mut self.serialize).remove(branch_index);
 		}
 		if let Some(register) = register {
-			self.register_drop(branch_index, last.clone(), register);
+			self.register_change(branch_index, last.clone(), register);
 		}
 		while &last.end > node_index {
 			last.end -= BI::one();
@@ -823,7 +836,8 @@ impl<
 		}
 	}
 
-	pub fn apply_drop_state_rec_call(&mut self,
+	fn apply_drop_state_rec_call(
+		&mut self,
 		branch_index: &I,
 		node_index: &BI,
 		call_back: &mut impl FnMut(&I, &BI, &mut S::Storage),
@@ -844,7 +858,7 @@ impl<
 			}
 		}
 		for (i, s) in to_delete.into_iter() {
-			self.register_drop(&i, s.state.clone(), None);
+			self.register_change(&i, s.state.clone(), None);
 			// TODO these drop is a full branch drop: we could recurse on ourselves
 			// into calling function and this function rec on itself and do its own drop
 			let mut bi = s.state.start.clone();
@@ -858,7 +872,8 @@ impl<
 		}
 	}
 
-	fn register_drop(&mut self,
+	/// Register a change state in journal.
+	fn register_change(&mut self,
 		branch_index: &I,
 		branch_range: BranchRange<BI>,
 		new_node_index: Option<BI>, // if none this is a delete
@@ -887,11 +902,9 @@ impl<
 
 	fn clear_journal_delete(&mut self) {
 		let mut journal_delete = self.journal_delete.mapping(&mut self.serialize);
-		// TODO remove ext_states for all delete!!
 		journal_delete.clear()
 	}
 
-	// TODO should not be a function, this is very specific
 	fn clear_composite(&mut self) {
 		let mut to_remove = Vec::new();
 		if let Some(composite_treshold) = self.meta.get().next_composite_treshold.clone() {
@@ -907,11 +920,9 @@ impl<
 			storage.remove(&i);
 		}
 	}
-
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// Query plane needed for operation for a given
+/// Query plan needed for operation for a given
 /// fork.
 /// This is a subset of the full branch set definition.
 ///
@@ -925,9 +936,10 @@ impl<
 /// (block processing), that way we iterate on a vec rather than
 /// hoping over linked branches.
 /// TODO small vec that ??
-/// TODO add I treshold (everything valid starting at this one)?
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ForkPlan<I, BI> {
 	history: Vec<BranchPlan<I, BI>>,
+	/// All indexes before this treshold are valid.
 	pub composite_treshold: (I, BI),
 }
 
@@ -1052,7 +1064,6 @@ impl<I: Ord> BranchRange<I> {
 }
 
 impl<I: Default, BI: Default + AddAssign<u32>> Default for BranchState<I, BI> {
-
 	// initialize with one element
 	fn default() -> Self {
 		let mut end = BI::default();
@@ -1071,11 +1082,11 @@ impl<I: Default, BI: Default + AddAssign<u32>> Default for BranchState<I, BI> {
 
 impl<I, BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI> {
 
-	pub fn query_plan(&self) -> BranchRange<BI> {
+	fn query_plan(&self) -> BranchRange<BI> {
 		self.state.clone()
 	}
 
-	pub fn query_plan_to(&self, end: BI) -> BranchRange<BI> {
+	fn query_plan_to(&self, end: BI) -> BranchRange<BI> {
 		debug_assert!(self.state.end >= end);
 		BranchRange {
 			start: self.state.start.clone(),
@@ -1083,7 +1094,7 @@ impl<I, BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI
 		}
 	}
 
-	pub fn new(offset: BI, parent_branch_index: I) -> Self {
+	fn new(offset: BI, parent_branch_index: I) -> Self {
 		let mut end = offset.clone();
 		end += BI::one();
 		BranchState {
@@ -1098,15 +1109,15 @@ impl<I, BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI
 	}
 
 	/// Return true if you can add this index.
-	pub fn can_add(&self, index: &BI) -> bool {
+	fn can_add(&self, index: &BI) -> bool {
 		index == &self.state.end
 	}
 
- 	pub fn can_fork(&self, index: &BI) -> bool {
+ 	fn can_fork(&self, index: &BI) -> bool {
 		index <= &self.state.end && index > &self.state.start
 	}
 
-	pub fn add_state(&mut self) -> bool {
+	fn add_state(&mut self) -> bool {
 		if self.can_append {
 			self.state.end += BI::one();
 			true
@@ -1116,7 +1127,7 @@ impl<I, BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI
 	}
 
 	/// Return true if resulting branch is empty.
-	pub fn drop_state(&mut self) -> bool {
+	pub(crate) fn drop_state(&mut self) -> bool {
 		if self.state.end > self.state.start {
 			self.state.end -= BI::one();
 			self.can_append = false;
@@ -1134,21 +1145,13 @@ impl<I, BI: Ord + SubAssign<BI> + AddAssign<BI> + Clone + One> BranchState<I, BI
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct BranchGC<I, BI> {
+	/// Index of the modified branch.
 	pub branch_index: I,
 	/// A new start - end limit for the branch or a removed
 	/// branch.
 	pub new_range: Option<LinearGC<BI>>,
 }
 
-
-// TODO delete
-#[derive(Debug, Clone, Encode, Decode)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct TreeMigrate<I, BI> {
-	/// Every modified branch.
-	/// Ordered by branch index.
-	pub changes: Vec<BranchGC<I, BI>>,
-}
 
 /// Same as `DeltaTreeStateGc`, but also
 /// indicates the changes journaling can be clean.
@@ -1176,14 +1179,6 @@ pub enum MultipleMigrate<I, BI> {
 	JournalGc(DeltaTreeStateGc<I, BI>),
 	Rewrite(TreeRewrite<I, BI>),
 	Noops,
-}
-
-impl<I, BI> Default for TreeMigrate<I, BI> {
-	fn default() -> Self {
-		TreeMigrate {
-			changes: Vec::new(),
-		}
-	}
 }
 
 impl<
