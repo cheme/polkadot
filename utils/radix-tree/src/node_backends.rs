@@ -15,11 +15,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Backend for storing tree nodes.
+//! Node backends for storing tree nodes.
 
-use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
-	Position, MaskKeyByte, NodeIndex, NodeBox, NodeBackend, RadixConf,
-	PrefixKeyConf, BackendFor, Children, Node, Key};
+use crate::{TreeConf, PositionFor, KeyIndexFor,
+	Position, NodeBox, RadixConf, BackendFor,
+	PrefixKeyConf, Node, Key};
+use crate::node_radix::{MaskFor, MaskKeyByte};
+use crate::node_children::{Children, NodeIndex};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use alloc::boxed::Box;
@@ -30,6 +32,99 @@ use derivative::Derivative;
 #[cfg(feature = "std")]
 pub use arc_backend::ArcBackend;
 
+/// Node backend management.
+pub trait TreeBackend<N: TreeConf>: Clone {
+	/// Inner backend used.
+	type Backend: Clone;
+	/// Default value for inactive implementation.
+	/// Active implementation needs input parameters and
+	/// default to `None`.
+	const DEFAULT: Option<Self> = None;
+	/// Indicate if we display the whole tree on format.
+	const DO_DEBUG: bool = true;
+
+	/// Instantiate backend to store in an existing node.
+	fn existing_node(init: &Self::Backend, key: Key) -> Self;
+
+	/// Create a new root backend.
+	fn new_root(init: &Self::Backend) -> Self;
+
+	/// Create a new node from an existing node.
+	/// Node reference ('self') is the parent node.
+	/// Note that the reference to a node is only here
+	/// to clone the backend (see 'backend_key').
+	fn new_node(&self, key: Key) -> Self;
+
+	/// Get a root node from the backend.
+	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>>;
+
+	/// Get a child node from the backend.
+	/// Node reference ('self') is the parent node.
+	/// Note that the reference to a node is only here
+	/// to clone the backend (see 'backend_key').
+	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N>;
+
+	/// Build a backend key
+	fn backend_key(key: &[u8], position: PositionFor<N>) -> Key;
+
+	/// Inverse of 'backend_key'.
+	/// This is not strictly mandatory, but seems like a good
+	/// way to inspect a backend and ensure the key scheme
+	/// is conflict free.
+	fn from_backend_key(key: &Key) -> (&[u8], PositionFor<N>);
+
+	/// Resolve the data for a node before access.
+	fn resolve(node: &Node<N>);
+
+	/// Resolve the data for a node before access.
+	fn resolve_mut(node: &mut Node<N>);
+
+	/// Indicate a node was change.
+	/// Does not flush change immediately.
+	fn set_change(&mut self);
+	
+	/// Delete a node.
+	/// Does flush change immediatly.
+	fn delete(node: NodeBox<N>);
+
+	/// Flush changes that happens to a node.
+	fn commit_change(node: &mut Node<N>, recursive: bool);
+}
+
+
+
+impl<N: TreeConf<Backend = ()>> TreeBackend<N> for () {
+	type Backend = ();
+	const DEFAULT: Option<Self> = Some(());
+	fn existing_node(_init: &Self::Backend, _key: Key) -> Self {
+		()
+	}
+	fn new_root(_init: &Self::Backend) -> Self {
+		()
+	}
+	fn new_node(&self, _key: Key) -> Self {
+		()
+	}
+	fn get_root(_init: &Self::Backend) -> Option<NodeBox<N>> {
+		unreachable!("Inactive implementation");
+	}
+	fn fetch_node(&self, _key: &[u8], _position: PositionFor<N>) -> NodeBox<N> {
+		unreachable!("Inactive implementation");
+	}
+	fn backend_key(_key: &[u8], _position: PositionFor<N>) -> Key {
+		unreachable!("Inactive implementation");
+	}
+	fn from_backend_key(_key: &Key) -> (&[u8], PositionFor<N>) {
+		unreachable!("Inactive implementation");
+	}
+	fn resolve(_node: &Node<N>) { }
+	fn resolve_mut(_node: &mut Node<N>) { }
+	fn set_change(&mut self) { }
+	fn delete(_node: NodeBox<N>) { }
+	fn commit_change(_node: &mut Node<N>, _recursive: bool) { }
+}
+
+/// In memory hash map backend (mainly for testing).
 pub type MapBackend = HashMap<Key, Vec<u8>>;
 
 /// Read only backend to use with a tree.
@@ -75,6 +170,7 @@ impl BackendInner for MapBackend {
 	}
 }
 
+/// Non Send and Sync backend.
 #[derive(Derivative)]
 #[derivative(Clone(bound=""))]
 #[derivative(Default)]
@@ -86,7 +182,7 @@ impl<B> RcBackend<B> {
 	}
 }
 
-fn key_addressed<N: NodeConf>(
+fn key_addressed<N: TreeConf>(
 	key: &[u8],
 	start_postion: PositionFor<N>,
 ) -> Key {
@@ -109,7 +205,7 @@ fn key_addressed<N: NodeConf>(
 	}
 }
 
-fn key_from_addressed<N: NodeConf>(
+fn key_from_addressed<N: TreeConf>(
 	key: &[u8],
 ) -> (&[u8], PositionFor<N>) {
 	if <N::Radix as RadixConf>::Alignment::ALIGNED || key.len() == 0 {
@@ -138,11 +234,11 @@ fn fetch_and_decode_node<N>(
 	backend: &BackendFor<N>,
 ) -> core::result::Result<Node<N>, CodecError>
 	where
-		N: NodeConf,
+		N: TreeConf,
 		N::Value: Decode,
 		BackendFor<N>: Backend,
 {
-	let node_key = N::NodeBackend::backend_key(&key[..], start);
+	let node_key = N::Backend::backend_key(&key[..], start);
 	let encoded = if let Some(encoded) = backend.read(node_key.as_slice()) {
 		encoded
 	} else {
@@ -188,7 +284,7 @@ fn fetch_and_decode_node<N>(
 		end,
 		value,
 		(),
-		N::NodeBackend::existing_node(&backend, node_key),
+		N::Backend::existing_node(&backend, node_key),
 	);
 
 	end.index += start.index;
@@ -227,7 +323,7 @@ fn fetch_and_decode_node<N>(
 
 fn encode_node<N>(node: &Node<N>) -> Vec<u8>
 	where
-		N: NodeConf,
+		N: TreeConf,
 		N::Value: Encode,
 {
 	let mut result = Vec::new();
@@ -374,9 +470,9 @@ pub struct DirectBackend<B> {
 	changed: bool,
 }
 
-impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
+impl<N, B: Backend> TreeBackend<N> for LazyBackend<B>
 	where
-		N: NodeConf<NodeBackend = Self>,
+		N: TreeConf<Backend = Self>,
 		N::Value: Codec,
 {
 	/// Debug would trigger non mutable node resolution,
@@ -389,7 +485,7 @@ impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
 	}
 
 	fn new_root(init: &Self::Backend) -> Self {
-		let key = <Self as NodeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
+		let key = <Self as TreeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
 		LazyBackend::Resolved(DirectBackend {key, inner: init.clone(), changed: true})
 	}
 
@@ -483,7 +579,7 @@ impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
 					index: *start_index,
 					mask
 				};
-				let key = <Self as NodeBackend<N>>::backend_key(&key[..], start);
+				let key = <Self as TreeBackend<N>>::backend_key(&key[..], start);
 				inner.remove(key.as_slice());
 			},
 		}
@@ -521,9 +617,9 @@ impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
 	}
 }
 
-impl<N, B: Backend> NodeBackend<N> for DirectBackend<B>
+impl<N, B: Backend> TreeBackend<N> for DirectBackend<B>
 	where
-		N: NodeConf<NodeBackend = Self>,
+		N: TreeConf<Backend = Self>,
 		N::Value: Codec,
 {
 	type Backend = B;
@@ -535,7 +631,7 @@ impl<N, B: Backend> NodeBackend<N> for DirectBackend<B>
 		}
 	}
 	fn new_root(init: &Self::Backend) -> Self {
-		let key = <Self as NodeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
+		let key = <Self as TreeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
 		DirectBackend {
 			inner: init.clone(),
 			key,
@@ -605,6 +701,7 @@ mod arc_backend {
 	use std::sync::Arc;
 	use parking_lot::RwLock;
 
+	/// 'Send' and 'Sync' backend.
 	#[derive(Derivative)]
 	#[derivative(Clone(bound=""))]
 	#[derivative(Default)]
