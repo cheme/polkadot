@@ -132,7 +132,7 @@ fn key_from_addressed<N: NodeConf>(
 	}
 }
 
-fn decode_node<N>(
+fn fetch_and_decode_node<N>(
 	key: &[u8],
 	start: PositionFor<N>,
 	backend: &BackendFor<N>,
@@ -202,7 +202,7 @@ fn decode_node<N>(
 		if let Some(children_mask) = input.get(input_index) {
 			if children_mask & 0b1000_0000 >> byte_index != 0 {
 				end.set_index::<N::Radix>(&mut child_key, key_index);
-				let child = node.ext().fetch_node(&child_key[..], child_position);
+				let child = node.backend().fetch_node(&child_key[..], child_position);
 				node.set_child(key_index, child);
 			}
 
@@ -324,21 +324,53 @@ impl<B: ReadBackend> BackendInner for TransactionBackend<B> {
 #[derivative(Clone)]
 /// Resolve child nodes from backend lazilly.
 /// This way the whole tree do not need to be loaded.
+/// `resolve` and `resolve_mut` calls are use for this.
+/// Note that a tree using this cannot use `get` but
+/// have to use `get_mut` for accessing its content
+/// unless the node were already fetched.
+/// TODO can consider a `get` variant that return None
+/// on unfetched node (instead of panicking).
 pub enum LazyBackend<B> {
-	Unresolved(Vec<u8>, usize, u8, B),
-	Resolved(Key, B, bool),
+	Unresolved {
+		/// Key for that node (including partial key).
+		key: Key,
+		/// Index of node start of partial key.
+		/// (end position being the last byte of the key).
+		start_index: usize,
+		/// Mask for non aligned radix.
+		start_mask: u8,
+		/// Backend to fetch from.
+		inner: B,
+	},
+	Resolved(DirectBackend<B>),
 }
+
 impl<B: Default> Default for LazyBackend<B> {
 	fn default() -> Self {
-		LazyBackend::Unresolved(Default::default(), 0, 0, Default::default())
+		LazyBackend::Unresolved {
+			key: Default::default(),
+			start_index: 0,
+			start_mask: 0,
+			inner: Default::default(),
+		}
 	}
 }
+
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Default)]
+/// Backend associated to a node that has been
+/// fetched.
+/// When using a tree with this backend only,
+/// `resolve` and `resolve_mut` are called
+/// directly, so the whole tree get loaded
+/// when querying the first node.
 pub struct DirectBackend<B> {
+	/// Backend to fetch from.
 	inner: B,
+	/// Key for that node (including partial key).
 	key: Key,
+	/// Has fetch node been modified.
 	changed: bool,
 }
 
@@ -351,28 +383,37 @@ impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
 	/// which is not doable here.
 	const DO_DEBUG: bool = false;
 	type Backend = B;
+
 	fn existing_node(init: &Self::Backend, key: Key) -> Self {
-		LazyBackend::Resolved(key, init.clone(), false)
+		LazyBackend::Resolved(DirectBackend {key, inner: init.clone(), changed: false})
 	}
+
 	fn new_root(init: &Self::Backend) -> Self {
 		let key = <Self as NodeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
-		LazyBackend::Resolved(key, init.clone(), true)
+		LazyBackend::Resolved(DirectBackend {key, inner: init.clone(), changed: true})
 	}
+
 	fn new_node(&self, key: Key) -> Self {
 		match self {
-			LazyBackend::Unresolved(_, _, _, backend)
-				| LazyBackend::Resolved(_, backend, ..) => {
-				LazyBackend::Resolved(key, backend.clone(), true)
+			LazyBackend::Unresolved {inner, ..}
+				| LazyBackend::Resolved(DirectBackend {inner, ..}) => {
+				LazyBackend::Resolved(DirectBackend {
+					key,
+					inner: inner.clone(),
+					changed: true,
+				})
 			},
 		}
 	}
+
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>> {
-		decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
+		fetch_and_decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
 	}
+
 	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N> {
 		match self {
-			LazyBackend::Unresolved(_, _, _, backend)
-				| LazyBackend::Resolved(_, backend, ..) => {
+			LazyBackend::Unresolved {inner, ..}
+				| LazyBackend::Resolved(DirectBackend{inner, ..}) => {
 				let mask = <N::Radix as RadixConf>::Alignment::encode_mask(position.mask); 
 				Node::<N>::new_box(
 					key,
@@ -380,66 +421,78 @@ impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
 					position,
 					None,
 					(),
-					LazyBackend::Unresolved(key.to_vec(), position.index, mask, backend.clone()),
+					LazyBackend::Unresolved {
+						key: key.to_vec(), 
+						start_index: position.index,
+						start_mask: mask,
+						inner: inner.clone(),
+					},
 				)
 			},
 		}
 	}
+
 	fn backend_key(key: &[u8], position: PositionFor<N>) -> Key {
 		key_addressed::<N>(key, position)
 	}
+
 	fn from_backend_key(key: &Key) -> (&[u8], PositionFor<N>) {
 		key_from_addressed::<N>(key)
 	}
+
 	fn resolve(node: &Node<N>) {
-		match node.ext() {
+		match node.backend() {
 			LazyBackend::Resolved(..) => (),
 			_ => unimplemented!("Backend must be use as mutable due to lazy nature"),
 		}
 	}
+
 	fn resolve_mut(node: &mut Node<N>) {
-		if let Some(new_node) = match node.ext_mut() {
+		if let Some(new_node) = match node.backend_mut() {
 			LazyBackend::Resolved(..) => None,
-			LazyBackend::Unresolved(key, start_index, start_mask, backend) => {
+			LazyBackend::Unresolved{ key, start_index, start_mask, inner} => {
 				let mask = <N::Radix as RadixConf>::Alignment::decode_mask(*start_mask); 
 				let position = PositionFor::<N> {
 					index: *start_index,
 					mask
 				};
-				decode_node(&key, position, backend).ok()
+				fetch_and_decode_node(&key, position, inner).ok()
 			},
 		} {
 			*node = new_node;
 		}
 	}
+
 	fn set_change(&mut self) {
 		match self {
-			LazyBackend::Resolved(_, _, changed) => {
+			LazyBackend::Resolved(DirectBackend {changed, ..}) => {
 				*changed = true;
 			},
-			LazyBackend::Unresolved(..) => panic!("Node need to be resolved first"),
+			LazyBackend::Unresolved {..} => panic!("Node need to be resolved first"),
 		}
 	}
+
 	fn delete(mut node: NodeBox<N>) {
-		match node.ext_mut() {
-			LazyBackend::Resolved(key, backend, ..) => {
-				backend.remove(key.as_slice());
+		match node.backend_mut() {
+			LazyBackend::Resolved(DirectBackend {key, inner, ..}) => {
+				inner.remove(key.as_slice());
 			},
-			LazyBackend::Unresolved(key, start_index, start_mask, backend) => {
+			LazyBackend::Unresolved { key, start_index, start_mask, inner } => {
 				let mask = <N::Radix as RadixConf>::Alignment::decode_mask(*start_mask); 
 				let start = PositionFor::<N> {
 					index: *start_index,
 					mask
 				};
 				let key = <Self as NodeBackend<N>>::backend_key(&key[..], start);
-				backend.remove(key.as_slice());
+				inner.remove(key.as_slice());
 			},
 		}
 	}
+
 	fn commit_change(node: &mut Node<N>, recursive: bool) {
-		match node.ext() {
-			LazyBackend::Resolved(_, _, false)
-			| LazyBackend::Unresolved(..) => (),
+		match node.backend() {
+			LazyBackend::Resolved(DirectBackend {changed: false, ..})
+			| LazyBackend::Unresolved {..} => (),
 			LazyBackend::Resolved(..) => {
 				if recursive && node.children.number_child() > 0 {
 					let mut key_index = KeyIndexFor::<N>::zero();
@@ -456,10 +509,10 @@ impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
 					}
 				}
 				let encoded = encode_node(node);
-				match node.ext_mut() {
-					LazyBackend::Resolved(key, backend, changed) => {
+				match node.backend_mut() {
+					LazyBackend::Resolved(DirectBackend {key, inner, changed}) => {
 						*changed = false;
-						backend.write(key.clone(), encoded)
+						inner.write(key.clone(), encoded)
 					},
 					_ => (),
 				}
@@ -497,10 +550,10 @@ impl<N, B: Backend> NodeBackend<N> for DirectBackend<B>
 		}
 	}
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>> {
-		decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
+		fetch_and_decode_node(&[], PositionFor::<N>::zero(), init).map(Box::new).ok()
 	}
 	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N> {
-		decode_node(&key, position, &self.inner)
+		fetch_and_decode_node(&key, position, &self.inner)
 			.map(Box::new)
 			.expect("Corrupted backend, missing node")
 	}
@@ -519,11 +572,11 @@ impl<N, B: Backend> NodeBackend<N> for DirectBackend<B>
 		self.changed = true;
 	}
 	fn delete(mut node: NodeBox<N>) {
-		let ext = node.ext_mut();
-		ext.inner.remove(ext.key.as_slice());
+		let backend = node.backend_mut();
+		backend.inner.remove(backend.key.as_slice());
 	}
 	fn commit_change(node: &mut Node<N>, recursive: bool) {
-		if node.ext().changed == true {
+		if node.backend().changed == true {
 			if recursive && node.children.number_child() > 0 {
 				let mut key_index = KeyIndexFor::<N>::zero();
 				loop {
@@ -539,9 +592,9 @@ impl<N, B: Backend> NodeBackend<N> for DirectBackend<B>
 				}
 			}
 			let encoded = encode_node(node);
-			let ext = node.ext_mut();
-			ext.changed = false;
-			ext.inner.write(ext.key.clone(), encoded)
+			let backend = node.backend_mut();
+			backend.changed = false;
+			backend.inner.write(backend.key.clone(), encoded)
 		}
 	}
 }

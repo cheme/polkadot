@@ -163,7 +163,13 @@ pub trait NodeBackend<N: NodeConf>: Clone {
 	/// Indicate if we display the whole tree on format.
 	const DO_DEBUG: bool = true;
 	fn existing_node(init: &Self::Backend, key: Key) -> Self;
+
+	/// Create a new root with its backend.
 	fn new_root(init: &Self::Backend) -> Self;
+
+	/// Create a new node from an existing node.
+	/// Reference to a node is only here to clone the backend.
+	/// TODO backend as param instead.
 	fn new_node(&self, key: Key) -> Self;
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>>;
 	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N>;
@@ -798,29 +804,29 @@ pub trait NodeConf: Debug + Clone + Sized {
 	type NodeBackend: NodeBackend<Self>;
 
 	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::NodeBackend {
-		if let Some(ext) = Self::NodeBackend::DEFAULT {
-			ext
+		if let Some(backend) = Self::NodeBackend::DEFAULT {
+			backend
 		} else {
 			let mut key = key.into();
 			node.new_end(&mut key, position);
 			let at = at.next::<Self::Radix>();
 			// TODO consider owned variant of `backend_key` !!
 			let key = Self::NodeBackend::backend_key(key.as_slice(), at);
-			Self::NodeBackend::new_node(&node.ext, key)
+			Self::NodeBackend::new_node(&node.backend, key)
 		}
 	}
 
 	fn new_node_contained(node: &Node<Self>, key: &[u8], position: PositionFor<Self>) -> Self::NodeBackend {
-		if let Some(ext) = Self::NodeBackend::DEFAULT {
-			ext
+		if let Some(backend) = Self::NodeBackend::DEFAULT {
+			backend
 		} else {
 			let key = Self::NodeBackend::backend_key(key, position);
-			Self::NodeBackend::new_node(&node.ext, key)
+			Self::NodeBackend::new_node(&node.backend, key)
 		}
 	}
 	fn new_node_root(init: &BackendFor<Self>) -> Self::NodeBackend {
-		if let Some(ext) = Self::NodeBackend::DEFAULT {
-			ext
+		if let Some(backend) = Self::NodeBackend::DEFAULT {
+			backend
 		} else {
 			Self::NodeBackend::new_root(init)
 		}
@@ -843,7 +849,7 @@ pub struct Node<N>
 	//pub right: usize,
 	// TODO if backend behind, then Self would neeed to implement a Node trait with lazy loading...
 	children: N::Children,
-	ext: N::NodeBackend,
+	backend: N::NodeBackend,
 }
 
 impl<N: NodeConf> Debug for Node<N> {
@@ -889,9 +895,9 @@ impl<N: NodeConf> Node<N> {
 		end_position: PositionFor<N>,
 		value: Option<N::Value>,
 		init: (),
-		ext: N::NodeBackend,
+		backend: N::NodeBackend,
 	) -> NodeBox<N> {
-		Box::new(Self::new(key, start_position, end_position, value, init, ext))
+		Box::new(Self::new(key, start_position, end_position, value, init, backend))
 	}
 	pub fn new(
 		key: &[u8],
@@ -899,13 +905,13 @@ impl<N: NodeConf> Node<N> {
 		end_position: PositionFor<N>,
 		value: Option<N::Value>,
 		_init: (),
-		ext: N::NodeBackend,
+		backend: N::NodeBackend,
 	) -> Node<N> {
 		Node {
 			key: PrefixKey::new_offset(key, start_position, end_position),
 			value,
 			children: N::Children::empty(),
-			ext,
+			backend,
 		}
 	}
 	pub fn descend(
@@ -992,7 +998,6 @@ impl<N: NodeConf> Node<N> {
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<&mut Self> {
-		//N::NodeBackend::resolve_mut(self);
 		let mut result = self.children.get_child_mut(index);
 		result.as_mut().map(|c| N::NodeBackend::resolve_mut(c));
 		result
@@ -1002,7 +1007,7 @@ impl<N: NodeConf> Node<N> {
 		index: KeyIndexFor<N>,
 		child: Box<Self>,
 	) -> Option<Box<Self>> {
-		self.ext.set_change();
+		self.backend.set_change();
 		self.children.set_child(index, child)
 	}
 	pub fn remove_child(
@@ -1011,7 +1016,7 @@ impl<N: NodeConf> Node<N> {
 	) -> Option<Box<Self>> {
 		let result = self.children.remove_child(index);
 		if result.is_some() {
-			self.ext.set_change();
+			self.backend.set_change();
 		}
 		result
 	}
@@ -1023,7 +1028,7 @@ impl<N: NodeConf> Node<N> {
 	) {
 		at.index -= position.index;
 		let index = self.key.index::<N::Radix>(at);
-		let ext = N::new_node_split(self, key, position, at);
+		let backend = N::new_node_split(self, key, position, at);
 
 		let child_prefix = self.key.split_off::<N::Radix>(at);
 		let child_value = self.value.take();
@@ -1032,10 +1037,10 @@ impl<N: NodeConf> Node<N> {
 			key: child_prefix,
 			value: child_value,
 			children: child_children,
-			ext, 
+			backend, 
 		});
 		self.children.set_child(index, child);
-		self.ext.set_change();
+		self.backend.set_change();
 	}
 	pub fn fuse_child(
 		&mut self,
@@ -1090,15 +1095,15 @@ impl<N: NodeConf> Node<N> {
 			stack[node_position_end.index] = end;
 		}
 	}
-	pub fn ext(
+	pub fn backend(
 		&self,
 	) -> &N::NodeBackend {
-		&self.ext
+		&self.backend
 	}
-	pub fn ext_mut(
+	pub fn backend_mut(
 		&mut self,
 	) -> &mut N::NodeBackend {
-		&mut self.ext
+		&mut self.backend
 	}
 }
 
