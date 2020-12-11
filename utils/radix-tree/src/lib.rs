@@ -24,9 +24,9 @@
 
 extern crate alloc;
 
-pub mod node_backends;
-pub mod node_radix;
-pub mod node_children;
+pub mod backends;
+pub mod radix;
+pub mod children;
 pub mod iterators;
 pub mod tests;
 
@@ -38,10 +38,10 @@ use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::mem::replace;
 use codec::Codec;
-use node_radix::{PrefixKeyConf, RadixConf, Position,
+use radix::{PrefixKeyConf, RadixConf, Position,
 	MaskFor, MaskKeyByte};
-use node_children::{Children, NodeIndex};
-use node_backends::{Backend, TreeBackend};
+use children::Children;
+pub use backends::TreeBackend as Backend;
 
 
 pub type Key = NodeKeyBuff;
@@ -346,7 +346,7 @@ pub trait TreeConf: Debug + Clone + Sized {
 	type Radix: RadixConf;
 	type Value: Value;
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
-	type Backend: TreeBackend<Self>;
+	type Backend: Backend<Self>;
 
 	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::Backend {
 		if let Some(backend) = Self::Backend::DEFAULT {
@@ -381,7 +381,7 @@ pub trait TreeConf: Debug + Clone + Sized {
 pub(crate) type PositionFor<N> = Position<<<N as TreeConf>::Radix as RadixConf>::Alignment>;
 pub(crate) type AlignmentFor<N> = <<N as TreeConf>::Radix as RadixConf>::Alignment;
 pub(crate) type KeyIndexFor<N> = <<N as TreeConf>::Radix as RadixConf>::KeyIndex;
-pub(crate) type BackendFor<N> = <<N as TreeConf>::Backend as TreeBackend<N>>::Backend;
+pub(crate) type BackendFor<N> = <<N as TreeConf>::Backend as Backend<N>>::Backend;
 
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -1047,8 +1047,8 @@ macro_rules! flatten_children {
 	}
 }
 
-use crate::node_children::{Children256, ART48_256};
-use crate::node_radix::impls::Radix256Conf;
+use crate::children::{Children256, ART48_256};
+use crate::radix::impls::Radix256Conf;
 
 flatten_children!(
 	Children256Flatten,
@@ -1075,9 +1075,9 @@ flatten_children!(
 	Node256HashBackend,
 	Children256,
 	Radix256Conf,
-	node_backends::DirectBackend<
-		node_backends::RcBackend<
-			node_backends::MapBackend
+	backends::DirectBackend<
+		backends::RcBackend<
+			backends::MapBackend
 		>
 	>,
 );
@@ -1089,9 +1089,9 @@ flatten_children!(
 	Node256LazyHashBackend,
 	Children256,
 	Radix256Conf,
-	node_backends::LazyBackend<
-		node_backends::RcBackend<
-			node_backends::MapBackend
+	backends::LazyBackend<
+		backends::RcBackend<
+			backends::MapBackend
 		>
 	>,
 );
@@ -1103,9 +1103,9 @@ flatten_children!(
 	Node256TxBackend,
 	Children256,
 	Radix256Conf,
-	node_backends::DirectBackend<
-		node_backends::RcBackend<
-			node_backends::MapBackend
+	backends::DirectBackend<
+		backends::RcBackend<
+			backends::MapBackend
 		>
 	>,
 );

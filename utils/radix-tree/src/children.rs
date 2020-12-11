@@ -17,13 +17,10 @@
 
 //! Children storage related traits and implementations.
 
-use crate::{PrefixKey, Key, NodeKeyBuff, NodeBox};
 use core::fmt::Debug;
-use core::cmp::{min, Ordering};
-use alloc::borrow::Borrow;
 use core::mem::replace;
 use derivative::Derivative;
-use crate::node_radix::RadixConf;
+use crate::radix::RadixConf;
 use alloc::boxed::Box;
 
 /// Children node index, depending on the radix use
@@ -125,7 +122,7 @@ struct Children2<N> (
 );
 
 impl<N: Debug + Clone> Children for Children2<N> {
-	type Radix = crate::node_radix::impls::Radix2Conf;
+	type Radix = crate::radix::impls::Radix2Conf;
 	type Node = N;
 
 	fn empty() -> Self {
@@ -339,7 +336,7 @@ impl<N: Debug> Debug for ART48_256<N> {
 }
 
 impl<N: Debug + Clone> Children for Children256<N> {
-	type Radix = crate::node_radix::impls::Radix256Conf;
+	type Radix = crate::radix::impls::Radix256Conf;
 	type Node = N;
 
 	fn empty() -> Self {
@@ -428,7 +425,7 @@ const REM_TRESHOLD48: u8 = 40u8;
 const REM_TRESHOLD16: u8 = 16u8;
 const REM_TRESHOLD4: u8 = 4u8;
 
-use crate::node_radix::impls::Radix256Conf;
+use crate::radix::impls::Radix256Conf;
 
 impl<N: Debug + Clone> Children48<N> {
 //	type Radix = Radix256Conf;

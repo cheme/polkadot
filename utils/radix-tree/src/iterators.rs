@@ -22,16 +22,8 @@
 use super::{Tree, TreeConf, Node, PositionFor, Descent, Key, KeyIndexFor};
 pub use derivative::Derivative;
 use alloc::vec::Vec;
-use alloc::boxed::Box;
-use alloc::borrow::Borrow;
-use core::cmp::{min, Ordering};
-use core::fmt::Debug;
-use core::mem::replace;
-use codec::Codec;
-use crate::node_radix::{PrefixKeyConf, RadixConf, Position,
-	MaskFor, MaskKeyByte};
-use crate::node_children::{Children, NodeIndex};
-use crate::node_backends::{Backend, TreeBackend};
+use crate::radix::{Position, MaskFor, MaskKeyByte};
+use crate::children::NodeIndex;
 
 /// Stack of Node to reach a position.
 struct NodeStack<'a, N: TreeConf> {

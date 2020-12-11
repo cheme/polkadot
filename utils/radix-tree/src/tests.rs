@@ -17,6 +17,7 @@
 
 //! Tests an fuzzing base code.
 
+#[cfg(any(test, feature = "fuzzer"))]
 use crate::{Node256NoBackend, Node256NoBackendART, Node256HashBackend,
 	Node256TxBackend, Node256LazyHashBackend};
 

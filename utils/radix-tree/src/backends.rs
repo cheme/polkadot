@@ -20,8 +20,8 @@
 use crate::{TreeConf, PositionFor, KeyIndexFor,
 	Position, NodeBox, RadixConf, BackendFor,
 	PrefixKeyConf, Node, Key};
-use crate::node_radix::{MaskFor, MaskKeyByte};
-use crate::node_children::{Children, NodeIndex};
+use crate::radix::{MaskFor, MaskKeyByte};
+use crate::children::{Children, NodeIndex};
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use alloc::boxed::Box;

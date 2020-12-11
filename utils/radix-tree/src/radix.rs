@@ -17,12 +17,12 @@
 
 //! Radix related variants for keys and children.
 
-use crate::{PrefixKey, Key, NodeKeyBuff, NodeBox};
+use crate::{PrefixKey, NodeKeyBuff};
 use core::fmt::Debug;
-use core::cmp::{min, Ordering};
+use core::cmp::Ordering;
 use alloc::borrow::Borrow;
 use derivative::Derivative;
-use crate::node_children::{NodeIndex};
+use crate::children::{NodeIndex};
 
 /// Masking operation for unaliged prefix key.
 ///
