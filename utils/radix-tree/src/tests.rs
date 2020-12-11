@@ -65,6 +65,7 @@ pub mod $module_name {
 		assert!(!compare_tree(&t1, &t2));
 	}
 
+	#[cfg(test)]
 	fn compare_tree(left: &Tree::<TreeConf>, right: &Tree::<TreeConf>) -> bool {
 		let left_node = left.iter();
 		let left = left_node.value_iter();
