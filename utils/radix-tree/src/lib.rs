@@ -155,7 +155,7 @@ type BackendFor<N> = <<N as NodeConf>::NodeBackend as NodeBackend<N>>::Backend;
 /// Node backend management.
 pub trait NodeBackend<N: NodeConf>: Clone {
 	/// Inner backend used.
-	type Backend: Clone;
+	type Backend;
 	/// Default value for inactive implementation.
 	/// Active implementation needs input parameters and
 	/// default to `None`.
@@ -1103,7 +1103,7 @@ impl<N: NodeConf> Node<N> {
 }
 
 #[derive(Derivative)]
-#[derivative(Clone(bound=""))]
+#[derivative(Clone(bound="<<N as NodeConf>::NodeBackend as NodeBackend<N>>::Backend: Clone"))]
 #[derivative(Debug(bound=""))]
 pub struct Tree<N>
 	where
@@ -2215,7 +2215,7 @@ flatten_children!(
 	Node256HashBackend,
 	Children256,
 	Radix256Conf,
-	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
+	backend::DirectBackend<backend::RcBackend<backend::MapBackend>>,
 );
 
 flatten_children!(
@@ -2225,7 +2225,7 @@ flatten_children!(
 	Node256LazyHashBackend,
 	Children256,
 	Radix256Conf,
-	backend::LazyExt<backend::RcBackend<backend::MapBackend>>,
+	backend::LazyBackend<backend::RcBackend<backend::MapBackend>>,
 );
 
 flatten_children!(
@@ -2235,7 +2235,7 @@ flatten_children!(
 	Node256TxBackend,
 	Children256,
 	Radix256Conf,
-	backend::DirectExt<backend::RcBackend<backend::MapBackend>>,
+	backend::DirectBackend<backend::RcBackend<backend::MapBackend>>,
 );
 
 #[derive(Derivative)]

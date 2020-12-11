@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Use a backend for existing nodes.
+//! Backend for storing tree nodes.
 
 use crate::{NodeConf, PositionFor, KeyIndexFor, MaskFor,
 	Position, MaskKeyByte, NodeIndex, NodeBox, NodeBackend, RadixConf,
@@ -51,6 +51,14 @@ pub trait BackendInner: ReadBackend {
 
 /// The backend to use for a tree.
 pub trait Backend: BackendInner + Clone { }
+
+/*
+/// The backend to use for a tree.
+pub trait BackendSync: Backend + Send + Sync {
+	fn write(&self, k: Key, v: Vec<u8>);
+	fn remove(&self, k: &[u8]);
+}
+*/
 
 impl ReadBackend for MapBackend {
 	fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
@@ -316,25 +324,25 @@ impl<B: ReadBackend> BackendInner for TransactionBackend<B> {
 #[derivative(Clone)]
 /// Resolved from backend on 
 /// TODO rename
-pub enum LazyExt<B> {
+pub enum LazyBackend<B> {
 	Unresolved(Vec<u8>, usize, u8, B),
 	Resolved(Key, B, bool),
 }
-impl<B: Default> Default for LazyExt<B> {
+impl<B: Default> Default for LazyBackend<B> {
 	fn default() -> Self {
-		LazyExt::Unresolved(Default::default(), 0, 0, Default::default())
+		LazyBackend::Unresolved(Default::default(), 0, 0, Default::default())
 	}
 }
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Default)]
-pub struct DirectExt<B> {
+pub struct DirectBackend<B> {
 	inner: B,
 	key: Key,
 	changed: bool,
 }
 
-impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
+impl<N, B: Backend> NodeBackend<N> for LazyBackend<B>
 	where
 		N: NodeConf<NodeBackend = Self>,
 		N::Value: Codec,
@@ -344,17 +352,17 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 	const DO_DEBUG: bool = false;
 	type Backend = B;
 	fn existing_node(init: &Self::Backend, key: Key) -> Self {
-		LazyExt::Resolved(key, init.clone(), false)
+		LazyBackend::Resolved(key, init.clone(), false)
 	}
 	fn new_root(init: &Self::Backend) -> Self {
 		let key = <Self as NodeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
-		LazyExt::Resolved(key, init.clone(), true)
+		LazyBackend::Resolved(key, init.clone(), true)
 	}
 	fn new_node(&self, key: Key) -> Self {
 		match self {
-			LazyExt::Unresolved(_, _, _, backend)
-				| LazyExt::Resolved(_, backend, ..) => {
-				LazyExt::Resolved(key, backend.clone(), true)
+			LazyBackend::Unresolved(_, _, _, backend)
+				| LazyBackend::Resolved(_, backend, ..) => {
+				LazyBackend::Resolved(key, backend.clone(), true)
 			},
 		}
 	}
@@ -363,8 +371,8 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 	}
 	fn fetch_node(&self, key: &[u8], position: PositionFor<N>) -> NodeBox<N> {
 		match self {
-			LazyExt::Unresolved(_, _, _, backend)
-				| LazyExt::Resolved(_, backend, ..) => {
+			LazyBackend::Unresolved(_, _, _, backend)
+				| LazyBackend::Resolved(_, backend, ..) => {
 				let mask = <N::Radix as RadixConf>::Alignment::encode_mask(position.mask); 
 				Node::<N>::new_box(
 					key,
@@ -372,7 +380,7 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 					position,
 					None,
 					(),
-					LazyExt::Unresolved(key.to_vec(), position.index, mask, backend.clone()),
+					LazyBackend::Unresolved(key.to_vec(), position.index, mask, backend.clone()),
 				)
 			},
 		}
@@ -385,14 +393,14 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 	}
 	fn resolve(node: &Node<N>) {
 		match node.ext() {
-			LazyExt::Resolved(..) => (),
+			LazyBackend::Resolved(..) => (),
 			_ => unimplemented!("Backend must be use as mutable due to lazy nature"),
 		}
 	}
 	fn resolve_mut(node: &mut Node<N>) {
 		if let Some(new_node) = match node.ext_mut() {
-			LazyExt::Resolved(..) => None,
-			LazyExt::Unresolved(key, start_index, start_mask, backend) => {
+			LazyBackend::Resolved(..) => None,
+			LazyBackend::Unresolved(key, start_index, start_mask, backend) => {
 				let mask = <N::Radix as RadixConf>::Alignment::decode_mask(*start_mask); 
 				let position = PositionFor::<N> {
 					index: *start_index,
@@ -406,18 +414,18 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 	}
 	fn set_change(&mut self) {
 		match self {
-			LazyExt::Resolved(_, _, changed) => {
+			LazyBackend::Resolved(_, _, changed) => {
 				*changed = true;
 			},
-			LazyExt::Unresolved(..) => panic!("Node need to be resolved first"),
+			LazyBackend::Unresolved(..) => panic!("Node need to be resolved first"),
 		}
 	}
 	fn delete(mut node: NodeBox<N>) {
 		match node.ext_mut() {
-			LazyExt::Resolved(key, backend, ..) => {
+			LazyBackend::Resolved(key, backend, ..) => {
 				backend.remove(key.as_slice());
 			},
-			LazyExt::Unresolved(key, start_index, start_mask, backend) => {
+			LazyBackend::Unresolved(key, start_index, start_mask, backend) => {
 				let mask = <N::Radix as RadixConf>::Alignment::decode_mask(*start_mask); 
 				let start = PositionFor::<N> {
 					index: *start_index,
@@ -430,9 +438,9 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 	}
 	fn commit_change(node: &mut Node<N>, recursive: bool) {
 		match node.ext() {
-			LazyExt::Resolved(_, _, false)
-			| LazyExt::Unresolved(..) => (),
-			LazyExt::Resolved(..) => {
+			LazyBackend::Resolved(_, _, false)
+			| LazyBackend::Unresolved(..) => (),
+			LazyBackend::Resolved(..) => {
 				if recursive && node.children.number_child() > 0 {
 					let mut key_index = KeyIndexFor::<N>::zero();
 					loop {
@@ -449,7 +457,7 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 				}
 				let encoded = encode_node(node);
 				match node.ext_mut() {
-					LazyExt::Resolved(key, backend, changed) => {
+					LazyBackend::Resolved(key, backend, changed) => {
 						*changed = false;
 						backend.write(key.clone(), encoded)
 					},
@@ -460,14 +468,14 @@ impl<N, B: Backend> NodeBackend<N> for LazyExt<B>
 	}
 }
 
-impl<N, B: Backend> NodeBackend<N> for DirectExt<B>
+impl<N, B: Backend> NodeBackend<N> for DirectBackend<B>
 	where
 		N: NodeConf<NodeBackend = Self>,
 		N::Value: Codec,
 {
 	type Backend = B;
 	fn existing_node(init: &Self::Backend, key: Key) -> Self {
-		DirectExt {
+		DirectBackend {
 			inner: init.clone(),
 			key,
 			changed: false,
@@ -475,14 +483,14 @@ impl<N, B: Backend> NodeBackend<N> for DirectExt<B>
 	}
 	fn new_root(init: &Self::Backend) -> Self {
 		let key = <Self as NodeBackend<N>>::backend_key(&[], PositionFor::<N>::zero());
-		DirectExt {
+		DirectBackend {
 			inner: init.clone(),
 			key,
 			changed: true,
 		}
 	}
 	fn new_node(&self, key: Key) -> Self {
-		DirectExt {
+		DirectBackend {
 			inner: self.inner.clone(),
 			key,
 			changed: true,

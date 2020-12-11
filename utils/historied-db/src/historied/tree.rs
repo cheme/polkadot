@@ -89,7 +89,6 @@ macro_rules! tree_get {
 	}
 }
 
-
 #[derive(Derivative, Debug, Clone, Encode)]
 #[derivative(PartialEq(bound="D: PartialEq"))]
 pub struct Tree<I, BI, V, D: Context, BD: Context> {
