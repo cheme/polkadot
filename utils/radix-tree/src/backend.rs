@@ -322,8 +322,8 @@ impl<B: ReadBackend> BackendInner for TransactionBackend<B> {
 
 #[derive(Derivative)]
 #[derivative(Clone)]
-/// Resolved from backend on 
-/// TODO rename
+/// Resolve child nodes from backend lazilly.
+/// This way the whole tree do not need to be loaded.
 pub enum LazyBackend<B> {
 	Unresolved(Vec<u8>, usize, u8, B),
 	Resolved(Key, B, bool),

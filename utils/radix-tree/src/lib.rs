@@ -155,7 +155,7 @@ type BackendFor<N> = <<N as NodeConf>::NodeBackend as NodeBackend<N>>::Backend;
 /// Node backend management.
 pub trait NodeBackend<N: NodeConf>: Clone {
 	/// Inner backend used.
-	type Backend;
+	type Backend: Clone;
 	/// Default value for inactive implementation.
 	/// Active implementation needs input parameters and
 	/// default to `None`.
@@ -1103,7 +1103,7 @@ impl<N: NodeConf> Node<N> {
 }
 
 #[derive(Derivative)]
-#[derivative(Clone(bound="<<N as NodeConf>::NodeBackend as NodeBackend<N>>::Backend: Clone"))]
+#[derivative(Clone(bound=""))]
 #[derivative(Debug(bound=""))]
 pub struct Tree<N>
 	where
