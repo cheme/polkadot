@@ -27,13 +27,12 @@ use crate::children::NodeIndex;
 
 /// Stack of Node to reach a position.
 struct NodeStack<'a, N: TreeConf> {
-	// TODO use smallvec instead
+	// TODO use smallvec instead?
 	stack: Vec<(PositionFor<N>, &'a Node<N>)>,
 	// The key used with the stack.
 	// key: Vec<u8>,
 }
 
-// TODO put pointers in node stack.
 impl<'a, N: TreeConf> NodeStack<'a, N> {
 	fn new() -> Self {
 		NodeStack {
@@ -41,6 +40,7 @@ impl<'a, N: TreeConf> NodeStack<'a, N> {
 		}
 	}
 }
+
 impl<'a, N: TreeConf> NodeStack<'a, N> {
 	fn descend(&self, key: &[u8], dest_position: PositionFor<N>) -> Descent<N::Radix> {
 		if let Some(top) = self.stack.last() {
@@ -54,13 +54,12 @@ impl<'a, N: TreeConf> NodeStack<'a, N> {
 
 /// Stack of Node to reach a position.
 struct NodeStackMut<N: TreeConf> {
-	// TODO use smallvec instead
+	// TODO use smallvec instead?
 	stack: Vec<(PositionFor<N>, *mut Node<N>)>,
 	// The key used with the stack.
 	// key: Vec<u8>,
 }
 
-// TODO put pointers in node stack.
 impl<N: TreeConf> NodeStackMut<N> {
 	fn new() -> Self {
 		NodeStackMut {
@@ -82,21 +81,62 @@ impl<N: TreeConf> NodeStackMut<N> {
 	}
 }
 
+/// Stack of Node to reach a position.
+struct IterStack<'a, N: TreeConf> {
+	// TODO use smallvec instead
+	// The index is the current index where to descend into if going
+	// downward, or where we descend from if going upward.
+	stack: Vec<(PositionFor<N>, &'a Node<N>, KeyIndexFor<N>)>,
+	// The key used with the stack.
+	key: Key,
+}
 
+/// Stack of Node to reach a position.
+struct IterStackMut<N: TreeConf> {
+	// TODO use smallvec instead
+	// The index is the current index where to descend into if going
+	// downward, or where we descend from if going upward.
+	stack: Vec<(PositionFor<N>, *mut Node<N>, KeyIndexFor<N>)>,
+	// The key used with the stack.
+	key: Key,
+}
 
+impl<'a, N: TreeConf> IterStack<'a, N> {
+	fn new() -> Self {
+		IterStack {
+			stack: Vec::new(),
+			key: Default::default(),
+		}
+	}
+}
+
+impl<N: TreeConf> IterStackMut<N> {
+	fn new() -> Self {
+		IterStackMut {
+			stack: Vec::new(),
+			key: Default::default(),
+		}
+	}
+}
+
+/// Iterator on nodes that follows a given key (all nodes seeked
+/// on the key path).
 pub struct SeekIter<'a, N: TreeConf> {
 	tree: &'a Tree<N>,
 	dest: &'a [u8],
 	dest_position: PositionFor<N>,
-	// TODO seekiter could be lighter and not stack, 
+	// TODO seekiter could be lighter and avoid using stack, 
 	// just keep latest: a stack trait could be use.
 	stack: NodeStack<'a, N>,
 	reach_dest: bool,
 	next: Descent<N::Radix>,
 }
+
+/// Iterator on values seeked when fetching a given key.
 pub struct SeekValueIter<'a, N: TreeConf>(SeekIter<'a, N>);
 
 impl<N: TreeConf> Tree<N> {
+	/// Seek iteration following a giving key.
 	pub fn seek_iter<'a>(&'a self, key: &'a [u8]) -> SeekIter<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
@@ -104,7 +144,9 @@ impl<N: TreeConf> Tree<N> {
 		};
 		self.seek_iter_at(key, dest_position)
 	}
-	/// Seek non byte aligned nodes.
+
+	/// Seek iteration following a giving node key, a postion on the key is used for unalingned
+	/// radix.
 	pub fn seek_iter_at<'a>(&'a self, key: &'a [u8], dest_position: PositionFor<N>) -> SeekIter<'a, N> {
 		let stack = NodeStack::new();
 		let reach_dest = false;
@@ -122,6 +164,9 @@ impl<N: TreeConf> Tree<N> {
 
 
 impl<'a, N: TreeConf> SeekIter<'a, N> {
+	/// Node iterator from a seek iterator.
+	/// This allow doing seek first then iterationg nodes
+	/// with the same context.
 	pub fn iter(self) -> Iter<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
@@ -138,6 +183,11 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 			finished: false,
 		}
 	}
+
+	/// Node iterator from a seek iterator.
+	/// This differs from `iter` because the iteration
+	/// will only happen on nodes starting with the prefix
+	/// of the current node for the seek iterator.
 	pub fn iter_prefix(mut self) -> Iter<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
@@ -154,9 +204,12 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 			finished: false,
 		}
 	}
+
+	/// Get iterator only on value from respective node iterator.
 	pub fn value_iter(self) -> SeekValueIter<'a, N> {
 		SeekValueIter(self)
 	}
+
 	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a Node<N>)> {
 		if self.reach_dest {
 			return None;
@@ -200,6 +253,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 
 impl<'a, N: TreeConf> Iterator for SeekIter<'a, N> {
 	type Item = (&'a [u8], PositionFor<N>, &'a Node<N>);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(pos, node)| (self.dest, pos, node))
 	}
@@ -207,6 +261,7 @@ impl<'a, N: TreeConf> Iterator for SeekIter<'a, N> {
 
 impl<'a, N: TreeConf> Iterator for SeekValueIter<'a, N> {
 	type Item = (&'a [u8], &'a N::Value);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((key, _pos, node)) = self.0.next() {
@@ -219,20 +274,24 @@ impl<'a, N: TreeConf> Iterator for SeekValueIter<'a, N> {
 		}
 	}
 }
+
+/// Mutable variant of seek iterator.
 pub struct SeekIterMut<'a, N: TreeConf> {
 	tree: &'a mut Tree<N>,
 	dest: &'a [u8],
 	dest_position: PositionFor<N>,
 	// Here NodeStackMut will be used through unsafe
-	// calls, so it should always be 'a with
+	// calls, but it should always be 'a with
 	// content comming only form tree field.
 	stack: NodeStackMut<N>,
 	reach_dest: bool,
 	next: Descent<N::Radix>,
 }
+
 pub struct SeekValueIterMut<'a, N: TreeConf>(SeekIterMut<'a, N>);
 	
 impl<N: TreeConf> Tree<N> {
+	/// Seek nodes iterator over a given key with mutable access.
 	pub fn seek_iter_mut<'a>(&'a mut self, key: &'a [u8]) -> SeekIterMut<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
@@ -240,7 +299,8 @@ impl<N: TreeConf> Tree<N> {
 		};
 		self.seek_iter_at_mut(key, dest_position)
 	}
-	/// Seek non byte aligned nodes.
+
+	/// Variant of `seek_iter_mut` for key using a unaligned radix.
 	pub fn seek_iter_at_mut<'a>(&'a mut self, key: &'a [u8], dest_position: PositionFor<N>) -> SeekIterMut<'a, N> {
 		let stack = NodeStackMut::new();
 		let reach_dest = false;
@@ -257,9 +317,12 @@ impl<N: TreeConf> Tree<N> {
 }
 
 impl<'a, N: TreeConf> SeekIterMut<'a, N> {
+	/// Get iterator only on value from respective node iterator.
 	pub fn value_iter(self) -> SeekValueIterMut<'a, N> {
 		SeekValueIterMut(self)
 	}
+
+	/// Get iterator on nodes from the seek iterator context.
 	pub fn iter(self) -> IterMut<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
@@ -276,6 +339,9 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 			finished: false,
 		}
 	}
+
+	/// Get iterator on nodes from the seek iterator context,
+	/// and limit iteration do the seeked prefix.
 	pub fn iter_prefix(mut self) -> IterMut<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
@@ -292,6 +358,7 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 			finished: false,
 		}
 	}
+
 	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a mut Node<N>)> {
 		if self.reach_dest {
 			return None;
@@ -341,6 +408,7 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 
 impl<'a, N: TreeConf> Iterator for SeekIterMut<'a, N> {
 	type Item = (&'a [u8], PositionFor<N>, &'a mut Node<N>);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(pos, node)| (self.dest, pos, node))
 	}
@@ -348,6 +416,7 @@ impl<'a, N: TreeConf> Iterator for SeekIterMut<'a, N> {
 
 impl<'a, N: TreeConf> Iterator for SeekValueIterMut<'a, N> {
 	type Item = (&'a [u8], &'a N::Value);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((key, _pos, node)) = self.0.next() {
@@ -361,81 +430,28 @@ impl<'a, N: TreeConf> Iterator for SeekValueIterMut<'a, N> {
 	}
 }
 
-/// Stack of Node to reach a position.
-struct IterStack<'a, N: TreeConf> {
-	// TODO use smallvec instead
-	// The index is the current index where to descend into if going
-	// downward, or where we descend from if going upward.
-	stack: Vec<(PositionFor<N>, &'a Node<N>, KeyIndexFor<N>)>,
-	// The key used with the stack.
-	key: Key,
-}
-
-/// Stack of Node to reach a position.
-struct IterStackMut<N: TreeConf> {
-	// TODO use smallvec instead
-	// The index is the current index where to descend into if going
-	// downward, or where we descend from if going upward.
-	stack: Vec<(PositionFor<N>, *mut Node<N>, KeyIndexFor<N>)>,
-	// The key used with the stack.
-	key: Key,
-}
-
-impl<'a, N: TreeConf> IterStack<'a, N> {
-	fn new() -> Self {
-		IterStack {
-			stack: Vec::new(),
-			key: Default::default(),
-		}
-	}
-}
-
-impl<N: TreeConf> IterStackMut<N> {
-	fn new() -> Self {
-		IterStackMut {
-			stack: Vec::new(),
-			key: Default::default(),
-		}
-	}
-}
-
-
+/// Iterator over the nodes of a tree.
 pub struct Iter<'a, N: TreeConf> {
 	tree: &'a Tree<N>,
 	stack: IterStack<'a, N>,
 	finished: bool,
 }
 
+/// Mutable aterator over the nodes of a tree.
 pub struct IterMut<'a, N: TreeConf> {
 	tree: &'a mut Tree<N>,
 	stack: IterStackMut<N>,
 	finished: bool,
 }
 
+/// Iterator over the values of a tree.
 pub struct ValueIter<'a, N: TreeConf>(Iter<'a, N>);
 
+/// Mutable iterator over the values of a tree.
 pub struct ValueIterMut<'a, N: TreeConf>(IterMut<'a, N>);
 
-/// Iterator owning tree, this is an unsafe wrapper
-/// over `ValueIterMut` (we use mutable version for backend
-/// supports).
-pub struct OwnedIter<N: TreeConf + 'static> {
-	inner: Tree<N>,
-	iter: ValueIterMut<'static, N>,
-}
-
-impl<N: TreeConf + 'static> OwnedIter<N> {
-	pub fn extract_inner(self) -> Tree<N> {
-		let OwnedIter {
-			inner,
-			iter,
-		} = self;
-		drop(iter);
-		inner
-	}
-}
-
 impl<N: TreeConf> Tree<N> {
+	/// Get node iterator for this tree.
 	pub fn iter<'a>(&'a self) -> Iter<'a, N> {
 		Iter {
 			tree: self,
@@ -443,6 +459,8 @@ impl<N: TreeConf> Tree<N> {
 			finished: false,
 		}
 	}
+
+	/// Get mutable node iterator for this tree.
 	pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, N> {
 		IterMut {
 			tree: self,
@@ -450,53 +468,14 @@ impl<N: TreeConf> Tree<N> {
 			finished: false,
 		}
 	}
-	pub fn owned_iter(mut self) -> OwnedIter<N> {
-		let self_ptr = &mut self as *mut Self;
-		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
-		OwnedIter {
-			inner: self,
-			iter: ValueIterMut (
-				IterMut {
-					tree: unsafe_ptr,
-					stack: IterStackMut::new(),
-					finished: false,
-				}
-			),
-		}
-	}
-	// TODO test case/fuzz this.
-	pub fn owned_prefix_iter(mut self, prefix: &[u8]) -> OwnedIter<N> {
-		let self_ptr = &mut self as *mut Self;
-		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
-		let static_prefix = prefix as *const [u8];
-		let static_prefix: &'static [u8] = unsafe { static_prefix.as_ref().unwrap() };
-		let mut seek_iter = unsafe_ptr.seek_iter_mut(static_prefix);
-		while seek_iter.next().is_some() { }
-		let iter = seek_iter.iter_prefix().value_iter_mut();
-		OwnedIter {
-			inner: self,
-			iter,
-		}
-	}
-	pub fn owned_iter_from(mut self, prefix: &[u8]) -> OwnedIter<N> {
-		let self_ptr = &mut self as *mut Self;
-		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
-		let static_prefix = prefix as *const [u8];
-		let static_prefix: &'static [u8] = unsafe { static_prefix.as_ref().unwrap() };
-		let mut seek_iter = unsafe_ptr.seek_iter_mut(static_prefix);
-		while seek_iter.next().is_some() { }
-		let iter = seek_iter.iter().value_iter_mut();
-		OwnedIter {
-			inner: self,
-			iter,
-		}
-	}
 }
 
 impl<'a, N: TreeConf> Iter<'a, N> {
+	/// Get value iterator from this node iterator.
 	pub fn value_iter(self) -> ValueIter<'a, N> {
 		ValueIter(self)
 	}
+
 	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a Node<N>)> {
 		if self.finished {
 			return None;
@@ -561,9 +540,11 @@ impl<'a, N: TreeConf> Iter<'a, N> {
 }
 
 impl<'a, N: TreeConf> IterMut<'a, N> {
+	/// Get value iterator from this node iterator.
 	pub fn value_iter_mut(self) -> ValueIterMut<'a, N> {
 		ValueIterMut(self)
 	}
+
 	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a mut Node<N>)> {
 		if self.finished {
 			return None;
@@ -628,11 +609,11 @@ impl<'a, N: TreeConf> IterMut<'a, N> {
 	}
 }
 
-
 impl<'a, N: TreeConf> Iterator for Iter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
 	type Item = (Key, PositionFor<N>, &'a Node<N>);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(p, n)| (self.stack.key.clone(), p, n))
 	}
@@ -642,6 +623,7 @@ impl<'a, N: TreeConf> Iterator for IterMut<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
 	type Item = (Key, PositionFor<N>, &'a mut Node<N>);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_node().map(|(p, n)| (self.stack.key.clone(), p, n))
 	}
@@ -651,6 +633,7 @@ impl<'a, N: TreeConf> Iterator for ValueIter<'a, N> {
 	// TODO key as slice, but usual lifetime issue.
 	// TODO at leas use a stack type for key (smallvec).
 	type Item = (Key, &'a N::Value);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
@@ -666,9 +649,12 @@ impl<'a, N: TreeConf> Iterator for ValueIter<'a, N> {
 }
 
 impl<'a, N: TreeConf> Iterator for ValueIterMut<'a, N> {
-	// TODO key as slice, but usual lifetime issue.
+	// TODO key as slice, but usual lifetime issue (key being
+	// build from multiple prefixes).
+	// TODO return stack of keys that would require merge?
 	// TODO at leas use a stack type for key (smallvec).
 	type Item = (Key, &'a mut N::Value);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			if let Some((mut key, pos, node)) = self.0.next() {
@@ -683,10 +669,86 @@ impl<'a, N: TreeConf> Iterator for ValueIterMut<'a, N> {
 	}
 }
 
+/// Owned tree iterator.
+///
+/// Should be use when we want to keep iterator context
+/// but don't want to manage associated lifetime.
+///
+/// This is an unsafe wrapper over `ValueIterMut`
+/// (we use mutable version for backend supports).
+///
+/// Owned iterator do not modify the inner tree,
+/// and iterated content is always cloned.
+pub struct OwnedIter<N: TreeConf + 'static> {
+	inner: Tree<N>,
+	iter: ValueIterMut<'static, N>,
+}
+
+impl<N: TreeConf + 'static> OwnedIter<N> {
+	/// After iteration, we can use back the
+	/// tree content back.
+	pub fn extract_inner(self) -> Tree<N> {
+		let OwnedIter {
+			inner,
+			iter,
+		} = self;
+		drop(iter);
+		inner
+	}
+}
+
+impl<N: TreeConf> Tree<N> {
+	/// Use tree as a value iterator.
+	pub fn owned_iter(mut self) -> OwnedIter<N> {
+		let self_ptr = &mut self as *mut Self;
+		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
+		OwnedIter {
+			inner: self,
+			iter: ValueIterMut (
+				IterMut {
+					tree: unsafe_ptr,
+					stack: IterStackMut::new(),
+					finished: false,
+				}
+			),
+		}
+	}
+
+	/// Use tree as a value iterator for keys starting with a given prefix.
+	pub fn owned_prefix_iter(mut self, prefix: &[u8]) -> OwnedIter<N> {
+		let self_ptr = &mut self as *mut Self;
+		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
+		let static_prefix = prefix as *const [u8];
+		let static_prefix: &'static [u8] = unsafe { static_prefix.as_ref().unwrap() };
+		let mut seek_iter = unsafe_ptr.seek_iter_mut(static_prefix);
+		while seek_iter.next().is_some() { }
+		let iter = seek_iter.iter_prefix().value_iter_mut();
+		OwnedIter {
+			inner: self,
+			iter,
+		}
+	}
+
+	/// Use tree as a value iterator for keys starting with a given key.
+	pub fn owned_iter_from(mut self, start_key: &[u8]) -> OwnedIter<N> {
+		let self_ptr = &mut self as *mut Self;
+		let unsafe_ptr: &'static mut Self = unsafe { self_ptr.as_mut().unwrap() };
+		let static_prefix = start_key as *const [u8];
+		let static_prefix: &'static [u8] = unsafe { static_prefix.as_ref().unwrap() };
+		let mut seek_iter = unsafe_ptr.seek_iter_mut(static_prefix);
+		while seek_iter.next().is_some() { }
+		let iter = seek_iter.iter().value_iter_mut();
+		OwnedIter {
+			inner: self,
+			iter,
+		}
+	}
+}
+
 impl<N: TreeConf + 'static> Iterator for OwnedIter<N> {
 	type Item = (Key, N::Value);
+
 	fn next(&mut self) -> Option<Self::Item> {
 		self.iter.next().map(|(key, value)| (key, value.clone()))
 	}
 }
-	

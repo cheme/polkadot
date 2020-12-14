@@ -75,36 +75,23 @@ impl<D, P> PrefixKey<D, P>
 		D: Borrow<[u8]>,
 		P: PrefixKeyConf,
 {
-
 	fn unchecked_first_byte(&self) -> u8 {
 		self.start.mask(self.data.borrow()[0])
 	}
+
 	fn unchecked_last_byte(&self) -> u8 {
 		self.end.mask_end(self.data.borrow()[self.data.borrow().len() - 1])
 	}
+
 	fn unchecked_single_byte(&self) -> u8 {
 		self.start.mask(self.end.mask_end(self.data.borrow()[0]))
 	}
-
-/*	fn pos_start(&self) -> Position<P> {
-		Position {
-			index: 0,
-			mask: self.start,
-		}
-	}
-
-	fn pos_end(&self) -> Position {
-		Position {
-			index: self.data.borrow().len(),
-			mask: self.end,
-		}
-	}
-*/
 
 	fn index<R: RadixConf<Alignment = P>>(&self, position: Position<P>) -> R::KeyIndex {
 		position.index::<R>(self.data.borrow())
 			.expect("TODO consider safe api here")
 	}
+
 	fn depth(&self) -> usize {
 		if P::ALIGNED {
 			self.data.borrow().len()
@@ -154,32 +141,31 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 }
 
 
-// TODO remove that??
-// Return first differing position. (TODO rename?)
-fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<D2, N::Alignment>) -> Position<N::Alignment>
+/// Returns first position where position differs.
+fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<D2, N::Alignment>) -> Position<N::Alignment>
 	where
 		D1: Borrow<[u8]>,
 		D2: Borrow<[u8]>,
 		N: RadixConf,
 {
-		if N::Alignment::ALIGNED {
-			let left = one.data.borrow();
-			let right = other.data.borrow();
-			let upper_bound = min(left.len(), right.len());
-			for index in 0..upper_bound {
-				if left[index] != right[index] {
-					return Position {
-						index,
-						mask: MaskFor::<N>::first(),
-					}
+	if N::Alignment::ALIGNED {
+		let left = one.data.borrow();
+		let right = other.data.borrow();
+		let upper_bound = min(left.len(), right.len());
+		for index in 0..upper_bound {
+			if left[index] != right[index] {
+				return Position {
+					index,
+					mask: MaskFor::<N>::first(),
 				}
 			}
-			return Position {
-				index: upper_bound,
-				mask: MaskFor::<N>::first(),
-			}
-		} else {
-			unimplemented!()
+		}
+		return Position {
+			index: upper_bound,
+			mask: MaskFor::<N>::first(),
+		}
+	} else {
+		unimplemented!()
 /*		if one.start != other.start {
 			return Position::zero();
 		}
@@ -230,9 +216,8 @@ fn common_depth<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 				mask,
 			}
 		*/
-		}
 	}
-
+}
 
 //	fn common_depth_next(&self, other: &Self) -> Descent<P> {
 /*		// key must be aligned.
@@ -303,8 +288,9 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 	where
 		P: PrefixKeyConf,
 {
-	/// start is inclusive, end is exclusive, this function cannot build an empty `PrefixKey`
-	/// `empty` should be use.
+	/// start is inclusive, end is exclusive.
+	/// This function cannot build an empty `PrefixKey`,
+	/// if needed `empty` should be use.
 	fn new_offset<Q: Borrow<[u8]>>(key: Q, start: Position<P>, end: Position<P>) -> Self {
 		let data = if end.mask == P::Mask::first() {
 			key.borrow()[start.index..end.index].into()
@@ -312,9 +298,6 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 			key.borrow()[start.index..end.index + 1].into()
 		};
 
-/*		if data.len() > 0 {
-			data[0] &= start.mask; // this update is for Eq implementation
-		}*/
 		PrefixKey {
 			start: start.mask,
 			end: end.mask,
@@ -322,6 +305,7 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 		}
 	}
 }
+
 impl<'a, P> PrefixKey<&'a [u8], P>
 	where
 		P: PrefixKeyConf,
@@ -463,14 +447,15 @@ impl<N: TreeConf> Node<N> {
 			backend,
 		}
 	}
-	pub fn descend(
+
+	fn descend(
 		&self,
 		key: &[u8],
 		node_position: PositionFor<N>,
 		dest_position: PositionFor<N>,
 	) -> Descent<N::Radix> {
 		let ref_prefix = PrefixKey::<_, AlignmentFor<N>>::new_offset_ref(key, node_position, dest_position);
-		let mut common = common_depth::<_, _, N::Radix>(&self.key, &ref_prefix);
+		let mut common = common_until::<_, _, N::Radix>(&self.key, &ref_prefix);
 		let dest_position_next = dest_position;
 		common.index += node_position.index;
 		match common.cmp(dest_position_next) {

@@ -66,32 +66,39 @@ pub trait Children: Clone + Debug {
 	type Node;
 
 	fn empty() -> Self;
+
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 		child: Box<Self::Node>,
 	) -> Option<Box<Self::Node>>;
+
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<Box<Self::Node>>;
+
 	fn number_child(
 		&self,
 	) -> usize;
+
 	fn has_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> bool {
 		self.get_child(index).is_some()
 	}
+
 	fn get_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&Self::Node>;
+
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut Self::Node>;
+
 	fn first_child_index(
 		&self,
 	) -> Option<<Self::Radix as RadixConf>::KeyIndex> {
@@ -123,11 +130,13 @@ struct Children2<N> (
 
 impl<N: Debug + Clone> Children for Children2<N> {
 	type Radix = crate::radix::impls::Radix2Conf;
+
 	type Node = N;
 
 	fn empty() -> Self {
 		Children2(None)
 	}
+
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -144,6 +153,7 @@ impl<N: Debug + Clone> Children for Children2<N> {
 			replace(&mut children.1, Some(child))
 		}
 	}
+
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -158,6 +168,7 @@ impl<N: Debug + Clone> Children for Children2<N> {
 			None
 		}
 	}
+
 	fn number_child(
 		&self,
 	) -> usize {
@@ -171,6 +182,7 @@ impl<N: Debug + Clone> Children for Children2<N> {
 			None => 0,
 		}
 	}
+
 	fn get_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -181,6 +193,7 @@ impl<N: Debug + Clone> Children for Children2<N> {
 			b.1.as_ref().map(AsRef::as_ref)
 		})
 	}
+
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -337,11 +350,13 @@ impl<N: Debug> Debug for ART48_256<N> {
 
 impl<N: Debug + Clone> Children for Children256<N> {
 	type Radix = crate::radix::impls::Radix256Conf;
+
 	type Node = N;
 
 	fn empty() -> Self {
 		Children256(None, 0)
 	}
+
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -358,6 +373,7 @@ impl<N: Debug + Clone> Children for Children256<N> {
 		}
 		result
 	}
+
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -372,11 +388,13 @@ impl<N: Debug + Clone> Children for Children256<N> {
 			None
 		}
 	}
+
 	fn number_child(
 		&self,
 	) -> usize {
 		self.1 as usize
 	}
+
 	fn get_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -384,6 +402,7 @@ impl<N: Debug + Clone> Children for Children256<N> {
 		self.0.as_ref().and_then(|b| b[index as usize].as_ref())
 			.map(AsRef::as_ref)
 	}
+
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -399,6 +418,7 @@ impl<N: Debug + Clone> Children256<N> {
 	) -> bool {
 		self.1 <= REM_TRESHOLD48
 	}
+
 	fn reduce_node(&mut self) -> Children48<N> {
 		debug_assert!(self.1 <= 48);
 		let mut result = Children48::empty();
@@ -428,9 +448,6 @@ const REM_TRESHOLD4: u8 = 4u8;
 use crate::radix::impls::Radix256Conf;
 
 impl<N: Debug + Clone> Children48<N> {
-//	type Radix = Radix256Conf;
-//	type Node = N;
-
 	fn empty() -> Self {
 		Children48(None, 0)
 	}
@@ -553,11 +570,13 @@ impl<N: Debug + Clone> Children48<N> {
 			None
 		}
 	}
+
 	fn number_child(
 		&self,
 	) -> usize {
 		self.1 as usize
 	}
+
 	fn get_child(
 		&self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -575,6 +594,7 @@ impl<N: Debug + Clone> Children48<N> {
 			None
 		}
 	}
+
 	fn get_child_mut(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -595,9 +615,6 @@ impl<N: Debug + Clone> Children48<N> {
 }
 
 impl<N: Debug + Clone> Children16<N> {
-//	type Radix = Radix256Conf;
-//	type Node = N;
-
 	fn empty() -> Self {
 		Children16(None, 0)
 	}
@@ -638,7 +655,7 @@ impl<N: Debug + Clone> Children16<N> {
 		result
 	}
 
-	// return either the old value or the value to set after growth.
+	// Returns either the old value or the value to set after growth.
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -703,11 +720,13 @@ impl<N: Debug + Clone> Children16<N> {
 			None
 		}
 	}
+
 	fn number_child(
 		&self,
 	) -> usize {
 		self.1 as usize
 	}
+
 	fn get_child(
 		&self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -724,6 +743,7 @@ impl<N: Debug + Clone> Children16<N> {
 		}
 		None
 	}
+
 	fn get_child_mut(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -743,9 +763,6 @@ impl<N: Debug + Clone> Children16<N> {
 }
 
 impl<N: Debug + Clone> Children4<N> {
-//	type Radix = Radix256Conf;
-//	type Node = N;
-
 	fn empty() -> Self {
 		Children4(None, 0)
 	}
@@ -766,7 +783,7 @@ impl<N: Debug + Clone> Children4<N> {
 		result
 	}
 
-	// return either the old value or the value to set after growth.
+	// Returns either the old value or the value to set after growth.
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -831,11 +848,13 @@ impl<N: Debug + Clone> Children4<N> {
 			None
 		}
 	}
+
 	fn number_child(
 		&self,
 	) -> usize {
 		self.1 as usize
 	}
+
 	fn get_child(
 		&self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -852,6 +871,7 @@ impl<N: Debug + Clone> Children4<N> {
 		}
 		None
 	}
+
 	fn get_child_mut(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
@@ -888,6 +908,7 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 	fn empty() -> Self {
 		ART48_256::ART4(Children4::empty())
 	}
+
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -930,6 +951,7 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 		*self = new_256;
 		result
 	}
+
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -968,6 +990,7 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 		}
 		result
 	}
+
 	fn number_child(
 		&self,
 	) -> usize {
@@ -978,6 +1001,7 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 			ART48_256::ART4(inner) => inner.number_child(),
 		}
 	}
+
 	fn get_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -989,6 +1013,7 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 			ART48_256::ART4(inner) => inner.get_child(index),
 		}
 	}
+
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
