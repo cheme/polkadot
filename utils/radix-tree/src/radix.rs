@@ -30,20 +30,25 @@ use crate::children::{NodeIndex};
 /// in an empty byte. Instead of an empty byte we should use
 /// the full byte configuration (`last`) at the previous index.
 pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
+	/// First mask for a byte.
+	const FIRST: Self;
+	
+	/// Last mask for a byte.
+	const LAST: Self;
+
 	/// Mask left part of a byte.
 	fn mask(&self, byte: u8) -> u8;
+
 	/// Mask right part of a byte.
 	fn mask_end(&self, byte: u8) -> u8;
+
 	/// Extract u8 index from this byte.
 	fn index(&self, byte: u8) -> u8;
+
 	/// Insert u8 index into this byte.
 	fn set_index(&self, byte: u8, index: u8) -> u8;
-//	fn mask_mask(&self, other: Self) -> Self;
-	/// TODO use constant
-	fn first() -> Self;
-	/// TODO use constant
-	fn last() -> Self;
-	/// cmp
+
+	/// Same as `Ord` `cmp`, but not using a reference.
 	fn cmp(&self, other: Self) -> Ordering;
 }
 
@@ -106,33 +111,36 @@ mod prefix_key_confs_impls {
 	}
 
 	impl MaskKeyByte for () {
+		const FIRST: Self = ();
+
+		const LAST: Self = ();
+
 		fn mask(&self, byte: u8) -> u8 {
 			byte
 		}
+
 		fn mask_end(&self, byte: u8) -> u8 {
 			byte
 		}
-	/*	fn mask_mask(&self, other: Self) -> Self {
-			()
-		}*/
-		fn first() -> Self {
-			()
-		}
-		fn last() -> Self {
-			()
-		}
+
 		fn index(&self, byte: u8) -> u8 {
 			byte
 		}
+
 		fn set_index(&self, _byte: u8, index: u8) -> u8 {
 			index
 		}
+
 		fn cmp(&self, _other: Self) -> Ordering {
 			Ordering::Equal
 		}
 	}
 
 	impl MaskKeyByte for bool {
+		const FIRST: Self = true;
+
+		const LAST: Self = false;
+
 		fn mask(&self, byte: u8) -> u8 {
 			if *self {
 				byte & 0x0f
@@ -140,6 +148,7 @@ mod prefix_key_confs_impls {
 				byte
 			}
 		}
+
 		fn mask_end(&self, byte: u8) -> u8 {
 			if *self {
 				byte & 0xf0
@@ -155,6 +164,7 @@ mod prefix_key_confs_impls {
 				byte & 0x0f
 			}
 		}
+
 		fn set_index(&self, byte: u8, index: u8) -> u8 {
 			if *self {
 				(byte & 0x0f) | (index << 4)
@@ -162,12 +172,7 @@ mod prefix_key_confs_impls {
 				(byte & 0xf0) | index
 			}
 		}
-		fn first() -> Self {
-			true
-		}
-		fn last() -> Self {
-			false
-		}
+
 		fn cmp(&self, other: Self) -> Ordering {
 			match (*self, other) {
 				(true, false) => Ordering::Less,
@@ -179,27 +184,26 @@ mod prefix_key_confs_impls {
 	}
 
 	impl MaskKeyByte for u8 {
+		const FIRST: Self = 0;
+
+		const LAST: Self = 7;
+
 		fn mask(&self, byte: u8) -> u8 {
 			byte & (0b11111111 >> self)
 		}
+
 		fn mask_end(&self, byte: u8) -> u8 {
 			byte & (0b11111111 << (7 - self) )
 		}
+
 		fn index(&self, byte: u8) -> u8 {
 			(byte & (0b10000000 >> self)) >> (7 - self)
 		}
+
 		fn set_index(&self, byte: u8, index: u8) -> u8 {
 			(byte & !(0b10000000 >> self)) | (index << (7 - self))
 		}
-	/*	fn mask_mask(&self, other: Self) -> Self {
-			self & other
-		}*/
-		fn first() -> Self {
-			0
-		}
-		fn last() -> Self {
-			7
-		}
+
 		fn cmp(&self, other: Self) -> Ordering {
 			<u8 as core::cmp::Ord>::cmp(self, &other)
 		}
@@ -400,7 +404,7 @@ impl<P> Position<P>
 	pub(crate) fn zero() -> Self {
 		Position {
 			index: 0,
-			mask: P::Mask::first(),
+			mask: P::Mask::FIRST,
 		}
 	}
 	pub(crate) fn next<R: RadixConf<Alignment = P>>(&self) -> Self {

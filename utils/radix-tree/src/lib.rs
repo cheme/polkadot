@@ -43,10 +43,16 @@ use radix::{PrefixKeyConf, RadixConf, Position,
 use children::Children;
 pub use backends::TreeBackend as Backend;
 
-
+/// Alias to type of a key as used by external api.
 pub type Key = NodeKeyBuff;
-//type NodeKeyBuff = smallvec::SmallVec<[u8; 64]>;
+
+/// Alias type to internal byte buffer for partial key (`PrefixKey`)
+/// stored in nodes.
 type NodeKeyBuff = Vec<u8>;
+//type NodeKeyBuff = smallvec::SmallVec<[u8; 64]>;
+
+/// Alias to boxed nodes, tree use
+/// node on heap.
 pub type NodeBox<N> = Box<Node<N>>;
 
 /// Value trait constraints.
@@ -112,7 +118,7 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 	// TODO consider returning the skipped byte aka key index (avoid fetching it before split_off)
 	fn split_off<R: RadixConf<Alignment = P>>(&mut self, position: Position<P>) -> Self {
 		let split_end = self.end;
-		let mut split: NodeKeyBuff = if position.mask == MaskFor::<R>::first() {
+		let mut split: NodeKeyBuff = if position.mask == MaskFor::<R>::FIRST {
 			// No splitoff for smallvec
 			//let split = self.data[position.index..].into();
 			//self.data.truncate(position.index);
@@ -156,13 +162,13 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 			if left[index] != right[index] {
 				return Position {
 					index,
-					mask: MaskFor::<N>::first(),
+					mask: MaskFor::<N>::FIRST,
 				}
 			}
 		}
 		return Position {
 			index: upper_bound,
-			mask: MaskFor::<N>::first(),
+			mask: MaskFor::<N>::FIRST,
 		}
 	} else {
 		unimplemented!()
@@ -292,7 +298,7 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 	/// This function cannot build an empty `PrefixKey`,
 	/// if needed `empty` should be use.
 	fn new_offset<Q: Borrow<[u8]>>(key: Q, start: Position<P>, end: Position<P>) -> Self {
-		let data = if end.mask == P::Mask::first() {
+		let data = if end.mask == P::Mask::FIRST {
 			key.borrow()[start.index..end.index].into()
 		} else {
 			key.borrow()[start.index..end.index + 1].into()
@@ -312,7 +318,7 @@ impl<'a, P> PrefixKey<&'a [u8], P>
 {
 	/// start is inclusive, end is exclusive.
 	fn new_offset_ref(key: &'a [u8], start: Position<P>, end: Position<P>) -> Self {
-		let data = if end.mask == P::Mask::first() {
+		let data = if end.mask == P::Mask::FIRST {
 			&key[start.index..end.index]
 		} else {
 			&key[start.index..end.index + 1]
@@ -353,6 +359,7 @@ pub trait TreeConf: Debug + Clone + Sized {
 			Self::Backend::new_node(&node.backend, key)
 		}
 	}
+
 	fn new_node_root(init: &BackendFor<Self>) -> Self::Backend {
 		if let Some(backend) = Self::Backend::DEFAULT {
 			backend
@@ -367,21 +374,28 @@ pub(crate) type AlignmentFor<N> = <<N as TreeConf>::Radix as RadixConf>::Alignme
 pub(crate) type KeyIndexFor<N> = <<N as TreeConf>::Radix as RadixConf>::KeyIndex;
 pub(crate) type BackendFor<N> = <<N as TreeConf>::Backend as Backend<N>>::Backend;
 
+/// Node of a tree.
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct Node<N>
 	where
 		N: TreeConf,
 {
-	// TODO this should be able to use &'a[u8] for iteration
-	// and querying.
+	/// A partial key contain in this node.
+	/// TODO if implementing optimisation where key is stored with
+	/// value only, this will still need to contain depth info and
+	/// also maybe position of the closest child value (instert
+	/// will need to query in depth to resolve key position in children).
+	/// Can probably be gated behind an associated type in N.
 	key: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
-	//pub value: usize,
+
+	/// A value if a value is stored for this node.
 	value: Option<N::Value>,
-	//pub left: usize,
-	//pub right: usize,
-	// TODO if backend behind, then Self would neeed to implement a Node trait with lazy loading...
+
+	/// Children of this node
 	children: N::Children,
+
+	/// A backend for serializing the tree. `()` can be used if no serializing is needed.
 	backend: N::Backend,
 }
 
@@ -405,24 +419,8 @@ impl<N: TreeConf> Drop for Node<N> {
 	}
 }
 
-/*
-impl<P, C> Node<P, C>
-	where
-		P: RadixConf,
-		C: Children<Self, Radix = P>,
-{
-	fn leaf(key: &[u8], start: Position<P::Alignment>, value: Vec<u8>) -> Self {
-		Node {
-			key: PrefixKey::new_offset(key, start),
-			value: Some(value),
-			children: C::empty(),
-		}
-	}
-}
-*/
-
 impl<N: TreeConf> Node<N> {
-	pub fn new_box(
+	fn new_box(
 		key: &[u8],
 		start_position: PositionFor<N>,
 		end_position: PositionFor<N>,
@@ -432,7 +430,8 @@ impl<N: TreeConf> Node<N> {
 	) -> NodeBox<N> {
 		Box::new(Self::new(key, start_position, end_position, value, init, backend))
 	}
-	pub fn new(
+
+	fn new(
 		key: &[u8],
 		start_position: PositionFor<N>,
 		end_position: PositionFor<N>,
@@ -482,38 +481,45 @@ impl<N: TreeConf> Node<N> {
 			},
 		}
 	}
-	pub fn depth(
+
+	fn depth(
 		&self,
 	) -> usize {
 		self.key.depth()
 	}
-	pub fn value(
+
+	fn value(
 		&self,
 	) -> Option<&N::Value> {
 		self.value.as_ref()
 	}
-	pub fn value_mut(
+
+	fn value_mut(
 		&mut self,
 	) -> Option<&mut N::Value> {
 		self.value.as_mut()
 	}
-	pub fn set_value(
+
+	fn set_value(
 		&mut self,
 		value: N::Value,
 	) -> Option<N::Value> {
 		replace(&mut self.value, Some(value))
 	}
-	pub fn remove_value(
+
+	fn remove_value(
 		&mut self,
 	) -> Option<N::Value> {
 		replace(&mut self.value, None)
 	}
-	pub fn number_child(
+
+	fn number_child(
 		&self,
 	) -> usize {
 		self.children.number_child()
 	}
-	pub fn get_child(
+
+	fn get_child(
 		&self,
 		index: KeyIndexFor<N>,
 	) -> Option<&Self> {
@@ -522,13 +528,15 @@ impl<N: TreeConf> Node<N> {
 		result.as_ref().map(|c| N::Backend::resolve(c));
 		result
 	}
-	pub fn has_child(
+
+	fn has_child(
 		&self,
 		index: KeyIndexFor<N>,
 	) -> bool {
 		self.children.has_child(index)
 	}
-	pub fn get_child_mut(
+
+	fn get_child_mut(
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<&mut Self> {
@@ -536,7 +544,8 @@ impl<N: TreeConf> Node<N> {
 		result.as_mut().map(|c| N::Backend::resolve_mut(c));
 		result
 	}
-	pub fn set_child(
+
+	fn set_child(
 		&mut self,
 		index: KeyIndexFor<N>,
 		child: Box<Self>,
@@ -544,7 +553,8 @@ impl<N: TreeConf> Node<N> {
 		self.backend.set_change();
 		self.children.set_child(index, child)
 	}
-	pub fn remove_child(
+
+	fn remove_child(
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<Box<Self>> {
@@ -554,7 +564,8 @@ impl<N: TreeConf> Node<N> {
 		}
 		result
 	}
-	pub fn split_off(
+
+	fn split_off(
 		&mut self,
 		key: &[u8],
 		position: PositionFor<N>,
@@ -576,7 +587,8 @@ impl<N: TreeConf> Node<N> {
 		self.children.set_child(index, child);
 		self.backend.set_change();
 	}
-	pub fn fuse_child(
+
+	fn fuse_child(
 		&mut self,
 	) {
 		if let Some(index) = self.children.first_child_index() {
@@ -602,9 +614,9 @@ impl<N: TreeConf> Node<N> {
 		}
 	}
 
-	// TODO make it a trait function?
+	// TODO make it a trait function for Radix_conf?
 	/// Realign node partial key to a given end position.
-	pub fn new_end(&self, stack: &mut Key, node_position: PositionFor<N>) {
+	fn new_end(&self, stack: &mut Key, node_position: PositionFor<N>) {
 		let depth = self.depth();
 		if depth == 0 {
 			return;
@@ -618,7 +630,7 @@ impl<N: TreeConf> Node<N> {
 
 			let (start, end) = if node_position.index == node_position_end.index {
 				let start = stack[node_position.index] & !self.key.start.mask(255) & self.key.end.mask(255)
-					& self.key.unchecked_single_byte();
+					&self.key.unchecked_single_byte();
 				(start, start)
 			} else {
 				let start = stack[node_position.index] & !self.key.start.mask(255) & self.key.unchecked_first_byte();
@@ -631,13 +643,13 @@ impl<N: TreeConf> Node<N> {
 		}
 	}
 
-	pub fn backend(
+	fn backend(
 		&self,
 	) -> &N::Backend {
 		&self.backend
 	}
 
-	pub fn backend_mut(
+	fn backend_mut(
 		&mut self,
 	) -> &mut N::Backend {
 		&mut self.backend
@@ -664,12 +676,16 @@ impl<N> Tree<N>
 	where
 		N: TreeConf,
 {
+	/// Create a new empty tree.
 	pub fn new(init: BackendFor<N>) -> Self {
 		Tree {
 			tree: None,
 			init,
 		}
 	}
+	
+	/// Instantiate an existing tree from its serializing
+	/// backend.
 	pub fn from_backend(init: BackendFor<N>) -> Self {
 		if N::Backend::DEFAULT.is_some() {
 			Self::new(init)
@@ -681,6 +697,8 @@ impl<N> Tree<N>
 			}
 		}
 	}
+
+	/// Commit tree changes to its underlying serializing backend.
 	pub fn commit(&mut self) {
 		self.tree.as_mut()
 			.map(|node| N::Backend::commit_change(node, true));
@@ -690,7 +708,7 @@ impl<N> Tree<N>
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Copy)]
-pub enum Descent<P>
+enum Descent<P>
 	where
 		P: RadixConf,
 {
@@ -705,25 +723,10 @@ pub enum Descent<P>
 	/// Position is child is at position + 1 of the branch.
 	/// TODO is position of any use (it is dest position of descent)
 	Match(Position<P::Alignment>),
-//	// position mask left of this node
-//	Middle(usize, u8),
 }
-/*
-impl<P, C> Node<P, C>
-	where
-		P: RadixConf,
-		C: Children<Node = Self, Radix = P>,
-{
-	fn prefix_node(&self, key: &[u8]) -> (&Self, Descent<P>) {
-		unimplemented!()
-	}
-	fn prefix_node_mut(&mut self, key: &[u8]) -> (&mut Self, Descent<P>) {
-		unimplemented!()
-	}
-}
-*/
 
 impl<N: TreeConf> Tree<N> {
+	/// Get reference to a tree value for a given key.
 	pub fn get(&self, key: &[u8]) -> Option<&N::Value> {
 		if let Some(top) = self.tree.as_ref() {
 			let mut current = top.as_ref();
@@ -732,7 +735,7 @@ impl<N: TreeConf> Tree<N> {
 			}
 			let dest_position = Position {
 				index: key.len(),
-				mask: MaskFor::<N::Radix>::last(),
+				mask: MaskFor::<N::Radix>::LAST,
 			};
 			let mut position = PositionFor::<N>::zero();
 			loop {
@@ -758,6 +761,8 @@ impl<N: TreeConf> Tree<N> {
 			None
 		}
 	}
+
+	/// Get mutable reference to a tree value for a given key.
 	pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut N::Value> {
 		if let Some(top) = self.tree.as_mut() {
 			let mut current = top.as_mut();
@@ -766,7 +771,7 @@ impl<N: TreeConf> Tree<N> {
 			}
 			let dest_position = Position {
 				index: key.len(),
-				mask: MaskFor::<N::Radix>::last(),
+				mask: MaskFor::<N::Radix>::FIRST,
 			};
 			let mut position = PositionFor::<N>::zero();
 			loop {
@@ -793,10 +798,11 @@ impl<N: TreeConf> Tree<N> {
 		}
 	}
 
+	/// Add new key value to the tree, and return previous value if any.
 	pub fn insert(&mut self, key: &[u8], value: N::Value) -> Option<N::Value> {
 		let dest_position = PositionFor::<N> {
 			index: key.len(),
-			mask: MaskFor::<N::Radix>::first(),
+			mask: MaskFor::<N::Radix>::FIRST,
 		};
 		let mut position = PositionFor::<N>::zero();
 		if let Some(top) = self.tree.as_mut() {
@@ -869,6 +875,8 @@ impl<N: TreeConf> Tree<N> {
 			None
 		}
 	}
+
+	/// Remove value at a given location.
 	pub fn remove(&mut self, key: &[u8]) -> Option<N::Value> {
 		let mut position = PositionFor::<N>::zero();
 		let mut empty_tree = None;
@@ -888,7 +896,7 @@ impl<N: TreeConf> Tree<N> {
 			}
 			let dest_position = Position {
 				index: key.len(),
-				mask: MaskFor::<N::Radix>::last(),
+				mask: MaskFor::<N::Radix>::LAST,
 			};
 			if let Some(result) = empty_tree {
 				self.tree = None;
@@ -946,8 +954,10 @@ impl<N: TreeConf> Tree<N> {
 		}
 		None
 	}
+
+	/// Empty a tree from all its key values.
 	pub fn clear(&mut self) {
-		// TODO use iter mut
+		// TODO use iter mut.
 		let keys: Vec<_> = self.iter().value_iter().map(|v| v.0).collect();
 		for key in keys {
 			self.remove(key.as_slice());
@@ -955,10 +965,11 @@ impl<N: TreeConf> Tree<N> {
 	}
 }
 
-#[macro_export]
 /// Flatten type for children of a given node type.
+///
 /// `inner_node_type` is expected to be parametered by a `Children` type
 /// and a `RadixConf` type.
+#[macro_export]
 macro_rules! flatten_children {
 	(
 		$(!value_bound: $( $value_const: ident)*,)?

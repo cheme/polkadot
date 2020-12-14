@@ -189,7 +189,7 @@ fn key_addressed<N: TreeConf>(
 	if <N::Radix as RadixConf>::Alignment::ALIGNED {
 		key[..start_postion.index].into()
 	} else {
-		if start_postion.mask == MaskFor::<N::Radix>::first() {
+		if start_postion.mask == MaskFor::<N::Radix>::FIRST {
 			let mut result: Key = key[..start_postion.index - 1].into();
 			result.push(255);
 			result
@@ -216,7 +216,7 @@ fn key_from_addressed<N: TreeConf>(
 		if encoded_mask == 255 {
 			(&key[..len - 1], Position {
 				index: len,
-				mask: MaskFor::<N::Radix>::first(),
+				mask: MaskFor::<N::Radix>::FIRST,
 			})
 		} else {
 			let mask = <N::Radix as RadixConf>::Alignment::decode_mask(encoded_mask + 1);
@@ -262,7 +262,7 @@ fn fetch_and_decode_node<N>(
 		<N::Radix as RadixConf>::Alignment::decode_mask(b)
 	};
 	let prefix: Vec<u8> = Decode::decode(input)?;
-	let mut end = if end_mask == MaskFor::<N::Radix>::first() {
+	let mut end = if end_mask == MaskFor::<N::Radix>::FIRST {
 		PositionFor::<N>  {
 			index: prefix.len(),
 			mask: end_mask,
