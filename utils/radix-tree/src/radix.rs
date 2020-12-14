@@ -72,11 +72,15 @@ mod prefix_key_confs_impls {
 
 	impl PrefixKeyConf for () {
 		const ALIGNED: bool = true;
+
 		const DEFAULT: Option<Self::Mask> = Some(());
+
 		type Mask = ();
+
 		fn encode_mask(_mask: Self::Mask) -> u8 {
 			0
 		}
+
 		fn decode_mask(_mask: u8) -> Self::Mask {
 			()
 		}
@@ -84,8 +88,11 @@ mod prefix_key_confs_impls {
 
 	impl PrefixKeyConf for bool {
 		const ALIGNED: bool = false;
+
 		const DEFAULT: Option<Self::Mask> = None;
+
 		type Mask = bool;
+
 		fn encode_mask(mask: Self::Mask) -> u8 {
 			if mask {
 				1
@@ -93,6 +100,7 @@ mod prefix_key_confs_impls {
 				0
 			}
 		}
+
 		fn decode_mask(mask: u8) -> Self::Mask {
 			mask == 1
 		}
@@ -100,11 +108,15 @@ mod prefix_key_confs_impls {
 
 	impl PrefixKeyConf for u8 {
 		const ALIGNED: bool = false;
+
 		const DEFAULT: Option<Self::Mask> = None;
+
 		type Mask = u8;
+
 		fn encode_mask(mask: Self::Mask) -> u8 {
 			mask
 		}
+
 		fn decode_mask(mask: u8) -> Self::Mask {
 			mask
 		}
@@ -214,15 +226,19 @@ mod prefix_key_confs_impls {
 pub trait RadixConf {
 	/// Prefix alignement and mask.
 	type Alignment: PrefixKeyConf;
+
 	/// Index for a given `NodeChildren`.
 	type KeyIndex: NodeIndex;
+
 	/// Maximum number of children per item.
 	/// Corresponding node depth (not counting partial key)
 	/// in bits is therefore Log2(CHILDREN_CAPACITY).
 	const CHILDREN_CAPACITY: usize;
+
 	/// Advance one item in depth.
 	/// Return next mask and number of incremented bytes.
 	fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize);
+
 	/// Advance with multiple depth steps.
 	fn advance_by(mut previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
 		let mut bytes = 0;
@@ -233,10 +249,13 @@ pub trait RadixConf {
 		}
 		(previous_mask, bytes)
 	}
+
 	/// Get child node index for a given position (depth) of a key.
 	fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex>;
+
 	/// Set index at a given position in a key.
 	fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex);
+
 	/// Get mask from the delta of two byte, the delta is obtain by using xor, so 255
 	/// if no common bytes and 0 if all common.
 	/// This is mask for a start byte in the case of common prefix calculation.
@@ -255,8 +274,11 @@ pub mod impls {
 
 	impl RadixConf for Radix16Conf {
 		type Alignment = bool;
+
 		type KeyIndex = u8;
+
 		const CHILDREN_CAPACITY: usize = 16;
+
 		fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
 			if previous_mask {
 				(false, 1)
@@ -264,17 +286,21 @@ pub mod impls {
 				(true, 0)
 			}
 		}
+
 		fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
 			unimplemented!("TODO or default one")
 		}
+
 		fn mask_from_delta(delta: u8) -> MaskFor<Self> {
 			delta < 16
 		}
+
 		fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
 			key.get(at.index).map(|byte| {
 				at.mask.index(*byte)
 			})
 		}
+
 		fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 			if key.len() <= at.index {
 				key.resize(at.index + 1, 0);
@@ -287,22 +313,29 @@ pub mod impls {
 
 	impl RadixConf for Radix256Conf {
 		type Alignment = ();
+
 		type KeyIndex = u8;
+
 		const CHILDREN_CAPACITY: usize = 256;
+
 		fn advance(_previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
 			((), 1)
 		}
+
 		fn advance_by(_previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
 			((), nb)
 		}
+
 		fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
 			()
 		}
+
 		fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
 			key.get(at.index).map(|byte| {
 				at.mask.index(*byte)
 			})
 		}
+
 		fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 			if key.len() <= at.index {
 				key.resize(at.index + 1, 0);
@@ -315,8 +348,11 @@ pub mod impls {
 
 	impl RadixConf for Radix2Conf {
 		type Alignment = u8;
+
 		type KeyIndex = bool;
+
 		const CHILDREN_CAPACITY: usize = 2;
+
 		fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
 			if previous_mask < 255 {
 				(previous_mask + 1, 0)
@@ -324,17 +360,21 @@ pub mod impls {
 				(0, 1)
 			}
 		}
+
 		fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
 			unimplemented!("TODO implement or default")
 		}
+
 		fn mask_from_delta(delta: u8) -> MaskFor<Self> {
 			255 >> (delta.leading_zeros())
 		}
+
 		fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
 			key.get(at.index).map(|byte| {
 				at.mask.index(*byte) > 0
 			})
 		}
+
 		fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
 			if key.len() <= at.index {
 				key.resize(at.index + 1, 0);
@@ -407,6 +447,7 @@ impl<P> Position<P>
 			mask: P::Mask::FIRST,
 		}
 	}
+
 	pub(crate) fn next<R: RadixConf<Alignment = P>>(&self) -> Self {
 		let (mask, increment) = R::advance(self.mask);
 		Position {
@@ -414,6 +455,7 @@ impl<P> Position<P>
 			mask,
 		}
 	}
+
 	pub(crate) fn next_by<R: RadixConf<Alignment = P>>(&self, nb: usize) -> Self {
 		let (mask, increment) = R::advance_by(self.mask, nb);
 		Position {
@@ -421,14 +463,15 @@ impl<P> Position<P>
 			mask,
 		}
 	}
+
 	pub(crate) fn index<R: RadixConf<Alignment = P>>(&self, key: &[u8]) -> Option<R::KeyIndex> {
 		R::index(key, *self)
 	}
+
 	pub(crate) fn set_index<R: RadixConf<Alignment = P>>(&self, key: &mut NodeKeyBuff, index: R::KeyIndex) {
 		R::set_index(key, *self, index)
 	}
 
-	// TODO could derive Ord
 	pub(crate) fn cmp(&self, other: Position<P>) -> Ordering {
 		match self.index.cmp(&other.index) {
 			Ordering::Equal => {

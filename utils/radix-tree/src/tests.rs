@@ -23,6 +23,8 @@ use crate::{Node256NoBackend, Node256NoBackendART, Node256HashBackend,
 
 macro_rules! test_for {
 	($module_name: ident, $backend_conf: ident, $check_backend_ser: expr) => {
+
+
 #[cfg(any(test, feature = "fuzzer"))]
 pub mod $module_name {
 	use crate::*;
@@ -245,8 +247,11 @@ pub mod $module_name {
 		}
 	}
 }
+
+
 }
 }
+
 test_for!(test_256, Node256NoBackend, false);
 test_for!(test_256_art, Node256NoBackendART, false);
 test_for!(test_256_hash, Node256HashBackend, true);
@@ -289,32 +294,32 @@ mod lazy_test {
 
 	#[test]
 	fn compare_btree() {
-		compare_btree_internal(true);
-		compare_btree_internal(false);
-	}
-	fn compare_btree_internal(drop: bool) {
-		let backend = new_backend();
-		let mut t1 = Tree::<TreeConf>::new(backend.clone());
-		let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
-		let mut value1 = b"value1".to_vec();
-		assert_eq!(None, t1.insert(b"key1", value1.clone()));
-		assert_eq!(None, t2.insert(b"key1", value1.clone()));
-		assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
-		assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
-		assert_eq!(None, t1.insert(b"key2", value1.clone()));
-		assert_eq!(None, t2.insert(b"key2", value1.clone()));
-		assert_eq!(None, t1.insert(b"key3", value1.clone()));
-		assert_eq!(None, t2.insert(b"key3", value1.clone()));
-		// Shouldn't call get on a lazy tree, but here we got all in memory.
-		assert_eq!(t1.get(&b"key3"[..]), Some(&value1));
-		assert_eq!(t1.get_mut(&b"key3"[..]), Some(&mut value1));
-		if drop {
-			core::mem::drop(t1);
-		} else {
-			t1.commit();
+		fn test(drop: bool) {
+			let backend = new_backend();
+			let mut t1 = Tree::<TreeConf>::new(backend.clone());
+			let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
+			let mut value1 = b"value1".to_vec();
+			assert_eq!(None, t1.insert(b"key1", value1.clone()));
+			assert_eq!(None, t2.insert(b"key1", value1.clone()));
+			assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
+			assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
+			assert_eq!(None, t1.insert(b"key2", value1.clone()));
+			assert_eq!(None, t2.insert(b"key2", value1.clone()));
+			assert_eq!(None, t1.insert(b"key3", value1.clone()));
+			assert_eq!(None, t2.insert(b"key3", value1.clone()));
+			// Shouldn't call get on a lazy tree, but here we got all in memory.
+			assert_eq!(t1.get(&b"key3"[..]), Some(&value1));
+			assert_eq!(t1.get_mut(&b"key3"[..]), Some(&mut value1));
+			if drop {
+				core::mem::drop(t1);
+			} else {
+				t1.commit();
+			}
+			let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
+			assert_eq!(t3.get_mut(&b"key3"[..]), Some(&mut value1));
+			assert!(compare_iter_mut(&mut t3, &mut t2));
 		}
-		let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
-		assert_eq!(t3.get_mut(&b"key3"[..]), Some(&mut value1));
-		assert!(compare_iter_mut(&mut t3, &mut t2));
+		test(true);
+		test(false);
 	}
 }
