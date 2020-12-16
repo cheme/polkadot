@@ -135,6 +135,13 @@ pub struct SeekIter<'a, N: TreeConf> {
 /// Iterator on values seeked when fetching a given key.
 pub struct SeekValueIter<'a, N: TreeConf>(SeekIter<'a, N>);
 
+impl<'a, N: TreeConf> SeekValueIter<'a, N> {
+	/// Get back node iterator.
+	pub fn node_iter(self) -> SeekIter<'a, N> {
+		self.0
+	}
+}
+
 impl<N: TreeConf> Tree<N> {
 	/// Seek iteration following a giving key.
 	pub fn seek_iter<'a>(&'a self, key: &'a [u8]) -> SeekIter<'a, N> {
@@ -645,6 +652,13 @@ impl<'a, N: TreeConf> Iterator for ValueIter<'a, N> {
 				return None;
 			}
 		}
+	}
+}
+
+impl<'a, N: TreeConf> ValueIter<'a, N> {
+	/// Get back node iterator.
+	pub fn node_iter(self) -> Iter<'a, N> {
+		self.0
 	}
 }
 
