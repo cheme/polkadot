@@ -672,6 +672,19 @@ pub struct Tree<N>
 	pub init: BackendFor<N>,
 }
 
+impl<N> Default for Tree<N>
+	where
+		N: TreeConf,
+		BackendFor<N>: Default,
+{
+	fn default() -> Self {
+		Tree {
+			tree: None,
+			init: Default::default(),
+		}
+	}
+}
+	
 impl<N> Tree<N>
 	where
 		N: TreeConf,
