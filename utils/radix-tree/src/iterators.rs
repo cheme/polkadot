@@ -237,13 +237,23 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 					//		// TODO put ref in stack.
 					if let Some(node) = self.tree.tree.as_ref() {
 						let zero = PositionFor::<N>::zero();
-						if let Descent::Middle(a, b) = node.descend(
+						match node.descend(
 							&self.dest,
 							zero,
 							self.dest_position,
 						) {
-							self.next = Descent::Middle(a, b);
-							return None;
+							next@Descent::Middle(..) => {
+								self.next = next;
+								self.reach_dest = true;
+								return None;
+							},
+							next@Descent::Match(..) => {
+								self.next = next;
+								self.reach_dest = true;
+							},
+							next@Descent::Child(..) => {
+								self.next = next;
+							},
 						}
 						self.stack.stack.push((zero, node));
 					} else {
@@ -397,13 +407,23 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 					//		// TODO put ref in stack.
 					if let Some(node) = self.tree.tree.as_mut() {
 						let zero = PositionFor::<N>::zero();
-						if let Descent::Middle(a, b) = node.descend(
+						match node.descend(
 							&self.dest,
 							zero,
 							self.dest_position,
 						) {
-							self.next = Descent::Middle(a, b);
-							return None;
+							next@Descent::Middle(..) => {
+								self.next = next;
+								self.reach_dest = true;
+								return None;
+							},
+							next@Descent::Match(..) => {
+								self.next = next;
+								self.reach_dest = true;
+							},
+							next@Descent::Child(..) => {
+								self.next = next;
+							},
 						}
 						self.stack.stack.push((zero, node.as_mut()));
 					} else {
