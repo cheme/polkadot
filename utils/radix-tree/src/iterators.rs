@@ -237,7 +237,11 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 					//		// TODO put ref in stack.
 					if let Some(node) = self.tree.tree.as_ref() {
 						let zero = PositionFor::<N>::zero();
-						if let Descent::Middle(a, b) = node.descend(&self.dest, zero, self.dest_position) {
+						if let Descent::Middle(a, b) = node.descend(
+							&self.dest,
+							zero,
+							self.dest_position,
+						) {
 							self.next = Descent::Middle(a, b);
 							return None;
 						}
@@ -393,6 +397,14 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 					//		// TODO put ref in stack.
 					if let Some(node) = self.tree.tree.as_mut() {
 						let zero = PositionFor::<N>::zero();
+						if let Descent::Middle(a, b) = node.descend(
+							&self.dest,
+							zero,
+							self.dest_position,
+						) {
+							self.next = Descent::Middle(a, b);
+							return None;
+						}
 						self.stack.stack.push((zero, node.as_mut()));
 					} else {
 						self.reach_dest = true;
