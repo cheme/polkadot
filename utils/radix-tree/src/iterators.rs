@@ -22,7 +22,7 @@
 use super::{Tree, TreeConf, Node, PositionFor, Descent, Key, KeyIndexFor};
 pub use derivative::Derivative;
 use alloc::vec::Vec;
-use crate::radix::{Position, MaskFor, MaskKeyByte};
+use crate::radix::{Position, MaskFor, MaskKeyByte, RadixConf, PrefixKeyConf};
 use crate::children::NodeIndex;
 
 /// Stack of Node to reach a position.
@@ -226,7 +226,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 				if let Some(parent) = self.stack.stack.last() {
 					// TODO stack child
 					if let Some(child) = parent.1.get_child(index) {
-						//let position = position.next::<N::Radix>();
+						let position = position.next::<N::Radix>();
 						self.stack.stack.push((position, child));
 					} else {
 						self.reach_dest = true;
@@ -289,9 +289,17 @@ impl<'a, N: TreeConf> Iterator for SeekValueIter<'a, N> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
-			if let Some((key, _pos, node)) = self.0.next() {
+			if let Some((key, pos, node)) = self.0.next() {
 				if let Some(v) = node.value() {
-					return Some((key, v))
+					let align = if <N::Radix as RadixConf>::Alignment::ALIGNED
+						|| pos.mask == <<N::Radix as RadixConf>::Alignment as PrefixKeyConf>::Mask::LAST {
+						0
+					} else {
+						1
+					};
+					let end = node.depth() + pos.index - align;
+
+					return Some((&key[..end], v))
 				}
 			} else {
 				return None;
@@ -396,7 +404,7 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 						parent.1.as_mut().unwrap().get_child_mut(index) 
 					} {
 						let child = child as *mut _;
-						//let position = position.next::<N::Radix>();
+						let position = position.next::<N::Radix>();
 						self.stack.stack.push((position, child));
 					} else {
 						self.reach_dest = true;
@@ -462,9 +470,17 @@ impl<'a, N: TreeConf> Iterator for SeekValueIterMut<'a, N> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
-			if let Some((key, _pos, node)) = self.0.next() {
+			if let Some((key, pos, node)) = self.0.next() {
 				if let Some(v) = node.value() {
-					return Some((key, v))
+					let align = if <N::Radix as RadixConf>::Alignment::ALIGNED
+						|| pos.mask == <<N::Radix as RadixConf>::Alignment as PrefixKeyConf>::Mask::LAST {
+						0
+					} else {
+						1
+					};
+					let end = node.depth() + pos.index - align;
+
+					return Some((&key[..end], v))
 				}
 			} else {
 				return None;
