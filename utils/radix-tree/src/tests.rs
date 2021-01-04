@@ -163,7 +163,7 @@ pub mod $module_name {
 			}
 			assert_eq!(index, key_iter_path.len());
 		};
-/*		let keys = &[b"key".to_vec()][..];
+		let keys = &[b"key".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];
 		let key_iter_path = &[][..];
 		test(keys, key_seek_path, key_iter_path);
@@ -174,7 +174,11 @@ pub mod $module_name {
 		let keys = &[b"ab".to_vec(), b"key".to_vec(), b"l".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];
 		let key_iter_path = &[b"l".to_vec()][..];
-		test(keys, key_seek_path, key_iter_path);*/
+		test(keys, key_seek_path, key_iter_path);
+		let keys = &[b"key1".to_vec()][..];
+		let key_seek_path = &[b"key1".to_vec()][..];
+		let key_iter_path = &[][..];
+		test(keys, key_seek_path, key_iter_path);
 		let keys = &[b"ke".to_vec(), b"key".to_vec(), b"l".to_vec()][..];
 		let key_seek_path = &[b"ke".to_vec(), b"key".to_vec()][..];
 		let key_iter_path = &[b"l".to_vec()][..];
