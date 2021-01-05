@@ -162,6 +162,21 @@ pub mod $module_name {
 				index += 1;
 			}
 			assert_eq!(index, key_iter_path.len());
+			let backend = new_backend();
+			let mut t1 = Tree::<TreeConf>::new(backend.clone());
+			let value1 = b"value1".to_vec();
+			for key in keys.iter() {
+				assert_eq!(None, t1.insert(key.as_slice(), value1.clone()));
+			}
+			let dest = &b"key1"[..];
+			let mut seek_iter = t1.seek_iter_mut(dest).value_iter();
+			let mut index = 0;
+			while let Some((key, _value)) = seek_iter.next() {
+				assert_eq!(key, key_seek_path[index]);
+				index += 1;
+			}
+			assert_eq!(index, key_seek_path.len());
+			// TODO 'node_iter' for mut
 		};
 
 		let keys = &[b"key".to_vec()][..];
@@ -184,15 +199,17 @@ pub mod $module_name {
 		let key_seek_path = &[b"key1".to_vec()][..];
 		let key_iter_path = &[][..];
 		test(keys, key_seek_path, key_iter_path);
-
 		let keys = &[b"ke".to_vec(), b"key".to_vec(), b"key12".to_vec()][..];
 		let key_seek_path = &[b"ke".to_vec(), b"key".to_vec()][..];
 		let key_iter_path = &[b"key12".to_vec()][..];
 		test(keys, key_seek_path, key_iter_path);
-
 		let keys = &[b"k".to_vec(), b"key1".to_vec()][..];
 		let key_seek_path = &[b"k".to_vec(), b"key1".to_vec()][..];
 		let key_iter_path = &[][..];
+		test(keys, key_seek_path, key_iter_path);
+		let keys = &[b"ke".to_vec(), b"key1".to_vec(), b"key12".to_vec()][..];
+		let key_seek_path = &[b"ke".to_vec(), b"key1".to_vec()][..];
+		let key_iter_path = &[b"key12".to_vec()][..];
 		test(keys, key_seek_path, key_iter_path);
 	}
 

@@ -417,13 +417,23 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 					if let Some(child) = unsafe {
 						parent.1.as_mut().unwrap().get_child_mut(index) 
 					} {
-						self.next = child.descend(
+						let position = position.next::<N::Radix>();
+						match child.descend(
 							&self.dest,
 							position,
 							self.dest_position,
-						);
-						let position = position.next::<N::Radix>();
-						let position = position.next_by::<N::Radix>(child.depth());
+						) {
+							Descent::Middle(..) => {
+								self.reach_dest = true;
+								return None;
+							},
+							Descent::Match(..) => {
+								self.reach_dest = true;
+							},
+							next@Descent::Child(..) => {
+								self.next = next;
+							},
+						}
 						let child = child as *mut _;
 						self.stack.stack.push((position, child));
 					} else {
@@ -440,18 +450,17 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 							zero,
 							self.dest_position,
 						) {
-							next@Descent::Middle(..) => {
+							Descent::Middle(..) => {
 								self.reach_dest = true;
 								return None;
 							},
-							next@Descent::Match(..) => {
+							Descent::Match(..) => {
 								self.reach_dest = true;
 							},
 							next@Descent::Child(..) => {
 								self.next = next;
 							},
 						}
-						let zero = zero.next_by::<N::Radix>(node.depth());
 						self.stack.stack.push((zero, node.as_mut()));
 					} else {
 						self.reach_dest = true;
@@ -459,11 +468,10 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 				}
 			},
 			Descent::Middle(_position, _index) => {
-				self.reach_dest = true;
-				return None;
+				unreachable!();
 			},
 			Descent::Match(_position) => {
-				self.reach_dest = true;
+				unreachable!();
 			},
 		}
 		self.stack.stack.last().map(|last| (
