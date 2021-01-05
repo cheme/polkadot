@@ -22,7 +22,7 @@
 use super::{Tree, TreeConf, Node, PositionFor, Descent, Key, KeyIndexFor};
 pub use derivative::Derivative;
 use alloc::vec::Vec;
-use crate::radix::{Position, MaskFor, MaskKeyByte, RadixConf, PrefixKeyConf};
+use crate::radix::{Position, MaskFor, MaskKeyByte};
 use crate::children::NodeIndex;
 
 /// Stack of Node to reach a position.

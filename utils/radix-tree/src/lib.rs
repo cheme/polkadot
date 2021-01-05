@@ -753,8 +753,13 @@ impl<N: TreeConf> Tree<N> {
 	pub fn get(&self, key: &[u8]) -> Option<&N::Value> {
 		if let Some(top) = self.tree.as_ref() {
 			let mut current = top.as_ref();
+			// TODO is this limit condition of any use
 			if key.len() == 0 {
-				return current.value();
+				if current.depth() == 0 {
+					return current.value();
+				} else {
+					return None;
+				}
 			}
 			let dest_position = Position {
 				index: key.len(),
@@ -790,7 +795,11 @@ impl<N: TreeConf> Tree<N> {
 		if let Some(top) = self.tree.as_mut() {
 			let mut current = top.as_mut();
 			if key.len() == 0 {
-				return current.value_mut();
+				if current.depth() == 0 {
+					return current.value_mut();
+				} else {
+					return None;
+				}
 			}
 			let dest_position = Position {
 				index: key.len(),
