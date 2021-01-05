@@ -163,6 +163,7 @@ pub mod $module_name {
 			}
 			assert_eq!(index, key_iter_path.len());
 		};
+
 		let keys = &[b"key".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];
 		let key_iter_path = &[][..];
@@ -175,16 +176,25 @@ pub mod $module_name {
 		let key_seek_path = &[b"key".to_vec()][..];
 		let key_iter_path = &[b"l".to_vec()][..];
 		test(keys, key_seek_path, key_iter_path);
+		let keys = &[b"ke".to_vec(), b"key".to_vec(), b"lllllll".to_vec()][..];
+		let key_seek_path = &[b"ke".to_vec(), b"key".to_vec()][..];
+		let key_iter_path = &[b"lllllll".to_vec()][..];
+		test(keys, key_seek_path, key_iter_path);
 		let keys = &[b"key1".to_vec()][..];
 		let key_seek_path = &[b"key1".to_vec()][..];
 		let key_iter_path = &[][..];
 		test(keys, key_seek_path, key_iter_path);
-		let keys = &[b"ke".to_vec(), b"key".to_vec(), b"l".to_vec()][..];
+
+		let keys = &[b"ke".to_vec(), b"key".to_vec(), b"key12".to_vec()][..];
 		let key_seek_path = &[b"ke".to_vec(), b"key".to_vec()][..];
-		let key_iter_path = &[b"l".to_vec()][..];
+		let key_iter_path = &[b"key12".to_vec()][..];
+		test(keys, key_seek_path, key_iter_path);
+
+		let keys = &[b"k".to_vec(), b"key1".to_vec()][..];
+		let key_seek_path = &[b"k".to_vec(), b"key1".to_vec()][..];
+		let key_iter_path = &[][..];
 		test(keys, key_seek_path, key_iter_path);
 	}
-
 
 	fn fuzz_to_data(input: &[u8]) -> Vec<(Vec<u8>,Vec<u8>)> {
 		let mut result = Vec::new();

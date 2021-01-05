@@ -42,6 +42,7 @@ impl<'a, N: TreeConf> NodeStack<'a, N> {
 }
 
 impl<'a, N: TreeConf> NodeStack<'a, N> {
+	// TODO useless??
 	fn descend(&self, key: &[u8], dest_position: PositionFor<N>) -> Descent<N::Radix> {
 		if let Some(top) = self.stack.last() {
 			top.1.descend(key, top.0, dest_position)
@@ -128,8 +129,13 @@ pub struct SeekIter<'a, N: TreeConf> {
 	// TODO seekiter could be lighter and avoid using stack, 
 	// just keep latest: a stack trait could be use.
 	stack: NodeStack<'a, N>,
-	reach_dest: bool,
+	// state for next iter, we calculate it before
+	// just to store position with node prefix.
+	// TODO this is actually always a child variant
 	next: Descent<N::Radix>,
+	// part of state for next iter, not an item of descent
+	// to avoid
+	reach_dest: bool,
 }
 
 /// Iterator on values seeked when fetching a given key.
@@ -177,8 +183,10 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	pub fn iter(self) -> Iter<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
+			let pos = pos.next_by::<N::Radix>(node.depth());
 			let key = pos.index::<N::Radix>(dest)
-				.expect("build from existing data struct");
+				// out of dest we use the first child
+				.unwrap_or_else(|| KeyIndexFor::<N>::zero());
 			(pos, node, key)
 		}).collect();
 		Iter {
@@ -198,8 +206,9 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	pub fn iter_prefix(mut self) -> Iter<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
+			let pos = pos.next_by::<N::Radix>(node.depth());
 			let key = pos.index::<N::Radix>(dest)
-				.expect("build from existing data struct");
+				.unwrap_or_else(|| KeyIndexFor::<N>::zero());
 			(pos, node, key)
 		}).into_iter().collect();
 		Iter {
@@ -224,10 +233,24 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 		match self.next {
 			Descent::Child(position, index) => {
 				if let Some(parent) = self.stack.stack.last() {
-					// TODO stack child
 					if let Some(child) = parent.1.get_child(index) {
 						let position = position.next::<N::Radix>();
-						let position = position.next_by::<N::Radix>(child.depth());
+						match child.descend(
+							&self.dest,
+							position,
+							self.dest_position,
+						) {
+							Descent::Middle(..) => {
+								self.reach_dest = true;
+								return None;
+							},
+							Descent::Match(..) => {
+								self.reach_dest = true;
+							},
+							next@Descent::Child(..) => {
+								self.next = next;
+							},
+						}
 						self.stack.stack.push((position, child));
 					} else {
 						self.reach_dest = true;
@@ -243,20 +266,17 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 							zero,
 							self.dest_position,
 						) {
-							next@Descent::Middle(..) => {
-								self.next = next;
+							Descent::Middle(..) => {
 								self.reach_dest = true;
 								return None;
 							},
-							next@Descent::Match(..) => {
-								self.next = next;
+							Descent::Match(..) => {
 								self.reach_dest = true;
 							},
 							next@Descent::Child(..) => {
 								self.next = next;
 							},
 						}
-						let zero = zero.next_by::<N::Radix>(node.depth());
 						self.stack.stack.push((zero, node));
 					} else {
 						self.reach_dest = true;
@@ -264,15 +284,11 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 				}
 			},
 			Descent::Middle(_position, _index) => {
-				self.reach_dest = true;
-				return None;
+				unreachable!();
 			},
 			Descent::Match(_position) => {
-				self.reach_dest = true;
+				unreachable!();
 			},
-		}
-		if !self.reach_dest {
-			self.next = self.stack.descend(&self.dest, self.dest_position);
 		}
 		self.stack.stack.last().map(|last| (last.0, last.1))
 	}
@@ -293,6 +309,7 @@ impl<'a, N: TreeConf> Iterator for SeekValueIter<'a, N> {
 		loop {
 			if let Some((key, pos, node)) = self.0.next() {
 				if let Some(v) = node.value() {
+					let pos = pos.next_by::<N::Radix>(node.depth());
 					return Some((&key[..pos.index], v))
 				}
 			} else {
@@ -353,8 +370,10 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 	pub fn iter(self) -> IterMut<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
+			let node_depth = unsafe { node.as_mut().unwrap().depth() };
+			let pos = pos.next_by::<N::Radix>(node_depth);
 			let key = pos.index::<N::Radix>(dest)
-				.expect("build from existing data struct");
+				.unwrap_or_else(|| KeyIndexFor::<N>::zero());
 			(pos, node, key)
 		}).collect();
 		IterMut {
@@ -372,8 +391,10 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 	pub fn iter_prefix(mut self) -> IterMut<'a, N> {
 		let dest = self.dest;
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
+			let node_depth = unsafe { node.as_mut().unwrap().depth() };
+			let pos = pos.next_by::<N::Radix>(node_depth);
 			let key = pos.index::<N::Radix>(dest)
-				.expect("build from existing data struct");
+				.unwrap_or_else(|| KeyIndexFor::<N>::zero());
 			(pos, node, key)
 		}).into_iter().collect();
 		IterMut {
@@ -393,10 +414,14 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 		match self.next {
 			Descent::Child(position, index) => {
 				if let Some(parent) = self.stack.stack.last_mut() {
-					// TODO stack child
 					if let Some(child) = unsafe {
 						parent.1.as_mut().unwrap().get_child_mut(index) 
 					} {
+						self.next = child.descend(
+							&self.dest,
+							position,
+							self.dest_position,
+						);
 						let position = position.next::<N::Radix>();
 						let position = position.next_by::<N::Radix>(child.depth());
 						let child = child as *mut _;
@@ -416,12 +441,10 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 							self.dest_position,
 						) {
 							next@Descent::Middle(..) => {
-								self.next = next;
 								self.reach_dest = true;
 								return None;
 							},
 							next@Descent::Match(..) => {
-								self.next = next;
 								self.reach_dest = true;
 							},
 							next@Descent::Child(..) => {
@@ -442,9 +465,6 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 			Descent::Match(_position) => {
 				self.reach_dest = true;
 			},
-		}
-		if !self.reach_dest {
-			self.next = self.stack.descend(&self.dest, self.dest_position);
 		}
 		self.stack.stack.last().map(|last| (
 			last.0,
@@ -468,6 +488,7 @@ impl<'a, N: TreeConf> Iterator for SeekValueIterMut<'a, N> {
 		loop {
 			if let Some((key, pos, node)) = self.0.next() {
 				if let Some(v) = node.value() {
+					let pos = pos.next_by::<N::Radix>(node.depth());
 					return Some((&key[..pos.index], v))
 				}
 			} else {

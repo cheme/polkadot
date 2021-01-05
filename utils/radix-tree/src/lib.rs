@@ -457,8 +457,17 @@ impl<N: TreeConf> Node<N> {
 		let mut common = common_until::<_, _, N::Radix>(&self.key, &ref_prefix);
 		let dest_position_next = dest_position;
 		common.index += node_position.index;
+		// TODO comment and check for more efficient compare (maybe first next_by?).
 		match common.cmp(dest_position_next) {
-			Ordering::Equal => Descent::Match(common),
+			Ordering::Equal => {
+				let node_end_index = node_position.next_by::<N::Radix>(self.depth());
+				if common == node_end_index {
+					Descent::Match(common)
+				} else {
+					let ix = common.index::<N::Radix>(key);
+					Descent::Middle(common, ix)
+				}
+			},
 			Ordering::Greater => {
 				let ix = common.index::<N::Radix>(key)
 					.expect("child");
@@ -473,7 +482,8 @@ impl<N: TreeConf> Node<N> {
 						.expect("child");
 					Descent::Child(common, ix)
 				} else if common == dest_position_next {
-					Descent::Middle(common, None)
+					unreachable!();
+					//Descent::Middle(common, None)
 				} else {
 					let ix = common.index::<N::Radix>(key);
 					Descent::Middle(common, ix)
