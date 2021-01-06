@@ -291,9 +291,11 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 							zero,
 							self.dest_position,
 						) {
-							next@Descent::Middle(..) => {
+							Descent::Middle(position, index) => {
 								// use for corner case when creating iter.
-								self.next = next;
+								if position != self.dest_position {
+									self.next = Descent::Middle(position, index);
+								}
 								self.reach_dest = true;
 								return None;
 							},
@@ -501,9 +503,11 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 							zero,
 							self.dest_position,
 						) {
-							next@Descent::Middle(..) => {
+							Descent::Middle(position, index) => {
 								// use for corner case when creating iter.
-								self.next = next;
+								if position != self.dest_position {
+									self.next = Descent::Middle(position, index);
+								}
 								self.reach_dest = true;
 								return None;
 							},
