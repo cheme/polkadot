@@ -182,11 +182,16 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	/// with the same context.
 	pub fn iter(mut self) -> Iter<'a, N> {
 		let dest = self.dest;
-		// corner case where seek iter skip a stack
+		let mut finished = false;
+		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_ref() {
-				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node));
+				if let Descent::Middle(..) = self.next {
+					finished = true;
+				} else {
+					let zero = PositionFor::<N>::zero();
+					self.stack.stack.push((zero, node));
+				}
 			}
 		}
 
@@ -203,7 +208,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 				stack,
 				key: self.dest.into(),
 			},
-			finished: false,
+			finished,
 		}
 	}
 
@@ -213,11 +218,16 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	/// of the current node for the seek iterator.
 	pub fn iter_prefix(mut self) -> Iter<'a, N> {
 		let dest = self.dest;
-		// corner case where seek iter skip a stack
+		let mut finished = false;
+		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_ref() {
-				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node));
+				if let Descent::Middle(..) = self.next {
+					finished = true;
+				} else {
+					let zero = PositionFor::<N>::zero();
+					self.stack.stack.push((zero, node));
+				}
 			}
 		}
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
@@ -232,7 +242,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 				stack,
 				key: self.dest.into(),
 			},
-			finished: false,
+			finished,
 		}
 	}
 
@@ -281,7 +291,9 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 							zero,
 							self.dest_position,
 						) {
-							Descent::Middle(..) => {
+							next@Descent::Middle(..) => {
+								// use for corner case when creating iter.
+								self.next = next;
 								self.reach_dest = true;
 								return None;
 							},
@@ -384,11 +396,16 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 	/// Get iterator on nodes from the seek iterator context.
 	pub fn iter(mut self) -> IterMut<'a, N> {
 		let dest = self.dest;
-		// corner case where seek iter skip a stack
+		let mut finished = false;
+		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_mut() {
-				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node.as_mut()));
+				if let Descent::Middle(..) = self.next {
+					finished = true;
+				} else {
+					let zero = PositionFor::<N>::zero();
+					self.stack.stack.push((zero, node.as_mut()));
+				}
 			}
 		}
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
@@ -404,7 +421,7 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 				stack,
 				key: self.dest.into(),
 			},
-			finished: false,
+			finished,
 		}
 	}
 
@@ -412,11 +429,16 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 	/// and limit iteration do the seeked prefix.
 	pub fn iter_prefix(mut self) -> IterMut<'a, N> {
 		let dest = self.dest;
-		// corner case where seek iter skip a stack
+		let mut finished = false;
+		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_mut() {
-				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node.as_mut()));
+				if let Descent::Middle(..) = self.next {
+					finished = true;
+				} else {
+					let zero = PositionFor::<N>::zero();
+					self.stack.stack.push((zero, node.as_mut()));
+				}
 			}
 		}
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
@@ -432,7 +454,7 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 				stack,
 				key: self.dest.into(),
 			},
-			finished: false,
+			finished,
 		}
 	}
 
@@ -479,7 +501,9 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 							zero,
 							self.dest_position,
 						) {
-							Descent::Middle(..) => {
+							next@Descent::Middle(..) => {
+								// use for corner case when creating iter.
+								self.next = next;
 								self.reach_dest = true;
 								return None;
 							},
