@@ -186,11 +186,15 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_ref() {
-				if let Descent::Middle(..) = self.next {
-					finished = true;
-				} else {
-					let zero = PositionFor::<N>::zero();
-					self.stack.stack.push((zero, node));
+				match self.next {
+					Descent::Middle(..) => {
+						finished = true;
+					},
+					Descent::Child(..) => {
+						let zero = PositionFor::<N>::zero();
+						self.stack.stack.push((zero, node));
+					},
+					Descent::Match(..) => (),
 				}
 			}
 		}
@@ -222,11 +226,15 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_ref() {
-				if let Descent::Middle(..) = self.next {
-					finished = true;
-				} else {
-					let zero = PositionFor::<N>::zero();
-					self.stack.stack.push((zero, node));
+				match self.next {
+					Descent::Middle(..) => {
+						finished = true;
+					},
+					Descent::Child(..) => {
+						let zero = PositionFor::<N>::zero();
+						self.stack.stack.push((zero, node));
+					},
+					Descent::Match(..) => (),
 				}
 			}
 		}
@@ -294,7 +302,11 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 							Descent::Middle(position, index) => {
 								// use for corner case when creating iter.
 								if position != self.dest_position {
+									// indicate no iter
 									self.next = Descent::Middle(position, index);
+								} else {
+									// indicate all iter
+									self.next = Descent::Match(position);
 								}
 								self.reach_dest = true;
 								return None;
@@ -402,11 +414,15 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_mut() {
-				if let Descent::Middle(..) = self.next {
-					finished = true;
-				} else {
-					let zero = PositionFor::<N>::zero();
-					self.stack.stack.push((zero, node.as_mut()));
+				match self.next {
+					Descent::Middle(..) => {
+						finished = true;
+					},
+					Descent::Child(..) => {
+						let zero = PositionFor::<N>::zero();
+						self.stack.stack.push((zero, node.as_mut()));
+					},
+					Descent::Match(..) => (),
 				}
 			}
 		}
@@ -435,11 +451,15 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
 			if let Some(node) = self.tree.tree.as_mut() {
-				if let Descent::Middle(..) = self.next {
-					finished = true;
-				} else {
-					let zero = PositionFor::<N>::zero();
-					self.stack.stack.push((zero, node.as_mut()));
+				match self.next {
+					Descent::Middle(..) => {
+						finished = true;
+					},
+					Descent::Child(..) => {
+						let zero = PositionFor::<N>::zero();
+						self.stack.stack.push((zero, node.as_mut()));
+					},
+					Descent::Match(..) => (),
 				}
 			}
 		}
@@ -506,7 +526,11 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 							Descent::Middle(position, index) => {
 								// use for corner case when creating iter.
 								if position != self.dest_position {
+									// indicate no iter
 									self.next = Descent::Middle(position, index);
+								} else {
+									// indicate all iter
+									self.next = Descent::Match(position);
 								}
 								self.reach_dest = true;
 								return None;
