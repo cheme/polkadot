@@ -211,6 +211,14 @@ pub mod $module_name {
 		let key_seek_path = &[b"ke".to_vec(), b"key1".to_vec()][..];
 		let key_iter_path = &[b"key12".to_vec()][..];
 		test(keys, key_seek_path, key_iter_path);
+		let keys = &[b"i".to_vec(), b"j".to_vec()][..];
+		let key_seek_path = &[][..];
+		let key_iter_path = &[][..];
+		test(keys, key_seek_path, key_iter_path);
+		let keys = &[b"i".to_vec()][..];
+		let key_seek_path = &[][..];
+		let key_iter_path = &[][..];
+		test(keys, key_seek_path, key_iter_path);
 	}
 
 	fn fuzz_to_data(input: &[u8]) -> Vec<(Vec<u8>,Vec<u8>)> {

@@ -180,8 +180,16 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	/// Node iterator from a seek iterator.
 	/// This allow doing seek first then iterationg nodes
 	/// with the same context.
-	pub fn iter(self) -> Iter<'a, N> {
+	pub fn iter(mut self) -> Iter<'a, N> {
 		let dest = self.dest;
+		// corner case where seek iter skip a stack
+		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
+			if let Some(node) = self.tree.tree.as_ref() {
+				let zero = PositionFor::<N>::zero();
+				self.stack.stack.push((zero, node));
+			}
+		}
+
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
 			let pos = pos.next_by::<N::Radix>(node.depth());
 			let key = pos.index::<N::Radix>(dest)
@@ -205,6 +213,13 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	/// of the current node for the seek iterator.
 	pub fn iter_prefix(mut self) -> Iter<'a, N> {
 		let dest = self.dest;
+		// corner case where seek iter skip a stack
+		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
+			if let Some(node) = self.tree.tree.as_ref() {
+				let zero = PositionFor::<N>::zero();
+				self.stack.stack.push((zero, node));
+			}
+		}
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
 			let pos = pos.next_by::<N::Radix>(node.depth());
 			let key = pos.index::<N::Radix>(dest)
@@ -367,8 +382,15 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 	}
 
 	/// Get iterator on nodes from the seek iterator context.
-	pub fn iter(self) -> IterMut<'a, N> {
+	pub fn iter(mut self) -> IterMut<'a, N> {
 		let dest = self.dest;
+		// corner case where seek iter skip a stack
+		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
+			if let Some(node) = self.tree.tree.as_mut() {
+				let zero = PositionFor::<N>::zero();
+				self.stack.stack.push((zero, node.as_mut()));
+			}
+		}
 		let stack = self.stack.stack.into_iter().map(|(pos, node)| {
 			let node_depth = unsafe { node.as_mut().unwrap().depth() };
 			let pos = pos.next_by::<N::Radix>(node_depth);
@@ -390,6 +412,13 @@ impl<'a, N: TreeConf> SeekIterMut<'a, N> {
 	/// and limit iteration do the seeked prefix.
 	pub fn iter_prefix(mut self) -> IterMut<'a, N> {
 		let dest = self.dest;
+		// corner case where seek iter skip a stack
+		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
+			if let Some(node) = self.tree.tree.as_mut() {
+				let zero = PositionFor::<N>::zero();
+				self.stack.stack.push((zero, node.as_mut()));
+			}
+		}
 		let stack = self.stack.stack.pop().map(|(pos, node)| {
 			let node_depth = unsafe { node.as_mut().unwrap().depth() };
 			let pos = pos.next_by::<N::Radix>(node_depth);
