@@ -25,7 +25,7 @@ use alloc::boxed::Box;
 
 /// Children node index, depending on the radix use
 /// different type can be use.
-pub trait NodeIndex: Clone + Copy + Debug + PartialEq {
+pub trait NodeIndex: Clone + Copy + Debug + PartialEq + PartialOrd {
 	fn zero() -> Self;
 	fn next(&self) -> Option<Self>;
 }

@@ -140,7 +140,13 @@ pub mod $module_name {
 
 	#[test]
 	fn test_seek_iter() {
-		fn test(keys: &[Vec<u8>], key_seek_path: &[Vec<u8>], key_iter_path: &[Vec<u8>]) {
+		// TODO add iter_prefix!! and mut variant!!!
+		fn test(
+			keys: &[Vec<u8>],
+			key_seek_path: &[Vec<u8>],
+			key_iter_path: &[Vec<u8>],
+			key_iter_prefix_path: &[Vec<u8>],
+		) {
 			let backend = new_backend();
 			let mut t1 = Tree::<TreeConf>::new(backend.clone());
 			let value1 = b"value1".to_vec();
@@ -162,13 +168,15 @@ pub mod $module_name {
 				index += 1;
 			}
 			assert_eq!(index, key_iter_path.len());
-			let backend = new_backend();
-			let mut t1 = Tree::<TreeConf>::new(backend.clone());
-			let value1 = b"value1".to_vec();
-			for key in keys.iter() {
-				assert_eq!(None, t1.insert(key.as_slice(), value1.clone()));
+			let mut seek_iter = t1.seek_iter(dest).value_iter();
+			while seek_iter.next().is_some() { }
+			index = 0;
+			let mut iter = seek_iter.node_iter().iter_prefix().value_iter();
+			while let Some((key, _value)) = iter.next() {
+				assert_eq!(key, key_iter_prefix_path[index]);
+				index += 1;
 			}
-			let dest = &b"key1"[..];
+			assert_eq!(index, key_iter_prefix_path.len());
 			let mut seek_iter = t1.seek_iter_mut(dest).value_iter();
 			let mut index = 0;
 			while let Some((key, _value)) = seek_iter.next() {
@@ -176,49 +184,92 @@ pub mod $module_name {
 				index += 1;
 			}
 			assert_eq!(index, key_seek_path.len());
-			// TODO 'node_iter' for mut
 		};
 
 		let keys = &[b"key".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];
 		let key_iter_path = &[][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"key".to_vec(), b"l".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];
 		let key_iter_path = &[b"l".to_vec()][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"ab".to_vec(), b"key".to_vec(), b"l".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];
 		let key_iter_path = &[b"l".to_vec()][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"ke".to_vec(), b"key".to_vec(), b"lllllll".to_vec()][..];
 		let key_seek_path = &[b"ke".to_vec(), b"key".to_vec()][..];
 		let key_iter_path = &[b"lllllll".to_vec()][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"key1".to_vec()][..];
 		let key_seek_path = &[b"key1".to_vec()][..];
 		let key_iter_path = &[][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"ke".to_vec(), b"key".to_vec(), b"key12".to_vec()][..];
 		let key_seek_path = &[b"ke".to_vec(), b"key".to_vec()][..];
 		let key_iter_path = &[b"key12".to_vec()][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[b"key12".to_vec()][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"k".to_vec(), b"key1".to_vec()][..];
 		let key_seek_path = &[b"k".to_vec(), b"key1".to_vec()][..];
 		let key_iter_path = &[][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"ke".to_vec(), b"key1".to_vec(), b"key12".to_vec()][..];
 		let key_seek_path = &[b"ke".to_vec(), b"key1".to_vec()][..];
 		let key_iter_path = &[b"key12".to_vec()][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[b"key12".to_vec()][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
+		let keys = &[b"key12".to_vec()][..];
+		let key_seek_path = &[][..];
+		let key_iter_path = &[b"key12".to_vec()][..];
+		let key_iter_prefix_path = &[b"key12".to_vec()][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"i".to_vec(), b"j".to_vec()][..];
 		let key_seek_path = &[][..];
 		let key_iter_path = &[][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 		let keys = &[b"i".to_vec()][..];
 		let key_seek_path = &[][..];
 		let key_iter_path = &[][..];
-		test(keys, key_seek_path, key_iter_path);
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
+
+		// middle seek for empty stack
+		let keys = &[b"key0".to_vec()][..];
+		let key_seek_path = &[][..];
+		let key_iter_path = &[][..];
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
+		let keys = &[b"key2".to_vec()][..];
+		let key_seek_path = &[][..];
+		let key_iter_path = &[b"key2".to_vec()][..];
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
+
+		// middle seek for non empty stack
+		let keys = &[b"ke".to_vec(), b"key0".to_vec()][..];
+		let key_seek_path = &[b"ke".to_vec()][..];
+		let key_iter_path = &[][..];
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
+		let keys = &[b"ke".to_vec(), b"key2".to_vec()][..];
+		let key_seek_path = &[b"ke".to_vec()][..];
+		let key_iter_path = &[b"key2".to_vec()][..];
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
+		let keys = &[b"k".to_vec(), b"key2".to_vec()][..];
+		let key_seek_path = &[b"k".to_vec()][..];
+		let key_iter_path = &[b"key2".to_vec()][..];
+		let key_iter_prefix_path = &[][..];
+		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 	}
 
 	fn fuzz_to_data(input: &[u8]) -> Vec<(Vec<u8>,Vec<u8>)> {

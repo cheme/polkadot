@@ -22,7 +22,7 @@ use core::fmt::Debug;
 use core::cmp::Ordering;
 use alloc::borrow::Borrow;
 use derivative::Derivative;
-use crate::children::{NodeIndex};
+use crate::children::NodeIndex;
 
 /// Masking operation for unaliged prefix key.
 ///

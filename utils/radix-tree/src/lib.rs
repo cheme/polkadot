@@ -664,6 +664,12 @@ impl<N: TreeConf> Node<N> {
 	) -> &mut N::Backend {
 		&mut self.backend
 	}
+	
+	fn partial_index(&self, node_offset_position: PositionFor<N>, position: PositionFor<N>) -> Option<KeyIndexFor<N>> {
+		let mut position = position.clone();
+		position.index -= node_offset_position.index;
+		position.index::<N::Radix>(self.key.data.borrow())
+	}
 }
 
 /// Main tree structure.
@@ -742,6 +748,8 @@ enum Descent<P>
 	/// Position is the position of the child of the middle branch.
 	/// Index is the index where existing child will be inserted.
 	/// (if None, then the key is on the existing node).
+	/// TODO looks incorrect when reading descend function: same
+	/// pos as child, or at least explicit why option.
 	Middle(Position<P::Alignment>, Option<P::KeyIndex>),
 	/// Position is child is at position + 1 of the branch.
 	/// TODO is position of any use (it is dest position of descent)
