@@ -27,68 +27,6 @@ use alloc::vec::Vec;
 use crate::radix::{Position, MaskFor, MaskKeyByte};
 use crate::children::NodeIndex;
 
-/// With middle we need to check the position and next element
-/// and act on stack to switch to iter.
-/// Return true if we need to continue iteration.
-fn middle_seek_to_iter<N: TreeConf, I: IterStackCommon<N>>(
-	next: &Descent<N::Radix>,
-	stack: &mut Vec<I>,
-	dest_key: &[u8],
-	dest_position: PositionFor<N>,
-) -> bool {
-	match next {
-		Descent::Middle(position, _index) => {
-			if position == &dest_position {
-				// we are on the partial key, just remove stacked node.
-				stack.pop();
-			} else {
-				let key_index = position.index::<N::Radix>(dest_key)
-					.expect("Middle variant");
-				debug_assert!(stack.len() > 0);
-				let node_position = if stack.len() > 1 {
-					stack[stack.len() - 2].position().next::<N::Radix>()
-				} else {
-					PositionFor::<N>::zero()
-				};
-				let index = stack[stack.len() - 1].node().partial_index(node_position, *position)
-					.expect("Middle variant");
-				debug_assert!(index != key_index);
-				if index > key_index {
-					// need to return self
-					stack.pop();
-				} else {
-					// return next from parent TODO duplicated with iter code
-					let mut do_pop = true;
-					while do_pop {
-						stack.pop();
-						if let Some(last) = stack.last_mut() {
-							if let Some(next) = last.index_mut().next() {
-								*last.index_mut() = next;
-							} else {
-								continue;
-							}
-						} else {
-							// last pop, do not iterate
-							return false;
-						}
-						do_pop = false;
-					}
-				}
-			}
-		},
-		_ => (),
-	}
-	true
-}
-
-/// Internal trait with common method of stack item
-/// to avoid redundant code.
-trait IterStackCommon<N: TreeConf> {
-	fn node(&self) -> &Node<N>;
-	fn position(&self) -> PositionFor<N>;
-	fn index_mut(&mut self) -> &mut KeyIndexFor<N>;
-}
-
 /// Stack of Node to reach a position.
 struct NodeStack<'a, N: TreeConf> {
 	// TODO use smallvec instead?
@@ -156,18 +94,6 @@ struct IterStack<'a, N: TreeConf> {
 	key: Key,
 }
 
-impl<'a, N: TreeConf> IterStackCommon<N> for (PositionFor<N>, &'a Node<N>, KeyIndexFor<N>) {
-	fn node(&self) -> &Node<N> {
-		&self.1
-	}
-	fn position(&self) -> PositionFor<N> {
-		self.0
-	}
-	fn index_mut(&mut self) -> &mut KeyIndexFor<N> {
-		&mut self.2
-	}
-}
-
 /// Stack of Node to reach a position.
 struct IterStackMut<N: TreeConf> {
 	// TODO use smallvec instead
@@ -176,19 +102,6 @@ struct IterStackMut<N: TreeConf> {
 	stack: Vec<(PositionFor<N>, *mut Node<N>, KeyIndexFor<N>)>,
 	// The key used with the stack.
 	key: Key,
-}
-
-impl<'a, N: TreeConf> IterStackCommon<N> for (PositionFor<N>, *mut Node<N>, KeyIndexFor<N>) {
-	fn node(&self) -> &Node<N> {
-		let node = unsafe { self.1.as_mut().unwrap() };
-		&*node
-	}
-	fn position(&self) -> PositionFor<N> {
-		self.0
-	}
-	fn index_mut(&mut self) -> &mut KeyIndexFor<N> {
-		&mut self.2
-	}
 }
 
 impl<'a, N: TreeConf> IterStack<'a, N> {
@@ -264,39 +177,108 @@ impl<N: TreeConf> Tree<N> {
 	}
 }
 
+macro_rules! seek_iter_impl {
+	(
+		$seek_iter: ident,
+		$iter: ident,
+		$item: ident,
+		$next_node: ident,
+		$seek_value_iter: ident,
+		$iter_stack: ident,
+		$from_stack: ident,
+		$to_stack: ident,
+		$as_ref: ident,
+		$get_child: ident,
+	) => {
 
-impl<'a, N: TreeConf> SeekIter<'a, N> {
+impl<'a, N: TreeConf> $seek_iter<'a, N> {
+
+	/// With middle we need to check the position and next element
+	/// and act on stack to switch to iter.
+	/// Return true if we need to continue iteration.
+	fn middle_seek_to_iter(
+		next: &Descent<N::Radix>,
+		stack: &mut Vec<$item<'a, N>>,
+		dest_key: &[u8],
+		dest_position: PositionFor<N>,
+	) -> bool {
+		match next {
+			Descent::Middle(position, _index) => {
+				if position == &dest_position {
+					// we are on the partial key, just remove stacked node.
+					stack.pop();
+				} else {
+					let key_index = position.index::<N::Radix>(dest_key)
+						.expect("Middle variant");
+					debug_assert!(stack.len() > 0);
+					let node_position = if stack.len() > 1 {
+						stack[stack.len() - 2].0.next::<N::Radix>()
+					} else {
+						PositionFor::<N>::zero()
+					};
+					let index = $from_stack(stack[stack.len() - 1].1).partial_index(node_position, *position)
+						.expect("Middle variant");
+					debug_assert!(index != key_index);
+					if index > key_index {
+						// need to return self
+						stack.pop();
+					} else {
+						// return next from parent TODO duplicated with iter code
+						let mut do_pop = true;
+						while do_pop {
+							stack.pop();
+							if let Some(last) = stack.last_mut() {
+								if let Some(next) = last.2.next() {
+									last.2 = next;
+								} else {
+									continue;
+								}
+							} else {
+								// last pop, do not iterate
+								return false;
+							}
+							do_pop = false;
+						}
+					}
+				}
+			},
+			_ => (),
+		}
+		true
+	}
+
 	/// Node iterator from a seek iterator.
 	/// This allow doing seek first then iterationg nodes
 	/// with the same context.
-	pub fn iter(mut self) -> Iter<'a, N> {
+	pub fn iter(mut self) -> $iter<'a, N> {
 		let dest = self.dest;
 		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
-			if let Some(node) = self.tree.tree.as_ref() {
+			if let Some(node) = self.tree.tree.$as_ref() {
 				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node));
+				self.stack.stack.push((zero, $to_stack(node)));
 			}
 		}
 
 		let mut stack = self.stack.stack.into_iter().map(|(pos, node)| {
-			let pos = pos.next_by::<N::Radix>(node.depth());
+			let node_depth = $from_stack(node).depth();
+			let pos = pos.next_by::<N::Radix>(node_depth);
 			let key = pos.index::<N::Radix>(dest)
 				// out of dest we use the first child
 				.unwrap_or_else(|| KeyIndexFor::<N>::zero());
 			(pos, node, key)
 		}).collect();
 
-		let finished = !middle_seek_to_iter(
+		let finished = !Self::middle_seek_to_iter(
 			&self.next,
 			&mut stack,
 			self.dest,
 			self.dest_position,
 		);
 
-		Iter {
+		$iter {
 			tree: self.tree,
-			stack: IterStack {
+			stack: $iter_stack {
 				stack,
 				key: self.dest.into(),
 			},
@@ -308,13 +290,13 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	/// This differs from `iter` because the iteration
 	/// will only happen on nodes starting with the prefix
 	/// of the current node for the seek iterator.
-	pub fn iter_prefix(mut self) -> Iter<'a, N> {
+	pub fn iter_prefix(mut self) -> $iter<'a, N> {
 		let dest = self.dest;
 		// corner case where seek iter skip a stack (alloc)
 		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
-			if let Some(node) = self.tree.tree.as_ref() {
+			if let Some(node) = self.tree.tree.$as_ref() {
 				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node));
+				self.stack.stack.push((zero, $to_stack(node)));
 			}
 		}
 
@@ -333,7 +315,8 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 
 		let stack = if !finished {
 			self.stack.stack.pop().map(|(pos, node)| {
-				let pos = pos.next_by::<N::Radix>(node.depth());
+				let node_depth = $from_stack(node).depth();
+				let pos = pos.next_by::<N::Radix>(node_depth);
 				let key = pos.index::<N::Radix>(dest)
 					.unwrap_or_else(|| KeyIndexFor::<N>::zero());
 				(pos, node, key)
@@ -342,9 +325,9 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 			Default::default()
 		};
 	
-		Iter {
+		$iter {
 			tree: self.tree,
-			stack: IterStack {
+			stack: $iter_stack {
 				stack,
 				key: self.dest.into(),
 			},
@@ -353,18 +336,18 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 	}
 
 	/// Get iterator only on value from respective node iterator.
-	pub fn value_iter(self) -> SeekValueIter<'a, N> {
-		SeekValueIter(self)
+	pub fn value_iter(self) -> $seek_value_iter<'a, N> {
+		$seek_value_iter(self)
 	}
 
-	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a Node<N>)> {
+	fn next_node(&mut self) -> Option<$next_node<'a, N>> {
 		if self.reach_dest {
 			return None;
 		}
 		match self.next {
 			Descent::Child(position, index) => {
 				if let Some(parent) = self.stack.stack.last() {
-					if let Some(child) = parent.1.get_child(index) {
+					if let Some(child) = $from_stack(parent.1).$get_child(index) {
 						let position = position.next::<N::Radix>();
 						match child.descend(
 							&self.dest,
@@ -375,7 +358,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 								self.next = next;
 								self.reach_dest = true;
 								// need to stack in order to convert to iter later.
-								self.stack.stack.push((position, child));
+								self.stack.stack.push((position, $to_stack(child)));
 								return None;
 							},
 							Descent::Match(..) => {
@@ -385,7 +368,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 								self.next = next;
 							},
 						}
-						self.stack.stack.push((position, child));
+						self.stack.stack.push((position, $to_stack(child)));
 					} else {
 						self.reach_dest = true;
 						return None;
@@ -393,7 +376,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 				} else {
 					// empty tree
 					//		// TODO put ref in stack.
-					if let Some(node) = self.tree.tree.as_ref() {
+					if let Some(node) = self.tree.tree.$as_ref() {
 						let zero = PositionFor::<N>::zero();
 						match node.descend(
 							&self.dest,
@@ -411,7 +394,7 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 								self.next = next;
 							},
 						}
-						self.stack.stack.push((zero, node));
+						self.stack.stack.push((zero, $to_stack(node)));
 					} else {
 						self.reach_dest = true;
 					}
@@ -424,9 +407,56 @@ impl<'a, N: TreeConf> SeekIter<'a, N> {
 				unreachable!();
 			},
 		}
-		self.stack.stack.last().map(|last| (last.0, last.1))
+		self.stack.stack.last().map(|last| (last.0, $from_stack(last.1)))
 	}
 }
+
+}}
+
+type SeekIterItem<'a, N> = (PositionFor<N>, &'a Node<N>, KeyIndexFor<N>);
+// TODO get rid up of it
+type NextNode<'a, N> = (PositionFor<N>, &'a Node<N>);
+type SeekIterItemMut<'a, N> = (PositionFor<N>, *mut Node<N>, KeyIndexFor<N>);
+type NextNodeMut<'a, N> = (PositionFor<N>, &'a mut Node<N>);
+fn from_stack<'a, N: TreeConf>(s: &'a Node<N>) -> &'a Node<N> {
+	s
+}
+fn to_stack<'a, N: TreeConf>(s: &'a Node<N>) -> &'a Node<N> {
+	s
+}
+fn unsafe_from_stack_mut<'a, N: TreeConf>(s: *mut Node<N>) -> &'a mut Node<N> {
+	unsafe { s.as_mut().unwrap() }
+}
+fn to_stack_mut<'a, N: TreeConf>(s: &'a mut Node<N>) -> *mut Node<N> {
+	s as *mut _
+	// s.as_mut()  TODO instead??
+}
+
+seek_iter_impl!(
+	SeekIter,
+	Iter,
+	SeekIterItem,
+	NextNode,
+	SeekValueIter,
+	IterStack,
+	from_stack,
+	to_stack,
+	as_ref,
+	get_child,
+);
+
+seek_iter_impl!(
+	SeekIterMut,
+	IterMut,
+	SeekIterItemMut,
+	NextNodeMut,
+	SeekValueIterMut,
+	IterStackMut,
+	unsafe_from_stack_mut,
+	to_stack_mut,
+	as_mut,
+	get_child_mut,
+);
 
 impl<'a, N: TreeConf> Iterator for SeekIter<'a, N> {
 	type Item = (&'a [u8], PositionFor<N>, &'a Node<N>);
@@ -491,173 +521,6 @@ impl<N: TreeConf> Tree<N> {
 			reach_dest,
 			next,
 		}
-	}
-}
-
-impl<'a, N: TreeConf> SeekIterMut<'a, N> {
-	/// Get iterator only on value from respective node iterator.
-	pub fn value_iter(self) -> SeekValueIterMut<'a, N> {
-		SeekValueIterMut(self)
-	}
-
-	/// Get iterator on nodes from the seek iterator context.
-	pub fn iter(mut self) -> IterMut<'a, N> {
-		let dest = self.dest;
-		// corner case where seek iter skip a stack (alloc)
-		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
-			if let Some(node) = self.tree.tree.as_mut() {
-				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node.as_mut()));
-			}
-		}
-
-		let mut stack = self.stack.stack.into_iter().map(|(pos, node)| {
-			let node_depth = unsafe { node.as_mut().unwrap().depth() };
-			let pos = pos.next_by::<N::Radix>(node_depth);
-			let key = pos.index::<N::Radix>(dest)
-				.unwrap_or_else(|| KeyIndexFor::<N>::zero());
-			(pos, node, key)
-		}).collect();
-
-		let finished = !middle_seek_to_iter(
-			&self.next,
-			&mut stack,
-			self.dest,
-			self.dest_position,
-		);
-
-		IterMut {
-			tree: self.tree,
-			stack: IterStackMut {
-				stack,
-				key: self.dest.into(),
-			},
-			finished,
-		}
-	}
-
-	/// Get iterator on nodes from the seek iterator context,
-	/// and limit iteration do the seeked prefix.
-	pub fn iter_prefix(mut self) -> IterMut<'a, N> {
-		let dest = self.dest;
-		// corner case where seek iter skip a stack (alloc)
-		if self.stack.stack.len() == 0 && self.dest.len() > 0 {
-			if let Some(node) = self.tree.tree.as_mut() {
-				let zero = PositionFor::<N>::zero();
-				self.stack.stack.push((zero, node.as_mut()));
-			}
-		}
-
-		let mut finished = false;
-		match self.next {
-			Descent::Middle(position, _index) => {
-				if position == self.dest_position {
-					self.stack.stack.pop();
-				} else {
-					// nothing match prefix.
-					finished = true;
-				}
-			},
-			_ => (),
-		}
-
-		let stack = if !finished {
-			self.stack.stack.pop().map(|(pos, node)| {
-				let node_depth = unsafe { node.as_mut().unwrap().depth() };
-				let pos = pos.next_by::<N::Radix>(node_depth);
-				let key = pos.index::<N::Radix>(dest)
-					.unwrap_or_else(|| KeyIndexFor::<N>::zero());
-				(pos, node, key)
-			}).into_iter().collect()
-		} else {
-			Default::default()
-		};
-	
-		IterMut {
-			tree: self.tree,
-			stack: IterStackMut {
-				stack,
-				key: self.dest.into(),
-			},
-			finished,
-		}
-	}
-
-	fn next_node(&mut self) -> Option<(PositionFor<N>, &'a mut Node<N>)> {
-		if self.reach_dest {
-			return None;
-		}
-		match self.next {
-			Descent::Child(position, index) => {
-				if let Some(parent) = self.stack.stack.last_mut() {
-					if let Some(child) = unsafe {
-						parent.1.as_mut().unwrap().get_child_mut(index) 
-					} {
-						let position = position.next::<N::Radix>();
-						match child.descend(
-							&self.dest,
-							position,
-							self.dest_position,
-						) {
-							next@Descent::Middle(..) => {
-								self.next = next;
-								self.reach_dest = true;
-								let child = child as *mut _;
-								self.stack.stack.push((position, child));
-								return None;
-							},
-							Descent::Match(..) => {
-								self.reach_dest = true;
-							},
-							next@Descent::Child(..) => {
-								self.next = next;
-							},
-						}
-						let child = child as *mut _;
-						self.stack.stack.push((position, child));
-					} else {
-						self.reach_dest = true;
-						return None;
-					}
-				} else {
-					// empty tree
-					//		// TODO put ref in stack.
-					if let Some(node) = self.tree.tree.as_mut() {
-						let zero = PositionFor::<N>::zero();
-						match node.descend(
-							&self.dest,
-							zero,
-							self.dest_position,
-						) {
-							next@Descent::Middle(..) => {
-								self.next = next;
-								self.reach_dest = true;
-								return None;
-							},
-							Descent::Match(..) => {
-								self.reach_dest = true;
-							},
-							next@Descent::Child(..) => {
-								self.next = next;
-							},
-						}
-						self.stack.stack.push((zero, node.as_mut()));
-					} else {
-						self.reach_dest = true;
-					}
-				}
-			},
-			Descent::Middle(_position, _index) => {
-				unreachable!();
-			},
-			Descent::Match(_position) => {
-				unreachable!();
-			},
-		}
-		self.stack.stack.last().map(|last| (
-			last.0,
-			unsafe { last.1.as_mut().unwrap() },
-		))
 	}
 }
 
