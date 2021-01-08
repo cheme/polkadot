@@ -405,7 +405,7 @@ mod lazy_test {
 
 	fn compare_iter_mut<K: Borrow<[u8]>>(left: &mut Tree::<TreeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
 		let left_node = left.iter_mut();
-		let left = left_node.value_iter_mut();
+		let left = left_node.value_iter();
 		let mut right = right.iter();
 		for l in left {
 			if let Some(r) = right.next() {
