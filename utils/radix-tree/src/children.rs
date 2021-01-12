@@ -217,8 +217,7 @@ pub struct Children256<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct Children4<N> (
-	// TODO try remove Option: same for art variant.
-	Option<[Option<Box<N>>; 4]>,
+	[Option<Box<N>>; 4],
 	u8,
 );
 
@@ -227,7 +226,7 @@ pub struct Children4<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct ART48<N> (
-	Option<([u8; 256], [Option<Box<N>>; 48])>,
+	([u8; 256], [Option<Box<N>>; 48]),
 	u8,
 );
 
@@ -235,7 +234,7 @@ pub struct ART48<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct ART16<N> (
-	Option<([u8; 16], [Option<Box<N>>; 16])>,
+	([u8; 16], [Option<Box<N>>; 16]),
 	u8,
 );
 
@@ -243,7 +242,7 @@ pub struct ART16<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct ART4<N> (
-	Option<([u8; 4], [Option<Box<N>>; 4])>,
+	([u8; 4], [Option<Box<N>>; 4]),
 	u8,
 );
 
@@ -257,6 +256,7 @@ pub enum ART48_256<N> {
 	ART256(Children256<N>),
 }
 
+#[inline]
 const fn empty_4_children<N>() -> [Option<N>; 4] {
 	// TODO copy tree crate macro
 	[
@@ -264,6 +264,7 @@ const fn empty_4_children<N>() -> [Option<N>; 4] {
 	]
 }
 
+#[inline]
 const fn empty_16_children<N>() -> [Option<N>; 16] {
 	// TODO copy tree crate macro
 	[
@@ -272,6 +273,7 @@ const fn empty_16_children<N>() -> [Option<N>; 16] {
 	]
 }
 
+#[inline]
 const fn empty_48_children<N>() -> [Option<N>; 48] {
 	// TODO copy tree crate macro
 	[
@@ -284,6 +286,7 @@ const fn empty_48_children<N>() -> [Option<N>; 48] {
 	]
 }
 
+#[inline]
 const fn empty_256_children<N>() -> [Option<N>; 256] {
 	// TODO copy tree crate macro
 	[
@@ -335,12 +338,7 @@ impl<N: Debug> Debug for Children256<N> {
 
 impl<N: Debug> Debug for Children4<N> {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
-		if let Some(children) = self.0.as_ref() {
-			children[..].fmt(f)
-		} else {
-			let empty: &[N] = &[]; 
-			empty.fmt(f)
-		}
+		self.0[..].fmt(f)
 	}
 }
 
@@ -439,7 +437,7 @@ impl<N: Debug + Clone> Children for Children4<N> {
 	type Node = N;
 
 	fn empty() -> Self {
-		Children4(None, 0)
+		Children4(empty_4_children(), 0)
 	}
 
 	fn set_child(
@@ -447,11 +445,7 @@ impl<N: Debug + Clone> Children for Children4<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 		child: Box<N>,
 	) -> Option<Box<N>> {
-		if self.0.is_none() {
-			self.0 = Some(empty_4_children());
-		}
-		let children = self.0.as_mut()
-			.expect("Lazy init above");
+		let children = &mut self.0;
 		let result = replace(&mut children[index as usize], Some(child));
 		if result.is_none() {
 			self.1 += 1;
@@ -463,15 +457,12 @@ impl<N: Debug + Clone> Children for Children4<N> {
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<Box<N>> {
-		if let Some(children) = self.0.as_mut() {
-			let result = replace(&mut children[index as usize], None);
-			if result.is_some() {
-				self.1 -= 1;
-			}
-			result
-		} else {
-			None
+		let children = &mut self.0.as_mut();
+		let result = replace(&mut children[index as usize], None);
+		if result.is_some() {
+			self.1 -= 1;
 		}
+		result
 	}
 
 	fn number_child(
@@ -484,16 +475,14 @@ impl<N: Debug + Clone> Children for Children4<N> {
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&N> {
-		self.0.as_ref().and_then(|b| b[index as usize].as_ref())
-			.map(AsRef::as_ref)
+		self.0[index as usize].as_ref().map(AsRef::as_ref)
 	}
 
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
-		self.0.as_mut().and_then(|b| b[index as usize].as_mut())
-			.map(AsMut::as_mut)
+		self.0[index as usize].as_mut().map(AsMut::as_mut)
 	}
 }
 
@@ -534,7 +523,7 @@ use crate::radix::impls::Radix256Conf;
 
 impl<N: Debug + Clone> ART48<N> {
 	fn empty() -> Self {
-		ART48(None, 0)
+		ART48(([UNSET48; 256], empty_48_children()), 0)
 	}
 
 	fn need_reduce(
@@ -546,13 +535,12 @@ impl<N: Debug + Clone> ART48<N> {
 	fn reduce_node(&mut self) -> ART16<N> {
 		debug_assert!(self.1 <= 16);
 		let mut result = ART16::empty();
-		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..=255 {
-				let index = indexes[i as usize];
-				if index != UNSET48 {
-					if let Some(value) = values[index as usize].take() {
-						result.set_child(i, value);
-					}
+		let (indexes, values) = &mut self.0;
+		for i in 0..=255 {
+			let index = indexes[i as usize];
+			if index != UNSET48 {
+				if let Some(value) = values[index as usize].take() {
+					result.set_child(i, value);
 				}
 			}
 		}
@@ -560,18 +548,17 @@ impl<N: Debug + Clone> ART48<N> {
 	}
 
 	fn grow_node(&mut self) -> Children256<N> {
-		if self.0.is_none() || self.1 == 0 {
+		if self.1 == 0 {
 			return Children256::empty();
 		}
 		let mut result = Children256::empty();
-		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..=255 {
-				let ix = indexes[i];
-				if ix != UNSET48 {
-					let value = values[ix as usize].take()
-						.expect("Not unset");
-					result.set_child(i as u8, value);
-				}
+		let (indexes, values) = &mut self.0;
+		for i in 0..=255 {
+			let ix = indexes[i];
+			if ix != UNSET48 {
+				let value = values[ix as usize].take()
+					.expect("Not unset");
+				result.set_child(i as u8, value);
 			}
 		}
 		result
@@ -581,11 +568,10 @@ impl<N: Debug + Clone> ART48<N> {
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
 	) -> bool {
-		if self.0.is_none() || self.1 < ADD_TRESHOLD48{
+		if self.1 < ADD_TRESHOLD48{
 			return true;
 		}
-		let (indexes, _values) = self.0.as_ref()
-			.expect("Lazy init above");
+		let (indexes, _values) = &self.0;
 		let is_new = indexes[index as usize] == UNSET48;
 		if is_new && self.1 >= ADD_TRESHOLD48 {
 			return false;
@@ -598,11 +584,7 @@ impl<N: Debug + Clone> ART48<N> {
 		index: <Radix256Conf as RadixConf>::KeyIndex,
 		child: Box<N>,
 	) -> Option<Option<Box<N>>> {
-		if self.0.is_none() {
-			self.0 = Some(([UNSET48; 256], empty_48_children()));
-		}
-		let (indexes, values) = self.0.as_mut()
-			.expect("Lazy init above");
+		let (indexes, values) = &mut self.0;
 		let is_new = indexes[index as usize] == UNSET48;
 		if is_new && self.1 >= ADD_TRESHOLD48 {
 			return None;
@@ -626,31 +608,28 @@ impl<N: Debug + Clone> ART48<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_mut() {
-			if indexes[index as usize] != UNSET48 {
-				let old_index = indexes[index as usize];
-				let result = replace(&mut values[old_index as usize], None);
-				indexes[index as usize] = UNSET48;
-				self.1 -= 1;
-				if old_index != self.1 {
-					// slow removal implementation (may do something here with u128 bit ops.
-					let mut found = None;
-					for (ix, value_ix) in indexes.iter().enumerate() {
-						if *value_ix == self.1 {
-							found = Some(ix);
-							break;
-						}
-					}
-					if let Some(ix) = found {
-						let v = values[indexes[ix] as usize].take();
-						values[old_index as usize] = v;
-						indexes[ix] = old_index;
+		let (indexes, values) = &mut self.0;
+		if indexes[index as usize] != UNSET48 {
+			let old_index = indexes[index as usize];
+			let result = replace(&mut values[old_index as usize], None);
+			indexes[index as usize] = UNSET48;
+			self.1 -= 1;
+			if old_index != self.1 {
+				// slow removal implementation (may do something here with u128 bit ops.
+				let mut found = None;
+				for (ix, value_ix) in indexes.iter().enumerate() {
+					if *value_ix == self.1 {
+						found = Some(ix);
+						break;
 					}
 				}
-				result
-			} else {
-				None
+				if let Some(ix) = found {
+					let v = values[indexes[ix] as usize].take();
+					values[old_index as usize] = v;
+					indexes[ix] = old_index;
+				}
 			}
+			result
 		} else {
 			None
 		}
@@ -669,15 +648,12 @@ impl<N: Debug + Clone> ART48<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_ref() {
-			let index = indexes[index as usize];
-			if index == UNSET48 {
-				return None;
-			}
-			values[index as usize].as_ref().map(AsRef::as_ref)
-		} else {
-			None
+		let (indexes, values) = &self.0;
+		let index = indexes[index as usize];
+		if index == UNSET48 {
+			return None;
 		}
+		values[index as usize].as_ref().map(AsRef::as_ref)
 	}
 
 	fn get_child_mut(
@@ -687,35 +663,31 @@ impl<N: Debug + Clone> ART48<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_mut() {
-			let index = indexes[index as usize];
-			if index == UNSET48 {
-				return None;
-			}
-			values[index as usize].as_mut().map(AsMut::as_mut)
-		} else {
-			None
+		let (indexes, values) = &mut self.0;
+		let index = indexes[index as usize];
+		if index == UNSET48 {
+			return None;
 		}
+		values[index as usize].as_mut().map(AsMut::as_mut)
 	}
 }
 
 impl<N: Debug + Clone> ART16<N> {
 	fn empty() -> Self {
-		ART16(None, 0)
+		ART16(([0u8; 16], empty_16_children()), 0)
 	}
 
 	fn grow_node(&mut self) -> ART48<N> {
-		if self.0.is_none() || self.1 == 0 {
+		if self.1 == 0 {
 			return ART48::empty();
 		}
 		let mut result = ART48::empty();
-		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..self.1 {
-				let ix = indexes[i as usize];
-				let value = values[i as usize].take()
-					.expect("Restricted by size");
-				result.set_child(ix, value);
-			}
+		let (indexes, values) = &mut self.0;
+		for i in 0..self.1 {
+			let ix = indexes[i as usize];
+			let value = values[i as usize].take()
+				.expect("Restricted by size");
+			result.set_child(ix, value);
 		}
 		result
 	}
@@ -729,12 +701,11 @@ impl<N: Debug + Clone> ART16<N> {
 	fn reduce_node(&mut self) -> ART4<N> {
 		debug_assert!(self.1 <= 4);
 		let mut result = ART4::empty();
-		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..self.1 {
-				let index = indexes[i as usize];
-				if let Some(value) = values[i as usize].take() {
-					result.set_child(index, value);
-				}
+		let (indexes, values) = &mut self.0;
+		for i in 0..self.1 {
+			let index = indexes[i as usize];
+			if let Some(value) = values[i as usize].take() {
+				result.set_child(index, value);
 			}
 		}
 		result
@@ -746,11 +717,7 @@ impl<N: Debug + Clone> ART16<N> {
 		index: <Radix256Conf as RadixConf>::KeyIndex,
 		child: Box<N>,
 	) -> (Option<Option<Box<N>>>, Option<Box<N>>) {
-		if self.0.is_none() {
-			self.0 = Some(([0u8; 16], empty_16_children()));
-		}
-		let (indexes, values) = self.0.as_mut()
-			.expect("Lazy init above");
+		let (indexes, values) = &mut self.0;
 		let mut existing_index = None;
 		// TODO something to do with bit expr
 		for i in 0..self.1 {
@@ -780,26 +747,23 @@ impl<N: Debug + Clone> ART16<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_mut() {
-			let mut existing_index = None;
-			// TODO something to do with bit expr
-			for i in 0..self.1 {
-				if indexes[i as usize] == index {
-					existing_index = Some(i);
-				}
+		let (indexes, values) = &mut self.0;
+		let mut existing_index = None;
+		// TODO something to do with bit expr
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				existing_index = Some(i);
 			}
-			if let Some(ix) = existing_index {
-				self.1 -= 1;
-				if ix == self.1 {
-					replace(&mut values[ix as usize], None)
-				} else {
-					let result = replace(&mut values[ix as usize], None);
-					values[ix as usize] = values[self.1 as usize].take();
-					indexes[ix as usize] = indexes[self.1 as usize];
-					result
-				}
+		}
+		if let Some(ix) = existing_index {
+			self.1 -= 1;
+			if ix == self.1 {
+				replace(&mut values[ix as usize], None)
 			} else {
-				None
+				let result = replace(&mut values[ix as usize], None);
+				values[ix as usize] = values[self.1 as usize].take();
+				indexes[ix as usize] = indexes[self.1 as usize];
+				result
 			}
 		} else {
 			None
@@ -819,11 +783,10 @@ impl<N: Debug + Clone> ART16<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_ref() {
-			for i in 0..self.1 {
-				if indexes[i as usize] == index {
-					return values[i as usize].as_ref().map(AsRef::as_ref)
-				}
+		let (indexes, values) = &self.0;
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				return values[i as usize].as_ref().map(AsRef::as_ref)
 			}
 		}
 		None
@@ -836,11 +799,10 @@ impl<N: Debug + Clone> ART16<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..self.1 {
-				if indexes[i as usize] == index {
-					return values[i as usize].as_mut().map(AsMut::as_mut)
-				}
+		let (indexes, values) = &mut self.0;
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				return values[i as usize].as_mut().map(AsMut::as_mut)
 			}
 		}
 		None
@@ -849,21 +811,20 @@ impl<N: Debug + Clone> ART16<N> {
 
 impl<N: Debug + Clone> ART4<N> {
 	fn empty() -> Self {
-		ART4(None, 0)
+		ART4(([0u8; 4], empty_4_children()), 0)
 	}
 
 	fn grow_node(&mut self) -> ART16<N> {
-		if self.0.is_none() || self.1 == 0 {
+		if self.1 == 0 {
 			return ART16::empty();
 		}
 		let mut result = ART16::empty();
-		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..self.1 {
-				let ix = indexes[i as usize];
-				let value = values[i as usize].take()
-					.expect("Restricted by size");
-				result.set_child(ix, value);
-			}
+		let (indexes, values) = &mut self.0;
+		for i in 0..self.1 {
+			let ix = indexes[i as usize];
+			let value = values[i as usize].take()
+				.expect("Restricted by size");
+			result.set_child(ix, value);
 		}
 		result
 	}
@@ -874,11 +835,7 @@ impl<N: Debug + Clone> ART4<N> {
 		index: <Radix256Conf as RadixConf>::KeyIndex,
 		child: Box<N>,
 	) -> (Option<Option<Box<N>>>, Option<Box<N>>) {
-		if self.0.is_none() {
-			self.0 = Some(([0u8; 4], empty_4_children()));
-		}
-		let (indexes, values) = self.0.as_mut()
-			.expect("Lazy init above");
+		let (indexes, values) = &mut self.0;
 		let mut existing_index = None;
 		// TODO something to do with bit expr
 		for i in 0..self.1 {
@@ -908,26 +865,23 @@ impl<N: Debug + Clone> ART4<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_mut() {
-			let mut existing_index = None;
-			// TODO something to do with bit expr
-			for i in 0..self.1 {
-				if indexes[i as usize] == index {
-					existing_index = Some(i);
-				}
+		let (indexes, values) = &mut self.0;
+		let mut existing_index = None;
+		// TODO something to do with bit expr
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				existing_index = Some(i);
 			}
-			if let Some(ix) = existing_index {
-				self.1 -= 1;
-				if ix == self.1 {
-					replace(&mut values[ix as usize], None)
-				} else {
-					let result = replace(&mut values[ix as usize], None);
-					values[ix as usize] = values[self.1 as usize].take();
-					indexes[ix as usize] = indexes[self.1 as usize];
-					result
-				}
+		}
+		if let Some(ix) = existing_index {
+			self.1 -= 1;
+			if ix == self.1 {
+				replace(&mut values[ix as usize], None)
 			} else {
-				None
+				let result = replace(&mut values[ix as usize], None);
+				values[ix as usize] = values[self.1 as usize].take();
+				indexes[ix as usize] = indexes[self.1 as usize];
+				result
 			}
 		} else {
 			None
@@ -947,11 +901,10 @@ impl<N: Debug + Clone> ART4<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_ref() {
-			for i in 0..self.1 {
-				if indexes[i as usize] == index {
-					return values[i as usize].as_ref().map(AsRef::as_ref)
-				}
+		let (indexes, values) = &self.0;
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				return values[i as usize].as_ref().map(AsRef::as_ref)
 			}
 		}
 		None
@@ -964,11 +917,10 @@ impl<N: Debug + Clone> ART4<N> {
 		if self.1 == 0 {
 			return None;
 		}
-		if let Some((indexes, values)) = self.0.as_mut() {
-			for i in 0..self.1 {
-				if indexes[i as usize] == index {
-					return values[i as usize].as_mut().map(AsMut::as_mut)
-				}
+		let (indexes, values) = &mut self.0;
+		for i in 0..self.1 {
+			if indexes[i as usize] == index {
+				return values[i as usize].as_mut().map(AsMut::as_mut)
 			}
 		}
 		None
