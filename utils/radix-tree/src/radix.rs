@@ -270,6 +270,7 @@ pub mod impls {
 
 	pub struct Radix256Conf;
 	pub struct Radix2Conf;
+	pub struct Radix4Conf;
 	pub struct Radix16Conf;
 
 	impl RadixConf for Radix16Conf {
@@ -310,6 +311,35 @@ pub mod impls {
 			});
 		}
 	}
+
+	impl RadixConf for Radix4Conf {
+		type Alignment = u8;
+
+		type KeyIndex = u8;
+
+		const CHILDREN_CAPACITY: usize = 4;
+
+		fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
+			unimplemented!()
+		}
+
+		fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
+			unimplemented!("TODO or default one")
+		}
+
+		fn mask_from_delta(delta: u8) -> MaskFor<Self> {
+			unimplemented!()
+		}
+
+		fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
+			unimplemented!()
+		}
+
+		fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
+			unimplemented!()
+		}
+	}
+
 
 	impl RadixConf for Radix256Conf {
 		type Alignment = ();

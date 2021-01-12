@@ -214,10 +214,19 @@ pub struct Children256<N> (
 	u8,
 );
 
+#[derive(Derivative)]
+#[derivative(Clone)]
+pub struct Children4<N> (
+	// TODO try remove Option: same for art variant.
+	Option<[Option<Box<N>>; 4]>,
+	u8,
+);
+
+
 /// 48 children for art tree.
 #[derive(Derivative)]
 #[derivative(Clone)]
-pub struct Children48<N> (
+pub struct ART48<N> (
 	Option<([u8; 256], [Option<Box<N>>; 48])>,
 	u8,
 );
@@ -225,7 +234,7 @@ pub struct Children48<N> (
 /// 16 children for art tree.
 #[derive(Derivative)]
 #[derivative(Clone)]
-pub struct Children16<N> (
+pub struct ART16<N> (
 	Option<([u8; 16], [Option<Box<N>>; 16])>,
 	u8,
 );
@@ -233,7 +242,7 @@ pub struct Children16<N> (
 /// 4 children for art tree.
 #[derive(Derivative)]
 #[derivative(Clone)]
-pub struct Children4<N> (
+pub struct ART4<N> (
 	Option<([u8; 4], [Option<Box<N>>; 4])>,
 	u8,
 );
@@ -242,9 +251,9 @@ pub struct Children4<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub enum ART48_256<N> {
-	ART4(Children4<N>),
-	ART16(Children16<N>),
-	ART48(Children48<N>),
+	ART4(ART4<N>),
+	ART16(ART16<N>),
+	ART48(ART48<N>),
 	ART256(Children256<N>),
 }
 
@@ -324,19 +333,30 @@ impl<N: Debug> Debug for Children256<N> {
 	}
 }
 
-impl<N: Debug> Debug for Children48<N> {
+impl<N: Debug> Debug for Children4<N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
+		if let Some(children) = self.0.as_ref() {
+			children[..].fmt(f)
+		} else {
+			let empty: &[N] = &[]; 
+			empty.fmt(f)
+		}
+	}
+}
+
+impl<N: Debug> Debug for ART48<N> {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
 		"unimplemented children 48".fmt(f)
 	}
 }
 
-impl<N: Debug> Debug for Children16<N> {
+impl<N: Debug> Debug for ART16<N> {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
 		"unimplemented children 16".fmt(f)
 	}
 }
 
-impl<N: Debug> Debug for Children4<N> {
+impl<N: Debug> Debug for ART4<N> {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
 		"unimplemented children 4".fmt(f)
 	}
@@ -412,6 +432,71 @@ impl<N: Debug + Clone> Children for Children256<N> {
 	}
 }
 
+// TODO macroed children4 and children256
+impl<N: Debug + Clone> Children for Children4<N> {
+	type Radix = crate::radix::impls::Radix16Conf;
+
+	type Node = N;
+
+	fn empty() -> Self {
+		Children4(None, 0)
+	}
+
+	fn set_child(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+		child: Box<N>,
+	) -> Option<Box<N>> {
+		if self.0.is_none() {
+			self.0 = Some(empty_4_children());
+		}
+		let children = self.0.as_mut()
+			.expect("Lazy init above");
+		let result = replace(&mut children[index as usize], Some(child));
+		if result.is_none() {
+			self.1 += 1;
+		}
+		result
+	}
+
+	fn remove_child(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) -> Option<Box<N>> {
+		if let Some(children) = self.0.as_mut() {
+			let result = replace(&mut children[index as usize], None);
+			if result.is_some() {
+				self.1 -= 1;
+			}
+			result
+		} else {
+			None
+		}
+	}
+
+	fn number_child(
+		&self,
+	) -> usize {
+		self.1 as usize
+	}
+
+	fn get_child(
+		&self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) -> Option<&N> {
+		self.0.as_ref().and_then(|b| b[index as usize].as_ref())
+			.map(AsRef::as_ref)
+	}
+
+	fn get_child_mut(
+		&mut self,
+		index: <Self::Radix as RadixConf>::KeyIndex,
+	) -> Option<&mut N> {
+		self.0.as_mut().and_then(|b| b[index as usize].as_mut())
+			.map(AsMut::as_mut)
+	}
+}
+
 impl<N: Debug + Clone> Children256<N> {
 	fn need_reduce(
 		&self,
@@ -419,9 +504,9 @@ impl<N: Debug + Clone> Children256<N> {
 		self.1 <= REM_TRESHOLD48
 	}
 
-	fn reduce_node(&mut self) -> Children48<N> {
+	fn reduce_node(&mut self) -> ART48<N> {
 		debug_assert!(self.1 <= 48);
-		let mut result = Children48::empty();
+		let mut result = ART48::empty();
 		for i in 0..=255 {
 			if let Some(child) = self.remove_child(i) {
 				result.set_child(i, child);
@@ -447,9 +532,9 @@ const REM_TRESHOLD4: u8 = 4u8;
 
 use crate::radix::impls::Radix256Conf;
 
-impl<N: Debug + Clone> Children48<N> {
+impl<N: Debug + Clone> ART48<N> {
 	fn empty() -> Self {
-		Children48(None, 0)
+		ART48(None, 0)
 	}
 
 	fn need_reduce(
@@ -458,9 +543,9 @@ impl<N: Debug + Clone> Children48<N> {
 		self.1 <= REM_TRESHOLD16
 	}
 
-	fn reduce_node(&mut self) -> Children16<N> {
+	fn reduce_node(&mut self) -> ART16<N> {
 		debug_assert!(self.1 <= 16);
-		let mut result = Children16::empty();
+		let mut result = ART16::empty();
 		if let Some((indexes, values)) = self.0.as_mut() {
 			for i in 0..=255 {
 				let index = indexes[i as usize];
@@ -614,16 +699,16 @@ impl<N: Debug + Clone> Children48<N> {
 	}
 }
 
-impl<N: Debug + Clone> Children16<N> {
+impl<N: Debug + Clone> ART16<N> {
 	fn empty() -> Self {
-		Children16(None, 0)
+		ART16(None, 0)
 	}
 
-	fn grow_node(&mut self) -> Children48<N> {
+	fn grow_node(&mut self) -> ART48<N> {
 		if self.0.is_none() || self.1 == 0 {
-			return Children48::empty();
+			return ART48::empty();
 		}
-		let mut result = Children48::empty();
+		let mut result = ART48::empty();
 		if let Some((indexes, values)) = self.0.as_mut() {
 			for i in 0..self.1 {
 				let ix = indexes[i as usize];
@@ -641,9 +726,9 @@ impl<N: Debug + Clone> Children16<N> {
 		self.1 <= REM_TRESHOLD4
 	}
 
-	fn reduce_node(&mut self) -> Children4<N> {
+	fn reduce_node(&mut self) -> ART4<N> {
 		debug_assert!(self.1 <= 4);
-		let mut result = Children4::empty();
+		let mut result = ART4::empty();
 		if let Some((indexes, values)) = self.0.as_mut() {
 			for i in 0..self.1 {
 				let index = indexes[i as usize];
@@ -762,16 +847,16 @@ impl<N: Debug + Clone> Children16<N> {
 	}
 }
 
-impl<N: Debug + Clone> Children4<N> {
+impl<N: Debug + Clone> ART4<N> {
 	fn empty() -> Self {
-		Children4(None, 0)
+		ART4(None, 0)
 	}
 
-	fn grow_node(&mut self) -> Children16<N> {
+	fn grow_node(&mut self) -> ART16<N> {
 		if self.0.is_none() || self.1 == 0 {
-			return Children16::empty();
+			return ART16::empty();
 		}
-		let mut result = Children16::empty();
+		let mut result = ART16::empty();
 		if let Some((indexes, values)) = self.0.as_mut() {
 			for i in 0..self.1 {
 				let ix = indexes[i as usize];
@@ -906,7 +991,7 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 	type Node = N;
 
 	fn empty() -> Self {
-		ART48_256::ART4(Children4::empty())
+		ART48_256::ART4(ART4::empty())
 	}
 
 	fn set_child(

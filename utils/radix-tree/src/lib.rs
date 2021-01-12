@@ -1072,8 +1072,8 @@ macro_rules! flatten_children {
 	}
 }
 
-use crate::children::{Children256, ART48_256};
-use crate::radix::impls::Radix256Conf;
+use crate::children::{Children256, ART48_256, Children4};
+use crate::radix::impls::{Radix256Conf, Radix4Conf};
 
 flatten_children!(
 	Children256Flatten,
@@ -1133,4 +1133,13 @@ flatten_children!(
 			backends::MapBackend
 		>
 	>,
+);
+
+flatten_children!(
+	Children4Flatten,
+	Node4Flatten,
+	Node4NoBackend,
+	Children4,
+	Radix4Conf,
+	(),
 );
