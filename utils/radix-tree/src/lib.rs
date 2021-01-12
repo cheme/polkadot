@@ -756,15 +756,25 @@ enum Descent<P>
 	Match(Position<P::Alignment>),
 }
 
+macro_rules! tree_get {
+	(
+		$fn_name: ident,
+		$get_child: ident,
+		$as_ref: ident,
+		$value: ident,
+		$( $modifier: ident, )?
+	) => {
+
+
 impl<N: TreeConf> Tree<N> {
 	/// Get reference to a tree value for a given key.
-	pub fn get(&self, key: &[u8]) -> Option<&N::Value> {
-		if let Some(top) = self.tree.as_ref() {
-			let mut current = top.as_ref();
+	pub fn $fn_name(& $($modifier)? self, key: &[u8]) -> Option<& $($modifier)? N::Value> {
+		if let Some(top) = self.tree.$as_ref() {
+			let mut current = top.$as_ref();
 			// TODO is this limit condition of any use
 			if key.len() == 0 {
 				if current.depth() == 0 {
-					return current.value();
+					return current.$value();
 				} else {
 					return None;
 				}
@@ -777,9 +787,8 @@ impl<N: TreeConf> Tree<N> {
 			loop {
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
-						if let Some(child) = current.get_child(index) {
+						if let Some(child) = current.$get_child(index) {
 							position = child_position.next::<N::Radix>();
-							//position = child_position;
 							current = child;
 						} else {
 							return None;
@@ -789,7 +798,7 @@ impl<N: TreeConf> Tree<N> {
 						return None;
 					},
 					Descent::Match(_position) => {
-						return current.value();
+						return current.$value();
 					},
 				}
 			}
@@ -797,47 +806,27 @@ impl<N: TreeConf> Tree<N> {
 			None
 		}
 	}
+}
 
-	/// Get mutable reference to a tree value for a given key.
-	pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut N::Value> {
-		if let Some(top) = self.tree.as_mut() {
-			let mut current = top.as_mut();
-			if key.len() == 0 {
-				if current.depth() == 0 {
-					return current.value_mut();
-				} else {
-					return None;
-				}
-			}
-			let dest_position = Position {
-				index: key.len(),
-				mask: MaskFor::<N::Radix>::FIRST,
-			};
-			let mut position = PositionFor::<N>::zero();
-			loop {
-				match current.descend(key, position, dest_position) {
-					Descent::Child(child_position, index) => {
-						if let Some(child) = current.get_child_mut(index) {
-							position = child_position.next::<N::Radix>();
-							//position = child_position;
-							current = child;
-						} else {
-							return None;
-						}
-					},
-					Descent::Middle(_position, _index) => {
-						return None;
-					},
-					Descent::Match(_position) => {
-						return current.value_mut();
-					},
-				}
-			}
-		} else {
-			None
-		}
-	}
 
+}}
+
+tree_get!(
+	get,
+	get_child,
+	as_ref,
+	value,
+);
+
+tree_get!(
+	get_mut,
+	get_child_mut,
+	as_mut,
+	value_mut,
+	mut,
+);
+
+impl<N: TreeConf> Tree<N> {
 	/// Add new key value to the tree, and return previous value if any.
 	pub fn insert(&mut self, key: &[u8], value: N::Value) -> Option<N::Value> {
 		let dest_position = PositionFor::<N> {

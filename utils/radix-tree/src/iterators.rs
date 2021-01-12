@@ -17,10 +17,6 @@
 
 //! Different tree iterators and implementations.
 
-// TODO remove code redundancy.
-// -> using iterstackcommon and another trait with item accessor
-// and merging mut and non mut struct.
-
 use super::{Tree, TreeConf, Node, PositionFor, Descent, Key, KeyIndexFor};
 pub use derivative::Derivative;
 use alloc::vec::Vec;
@@ -482,7 +478,6 @@ impl<'a, N: TreeConf> $iter<'a, N> {
 }}
 
 type SeekIterItem<'a, N> = (PositionFor<N>, &'a Node<N>, KeyIndexFor<N>);
-// TODO get rid up of it
 type NextNode<'a, N> = (PositionFor<N>, &'a Node<N>);
 type SeekIterItemMut<'a, N> = (PositionFor<N>, *mut Node<N>, KeyIndexFor<N>);
 type NextNodeMut<'a, N> = (PositionFor<N>, &'a mut Node<N>);
