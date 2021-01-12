@@ -340,7 +340,6 @@ pub mod impls {
 		}
 	}
 
-
 	impl RadixConf for Radix256Conf {
 		type Alignment = ();
 
