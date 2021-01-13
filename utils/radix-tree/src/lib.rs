@@ -82,7 +82,7 @@ impl<D, P> PrefixKey<D, P>
 		P: PrefixKeyConf,
 {
 	fn unchecked_first_byte(&self) -> u8 {
-		self.start.mask(self.data.borrow()[0])
+		self.start.mask_start(self.data.borrow()[0])
 	}
 
 	fn unchecked_last_byte(&self) -> u8 {
@@ -90,7 +90,7 @@ impl<D, P> PrefixKey<D, P>
 	}
 
 	fn unchecked_single_byte(&self) -> u8 {
-		self.start.mask(self.end.mask_end(self.data.borrow()[0]))
+		self.start.mask_start(self.end.mask_end(self.data.borrow()[0]))
 	}
 
 	fn index<R: RadixConf<Alignment = P>>(&self, position: Position<P>) -> R::KeyIndex {
@@ -104,7 +104,7 @@ impl<D, P> PrefixKey<D, P>
 		} else {
 			let mut len = self.data.borrow().len() * 8;
 			// TODO consider a const value for getting bit mask.
-			len -= self.start.mask(255).leading_zeros() as usize;
+			len -= self.start.mask_start(255).leading_zeros() as usize;
 			len -= self.end.mask_end(255).trailing_zeros() as usize;
 			len
 		}
@@ -639,12 +639,12 @@ impl<N: TreeConf> Node<N> {
 			let node_position_end = node_position.next_by::<N::Radix>(depth);
 
 			let (start, end) = if node_position.index == node_position_end.index {
-				let start = stack[node_position.index] & !self.key.start.mask(255) & self.key.end.mask(255)
+				let start = stack[node_position.index] & !self.key.start.mask_start(255) & self.key.end.mask_start(255)
 					&self.key.unchecked_single_byte();
 				(start, start)
 			} else {
-				let start = stack[node_position.index] & !self.key.start.mask(255) & self.key.unchecked_first_byte();
-				let end = stack[node_position_end.index] & self.key.end.mask(255) & self.key.unchecked_last_byte();
+				let start = stack[node_position.index] & !self.key.start.mask_start(255) & self.key.unchecked_first_byte();
+				let end = stack[node_position_end.index] & self.key.end.mask_start(255) & self.key.unchecked_last_byte();
 				(start, end)
 			};
 			&mut stack[node_position.index..node_position_end.index].copy_from_slice(self.key.data.borrow());

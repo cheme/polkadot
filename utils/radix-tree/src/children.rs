@@ -28,7 +28,15 @@ use alloc::boxed::Box;
 pub trait NodeIndex: Clone + Copy + Debug + PartialEq + PartialOrd {
 	fn zero() -> Self;
 	fn next(&self) -> Option<Self>;
+	fn to_usize(self) -> usize;
+	fn from_usize(position: usize) -> Self;
 }
+
+// TODO macro index with limit stored in u8
+/// Radix 4 node index.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Index4(u8);
 
 mod node_indexes_impls {
 	use super::*;
@@ -44,6 +52,12 @@ mod node_indexes_impls {
 				Some(true)
 			}
 		}
+		fn to_usize(self) -> usize {
+			self as usize
+		}
+		fn from_usize(position: usize) -> Self {
+			position != 0
+		}
 	}
 
 	impl NodeIndex for u8 {
@@ -56,6 +70,31 @@ mod node_indexes_impls {
 			} else {
 				Some(*self + 1)
 			}
+		}
+		fn to_usize(self) -> usize {
+			self as usize
+		}
+		fn from_usize(position: usize) -> Self {
+			position as u8
+		}
+	}
+
+	impl NodeIndex for Index4 {
+		fn zero() -> Self {
+			Index4(0)
+		}
+		fn next(&self) -> Option<Self> {
+			if self.0 == 3 {
+				None
+			} else {
+				Some(Index4(self.0 + 1))
+			}
+		}
+		fn to_usize(self) -> usize {
+			self.0 as usize
+		}
+		fn from_usize(position: usize) -> Self {
+			Index4(position as u8)
 		}
 	}
 }
@@ -432,7 +471,7 @@ impl<N: Debug + Clone> Children for Children256<N> {
 
 // TODO macroed children4 and children256
 impl<N: Debug + Clone> Children for Children4<N> {
-	type Radix = crate::radix::impls::Radix16Conf;
+	type Radix = crate::radix::impls::Radix4Conf;
 
 	type Node = N;
 
@@ -446,7 +485,7 @@ impl<N: Debug + Clone> Children for Children4<N> {
 		child: Box<N>,
 	) -> Option<Box<N>> {
 		let children = &mut self.0;
-		let result = replace(&mut children[index as usize], Some(child));
+		let result = replace(&mut children[index.to_usize()], Some(child));
 		if result.is_none() {
 			self.1 += 1;
 		}
@@ -458,7 +497,7 @@ impl<N: Debug + Clone> Children for Children4<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<Box<N>> {
 		let children = &mut self.0.as_mut();
-		let result = replace(&mut children[index as usize], None);
+		let result = replace(&mut children[index.to_usize()], None);
 		if result.is_some() {
 			self.1 -= 1;
 		}
@@ -475,14 +514,14 @@ impl<N: Debug + Clone> Children for Children4<N> {
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&N> {
-		self.0[index as usize].as_ref().map(AsRef::as_ref)
+		self.0[index.to_usize()].as_ref().map(AsRef::as_ref)
 	}
 
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
-		self.0[index as usize].as_mut().map(AsMut::as_mut)
+		self.0[index.to_usize()].as_mut().map(AsMut::as_mut)
 	}
 }
 

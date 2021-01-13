@@ -37,12 +37,13 @@ pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 	const LAST: Self;
 
 	/// Mask left part of a byte.
-	fn mask(&self, byte: u8) -> u8;
+	fn mask_start(&self, byte: u8) -> u8;
 
 	/// Mask right part of a byte.
 	fn mask_end(&self, byte: u8) -> u8;
 
 	/// Extract u8 index from this byte.
+	/// TODO const function?
 	fn index(&self, byte: u8) -> u8;
 
 	/// Insert u8 index into this byte.
@@ -50,6 +51,11 @@ pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 
 	/// Same as `Ord` `cmp`, but not using a reference.
 	fn cmp(&self, other: Self) -> Ordering;
+
+	/// Get mask definition from a byte index.
+	/// Not out of bound checks done.
+	/// TODO unused??
+	fn from_index(index: u8) -> Self;
 }
 
 /// Definition of prefix key.
@@ -66,6 +72,14 @@ pub trait PrefixKeyConf {
 	/// Decode the byte mask.
 	fn decode_mask(mask: u8) -> Self::Mask;
 }
+
+/// Mask for radix 4 node.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Mask4(u8);
+
+/// PrefixKeyConf for a radix 4 tree.
+pub struct Prefix4;
 
 mod prefix_key_confs_impls {
 	use super::*;
@@ -122,12 +136,29 @@ mod prefix_key_confs_impls {
 		}
 	}
 
+	impl PrefixKeyConf for Prefix4 {
+		const ALIGNED: bool = false;
+
+		const DEFAULT: Option<Self::Mask> = None;
+
+		type Mask = Mask4;
+
+		fn encode_mask(mask: Self::Mask) -> u8 {
+			mask.0
+		}
+
+		fn decode_mask(mask: u8) -> Self::Mask {
+			Mask4(mask)
+		}
+	}
+
+	// Equivalent to Mask1
 	impl MaskKeyByte for () {
 		const FIRST: Self = ();
 
 		const LAST: Self = ();
 
-		fn mask(&self, byte: u8) -> u8 {
+		fn mask_start(&self, byte: u8) -> u8 {
 			byte
 		}
 
@@ -146,14 +177,19 @@ mod prefix_key_confs_impls {
 		fn cmp(&self, _other: Self) -> Ordering {
 			Ordering::Equal
 		}
+
+		fn from_index(_index: u8) -> Self {
+			()
+		}
 	}
 
+	// This is equivalent to Mask2
 	impl MaskKeyByte for bool {
 		const FIRST: Self = true;
 
 		const LAST: Self = false;
 
-		fn mask(&self, byte: u8) -> u8 {
+		fn mask_start(&self, byte: u8) -> u8 {
 			if *self {
 				byte & 0x0f
 			} else {
@@ -193,14 +229,20 @@ mod prefix_key_confs_impls {
 					| (false, false) => Ordering::Equal,
 			}
 		}
+
+		fn from_index(index: u8) -> Self {
+			index == 0
+		}
 	}
 
+	// TODO Mask macro for u8 derivative and use Mask8 here
+	// u8 is equivalent to Mask8 (for binary tree).
 	impl MaskKeyByte for u8 {
 		const FIRST: Self = 0;
 
 		const LAST: Self = 7;
 
-		fn mask(&self, byte: u8) -> u8 {
+		fn mask_start(&self, byte: u8) -> u8 {
 			byte & (0b11111111 >> self)
 		}
 
@@ -218,6 +260,40 @@ mod prefix_key_confs_impls {
 
 		fn cmp(&self, other: Self) -> Ordering {
 			<u8 as core::cmp::Ord>::cmp(self, &other)
+		}
+
+		fn from_index(index: u8) -> Self {
+			index
+		}
+	}
+
+	impl MaskKeyByte for Mask4 {
+		const FIRST: Self = Mask4(0);
+
+		const LAST: Self = Mask4(3);
+
+		fn mask_start(&self, byte: u8) -> u8 {
+			byte & (0b11111111 >> self.0)
+		}
+
+		fn mask_end(&self, byte: u8) -> u8 {
+			byte & (0b11111111 << ((3 - self.0) * 2) )
+		}
+
+		fn index(&self, byte: u8) -> u8 {
+			(byte & (0b11000000 >> self.0)) >> (3 - self.0)
+		}
+
+		fn set_index(&self, byte: u8, index: u8) -> u8 {
+			(byte & !(0b11000000 >> self.0)) | (index << (3 - self.0))
+		}
+
+		fn cmp(&self, other: Self) -> Ordering {
+			<u8 as core::cmp::Ord>::cmp(&self.0, &other.0)
+		}
+
+		fn from_index(index: u8) -> Self {
+			Mask4(index)
 		}
 	}
 }
@@ -259,6 +335,7 @@ pub trait RadixConf {
 	/// Get mask from the delta of two byte, the delta is obtain by using xor, so 255
 	/// if no common bytes and 0 if all common.
 	/// This is mask for a start byte in the case of common prefix calculation.
+	/// TODO sounds like *** : remove
 	fn mask_from_delta(delta: u8) -> MaskFor<Self>;
 }
 
@@ -313,30 +390,49 @@ pub mod impls {
 	}
 
 	impl RadixConf for Radix4Conf {
-		type Alignment = u8;
+		type Alignment = Prefix4;
 
-		type KeyIndex = u8;
+		type KeyIndex = crate::children::Index4;
 
 		const CHILDREN_CAPACITY: usize = 4;
 
+		// TODO put in MaskFor ? generally radix conf seems useless??
 		fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
+			if previous_mask == MaskFor::<Self>::LAST {
+				(Mask4(previous_mask.0 + 1), 0)
+			} else {
+				(MaskFor::<Self>::FIRST, 1)
+			}
+		}
+
+		fn advance_by(previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
+			let inc = nb / 4;
+			let rem = (nb % 4) as u8;
+			if previous_mask.0 + rem > 3 {
+				(Mask4(previous_mask.0 + rem - 3), inc + 1)
+			} else {
+				(Mask4(previous_mask.0 + rem), inc)
+			}
+		}
+
+		fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
 			unimplemented!()
 		}
 
-		fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
-			unimplemented!("TODO or default one")
-		}
-
-		fn mask_from_delta(delta: u8) -> MaskFor<Self> {
-			unimplemented!()
-		}
-
+		// TODO trait method? and from_index for index (uncheckd
 		fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
-			unimplemented!()
+			key.get(at.index).map(|byte| {
+				Self::KeyIndex::from_usize(at.mask.index(*byte) as usize)
+			})
 		}
 
 		fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex) {
-			unimplemented!()
+			if key.len() <= at.index {
+				key.resize(at.index + 1, 0);
+			}
+			key.get_mut(at.index).map(|byte| {
+				*byte = at.mask.set_index(*byte, index.to_usize() as u8)
+			});
 		}
 	}
 
@@ -384,7 +480,8 @@ pub mod impls {
 
 		fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
 			if previous_mask < 255 {
-				(previous_mask + 1, 0)
+				unimplemented!()
+			//	(previous_mask + 1, 0)
 			} else {
 				(0, 1)
 			}
