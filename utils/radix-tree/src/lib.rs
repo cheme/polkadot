@@ -625,7 +625,7 @@ impl<N: TreeConf> Node<N> {
 	}
 
 	// TODO make it a trait function for Radix_conf?
-	/// Realign node partial key to a given end position.
+	/// Push node partial on the current stacked key, given the node start position.
 	fn new_end(&self, stack: &mut Key, node_position: PositionFor<N>) {
 		let depth = self.depth();
 		if depth == 0 {
@@ -637,19 +637,15 @@ impl<N: TreeConf> Node<N> {
 			&mut stack[node_position.index..new_len].copy_from_slice(self.key.data.borrow());
 		} else {
 			let node_position_end = node_position.next_by::<N::Radix>(depth);
+			stack.resize(node_position_end.index, 0);
 
-			let (start, end) = if node_position.index == node_position_end.index {
-				let start = stack[node_position.index] & !self.key.start.mask_start(255) & self.key.end.mask_start(255)
-					&self.key.unchecked_single_byte();
-				(start, start)
-			} else {
-				let start = stack[node_position.index] & !self.key.start.mask_start(255) & self.key.unchecked_first_byte();
-				let end = stack[node_position_end.index] & self.key.end.mask_start(255) & self.key.unchecked_last_byte();
-				(start, end)
-			};
+			let start = stack[node_position.index]
+				& !self.key.start.mask_start(255)
+				& self.key.unchecked_first_byte();
+
 			&mut stack[node_position.index..node_position_end.index].copy_from_slice(self.key.data.borrow());
 			stack[node_position.index] = start;
-			stack[node_position_end.index] = end;
+			stack[node_position_end.index] = self.key.end.mask_end(stack[node_position_end.index]);
 		}
 	}
 
