@@ -43,10 +43,11 @@ pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 	fn mask_end(&self, byte: u8) -> u8;
 
 	/// Extract u8 index from this byte.
-	/// TODO const function?
+	/// TODO const function? TODO rename to 'at'
 	fn index(&self, byte: u8) -> u8;
 
 	/// Insert u8 index into this byte.
+	/// TODO rename to 'set_at'
 	fn set_index(&self, byte: u8, index: u8) -> u8;
 
 	/// Same as `Ord` `cmp`, but not using a reference.
@@ -56,6 +57,9 @@ pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 	/// Not out of bound checks done.
 	/// TODO unused??
 	fn from_index(index: u8) -> Self;
+
+	/// Get internal mask index.
+	fn to_index(&self) -> u8;
 }
 
 /// Definition of prefix key.
@@ -181,6 +185,10 @@ mod prefix_key_confs_impls {
 		fn from_index(_index: u8) -> Self {
 			()
 		}
+
+		fn to_index(&self) -> u8 {
+			0
+		}
 	}
 
 	// This is equivalent to Mask2
@@ -233,6 +241,14 @@ mod prefix_key_confs_impls {
 		fn from_index(index: u8) -> Self {
 			index == 0
 		}
+
+		fn to_index(&self) -> u8 {
+			if *self {
+				0
+			} else {
+				1
+			}
+		}
 	}
 
 	// TODO Mask macro for u8 derivative and use Mask8 here
@@ -265,6 +281,10 @@ mod prefix_key_confs_impls {
 		fn from_index(index: u8) -> Self {
 			index
 		}
+
+		fn to_index(&self) -> u8 {
+			*self
+		}
 	}
 
 	impl MaskKeyByte for Mask4 {
@@ -294,6 +314,10 @@ mod prefix_key_confs_impls {
 
 		fn from_index(index: u8) -> Self {
 			Mask4(index)
+		}
+
+		fn to_index(&self) -> u8 {
+			self.0
 		}
 	}
 }
@@ -332,11 +356,8 @@ pub trait RadixConf {
 	/// Set index at a given position in a key.
 	fn set_index(key: &mut NodeKeyBuff, at: Position<Self::Alignment>, index: Self::KeyIndex);
 
-	/// Get mask from the delta of two byte, the delta is obtain by using xor, so 255
-	/// if no common bytes and 0 if all common.
-	/// This is mask for a start byte in the case of common prefix calculation.
-	/// TODO sounds like *** : remove
-	fn mask_from_delta(delta: u8) -> MaskFor<Self>;
+	/// Get first non matching position from a delta resulting from a xor comparison.
+	fn common_until_delta(delta: u8) -> MaskFor<Self>;
 }
 
 pub(crate) type MaskFor<N> = <<N as RadixConf>::Alignment as PrefixKeyConf>::Mask;
@@ -369,7 +390,7 @@ pub mod impls {
 			unimplemented!("TODO or default one")
 		}
 
-		fn mask_from_delta(delta: u8) -> MaskFor<Self> {
+		fn common_until_delta(delta: u8) -> MaskFor<Self> {
 			delta < 16
 		}
 
@@ -415,8 +436,8 @@ pub mod impls {
 			}
 		}
 
-		fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
-			unimplemented!()
+		fn common_until_delta(delta: u8) -> MaskFor<Self> {
+			Mask4((delta.leading_zeros() / 2)  as u8)
 		}
 
 		// TODO trait method? and from_index for index (uncheckd
@@ -451,7 +472,7 @@ pub mod impls {
 			((), nb)
 		}
 
-		fn mask_from_delta(_delta: u8) -> MaskFor<Self> {
+		fn common_until_delta(_delta: u8) -> MaskFor<Self> {
 			()
 		}
 
@@ -491,8 +512,8 @@ pub mod impls {
 			unimplemented!("TODO implement or default")
 		}
 
-		fn mask_from_delta(delta: u8) -> MaskFor<Self> {
-			255 >> (delta.leading_zeros())
+		fn common_until_delta(delta: u8) -> MaskFor<Self> {
+			delta.leading_zeros() as u8
 		}
 
 		fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {

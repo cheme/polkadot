@@ -102,10 +102,13 @@ impl<D, P> PrefixKey<D, P>
 		if P::ALIGNED {
 			self.data.borrow().len()
 		} else {
-			let mut len = self.data.borrow().len() * 8;
-			// TODO consider a const value for getting bit mask.
-			len -= self.start.mask_start(255).leading_zeros() as usize;
-			len -= self.end.mask_end(255).trailing_zeros() as usize;
+			let nb_mask = P::Mask::LAST.to_index() + 1; // TODO associated const, but merge useless traits first
+			if P::Mask::FIRST == self.end {
+				return self.data.borrow().len() * nb_mask as usize;
+			}
+			let mut len = self.data.borrow().len() * nb_mask as usize;
+			len -= self.start.to_index() as usize;
+			len -= (nb_mask - self.end.to_index()) as usize;
 			len
 		}
 	}
@@ -171,57 +174,55 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 			mask: MaskFor::<N>::FIRST,
 		}
 	} else {
-		unimplemented!()
-/*		if one.start != other.start {
-			return Position::zero();
+		// TODO replace by debug_assert later.
+		if one.start != other.start {
+			panic!("Unaligned call to common_until.");
 		}
+
 		let left = one.data.borrow();
 		let right = other.data.borrow();
 		if left.len() == 0 || right.len() == 0 {
 			return Position::zero();
 		}
+
 		let mut index = 0;
 		let mut delta = one.unchecked_first_byte() ^ other.unchecked_first_byte();
 		if delta == 0 {
 			let upper_bound = min(left.len(), right.len());
 			for i in 1..(upper_bound - 1) {
-				if left[i] != right[i] {
+				delta = left[i] ^ right[i];
+				if delta != 0 {
 					index = i;
 					break;
 				}
 			}
 			if index == 0 {
 				index = upper_bound - 1;
-				delta = if left.len() == upper_bound {
-					one.unchecked_last_byte() ^ right[index]
-						& !one.end.mask(255)
+				let left = if left.len() == index {
+					one.unchecked_last_byte()
 				} else {
-					left[index] ^ other.unchecked_last_byte()
-						& !other.end.mask(255)
+					left[index]
 				};
-					unimplemented!("TODO do with a mask_end function.");
-			} else {
-				delta = left[index] ^ right[index];
+				let right =  if right.len() == index {
+					other.unchecked_last_byte()
+				} else {
+					right[index]
+				};
+				delta = left ^ right;
 			}
 		}
 		if delta == 0 {
 			Position {
-				index: index,
-				mask: MaskFor::<N>::last(),
+				index: index + 1,
+				mask: MaskFor::<N>::FIRST,
 			}
 		} else {
-			//let mask = 255u8 >> delta.leading_zeros();
-			let mask = N::mask_from_delta(delta);
-/*			let mask = if index == 0 {
-				self.start.mask_mask(mask)
-			} else {
-				mask
-			};*/
+			let mask = N::common_until_delta(delta);
 			Position {
-				index,
+				index: index,
 				mask,
 			}
-		*/
+		}
 	}
 }
 
@@ -636,16 +637,24 @@ impl<N: TreeConf> Node<N> {
 			stack.resize(new_len, 0);
 			&mut stack[node_position.index..new_len].copy_from_slice(self.key.data.borrow());
 		} else {
+			// exclusive end.
 			let node_position_end = node_position.next_by::<N::Radix>(depth);
-			stack.resize(node_position_end.index, 0);
+			let shift = if node_position_end.mask == MaskFor::<N::Radix>::FIRST {
+				1
+			} else {
+				0
+			};
+			stack.resize(node_position_end.index + 1 - shift, 0);
 
 			let start = stack[node_position.index]
 				& !self.key.start.mask_start(255)
 				& self.key.unchecked_first_byte();
-
-			&mut stack[node_position.index..node_position_end.index].copy_from_slice(self.key.data.borrow());
+			// end index exclusive semantic, is inclusive better here?
+			&mut stack[node_position.index..node_position_end.index + 1 - shift].copy_from_slice(self.key.data.borrow());
 			stack[node_position.index] = start;
-			stack[node_position_end.index] = self.key.end.mask_end(stack[node_position_end.index]);
+			if node_position_end.mask != MaskFor::<N::Radix>::FIRST {
+				stack[node_position_end.index] = self.key.end.mask_end(stack[node_position_end.index]);
+			};			
 		}
 	}
 
