@@ -781,7 +781,7 @@ impl<N: TreeConf> Tree<N> {
 			}
 			let dest_position = Position {
 				index: key.len(),
-				mask: MaskFor::<N::Radix>::LAST,
+				mask: MaskFor::<N::Radix>::FIRST,
 			};
 			let mut position = PositionFor::<N>::zero();
 			loop {
@@ -925,7 +925,7 @@ impl<N: TreeConf> Tree<N> {
 			}
 			let dest_position = Position {
 				index: key.len(),
-				mask: MaskFor::<N::Radix>::LAST,
+				mask: MaskFor::<N::Radix>::FIRST,
 			};
 			if let Some(result) = empty_tree {
 				self.tree = None;

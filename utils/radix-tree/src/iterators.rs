@@ -123,7 +123,7 @@ impl<N: TreeConf> Tree<N> {
 	pub fn seek_iter<'a>(&'a self, key: &'a [u8]) -> SeekIter<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
-			mask: MaskFor::<N::Radix>::LAST,
+			mask: MaskFor::<N::Radix>::FIRST,
 		};
 		self.seek_iter_at(key, dest_position)
 	}
