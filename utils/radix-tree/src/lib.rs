@@ -698,7 +698,7 @@ impl<N: TreeConf> Node<N> {
 
 			// TODO could also directly get first byte since prefix key should be updated correctly.
 			// TODO maybe change prefix key code to never update byte??
-			let start: u8 = self.key.start.mask_end_excl(stack[0]);
+			let start: u8 = self.key.start.mask_end_excl(stack[node_position.index]);
 			// end index exclusive semantic.
 			&mut stack[node_position.index..node_position_end.index + 1 - shift].copy_from_slice(self.key.data.borrow());
 			// this requires that the stack end position is cleared

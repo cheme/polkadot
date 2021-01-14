@@ -461,7 +461,7 @@ impl<'a, N: TreeConf> $iter<'a, N> {
 					let zero = PositionFor::<N>::zero();
 					let first_key = KeyIndexFor::<N>::zero();
 					node.new_end(&mut self.stack.key, zero);
-					let zero = zero.next_by::<N::Radix>(node.depth());
+					let zero = zero.next_by::<N::Radix>(node.depth()); // could just use node prefix end and index
 					self.stack.stack.push((zero, $to_stack(node), first_key));
 				} else {
 					self.finished = true;
