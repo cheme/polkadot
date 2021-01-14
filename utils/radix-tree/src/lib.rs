@@ -652,12 +652,13 @@ impl<N: TreeConf> Node<N> {
 			};
 			stack.resize(node_position_end.index + 1 - shift, 0);
 
-			let start = stack[node_position.index]
-				& !self.key.start.mask_start(255)
-				& self.key.unchecked_first_byte();
-			// end index exclusive semantic, is inclusive better here?
+			// TODO could also directly get first byte since prefix key should be updated correctly.
+			// TODO maybe change prefix key code to never update byte??
+			let start: u8 = self.key.unchecked_first_byte();
+			// end index exclusive semantic.
 			&mut stack[node_position.index..node_position_end.index + 1 - shift].copy_from_slice(self.key.data.borrow());
-			stack[node_position.index] = start;
+			// this requires that the stack end position is cleared
+			stack[node_position.index] &= start;
 			if node_position_end.mask != MaskFor::<N::Radix>::FIRST {
 				stack[node_position_end.index] = self.key.end.mask_end_incl(stack[node_position_end.index]);
 			};			
