@@ -460,7 +460,7 @@ pub mod impls {
 			let inc = nb / 4;
 			let rem = (nb % 4) as u8;
 			if previous_mask.0 + rem > 3 {
-				(Mask4(previous_mask.0 + rem - 3), inc + 1)
+				(Mask4(previous_mask.0 + rem - 4), inc + 1)
 			} else {
 				(Mask4(previous_mask.0 + rem), inc)
 			}
