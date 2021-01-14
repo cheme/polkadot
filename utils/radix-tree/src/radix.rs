@@ -324,8 +324,12 @@ mod prefix_key_confs_impls {
 		}
 
 		fn mask_end_excl(&self, byte: u8) -> u8 {
-			let shift = self.0 * 2;
-			byte & (0b11111111 << (8 - shift) )
+			if self.0 == 0 {
+				byte
+			} else {
+				let shift = self.0 * 2;
+				byte & (0b11111111 << (8 - shift) )
+			}
 		}
 
 		fn index(&self, byte: u8) -> u8 {
