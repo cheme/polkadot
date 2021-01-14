@@ -103,12 +103,11 @@ impl<D, P> PrefixKey<D, P>
 			self.data.borrow().len()
 		} else {
 			let nb_mask = P::Mask::LAST.to_index() + 1; // TODO associated const, but merge useless traits first
-			if P::Mask::FIRST == self.end {
-				return self.data.borrow().len() * nb_mask as usize;
-			}
 			let mut len = self.data.borrow().len() * nb_mask as usize;
 			len -= self.start.to_index() as usize;
-			len -= (nb_mask - self.end.to_index()) as usize;
+			if P::Mask::FIRST != self.end {
+				len -= (nb_mask - self.end.to_index()) as usize;
+			}
 			len
 		}
 	}
@@ -218,9 +217,26 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 			}
 		}
 		if delta == 0 {
-			Position {
-				index: index + 1,
-				mask: MaskFor::<N>::FIRST,
+			if one.end == MaskFor::<N>::FIRST && other.end == MaskFor::<N>::FIRST {
+				Position {
+					index: index + 1,
+					mask: MaskFor::<N>::FIRST,
+				}
+			} else {
+				// get max end mask (TODO refact thisexpression ?)
+				let mask = if one.end == MaskFor::<N>::FIRST {
+					other.end
+				} else if other.end == MaskFor::<N>::FIRST {
+					one.end
+				} else if one.end.cmp(other.end) == Ordering::Less {
+					one.end
+				} else {
+					other.end
+				};
+				Position {
+					index: index,
+					mask,
+				}
 			}
 		} else {
 			let mask = N::common_until_delta(delta);
