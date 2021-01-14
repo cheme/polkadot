@@ -592,7 +592,7 @@ impl<D1, D2, P> PartialEq<PrefixKey<D2, P>> for PrefixKey<D1, P>
 			&& (left.len() == 0
 				|| left.len() == 1 && self.unchecked_single_byte() == other.unchecked_single_byte()
 				|| (self.unchecked_first_byte() == other.unchecked_first_byte()
-					&& self.unchecked_last_byte() == other.unchecked_last_byte()
+					&& self.unchecked_last_byte_excl() == other.unchecked_last_byte_excl()
 					&& left[1..left.len() - 1]
 						== right[1..right.len() - 1]
 			))

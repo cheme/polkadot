@@ -62,8 +62,8 @@ impl<V: Clone + Debug> Value for V { }
 
 /// This is a partial key.
 /// It contains part of a value key.
-/// For unaligned radix, mask for start
-/// byte and end byte are included.
+/// For unaligned radix, inclusive mask for start
+/// byte and exclusive mask for end byte are included.
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Debug)]
@@ -85,8 +85,12 @@ impl<D, P> PrefixKey<D, P>
 		self.start.mask_start(self.data.borrow()[0])
 	}
 
-	fn unchecked_last_byte(&self) -> u8 {
+	/*fn unchecked_last_byte(&self) -> u8 {
 		self.end.mask_end_incl(self.data.borrow()[self.data.borrow().len() - 1])
+	}*/
+
+	fn unchecked_last_byte_excl(&self) -> u8 {
+		self.end.mask_end_excl(self.data.borrow()[self.data.borrow().len() - 1])
 	}
 
 	fn unchecked_single_byte(&self) -> u8 {
@@ -192,6 +196,15 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 
 		let mut index = 0;
 		let mut delta = one.unchecked_first_byte() ^ other.unchecked_first_byte();
+		/*if left.len() == 1 {
+			one.end.mask_end_excl(one.unchecked_first_byte())
+		} else {
+			one.unchecked_first_byte()
+		} ^ if right.len() == 1 {
+			other.end.mask_end_excl(other.unchecked_first_byte())
+		} else {
+			other.unchecked_first_byte()
+		};*/
 		if delta == 0 {
 			let upper_bound = min(left.len(), right.len());
 			for i in 1..(upper_bound - 1) {
@@ -204,16 +217,21 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 			if index == 0 {
 				index = upper_bound - 1;
 				let left = if left.len() == upper_bound && one.end != MaskFor::<N>::FIRST {
-					one.unchecked_last_byte()
+					one.unchecked_last_byte_excl()
 				} else {
 					left[index]
 				};
 				let right =  if right.len() == index && one.end != MaskFor::<N>::FIRST {
-					other.unchecked_last_byte()
+					other.unchecked_last_byte_excl()
 				} else {
 					right[index]
 				};
-				delta = left ^ right;
+				if index == 0 {
+					// actually we double check first byte here TODO remove first byte check?
+					delta = one.start.mask_start(left) ^ other.start.mask_start(right);
+				} else {
+					delta = left ^ right;
+				}
 			}
 		}
 		if delta == 0 {
@@ -239,7 +257,17 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 				}
 			}
 		} else {
-			let mask = N::common_until_delta(delta);
+			let mut mask = N::common_until_delta(delta);
+			if index + 1 == left.len() {
+				if one.end != MaskFor::<N>::FIRST && one.end.cmp(mask) == Ordering::Less {
+					mask = one.end;
+				}
+			}
+			if other.end != MaskFor::<N>::FIRST && index + 1 == right.len() {
+				if other.end.cmp(mask) == Ordering::Less {
+					mask = one.end;
+				}
+			}
 			Position {
 				index: index,
 				mask,
