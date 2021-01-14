@@ -196,7 +196,7 @@ fn key_addressed<N: TreeConf>(
 		} else {
 			let mut result: Key = key[..start_postion.index].into();
 			if start_postion.index != 0 {
-				result[start_postion.index - 1] = start_postion.mask.mask_end(result[start_postion.index - 1]);
+				result[start_postion.index - 1] = start_postion.mask.mask_end_incl(result[start_postion.index - 1]);
 			};
 			// first encode to 0 so we -1 to keep ordering
 			result.push(<N::Radix as RadixConf>::Alignment::encode_mask(start_postion.mask) - 1);

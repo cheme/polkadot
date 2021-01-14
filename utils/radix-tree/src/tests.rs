@@ -45,7 +45,7 @@ pub mod $module_name {
 		let backend = new_backend();
 		let t1 = Tree::<TreeConf>::new(backend.clone());
 		let t2 = Tree::<TreeConf>::new(backend.clone());
-		assert!(compare_tree(&t1, &t2));
+		assert!(compare_tree(&t1, &t2, Some(0)));
 	}
 
 	#[test]
@@ -56,24 +56,29 @@ pub mod $module_name {
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
-		assert!(compare_tree(&t1, &t2));
+		assert!(compare_tree(&t1, &t2, Some(1)));
 		assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
 		assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
-		assert!(compare_tree(&t1, &t2));
+		assert!(compare_tree(&t1, &t2, Some(1)));
 		assert_eq!(None, t1.insert(b"key2", value1.clone()));
 		assert_eq!(None, t2.insert(b"key2", value1.clone()));
-		assert!(compare_tree(&t1, &t2));
+		assert!(compare_tree(&t1, &t2, Some(2)));
 		assert_eq!(None, t2.insert(b"key3", value1.clone()));
-		assert!(!compare_tree(&t1, &t2));
+		assert!(!compare_tree(&t1, &t2, None));
 	}
 
 	#[cfg(test)]
-	fn compare_tree(left: &Tree::<TreeConf>, right: &Tree::<TreeConf>) -> bool {
+	fn compare_tree(left: &Tree::<TreeConf>, right: &Tree::<TreeConf>, mut nb_elt: Option<usize>) -> bool {
 		let left_node = left.iter();
 		let left = left_node.value_iter();
 		let right_node = right.iter();
 		let mut right = right_node.value_iter();
 		for l in left {
+			if nb_elt == Some(0) {
+				return false;
+			} else {
+				nb_elt = nb_elt.map(|nb_elt| nb_elt - 1);
+			}
 			if let Some(r) = right.next() {
 				if &l.0[..] != &r.0[..] {
 					return false;
@@ -85,7 +90,7 @@ pub mod $module_name {
 				return false;
 			}
 		}
-		if right.next().is_some() {
+		if right.next().is_some() || nb_elt.map(|nb| nb > 0).unwrap_or(false) {
 			return false;
 		}
 		true

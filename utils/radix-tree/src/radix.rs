@@ -40,7 +40,12 @@ pub trait MaskKeyByte: Clone + Copy + PartialEq + Debug {
 	fn mask_start(&self, byte: u8) -> u8;
 
 	/// Mask right part of a byte.
-	fn mask_end(&self, byte: u8) -> u8;
+	/// Inclusive position.
+	fn mask_end_incl(&self, byte: u8) -> u8;
+
+	/// Mask right part of a byte.
+	/// Exclusive position.
+	fn mask_end_excl(&self, byte: u8) -> u8;
 
 	/// Extract u8 index from this byte.
 	/// TODO const function? TODO rename to 'at'
@@ -166,8 +171,12 @@ mod prefix_key_confs_impls {
 			byte
 		}
 
-		fn mask_end(&self, byte: u8) -> u8 {
+		fn mask_end_incl(&self, byte: u8) -> u8 {
 			byte
+		}
+
+		fn mask_end_excl(&self, _byte: u8) -> u8 {
+			0
 		}
 
 		fn index(&self, byte: u8) -> u8 {
@@ -205,11 +214,19 @@ mod prefix_key_confs_impls {
 			}
 		}
 
-		fn mask_end(&self, byte: u8) -> u8 {
+		fn mask_end_incl(&self, byte: u8) -> u8 {
 			if *self {
 				byte & 0xf0
 			} else {
 				byte
+			}
+		}
+
+		fn mask_end_excl(&self, byte: u8) -> u8 {
+			if *self {
+				0	
+			} else {
+				byte & 0xf0
 			}
 		}
 
@@ -262,8 +279,12 @@ mod prefix_key_confs_impls {
 			byte & (0b11111111 >> self)
 		}
 
-		fn mask_end(&self, byte: u8) -> u8 {
+		fn mask_end_incl(&self, byte: u8) -> u8 {
 			byte & (0b11111111 << (7 - self) )
+		}
+
+		fn mask_end_excl(&self, byte: u8) -> u8 {
+			byte & (0b11111111 << (8 - self) )
 		}
 
 		fn index(&self, byte: u8) -> u8 {
@@ -293,19 +314,28 @@ mod prefix_key_confs_impls {
 		const LAST: Self = Mask4(3);
 
 		fn mask_start(&self, byte: u8) -> u8 {
-			byte & (0b11111111 >> self.0)
+			let shift = self.0 * 2;
+			byte & (0b11111111 >> shift)
 		}
 
-		fn mask_end(&self, byte: u8) -> u8 {
-			byte & (0b11111111 << ((3 - self.0) * 2) )
+		fn mask_end_incl(&self, byte: u8) -> u8 {
+			let shift = self.0 * 2;
+			byte & (0b11111111 << (6 - shift) )
+		}
+
+		fn mask_end_excl(&self, byte: u8) -> u8 {
+			let shift = self.0 * 2;
+			byte & (0b11111111 << (8 - shift) )
 		}
 
 		fn index(&self, byte: u8) -> u8 {
-			(byte & (0b11000000 >> self.0)) >> (3 - self.0)
+			let shift = self.0 * 2;
+			(byte & (0b11000000 >> shift)) >> (6 - shift)
 		}
 
 		fn set_index(&self, byte: u8, index: u8) -> u8 {
-			(byte & !(0b11000000 >> self.0)) | (index << (3 - self.0))
+			let shift = self.0 * 2;
+			(byte & !(0b11000000 >> shift)) | (index << (6 - shift))
 		}
 
 		fn cmp(&self, other: Self) -> Ordering {
@@ -419,7 +449,7 @@ pub mod impls {
 
 		// TODO put in MaskFor ? generally radix conf seems useless??
 		fn advance(previous_mask: MaskFor<Self>) -> (MaskFor<Self>, usize) {
-			if previous_mask == MaskFor::<Self>::LAST {
+			if previous_mask != MaskFor::<Self>::LAST {
 				(Mask4(previous_mask.0 + 1), 0)
 			} else {
 				(MaskFor::<Self>::FIRST, 1)

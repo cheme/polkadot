@@ -86,11 +86,11 @@ impl<D, P> PrefixKey<D, P>
 	}
 
 	fn unchecked_last_byte(&self) -> u8 {
-		self.end.mask_end(self.data.borrow()[self.data.borrow().len() - 1])
+		self.end.mask_end_incl(self.data.borrow()[self.data.borrow().len() - 1])
 	}
 
 	fn unchecked_single_byte(&self) -> u8 {
-		self.start.mask_start(self.end.mask_end(self.data.borrow()[0]))
+		self.start.mask_start(self.end.mask_end_incl(self.data.borrow()[0]))
 	}
 
 	fn index<R: RadixConf<Alignment = P>>(&self, position: Position<P>) -> R::KeyIndex {
@@ -119,27 +119,33 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 		P: PrefixKeyConf,
 {
 	// TODO consider returning the skipped byte aka key index (avoid fetching it before split_off)
-	fn split_off<R: RadixConf<Alignment = P>>(&mut self, position: Position<P>) -> Self {
+	fn child_split_off<R: RadixConf<Alignment = P>>(&mut self, position: Position<P>) -> Self {
 		let split_end = self.end;
-		let mut split: NodeKeyBuff = if position.mask == MaskFor::<R>::FIRST {
-			// No splitoff for smallvec
-			//let split = self.data[position.index..].into();
-			//self.data.truncate(position.index);
-			let split = self.data.split_off(position.index);
-			self.end = position.mask;
-			split
+		let shift = if position.mask == MaskFor::<R>::FIRST {
+			0
 		} else {
-			// No splitoff for smallvec
-			//let split = self.data[position.index + 1..].into();
-			//self.data.truncate(position.index + 1);
-			let split = self.data.split_off(position.index + 1);
-			self.end = position.mask;
-			split
+			1
 		};
+		// No splitoff for smallvec(
+		//let split = self.data[position.index..].into();
+		//self.data.truncate(position.index);)
+		let mut split = self.data.split_off(position.index + shift);
+		self.end = position.mask;
+
+		// remove one for child.
 		let (split_start, increment) = R::advance(position.mask);
-		if increment > 0 {
-			//split = split[increment..].into();
-			split = split.split_off(increment);
+		debug_assert!(increment < 2);
+		if shift > 0 {
+			if increment == 0 {
+				let last_ix = self.data.len() - 1;
+				let last = self.data[last_ix];
+				split.insert(0, split_start.mask_start(last));
+				self.data[last_ix] = self.end.mask_end_excl(last);
+			}
+		} else {
+			if increment > 0 {
+				split = split.split_off(increment);
+			}
 		}
 		PrefixKey {
 			data: split,
@@ -198,12 +204,12 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 			}
 			if index == 0 {
 				index = upper_bound - 1;
-				let left = if left.len() == index {
+				let left = if left.len() == upper_bound && one.end != MaskFor::<N>::FIRST {
 					one.unchecked_last_byte()
 				} else {
 					left[index]
 				};
-				let right =  if right.len() == index {
+				let right =  if right.len() == index && one.end != MaskFor::<N>::FIRST {
 					other.unchecked_last_byte()
 				} else {
 					right[index]
@@ -483,7 +489,7 @@ impl<N: TreeConf> Node<N> {
 						.expect("child");
 					Descent::Child(common, ix)
 				} else if common == dest_position_next {
-					unreachable!();
+					unreachable!(); // This indicate some possible optimization.
 					//Descent::Middle(common, None)
 				} else {
 					let ix = common.index::<N::Radix>(key);
@@ -575,7 +581,7 @@ impl<N: TreeConf> Node<N> {
 		}
 		result
 	}
-
+	// TODO this is truncate not split_off (and should use truncate internally).
 	fn split_off(
 		&mut self,
 		key: &[u8],
@@ -586,7 +592,7 @@ impl<N: TreeConf> Node<N> {
 		let index = self.key.index::<N::Radix>(at);
 		let backend = N::new_node_split(self, key, position, at);
 
-		let child_prefix = self.key.split_off::<N::Radix>(at);
+		let child_prefix = self.key.child_split_off::<N::Radix>(at);
 		let child_value = self.value.take();
 		let child_children = replace(&mut self.children, N::Children::empty());
 		let child = Box::new(Node {
@@ -653,7 +659,7 @@ impl<N: TreeConf> Node<N> {
 			&mut stack[node_position.index..node_position_end.index + 1 - shift].copy_from_slice(self.key.data.borrow());
 			stack[node_position.index] = start;
 			if node_position_end.mask != MaskFor::<N::Radix>::FIRST {
-				stack[node_position_end.index] = self.key.end.mask_end(stack[node_position_end.index]);
+				stack[node_position_end.index] = self.key.end.mask_end_incl(stack[node_position_end.index]);
 			};			
 		}
 	}
@@ -755,6 +761,8 @@ enum Descent<P>
 	/// (if None, then the key is on the existing node).
 	/// TODO looks incorrect when reading descend function: same
 	/// pos as child, or at least explicit why option.
+	/// TODO add index of both key and next, then audit use!!
+	/// Note that the value for both should be return by common fn.
 	Middle(Position<P::Alignment>, Option<P::KeyIndex>),
 	/// Position is child is at position + 1 of the branch.
 	/// TODO is position of any use (it is dest position of descent)
