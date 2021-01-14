@@ -148,7 +148,7 @@ impl<N: TreeConf> Tree<N> {
 	pub fn seek_iter_mut<'a>(&'a mut self, key: &'a [u8]) -> SeekIterMut<'a, N> {
 		let dest_position = Position {
 			index: key.len(),
-			mask: MaskFor::<N::Radix>::LAST,
+			mask: MaskFor::<N::Radix>::FIRST,
 		};
 		self.seek_iter_at_mut(key, dest_position)
 	}
@@ -590,7 +590,14 @@ pub struct SeekIterMut<'a, N: TreeConf> {
 }
 
 pub struct SeekValueIterMut<'a, N: TreeConf>(SeekIterMut<'a, N>);
-	
+
+impl<'a, N: TreeConf> SeekValueIterMut<'a, N> {
+	/// Get back node iterator.
+	pub fn node_iter(self) -> SeekIterMut<'a, N> {
+		self.0
+	}
+}
+
 impl<'a, N: TreeConf> Iterator for SeekIterMut<'a, N> {
 	type Item = (&'a [u8], PositionFor<N>, &'a mut Node<N>);
 

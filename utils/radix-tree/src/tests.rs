@@ -189,6 +189,14 @@ pub mod $module_name {
 				index += 1;
 			}
 			assert_eq!(index, key_seek_path.len());
+			index = 0;
+			let mut iter = seek_iter.node_iter().iter_prefix().value_iter();
+			while let Some((key, _value)) = iter.next() {
+				assert_eq!(key, key_iter_prefix_path[index]);
+				index += 1;
+			}
+			assert_eq!(index, key_iter_prefix_path.len());
+
 		};
 
 		let keys = &[b"key".to_vec()][..];
