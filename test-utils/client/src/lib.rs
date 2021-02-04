@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -79,6 +79,7 @@ pub struct TestClientBuilder<Block: BlockT, Executor, Backend, G: GenesisInit> {
 	keystore: Option<SyncCryptoStorePtr>,
 	fork_blocks: ForkBlocks<Block>,
 	bad_blocks: BadBlocks<Block>,
+	enable_offchain_indexing_api: bool,
 }
 
 impl<Block: BlockT, Executor, G: GenesisInit> Default
@@ -91,9 +92,10 @@ impl<Block: BlockT, Executor, G: GenesisInit> Default
 impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor, Backend<Block>, G> {
 	/// Create new `TestClientBuilder` with default backend.
 	pub fn with_default_backend() -> Self {
-		let backend = Arc::new(Backend::new_test_with_experimental_cache(
+		let backend = Arc::new(Backend::new_test_with_tx_storage(
 			std::u32::MAX,
 			std::u64::MAX,
+			TransactionStorageMode::BlockBody,
 			// TODO EMCH ExpCacheConf::Retracted??
 			ExpCacheConf::LRUOnly(std::usize::MAX),
 		));
@@ -102,9 +104,10 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 
 	/// Create new `TestClientBuilder` with default backend and pruning window size
 	pub fn with_pruning_window(keep_blocks: u32) -> Self {
-		let backend = Arc::new(Backend::new_test_with_experimental_cache(
+		let backend = Arc::new(Backend::new_test_with_tx_storage(
 			keep_blocks,
 			0,
+			TransactionStorageMode::BlockBody,
 			ExpCacheConf::GCRange(keep_blocks as usize),
 		));
 		Self::with_backend(backend)
@@ -123,6 +126,7 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 			keystore: None,
 			fork_blocks: None,
 			bad_blocks: None,
+			enable_offchain_indexing_api: false,
 		}
 	}
 
@@ -184,6 +188,12 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 		self
 	}
 
+	/// Enable the offchain indexing api.
+	pub fn enable_offchain_indexing_api(mut self) -> Self {
+		self.enable_offchain_indexing_api = true;
+		self
+	}
+
 	/// Build the test client with the given native executor.
 	pub fn build_with_executor<RuntimeApi>(
 		self,
@@ -228,7 +238,10 @@ impl<Block: BlockT, Executor, Backend, G: GenesisInit> TestClientBuilder<Block, 
 				self.keystore,
 			),
 			None,
-			ClientConfig::default(),
+			ClientConfig {
+				offchain_indexing_api: self.enable_offchain_indexing_api,
+				..Default::default()
+			},
 		).expect("Creates new client");
 
 		let longest_chain = sc_consensus::LongestChain::new(self.backend);

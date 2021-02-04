@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,16 +36,16 @@ pub struct InMemOffchainStorage {
 
 type InMemLinearBackend = historied_db::backend::in_memory::MemoryOnly<
 	Option<Vec<u8>>,
-	u32
+	u64,
 >;
 
 type InMemTreeBackend = historied_db::backend::in_memory::MemoryOnly<
-	historied_db::historied::linear::Linear<Option<Vec<u8>>, u32, InMemLinearBackend>,
+	historied_db::historied::linear::Linear<Option<Vec<u8>>, u64, InMemLinearBackend>,
 	u32,
 >;
 
 /// Historied value with multiple paralell branches.
-pub type InMemHValue = Tree<u32, u32, Option<Vec<u8>>, InMemTreeBackend, InMemLinearBackend>;
+pub type InMemHValue = Tree<u32, u64, Option<Vec<u8>>, InMemTreeBackend, InMemLinearBackend>;
 
 
 /// In-memory storage for offchain workers.
@@ -54,7 +54,7 @@ pub type InMemHValue = Tree<u32, u32, Option<Vec<u8>>, InMemTreeBackend, InMemLi
 pub struct BlockChainInMemOffchainStorage<Hash: Ord> {
 	// Note that we could parameterized over historied management here.
 	// Also could remove inner mutability if changing historied db simple db trait.
-	historied_management: Arc<RwLock<TreeManagement<Hash, u32, u32, ()>>>,
+	historied_management: Arc<RwLock<TreeManagement<Hash, u32, u64, ()>>>,
 	storage: Arc<RwLock<HashMap<Vec<u8>, InMemHValue>>>,
 }
 
@@ -62,8 +62,8 @@ pub struct BlockChainInMemOffchainStorage<Hash: Ord> {
 #[derive(Debug, Clone, Default)]
 pub struct BlockChainInMemOffchainStorageAt {
 	storage: Arc<RwLock<HashMap<Vec<u8>, InMemHValue>>>,
-	at_read: ForkPlan<u32, u32>,
-	at_write: Option<Latest<(u32, u32)>>,
+	at_read: ForkPlan<u32, u64>,
+	at_write: Option<Latest<(u32, u64)>>,
 }
 
 /// In-memory storage for offchain workers,
@@ -73,19 +73,19 @@ pub struct BlockChainInMemOffchainStorageAtNew(BlockChainInMemOffchainStorageAt)
 
 impl InMemOffchainStorage {
 	/// Consume the offchain storage and iterate over all key value pairs.
-	pub fn into_iter(self) -> impl Iterator<Item=(Vec<u8>,Vec<u8>)> {
+	pub fn into_iter(self) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> {
 		self.storage.into_iter()
 	}
 
 	/// Iterate over all key value pairs by reference.
-	pub fn iter<'a>(&'a self) -> impl Iterator<Item=(&'a Vec<u8>,&'a Vec<u8>)> {
+	pub fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a Vec<u8>, &'a Vec<u8>)> {
 		self.storage.iter()
 	}
 
 	/// Remove a key and its associated value from the offchain database.
 	pub fn remove(&mut self, prefix: &[u8], key: &[u8]) {
 		let key: Vec<u8> = prefix.iter().chain(key).cloned().collect();
-		let _ = self.storage.remove(&key);
+		self.storage.remove(&key);
 	}
 }
 
@@ -252,7 +252,6 @@ impl OffchainStorage for BlockChainInMemOffchainStorageAtNew {
 	}
 }
 
-
 impl BlockChainInMemOffchainStorageAt {
 	fn modify(
 		&mut self,
@@ -269,7 +268,10 @@ impl BlockChainInMemOffchainStorageAt {
 		let at_write = if is_new {
 			self.at_write.as_ref().expect("checked above")
 		} else {
-			at_write_inner = Latest::unchecked_latest(self.at_read.latest_index());
+			// Here we should not use at_write because at write do resolve
+			// a tree leaf (so is_new true).
+			use historied_db::StateIndex;
+			at_write_inner = Latest::unchecked_latest(self.at_read.index());
 			&at_write_inner
 		};
 		let key: Vec<u8> = prefix.iter().chain(item_key).cloned().collect();
@@ -292,9 +294,13 @@ impl BlockChainInMemOffchainStorageAt {
 				} else {
 					use historied_db::historied::force::ForceDataMut;
 					use historied_db::StateIndex;
+					let mut index = Default::default();
 					let _update_result = histo.force_set(
 						new_value,
-						at_write.index_ref(),
+						at_write.index_ref().unwrap_or_else(|| {
+							index = at_write.index();
+							&index
+						}),
 					);
 				}
 			} else {

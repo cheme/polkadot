@@ -1,18 +1,20 @@
-// Copyright 2019-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Substrate is free software: you can redistribute it and/or modify
+// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
+// This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// Substrate is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
 
 // You should have received a copy of the GNU General Public License
-// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 //! Database upgrade logic.
 
@@ -40,7 +42,6 @@ use codec::{Decode, Encode};
 use kvdb::KeyValueDB;
 use std::io;
 use sp_database::{Database, OrderedDatabase};
-
 use std::sync::Arc;
 
 /// Version file name.
@@ -49,6 +50,9 @@ const VERSION_FILE_NAME: &'static str = "db_version";
 /// Current db version.
 const CURRENT_VERSION: u32 = 2;
 
+/// Number of columns in v1.
+const V1_NUM_COLUMNS: u32 = 11;
+
 /// Upgrade database to current version.
 pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
 	let is_empty = db_path.read_dir().map_or(true, |mut d| d.next().is_none());
@@ -56,7 +60,11 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 		let db_version = current_version(db_path)?;
 		match db_version {
 			0 => Err(sp_blockchain::Error::Backend(format!("Unsupported database version: {}", db_version)))?,
-			1 => migrate_1_to_2::<Block>(db_path, db_type)?,
+			1 => {
+				migrate_1_to_2::<Block>(db_path, db_type)?;
+				migrate_2_to_3::<Block>(db_path, db_type)?;
+			},
+			2 => migrate_2_to_3::<Block>(db_path, db_type)?,
 			2 => (),
 			42 => {
 				delete_historied::<Block>(db_path, db_type)?;
@@ -65,6 +73,7 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 				println!("inject non canonnical in {}", now.elapsed().as_millis());
 				compare_latest_roots::<Block>(db_path, db_type, hash_for_root)?;*/
 			},
+			CURRENT_VERSION => (),
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
 	}
@@ -72,13 +81,13 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 	update_version(db_path)
 }
 
-/// Migration from version1 to version2:
-/// the number of columns has changed from 11 to 15;
-fn migrate_1_to_2<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
+/// Migration from version2 to version3:
+/// the number of columns has changed from 12 to 15;
+fn migrate_2_to_3<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
 	// Number of columns in v0.
-	const V1_NUM_COLUMNS: u32 = 11;
+	const V2_NUM_COLUMNS: u32 = 12;
 	{
-		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(V1_NUM_COLUMNS);
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(V2_NUM_COLUMNS);
 		let path = db_path.to_str()
 			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
 		let db = kvdb_rocksdb::Database::open(&db_config, &path)
@@ -320,15 +329,15 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	tx.delete(2, b"tree_mgmt/last_index");
 	tx.delete(2, b"tree_mgmt/neutral_elt");
 	tx.delete(2, b"tree_mgmt/tree_meta");
-	tx.delete_prefix(11, &[]);
 	tx.delete_prefix(12, &[]);
 	tx.delete_prefix(13, &[]);
 	tx.delete_prefix(14, &[]);
+	tx.delete_prefix(15, &[]);
 	for i in 0u8..255 {
-		tx.delete_prefix(11, &[i]);
 		tx.delete_prefix(12, &[i]);
 		tx.delete_prefix(13, &[i]);
 		tx.delete_prefix(14, &[i]);
+		tx.delete_prefix(15, &[i]);
 	}
 	tx.put(2, b"tree_mgmt/neutral_elt", &[0].encode()); // only for storing Vec<u8>, if changing type, change this.
 	db.write(tx).map_err(db_err)?;
@@ -637,6 +646,15 @@ impl<Block: BlockT> sp_state_machine::Storage<HashFor<Block>> for StorageDb<Bloc
 	}
 }
 
+/// 1) the number of columns has changed from 11 to 12;
+/// 2) transactions column is added;
+fn migrate_1_to_2<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
+	let db_path = db_path.to_str()
+		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+	let db_cfg = DatabaseConfig::with_columns(V1_NUM_COLUMNS);
+	let db = Database::open(&db_cfg, db_path).map_err(db_err)?;
+	db.add_column().map_err(db_err)
+}
 
 /// Reads current database version from the file at given path.
 /// If the file does not exist returns 0.
@@ -688,7 +706,7 @@ fn version_file_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
 	use sc_state_db::PruningMode;
-	use crate::{DatabaseSettings, DatabaseSettingsSrc};
+	use crate::{DatabaseSettings, DatabaseSettingsSrc, KeepBlocks, TransactionStorageMode};
 	use crate::tests::Block;
 	use super::*;
 
@@ -704,9 +722,11 @@ mod tests {
 		crate::utils::open_database::<Block>(&DatabaseSettings {
 			state_cache_size: 0,
 			state_cache_child_ratio: None,
-			pruning: PruningMode::ArchiveAll,
+			state_pruning: PruningMode::ArchiveAll,
 			source: DatabaseSettingsSrc::RocksDb { path: db_path.to_owned(), cache_size: 128 },
 			experimental_cache: Default::default(),
+			keep_blocks: KeepBlocks::All,
+			transaction_storage: TransactionStorageMode::BlockBody,
 		}, DatabaseType::Full).map(|_| ())
 	}
 
@@ -723,5 +743,16 @@ mod tests {
 		open_database(db_dir.path()).unwrap();
 		open_database(db_dir.path()).unwrap();
 		assert_eq!(current_version(db_dir.path()).unwrap(), CURRENT_VERSION);
+	}
+
+	#[test]
+	fn upgrade_from_1_to_2_works() {
+		for version_from_file in &[None, Some(1)] {
+			let db_dir = tempfile::TempDir::new().unwrap();
+			let db_path = db_dir.path();
+			create_db(db_path, *version_from_file);
+			open_database(db_path).unwrap();
+			assert_eq!(current_version(db_path).unwrap(), CURRENT_VERSION);
+		}
 	}
 }

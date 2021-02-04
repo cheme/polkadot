@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2020 Parity Technologies (UK) Ltd.
+// Copyright (C) 2020-2021 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,7 +36,7 @@
 //!
 
 use frame_support::{debug, traits::KeyOwnerProofSystem};
-use sp_consensus_babe::{EquivocationProof, SlotNumber};
+use sp_consensus_babe::{EquivocationProof, Slot};
 use sp_runtime::transaction_validity::{
 	InvalidTransaction, TransactionPriority, TransactionSource, TransactionValidity,
 	TransactionValidityError, ValidTransaction,
@@ -48,14 +48,14 @@ use sp_staking::{
 };
 use sp_std::prelude::*;
 
-use crate::{Call, Module, Trait};
+use crate::{Call, Module, Config};
 
 /// A trait with utility methods for handling equivocation reports in BABE.
 /// The trait provides methods for reporting an offence triggered by a valid
 /// equivocation report, checking the current block author (to declare as the
 /// reporter), and also for creating and submitting equivocation report
 /// extrinsics (useful only in offchain context).
-pub trait HandleEquivocation<T: Trait> {
+pub trait HandleEquivocation<T: Config> {
 	/// Report an offence proved by the given reporters.
 	fn report_offence(
 		reporters: Vec<T::AccountId>,
@@ -63,7 +63,7 @@ pub trait HandleEquivocation<T: Trait> {
 	) -> Result<(), OffenceError>;
 
 	/// Returns true if all of the offenders at the given time slot have already been reported.
-	fn is_known_offence(offenders: &[T::KeyOwnerIdentification], time_slot: &SlotNumber) -> bool;
+	fn is_known_offence(offenders: &[T::KeyOwnerIdentification], time_slot: &Slot) -> bool;
 
 	/// Create and dispatch an equivocation report extrinsic.
 	fn submit_unsigned_equivocation_report(
@@ -75,7 +75,7 @@ pub trait HandleEquivocation<T: Trait> {
 	fn block_author() -> Option<T::AccountId>;
 }
 
-impl<T: Trait> HandleEquivocation<T> for () {
+impl<T: Config> HandleEquivocation<T> for () {
 	fn report_offence(
 		_reporters: Vec<T::AccountId>,
 		_offence: BabeEquivocationOffence<T::KeyOwnerIdentification>,
@@ -83,7 +83,7 @@ impl<T: Trait> HandleEquivocation<T> for () {
 		Ok(())
 	}
 
-	fn is_known_offence(_offenders: &[T::KeyOwnerIdentification], _time_slot: &SlotNumber) -> bool {
+	fn is_known_offence(_offenders: &[T::KeyOwnerIdentification], _time_slot: &Slot) -> bool {
 		true
 	}
 
@@ -120,7 +120,7 @@ where
 	// We use the authorship pallet to fetch the current block author and use
 	// `offchain::SendTransactionTypes` for unsigned extrinsic creation and
 	// submission.
-	T: Trait + pallet_authorship::Trait + frame_system::offchain::SendTransactionTypes<Call<T>>,
+	T: Config + pallet_authorship::Config + frame_system::offchain::SendTransactionTypes<Call<T>>,
 	// A system for reporting offences after valid equivocation reports are
 	// processed.
 	R: ReportOffence<
@@ -136,7 +136,7 @@ where
 		R::report_offence(reporters, offence)
 	}
 
-	fn is_known_offence(offenders: &[T::KeyOwnerIdentification], time_slot: &SlotNumber) -> bool {
+	fn is_known_offence(offenders: &[T::KeyOwnerIdentification], time_slot: &Slot) -> bool {
 		R::is_known_offence(offenders, time_slot)
 	}
 
@@ -164,7 +164,7 @@ where
 /// A `ValidateUnsigned` implementation that restricts calls to `report_equivocation_unsigned`
 /// to local calls (i.e. extrinsics generated on this node) or that already in a block. This
 /// guarantees that only block authors can include unsigned equivocation reports.
-impl<T: Trait> frame_support::unsigned::ValidateUnsigned for Module<T> {
+impl<T: Config> frame_support::unsigned::ValidateUnsigned for Module<T> {
 	type Call = Call<T>;
 	fn validate_unsigned(source: TransactionSource, call: &Self::Call) -> TransactionValidity {
 		if let Call::report_equivocation_unsigned(equivocation_proof, _) = call {
@@ -187,7 +187,7 @@ impl<T: Trait> frame_support::unsigned::ValidateUnsigned for Module<T> {
 				// Only one equivocation report for the same offender at the same slot.
 				.and_provides((
 					equivocation_proof.offender.clone(),
-					equivocation_proof.slot_number,
+					*equivocation_proof.slot,
 				))
 				// We don't propagate this. This can never be included on a remote node.
 				.propagate(false)
@@ -212,7 +212,7 @@ impl<T: Trait> frame_support::unsigned::ValidateUnsigned for Module<T> {
 			// and if so then we can discard the report.
 			let is_known_offence = T::HandleEquivocation::is_known_offence(
 				&[offender],
-				&equivocation_proof.slot_number,
+				&equivocation_proof.slot,
 			);
 
 			if is_known_offence {
@@ -230,8 +230,8 @@ impl<T: Trait> frame_support::unsigned::ValidateUnsigned for Module<T> {
 ///
 /// When a validator released two or more blocks at the same slot.
 pub struct BabeEquivocationOffence<FullIdentification> {
-	/// A babe slot number in which this incident happened.
-	pub slot: SlotNumber,
+	/// A babe slot in which this incident happened.
+	pub slot: Slot,
 	/// The session index in which the incident happened.
 	pub session_index: SessionIndex,
 	/// The size of the validator set at the time of the offence.
@@ -244,7 +244,7 @@ impl<FullIdentification: Clone> Offence<FullIdentification>
 	for BabeEquivocationOffence<FullIdentification>
 {
 	const ID: Kind = *b"babe:equivocatio";
-	type TimeSlot = SlotNumber;
+	type TimeSlot = Slot;
 
 	fn offenders(&self) -> Vec<FullIdentification> {
 		vec![self.offender.clone()]
