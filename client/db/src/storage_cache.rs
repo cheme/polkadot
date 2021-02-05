@@ -1884,7 +1884,12 @@ mod tests {
 		let h1 = H256::random();
 		let h2 = H256::random();
 
-		let (shared, exp_cache) = new_shared_cache::<Block>(256*1024, (0,1), Default::default());
+		let (shared, _exp_cache) = new_shared_cache::<Block>(256*1024, (0,1), Default::default());
+
+		// Note that using sp_cache we got a value (1 because recommit h2 to state
+		// is creating a new branch: we do not check if h exists first: we always
+		// expect import to happen only once).
+		let exp_cache = None;
 	
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1944,6 +1949,7 @@ mod tests {
 			Some(2),
 			true,
 		);
+		//s.cache.no_assert = true;
 		assert_eq!(s.storage(&key).unwrap(), None);
 	}
 }
