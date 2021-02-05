@@ -629,7 +629,7 @@ pub struct CacheChanges<B: BlockT> {
 	/// Hash of the block on top of which this instance was created or
 	/// `None` if cache is disabled
 	pub parent_hash: Option<B::Hash>,
-	pub experimental_query_plan: Option<ForkPlan<u32, u64>>,
+	pub experimental_query_plan: Option<ForkPlan<u32, u64>>, // TODO remove? not read.
 	// TODO rather unused as we update on hresh fork.
 	pub experimental_update: Option<Latest<(u32, u64)>>,
 	/// disable checking experimental cache value
@@ -689,10 +689,28 @@ impl<B: BlockT> CacheChanges<B> {
 		let cache = &mut *shared_cache;
 
 		if let Some(cache) = self.experimental_cache.as_ref() {
-			let mut cache = cache.0.write();
-			if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
-				self.experimental_query_plan = Some(qp);
-				self.experimental_update = Some(eu);
+			let mut existing = false;
+			if let Some(ph) = self.parent_hash.as_ref() {
+				let mut cache = cache.0.write();
+				if let Some(qp) = cache.management.get_db_state(ph) {
+					existing = true;
+					self.experimental_query_plan = Some(qp);
+				}
+				if let Some(qp) = cache.management.get_db_state_mut(ph) {
+					existing = true;
+					self.experimental_update = Some(qp);
+				}
+			}
+
+			if !existing {
+				let mut cache = cache.0.write();
+				// TODO why so many param in 'sync' function.
+				if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
+					// TODO this is a bit unclear why we init it (especially when not is_best).
+					// actually when double update this would shit next one.
+					self.experimental_query_plan = Some(qp);
+					self.experimental_update = Some(eu);
+				}
 			}
 		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
 		
