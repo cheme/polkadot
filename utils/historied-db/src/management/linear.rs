@@ -18,13 +18,15 @@
 
 //! Linear state management implementations.
 
-use crate::Latest;
+use crate::{Latest, StateIndex};
 use crate::management::{ManagementMut, Management, Migrate, LinearManagement};
 use sp_std::ops::{AddAssign, SubAssign};
 use num_traits::One;
 
-// This is for small state as there is no double
-// mapping an some operation goes through full scan.
+/// A linear only management.
+///
+/// Being in memory, it is only for small state and
+/// tests.
 pub struct LinearInMemoryManagement<H, S> {
 	mapping: sp_std::collections::btree_map::BTreeMap<H, S>,
 	start_treshold: S,
@@ -40,13 +42,25 @@ impl<H, S: AddAssign<u32>> LinearInMemoryManagement<H, S> {
 	}
 }
 
-impl<H: Ord, S: Clone> Management<H> for LinearInMemoryManagement<H, S> {
+impl<H: Ord + Clone, S: Clone + Ord + StateIndex<S>> Management<H> for LinearInMemoryManagement<H, S> {
+	type Index = S;
 	type S = S;
 	type GC = S;
-	type Migrate = (S, Self::GC);
-	fn get_db_state(&mut self, state: &H) -> Option<Self::S> {
-		self.mapping.get(state).cloned()
+
+	fn get_internal_index(&mut self, tag: &H) -> Option<Self::Index> {
+		self.mapping.get(tag).cloned()
 	}
+
+	fn get_db_state(&mut self, tag: &H) -> Option<Self::S> {
+		self.mapping.get(tag).cloned()
+	}
+
+	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<H> {
+		self.mapping.iter()
+			.find(|(_k, v)| v == &index)
+			.map(|(k, _v)| k.clone())
+	}
+
 	fn get_gc(&self) -> Option<crate::Ref<Self::GC>> {
 		if self.changed_treshold {
 			Some(crate::Ref::Owned(self.start_treshold.clone()))
@@ -76,12 +90,13 @@ S: Default + Clone + AddAssign<u32> + Ord,
 
 impl<
 H: Ord + Clone,
-S: Default + Clone + AddAssign<u32> + Ord,
+S: Default + Clone + AddAssign<u32> + Ord + StateIndex<S>,
 > ManagementMut<H> for LinearInMemoryManagement<H, S> {
 	type SE = Latest<S>;
+	type Migrate = (S, Self::GC);
 
-	fn get_db_state_mut(&mut self, state: &H) -> Option<Self::SE> {
-		if let Some(state) = self.mapping.get(state) {
+	fn get_db_state_mut(&mut self, tag: &H) -> Option<Self::SE> {
+		if let Some(state) = self.mapping.get(tag) {
 			let latest = self.mapping.values().max()
 				.map(Clone::clone)
 				.unwrap_or(S::default());
@@ -103,35 +118,26 @@ S: Default + Clone + AddAssign<u32> + Ord,
 
 	fn force_latest_external_state(&mut self, _state: H) { }
 
-	fn reverse_lookup(&mut self, state: &Self::S) -> Option<H> {
-		// TODO could be the closest valid and return non optional!!!! TODO
-		self.mapping.iter()
-			.find(|(_k, v)| v == &state)
-			.map(|(k, _v)| k.clone())
-	}
-
 	fn get_migrate(&mut self) -> Migrate<H, Self> {
 		unimplemented!()
 	}
 
 	fn applied_migrate(&mut self) {
-		self.changed_treshold = false;
-		//self.start_treshold = gc.0; // TODO from backed inner state
-
+		//self.changed_treshold = false;
 		unimplemented!()
 	}
 }
 
 impl<
 H: Ord + Clone,
-S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + One,
+S: Default + Clone + SubAssign<S> + AddAssign<S> + Ord + One + StateIndex<S>,
 > LinearManagement<H> for LinearInMemoryManagement<H, S> {
-	fn append_external_state(&mut self, state: H) -> Option<Self::S> {
+	fn append_external_state(&mut self, tag: H) -> Option<Self::S> {
 		if !self.can_append {
 			return None;
 		}
 		self.current_state += S::one();
-		self.mapping.insert(state, self.current_state.clone());
+		self.mapping.insert(tag, self.current_state.clone());
 		Some(self.current_state.clone())
 	}
 

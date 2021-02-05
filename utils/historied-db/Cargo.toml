@@ -9,11 +9,11 @@ edition = "2018"
 
 [dependencies]
 derivative = { version = "2.1", features = ["use_core"] }
-smallvec = "1.4"
+smallvec = "1.5"
 hash-db = { default-features = false, version = "0.15.2"}
 codec = { package = "parity-scale-codec", version = "2.0.0", default-features = false, features = ["derive"] }
 sp-std = { version = "2.0.0", default-features = false }
-num-traits = { version = "0.2.8", default-features = false } # only for zero_one
+num-traits = { version = "0.2.14", default-features = false } # only for zero_one
 xdelta3 = { version = "0.1.5", optional = true, default-features = false, git = "https://github.com/cheme/xdelta3-rs" }
 
 [dev-dependencies]
@@ -21,7 +21,7 @@ ref-cast = { version = "1.0" }
 
 [features]
 default = ["std"]
-#default = ["std", "test-helpers", "db-traits"]
+#default = ["std", "test-helpers", "db-traits", "encoded-array-backend"]
 
 # Do we include fuzzer code.
 fuzzer = ["db-traits", "test-helpers"]
@@ -36,6 +36,7 @@ conditional-data = []
 # is not compatible with aggregate
 force-data = []
 # Would need benches to be use with confidence.
+# Also still incomplete.
 encoded-array-backend = []
 # temp size implementation specific to a use case
 temp-size-impl = []

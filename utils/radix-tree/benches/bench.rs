@@ -26,6 +26,7 @@ use criterion::Criterion;
 use criterion::black_box;
 
 type Tree = radix_tree::Tree<radix_tree::Node256NoBackend<Vec<u8>>>;
+//type Tree = radix_tree::Tree<radix_tree::Node256NoBackendART<Vec<u8>>>;
 
 trait Map {
 	fn insert(&mut self, key: Vec<u8>, value: Vec<u8>);

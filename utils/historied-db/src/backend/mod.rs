@@ -143,14 +143,18 @@ pub trait LinearStorageSlice<V: AsRef<[u8]>, S>: LinearStorage<V, S> {
 
 /// Technical trait to use for composing without
 /// the lifetime issue that can occurs with `LinearStorageSlice`.
-pub trait LinearStorageRange<V, S>: LinearStorage<V, S> {
+pub trait LinearStorageRange<'a, V, S>: LinearStorage<V, S> {
 	/// Instantiate from an existing slice.
-	fn from_slice(slice: &[u8]) -> Option<Self>;
+	fn from_slice_owned(slice: &[u8]) -> Option<Self>;
+	/// Instantiate from an existing slice, keeping
+	/// its lifetime and potentially not copying its
+	/// data.
+	fn from_slice_ref(slice: &'a [u8]) -> Option<Self>;
 	/// Return the range for the value in slice.
 	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, S>;
 	/// Get the range from a slice without using a `LinearStorageRange` instance.
-	fn get_range_from_slice(slice: &[u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, S>> {
-		Self::from_slice(slice).map(|inner| inner.get_range(index))
+	fn get_range_from_slice(slice: &'a [u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, S>> {
+		Self::from_slice_ref(slice).map(|inner| inner.get_range(index))
 	}
 }
 
@@ -259,7 +263,7 @@ mod test {
 	pub(crate) type Value = Vec<u8>;
 
 	// basic test for linear storage usage
-	pub(crate) fn test_linear_storage<L: LinearStorage<Value, State>>(storage: &mut L) {
+	pub(crate) fn test_linear_storage<L: LinearStorage<Value, State> + Clone>(storage: &mut L) {
 		// empty storage
 		assert!(storage.pop().is_none());
 		assert!(storage.get_state_lookup(0).is_none());
@@ -292,6 +296,38 @@ mod test {
 		for i in 0usize..30 {
 			assert_eq!(storage.get_state_lookup(i), Some(i as State));
 		}
+		for i in 0usize..30 {
+			let mut storage2 = storage.clone();
+			storage2.truncate(i);
+			for j in 0usize..i {
+				assert_eq!(storage2.get_state_lookup(j), Some(j as State));
+			}
+			for j in i..30 {
+				assert_eq!(storage2.get_state_lookup(j), None);
+			}
+		}
+		for i in 0usize..30 {
+			let mut storage2 = storage.clone();
+			storage2.truncate_until(i);
+			for j in 0usize..30 - i {
+				assert_eq!(storage2.get_state_lookup(j), Some(j as State + i as State));
+			}
+			for j in 30 - i..30 {
+				assert_eq!(storage2.get_state_lookup(j), None);
+			}
+		}
+		for i in 0usize..30 {
+			let mut storage2 = storage.clone();
+			storage2.remove_lookup(i);
+			for j in 0usize..i {
+				assert_eq!(storage2.get_state_lookup(j), Some(j as State));
+			}
+			for j in i..29 {
+				assert_eq!(storage2.get_state_lookup(j), Some(j as State + 1));
+			}
+			assert_eq!(storage2.get_state_lookup(29), None);
+		}
+
 		storage.truncate_until(5);
 		for i in 0usize..25 {
 			assert_eq!(storage.get_state_lookup(i), Some(i as State + 5));

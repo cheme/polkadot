@@ -83,12 +83,12 @@ impl<V, S> Default for $memory_only<V, S> {
 
 impl<V: Clone + Context, S: Clone> LinearStorageMem<V, S> for $memory_only<V, S> {
 	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S> {
-		let HistoriedValue { value, state } = &self.0[index];
+		let HistoriedValue { value, state } = &self.0[index as usize];
 		HistoriedValue { value: &value, state: state.clone() }
 	}
 	fn get_ref_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut V, S> {
-		let state = self.0[index].state.clone();
-		HistoriedValue { value: &mut self.0[index].value, state }
+		let state = self.0[index as usize].state.clone();
+		HistoriedValue { value: &mut self.0[index as usize].value, state }
 	}
 }
 
@@ -98,7 +98,7 @@ impl<V: Clone + Context + Trigger, S: Clone> Trigger for $memory_only<V, S> {
 	fn trigger_flush(&mut self) {
 		if Self::TRIGGER {
 			for i in 0 .. self.len() {
-				self.get(i).trigger_flush()
+				self.get_ref_mut(i as u64).as_mut().value.trigger_flush()
 			}
 		}
 	}
@@ -116,12 +116,12 @@ impl<V: Context, S> InitFrom for $memory_only<V, S> {
 
 impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for $memory_only<V, S> {
 	// Index position in array.
-	type Index = usize;
+	type Index = u64;
 	fn last(&self) -> Option<Self::Index> {
 		if self.0.len() == 0 {
 			None
 		} else {
-			Some(self.0.len() - 1)
+			Some((self.0.len() - 1) as u64)
 		}
 	}
 	fn previous_index(&self, mut index: Self::Index) -> Option<Self::Index> {
@@ -136,7 +136,7 @@ impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for $memory_only<V, S> {
 		if index >= self.0.len() {
 			None
 		} else {
-			Some(index)
+			Some(index as u64)
 		}
 	}
 	fn truncate_until(&mut self, split_off: usize) {
@@ -153,19 +153,19 @@ impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for $memory_only<V, S> {
 		self.0.len()
 	}
 	fn get(&self, index: Self::Index) -> HistoriedValue<V, S> {
-		self.0[index].clone()
+		self.0[index as usize].clone()
 	}
 	fn get_state(&self, index: Self::Index) -> S {
-		self.0[index].state.clone()
+		self.0[index as usize].state.clone()
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
 		self.0.push(value)
 	}
 	fn insert(&mut self, index: Self::Index, value: HistoriedValue<V, S>) {
-		self.0.insert(index, value)
+		self.0.insert(index as usize, value)
 	}
 	fn remove(&mut self, index: Self::Index) {
-		self.0.remove(index);
+		self.0.remove(index as usize);
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
 		self.0.pop()
@@ -177,7 +177,7 @@ impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for $memory_only<V, S> {
 		self.0.truncate(at)
 	}
 	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, S>) {
-		self.0[index] = value;
+		self.0[index as usize] = value;
 	}
 }
 

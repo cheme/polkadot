@@ -55,20 +55,32 @@ impl<'a, V, F> Clone for EncodedArray<'a, V, F> {
 	}
 }
 
-pub trait EncodedArrayValue: AsRef<[u8]> + Sized {
-	fn from_slice(slice: &[u8]) -> Self;
+pub trait EncodedArrayValue<'a>: AsRef<[u8]> + Sized {
+	/// Create value from a slice, the value will be
+	/// owned.
+	fn from_slice_owned(slice: &[u8]) -> Self;
+	/// Create value from a slice, getting lifetime of
+	/// slice.
+	/// If the implementation allows it the slice will
+	/// not be copied.
+	fn from_slice(slice: &'a [u8]) -> Self;
 }
 
-impl EncodedArrayValue for Vec<u8> {
-	fn from_slice(slice: &[u8]) -> Self {
+impl<'a> EncodedArrayValue<'a> for Vec<u8> {
+	fn from_slice_owned(slice: &[u8]) -> Self {
+		slice.to_vec()
+	}
+	fn from_slice(slice: &'a [u8]) -> Self {
 		slice.to_vec()
 	}
 }
 
-impl<'a, V, F> EncodedArrayValue for EncodedArray<'a, V, F> {
-	// TODO non ownd variant that is very tricky to do.
-	fn from_slice(slice: &[u8]) -> Self {
+impl<'a, V, F> EncodedArrayValue<'a> for EncodedArray<'a, V, F> {
+	fn from_slice_owned(slice: &[u8]) -> Self {
 		EncodedArray(EncodedArrayBuff::Cow(Cow::Owned(slice.to_vec())), PhantomData)
+	}
+	fn from_slice(slice: &'a [u8]) -> Self {
+		EncodedArray(EncodedArrayBuff::Cow(Cow::Borrowed(slice)), PhantomData)
 	}
 }
 
@@ -210,7 +222,7 @@ const SIZE_BYTE_LEN: usize = 8;
 // implementation.
 // Those function requires checked index.
 impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
-	where V: EncodedArrayValue {
+	where V: EncodedArrayValue<'a> {
 	pub fn into_owned(self) -> EncodedArray<'static, V, F> {
     EncodedArray(EncodedArrayBuff::Cow(Cow::from(self.0.into_owned())), PhantomData)
   }
@@ -228,7 +240,6 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 		let len = self.len();
 		let start_ix = self.index_start();
 		let end_ix = self.0.len();
-		let mut new_ix = self.0[start_ix..end_ix].to_vec();
 		let to_write = SIZE_BYTE_LEN + val.value.len() + extra.len();
 		self.0.to_mut().resize(end_ix + to_write, 0);
 		// move the index
@@ -353,7 +364,7 @@ impl<'a, V, F> Into<EncodedArray<'a, V, F>> for &'a mut Vec<u8> {
 
 // Utility function for basis implementation.
 impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
-	where V: EncodedArrayValue {
+	where V: EncodedArrayValue<'a> {
 	// Index at end, also contains the encoded size
 	fn index_start(&self) -> usize {
 		let nb_ix = self.len();
@@ -412,14 +423,14 @@ impl<'a, V: Context, F: EncodedArrayConfig> EncodedArray<'a, V, F>
 }
 
 impl<'a, F: EncodedArrayConfig, V: Context> Trigger for EncodedArray<'a, V, F>
-	where V: EncodedArrayValue + Trigger,
+	where V: EncodedArrayValue<'a> + Trigger,
 {
 	const TRIGGER: bool = <V as Trigger>::TRIGGER;
 
 	fn trigger_flush(&mut self) {
 		if Self::TRIGGER {
 			for i in 0 .. self.len() {
-				self.get(i).trigger_flush()
+				self.get(i as u64).trigger_flush()
 			}
 		}
 	}
@@ -436,13 +447,13 @@ impl<'a, F: EncodedArrayConfig, V: Context> InitFrom for EncodedArray<'a, V, F> 
 }
 
 impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArray<'a, V, F>
-	where V: EncodedArrayValue,
+	where V: EncodedArrayValue<'a>,
 {
 	// Node index.
-	type Index = usize;
+	type Index = u64;
 
 	fn last(&self) -> Option<Self::Index> {
-		let len = self.len();
+		let len = self.len() as u64;
 		if len == 0 {
 			return None;
 		}
@@ -459,7 +470,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 		if index >= len {
 			return None;
 		}
-		Some(index)
+		Some(index as u64)
 	}
 	fn truncate_until(&mut self, split_off: usize) {
 		self.remove_range(0, split_off);
@@ -471,10 +482,13 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 	}
 
 	fn get(&self, index: Self::Index) -> HistoriedValue<V, u64> {
-		self.get_state(index).map(|v| V::from_slice(v.as_ref()))
+		// TODO implement get_ref variant that do not owned value
+		// (currently we use slice index).
+		self.get_state(index as usize)
+			.map(|v| V::from_slice_owned(v.as_ref()))
 	}
 	fn get_state(&self, index: Self::Index) -> u64 {
-		self.get_state_only(index)
+		self.get_state_only(index as usize)
 	}
 	fn push(&mut self, value: HistoriedValue<V, u64>) {
 		let val = value.map_ref(|v| v.as_ref());
@@ -488,7 +502,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 		let start_ix = self.index_element(len - 1);
 		let end_ix = self.index_start();
 		let state = self.read_le_u64(start_ix);
-		let value = V::from_slice(&self.0[start_ix + SIZE_BYTE_LEN..end_ix]);
+		let value = V::from_slice_owned(&self.0[start_ix + SIZE_BYTE_LEN..end_ix]);
 		if len - 1 == 0 {
 			self.clear();
 			return Some(HistoriedValue { value, state })	
@@ -524,6 +538,7 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 	}
 
 	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, u64>) {
+		let index = index as usize;
 		let len = self.len();
 		debug_assert!(len > index);
 		let elt_start = self.index_element(index);
@@ -570,7 +585,8 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 		}
 	}
 
-	fn insert(&mut self, index: usize, value: HistoriedValue<V, u64>) {
+	fn insert(&mut self, index: Self::Index, value: HistoriedValue<V, u64>) {
+		let index = index as usize;
 		let len = self.len();
 		debug_assert!(len >= index);
 		let end_ix = self.0.len();
@@ -594,41 +610,45 @@ impl<'a, F: EncodedArrayConfig, V: Context> LinearStorage<V, u64> for EncodedArr
 		self.write_le_usize(self.0.len() - SIZE_BYTE_LEN, len + 1);
 	}
 	fn remove(&mut self, index: Self::Index) {
+		let index = index as usize;
 		self.remove_range(index, index + 1);
 	}
 }
 
 impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageSlice<V, u64> for EncodedArray<'a, V, F>
-	where V: EncodedArrayValue,
+	where V: EncodedArrayValue<'a>,
 {
 	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], u64> {
-		self.get_state(index)
+		self.get_state(index as usize)
 	}
 	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], u64> {
-		self.get_state_mut(index)
+		self.get_state_mut(index as usize)
 	}
 }
 
-impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<V, u64> for EncodedArray<'a, V, F>
-	where V: EncodedArrayValue,
+impl<'a, F: EncodedArrayConfig, V: Context> LinearStorageRange<'a, V, u64> for EncodedArray<'a, V, F>
+	where for<'b> V: EncodedArrayValue<'b>,
 {
-	fn get_range_from_slice(slice: &[u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, u64>> {
-		let ear = EncodedArray::<V, F>(EncodedArrayBuff::Cow(Cow::Borrowed(slice)), PhantomData);
-		let (start, end, state) = ear.get_range(index);
+	fn get_range_from_slice<'b>(slice: &'b [u8], index: Self::Index) -> Option<HistoriedValue<Range<usize>, u64>> {
+		let ear = EncodedArray::<'b, V, F>::from_slice(slice);
+		let (start, end, state) = ear.get_range(index as usize);
 		Some(HistoriedValue {
 			state,
 			value: start..end,
 		})
 	}
 	fn get_range(&self, index: Self::Index) -> HistoriedValue<Range<usize>, u64> {
-		let (start, end, state) = self.get_range(index);
+		let (start, end, state) = self.get_range(index as usize);
 		HistoriedValue {
 			state,
 			value: start..end,
 		}
 	}
-	fn from_slice(slice: &[u8]) -> Option<Self> {
-		Some(<Self as EncodedArrayValue>::from_slice(slice))
+	fn from_slice_owned(slice: &[u8]) -> Option<Self> {
+		Some(<Self as EncodedArrayValue<'a>>::from_slice_owned(slice))
+	}
+	fn from_slice_ref(slice: &'a [u8]) -> Option<Self> {
+		Some(<Self as EncodedArrayValue<'a>>::from_slice(slice))
 	}
 }
 

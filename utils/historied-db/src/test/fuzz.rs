@@ -31,6 +31,7 @@ type TreeBackend = crate::backend::in_memory::MemoryOnly<
 	crate::historied::linear::Linear<u16, u32, LinearBackend>,
 	u32,
 >;
+
 struct FuzzerState {
 	/// in memory historied datas to test
 	in_memory_db: crate::db_traits::BTreeMap<

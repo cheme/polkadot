@@ -27,18 +27,10 @@ pub mod fuzz;
 
 use codec::{Encode, Decode};
 
-/// state index.
-type StateIndex = u32;
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Encode, Decode)]
 /// State Input (aka hash).
 pub struct StateInput(pub u32);
-
-impl StateInput {
-	fn to_index(&self) -> StateIndex {
-		self.0
-	}
-}
 
 pub type InMemoryMgmt = crate::management::tree::TreeManagement<StateInput, u32, u32, ()>;
 pub type InMemoryMgmtSer = crate::management::tree::TreeManagement<StateInput, u32, u32, MappingTests>;
@@ -71,20 +63,16 @@ mod bindings {
 	static_instance!(TreeState, &[1u8, 0, 0, 0]);
 	const CST: &'static[u8] = &[2u8, 0, 0, 0];
 	static_instance!(JournalDelete, &[3u8, 0, 0, 0]);
-	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
-	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
 	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
 	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
 	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
 }
 
 impl crate::management::tree::TreeManagementStorage for MappingTests {
-	const JOURNAL_DELETE: bool = true;
+	const JOURNAL_CHANGES: bool = true;
 	type Storage = crate::test::InMemorySimpleDB5;
 	type Mapping = bindings::Mapping;
 	type JournalDelete = bindings::JournalDelete;
-	type TouchedGC = bindings::TouchedGC;
-	type CurrentGC = bindings::CurrentGC;
 	type LastIndex = bindings::LastIndex;
 	type NeutralElt = bindings::NeutralElt;
 	type TreeMeta = bindings::TreeMeta;
@@ -93,7 +81,6 @@ impl crate::management::tree::TreeManagementStorage for MappingTests {
 
 macro_rules! InMemSimpleDB {
 	($name: ident, $size: expr, $inner_module: ident) => {
-
 
 	pub use $inner_module::InMemory as $name;
 	mod $inner_module {
@@ -124,7 +111,6 @@ macro_rules! InMemSimpleDB {
 				InMemory(inner)
 			}
 
-			// TODO with branch conditional could be const
 			pub fn resolve_collection(c: &'static [u8]) -> Option<usize> {
 				if c.len() != 4 {
 					return None;

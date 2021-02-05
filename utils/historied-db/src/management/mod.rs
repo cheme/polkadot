@@ -19,10 +19,10 @@
 //!
 //! This associate a tag (for instance a block hash),
 //! with historical state index.
-//! Tags are usually associated with the generic parameter `H`.
+//! Tags are therefore usually associated with the generic parameter `H`.
 //!
-//! It allows building different states from state index
-//! for different operation on historical data.
+//! Given a tag, it allows building different states for different operation
+//! on historical data.
 
 /// Forkable state management implementations.
 pub mod tree;
@@ -30,34 +30,52 @@ pub mod tree;
 /// Linear state management implementations.
 pub mod linear;
 
-/*
-#[cfg(feature = "std")]
-use std::sync::Arc;
-#[cfg(not(feature = "std"))]
-use alloc::sync::Arc;
-*/
-
 use sp_std::{vec::Vec, boxed::Box, marker::PhantomData};
-use crate::Ref;
+use crate::{Ref, StateIndex};
 
 /// Management maps a historical tag of type `H` with its different db states representation.
 pub trait Management<H> {
-	/// attached db state needed for query.
-	type S;
-	/// attached db gc strategy.
-	/// TODO at Mut level? also is having a mut variant of any use here?
+	/// Internal index associated with a given tag.
+	type Index;
+
+	/// Attached db state needed for query operation
+	/// on historical data.
+	type S: StateIndex<Self::Index>;
+
+	/// Attached db gc strategy.
+	/// Can be applied on any historical data to
+	/// clean up.
 	type GC;
-	type Migrate;
-	/// Returns the historical state representation for a given historical tag.
+
+	/// Returns the associated inner index of a given historical tag.
+	///
+	/// Mutable access is for caching only.
+	fn get_internal_index(&mut self, tag: &H) -> Option<Self::Index>;
+
+	/// Returns the historical read state representation for a given historical tag.
+	///
+	/// Mutable access is for caching only.
 	fn get_db_state(&mut self, tag: &H) -> Option<Self::S>;
-	/// returns optional to avoid holding lock of do nothing GC.
-	/// TODO this would need RefMut or make the serialize cache layer inner mutable.
+
+	/// Reverse lookup fo a tag given an internal index.
+	/// This can be a slow implementation, and should not be
+	/// use for common operations.
+	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<H>;
+
+	/// Returns a Gc to cleanup historical data.
+	/// If the Gc is not relevant (eg after a migration), simply return None.
 	fn get_gc(&self) -> Option<Ref<Self::GC>>;
 }
 
 pub trait ManagementMut<H>: Management<H> + Sized {
-	/// attached db state needed for update.
-	type SE; // TODO rename to latest or pending???
+	/// Attached db state needed for update operation
+	/// on historical data.
+	type SE: StateIndex<Self::Index>;
+
+	/// Attached db migrate definition.
+	/// Can be applied on any historical data
+	/// to migrate to a post migration management state.
+	type Migrate;
 
 	/// Return state mut for state but only if state exists and is
 	/// a terminal writeable leaf (if not you need to create new branch 
@@ -74,8 +92,6 @@ pub trait ManagementMut<H>: Management<H> + Sized {
 	/// Force change value of latest external state.
 	fn force_latest_external_state(&mut self, index: H);
 
-	fn reverse_lookup(&mut self, state: &Self::S) -> Option<H>;
-
 	/// see migrate. When running thes making a backup of this management
 	/// state is usually a good idea (this method does not manage
 	/// backup or rollback).
@@ -86,21 +102,27 @@ pub trait ManagementMut<H>: Management<H> + Sized {
 	/// All previously fetch states are unvalid.
 	/// There is no type constraint of this, because migration is a specific
 	/// case the general type should not be complexified.
+	///
+	/// TODO consider removing applied migrate, it seems easier to use a transactional
+	/// backend over historied management.
 	fn applied_migrate(&mut self);
 }
 
 /// This trait is for mapping a given state to the DB opaque inner state.
 pub trait ForkableManagement<H>: ManagementMut<H> {
 	/// Do we keep trace of changes.
-	const JOURNAL_DELETE: bool;
-	/// Fork at any given internal state.
-	type SF;
+	const JOURNAL_CHANGES: bool;
 
-	/// SF is a state with 
-	fn inner_fork_state(&self, s: Self::SE) -> Self::SF;
+	/// Fork state, the state to use for forking.
+	///
+	/// Usually should be `Self::Index` or a type wrapping it.
+	/// (fork doable at any given index if index is defined,
+	/// no need for additional information).
+	type SF: StateIndex<Self::Index>;
 
-	/// SF from a S (usually the head of S)
-	fn ref_state_fork(&self, s: &Self::S) -> Self::SF;
+	/// Simple access to fork state type.
+	/// This operation should usually be a noops.
+	fn from_index(index: Self::Index) -> Self::SF;
 
 	fn get_db_state_for_fork(&mut self, tag: &H) -> Option<Self::SF>;
 
@@ -109,24 +131,33 @@ pub trait ForkableManagement<H>: ManagementMut<H> {
 
 	fn latest_state_fork(&mut self) -> Self::SF {
 		let se = self.latest_state();
-		self.inner_fork_state(se)
+		Self::from_index(se.index())
 	}
 
-	/// This only succeed valid `at`.
-	fn append_external_state(&mut self, state: H, at: &Self::SF) -> Option<Self::SE>;
+	/// Add a tagged state following a given fork state.
+	///
+	/// This only succeed for a valid `at`, and can either append to an
+	/// existing branch or create a new branch.
+	fn append_external_state(&mut self, tag: H, at: &Self::SF) -> Option<Self::SE>;
 
+	/// `append_external_state` variant with tag as parameter.
+	///
 	/// Note that this trait could be simplified to this function only.
-	/// But SF can generally be extracted from an SE or an S so it is one less query.
+	/// But fork state can generally be extracted from `Self::SE` or `Self::S`
+	/// and skip one query.
 	fn try_append_external_state(&mut self, state: H, at: &H) -> Option<Self::SE> {
 		self.get_db_state_for_fork(&at)
 			.and_then(|at| self.append_external_state(state, &at))
 	}
 
+	/// Drop at given fork state.
+	///
 	/// Warning this should cover all children recursively and can be slow for some
 	/// implementations.
-	/// Return all dropped tag.
+	/// Return all dropped tag if `return_dropped` is `true`.
 	fn drop_state(&mut self, state: &Self::SF, return_dropped: bool) -> Option<Vec<H>>;
 
+	/// `drop_state` variant using external tag as parameter.
 	fn try_drop_state(&mut self, tag: &H, return_dropped: bool) -> Option<Vec<H>> {
 		self.get_db_state_for_fork(tag)
 			.and_then(|at| self.drop_state(&at, return_dropped))
@@ -157,8 +188,6 @@ pub trait ForkableHeadManagement<H>: Management<H> {
 }
 
 /// Type holding a state db to lock the management, until applying migration.
-/// TODO consider removing applied migrate, since it is easier to use a transactional
-/// backend on historied management.
 pub struct Migrate<'a, H, M: ManagementMut<H>>(&'a mut M, M::Migrate, PhantomData<H>);
 
 impl<'a, H, M: ManagementMut<H>> Migrate<'a, H, M> {
@@ -181,14 +210,22 @@ impl<'a, H, M: ManagementMut<H>> Migrate<'a, H, M> {
  	}
 }
 
-/// Dynamic trait to register historied db
-/// implementation in order to allow migration
-/// (state global change requires to update all associated dbs).
+/// Allows to consume event from the state management.
+///
+/// Current usage is mostly ensuring that migration occurs
+/// on every compenent using the state (by registering these
+/// components on the state management and implementing `migrate`).
 pub trait ManagementConsumer<H, M: ManagementMut<H>>: Send + Sync + 'static {
+	/// A migration runing on the state management,
+	/// notice that the migrate parameter can be modified
+	/// in case it contains data relative to this particular
+	/// consumer. It is responsibility of the implementation
+	/// to avoid changing this parameter in a way that would
+	/// impact others consumer calls.
 	fn migrate(&self, migrate: &mut Migrate<H, M>);
 }
 
-/// Register db, this associate treemanagement.
+/// Cast the consumer to a dyn rust object.
 pub fn consumer_to_register<H, M: ManagementMut<H>, C: ManagementConsumer<H, M> + Clone>(c: &C) -> Box<dyn ManagementConsumer<H, M>> {
 	Box::new(c.clone())
 }
@@ -225,11 +262,15 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		mapping.insert(state, changes);
 	}
 
+	/// Get and remove the changes at a given state.
 	pub fn remove_changes_at(&mut self, db: &mut Db, state: &S) -> Option<Vec<K>> {
 		let mut mapping = self.touched_keys.mapping(db);
 		mapping.remove(state)
 	}
 
+	/// Get and remove the changes at a before a given state.
+	///
+	/// The result is aggregated into `result` mutable set.
 	pub fn remove_changes_before(
 		&mut self,
 		db: &mut Db,
@@ -255,6 +296,7 @@ impl<S, K, Db, DbConf> JournalForMigrationBasis<S, K, Db, DbConf>
 		}
 	}
 
+	/// Restore journals from a given backend database.
 	pub fn from_db(db: &Db) -> Self {
 		JournalForMigrationBasis {
 			touched_keys: crate::mapped_db::Map::default_from_db(&db),
@@ -287,10 +329,11 @@ fn merge_keys<K: Ord>(origin: &mut Vec<K>, mut keys: Vec<K>) {
 mod test {
 	use super::*;
 	use crate::test::InMemorySimpleDB5;
+
 	#[test]
 	fn test_merge_keys() {
 		let mut set1 = vec![b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"ab".to_vec()];
-		let mut set2 = vec![b"rb".to_vec(), b"bc".to_vec(), b"rb".to_vec(), b"ab".to_vec()];
+		let set2 = vec![b"rb".to_vec(), b"bc".to_vec(), b"rb".to_vec(), b"ab".to_vec()];
 		// note that set1 should not have duplicate, so they are kept, while for set 2 they are removed.
 		let res = vec![b"ab".to_vec(), b"ab".to_vec(), b"bc".to_vec(), b"da".to_vec(), b"rb".to_vec()];
 		merge_keys(&mut set1, set2);

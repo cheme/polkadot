@@ -33,6 +33,9 @@ pub trait DataBasis {
 	/// State to query for this value.
 	type S;
 
+	/// Internal index for a single history item.
+	type Index;
+
 	/// Check if a value exists at this state.
 	fn contains(&self, at: &Self::S) -> bool;
 
@@ -56,17 +59,17 @@ pub trait DataRef<V: Value>: DataBasis {
 }
 
 /// Access to slice of byte representing a value.
-pub trait DataSlices<V: Value>: DataBasis {
+pub trait DataSlices<'a, V: Value>: DataBasis {
 	/// Get reference to the value at this state.
-	fn get_slice(&self, at: &Self::S) -> Option<&[u8]>;
+	fn get_slice(&'a self, at: &Self::S) -> Option<&'a [u8]>;
 }
 
 /// Access to a range over a slice.
 /// The api is a little awkward, but it to compose without
 /// lifetime issues.
-pub trait DataSliceRanges<S> {
+pub trait DataSliceRanges<'a, S> {
 	/// Get reference to the value from which this slice can be build.
-	fn get_range(slice: &[u8], at: &S) -> Option<Range<usize>>;
+	fn get_range(slice: &'a [u8], at: &S) -> Option<Range<usize>>;
 }
 
 /// An item of historied value.
@@ -217,11 +220,6 @@ pub trait DataMut<V: Value>: DataBasis + Context {
 	/// constraints.
 	type SE: StateIndex<Self::Index>;
 
-	/// Index a single history item.
-	/// TODO this type and trait StateIndex are not very relevant.
-	/// TODO move to Data?
-	type Index;
-
 	/// GC strategy that can be applied.
 	/// GC can be run in parallel, it does not
 	/// make query incompatible.
@@ -357,6 +355,12 @@ impl<'a, V: 'a, S: Clone> HistoriedValue<V, S> {
 		HistoriedValue { value: &value, state: state.clone() }
 	}
 
+	/// Get historied mutable reference to the value.
+	pub fn as_mut(&mut self) -> HistoriedValue<&mut V, S> {
+		HistoriedValue { value: &mut self.value, state: self.state.clone() }
+	}
+
+
 	/// Map over a reference of value.
 	pub fn map_ref<V2: 'a, F: Fn(&'a V) -> V2>(&'a self, f: F) -> HistoriedValue<V2, S> {
 		let HistoriedValue { value, state } = self;
@@ -403,10 +407,7 @@ pub mod force {
 	/// This trait allow setting values in the past, this is usually
 	/// not a good idea to maintain state coherency.
 	pub trait ForceDataMut<V: Value>: DataMut<V> {
-		/// Internal index.
-		type IndexForce;
-
 		/// Do update if state allows it, otherwhise return None.
-		fn force_set(&mut self, value: V, at: &Self::IndexForce) -> UpdateResult<()>;
+		fn force_set(&mut self, value: V, at: &Self::Index) -> UpdateResult<()>;
 	}
 }
