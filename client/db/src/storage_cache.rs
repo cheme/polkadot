@@ -1908,7 +1908,7 @@ mod tests {
 		// is creating a new branch: we do not check if h exists first: we always
 		// expect import to happen only once).
 		let exp_cache = None;
-	
+
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
