@@ -24,7 +24,7 @@ use sp_std::collections::btree_map::BTreeMap;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 use hash_db::Hasher;
-use sp_trie::{MemoryDB, empty_trie_root, Layout};
+use sp_trie::{MemoryDB, empty_trie_root, Layout, TrieMut, trie_types::TrieDBMut};
 use codec::Codec;
 use sp_core::storage::ChildInfo;
 #[cfg(feature = "std")]
@@ -90,7 +90,7 @@ where
 	let indexes = BTreeMap::new();
 	let mut backend = TrieBackend::new(
 		db,
-		Default::default(),
+		empty_trie_root::<Layout<H>>(),
 		Arc::new(kv_db),
 		Arc::new(kv_db_2),
 		Arc::new(indexes),

@@ -296,7 +296,10 @@ impl<B: BlockT> ExperimentalCache<B> {
 			}
 
 			let result = experimental_query_plan
-				.map(|qp| self.management.ref_state_fork(qp))
+				.map(|qp| {
+					use historied_db::StateIndex;
+					qp.index()
+				})
 				.unwrap_or_else(|| {
 					warn!("#####Using init state fork for a new branch");
 					self.management.init_state_fork()
@@ -1881,14 +1884,16 @@ mod tests {
 		let h1 = H256::random();
 		let h2 = H256::random();
 
-		let shared = new_shared_cache::<Block>(256*1024, (0,1));
-
+		let (shared, exp_cache) = new_shared_cache::<Block>(256*1024, (0,1), Default::default());
+	
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
+			exp_cache.clone(),
 			Some(root_parent),
 		);
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![1]))],
@@ -1897,16 +1902,19 @@ mod tests {
 			Some(1),
 			true,
 		);
+
 		assert_eq!(shared.lock().lru_storage.get(&key).unwrap(), &Some(vec![1]));
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
+			exp_cache.clone(),
 			Some(h1),
 		);
 
 		// commit as non-best
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![(key.clone(), Some(vec![2]))],
@@ -1921,11 +1929,13 @@ mod tests {
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
+			exp_cache.clone(),
 			Some(h1),
 		);
 
 		// commit again as best with no changes
 		s.cache.sync_cache(
+			None,
 			&[],
 			&[],
 			vec![],
