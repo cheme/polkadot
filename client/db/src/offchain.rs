@@ -543,6 +543,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
 			test,
 			Some(value),
 			true,
+			false,
 		) {
 			Ok(_) => (),
 			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
@@ -558,6 +559,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
 			test,
 			None,
 			true,
+			false,
 		) {
 			Ok(_) => (),
 			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),
@@ -583,6 +585,7 @@ impl sp_core::offchain::OffchainStorage for BlockChainLocalAtNew {
 			Some(test),
 			Some(new_value),
 			true,
+			false,
 		) {
 			Ok(_) => true,
 			Err(ModifyError::NoWriteState) => panic!("Cannot write at latest"),

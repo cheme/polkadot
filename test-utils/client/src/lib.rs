@@ -95,7 +95,7 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 		let backend = Arc::new(Backend::new_test_with_tx_storage(
 			std::u32::MAX,
 			std::u64::MAX,
-			TransactionStorageMode::BlockBody,
+			sc_client_db::TransactionStorageMode::BlockBody,
 			// TODO EMCH ExpCacheConf::Retracted??
 			ExpCacheConf::LRUOnly(std::usize::MAX),
 		));
@@ -107,7 +107,7 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 		let backend = Arc::new(Backend::new_test_with_tx_storage(
 			keep_blocks,
 			0,
-			TransactionStorageMode::BlockBody,
+			sc_client_db::TransactionStorageMode::BlockBody,
 			ExpCacheConf::GCRange(keep_blocks as usize),
 		));
 		Self::with_backend(backend)

@@ -49,13 +49,13 @@ use historied_db::{
 	DecodeWithContext,
 	management::{ManagementMut, ForkableManagement, Management},
 	historied::{DataMut, DataRef, aggregate::Sum as _},
-	mapped_db::TransactionalMappedDB,
+	mapped_db::{TransactionalMappedDB, MappedDBDyn},
 	db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
 	Latest, UpdateResult,
 	historied::tree::{Tree, aggregate::Sum as TreeSum},
 	management::tree::{Tree as TreeMgmt, ForkPlan},
 	backend::nodes::ContextHead,
-	historied::aggregate::xdelta::{BytesDelta, BytesDiff, BytesSubstract},
+	historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 };
 
 use std::sync::Arc;
@@ -361,17 +361,19 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		let init_nodes = ContextHead {
 			key: k.to_vec(),
 			backend: block_nodes.clone(),
+			encoded_indexes: Vec::new(),
 			node_init_from: (),
 		};
 		let init = ContextHead {
 			key: k.to_vec(),
 			backend: branch_nodes.clone(),
+			encoded_indexes: Vec::new(),
 			node_init_from: init_nodes.clone(),
 		};
 
 		let histo = if let Some(histo) = self.db.get(column, k) {
 			Some(HValue::decode_with_context(&mut &histo[..], &(init.clone(), init_nodes.clone()))
-				.expect("Bad encoded value in db, closing"))
+				.expect("Corrupted db, wrong historied value encoding, closing."))
 		} else {
 			if change.is_none() {
 				return;
@@ -435,9 +437,8 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 					// current state will always return previous state
 					h.get_sum(&self.current_state_read)
 				} {
-					use historied_db::historied::aggregate::{Substract};
-					let mut builder = BytesSubstract::new();
-					let v_diff = builder.substract(&previous, &Some(v.clone()).into());
+					let target_value = Some(v).into();
+					let v_diff = historied_db::historied::aggregate::xdelta::substract(&previous, &target_value).into();
 					new_value = histo;
 					new_value.set(v_diff, &self.current_state)
 				} else {
@@ -768,13 +769,11 @@ pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
 pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeDatabase<H>);
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
-	const JOURNAL_DELETE: bool = true;
+	const JOURNAL_CHANGES: bool = true;
 	// Use pointer to serialize db with a transactional layer.
 	type Storage = TransactionalMappedDB<historied_db::mapped_db::MappedDBDyn>;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
-	type TouchedGC = historied_tree_bindings::TouchedGC;
-	type CurrentGC = historied_tree_bindings::CurrentGC;
 	type LastIndex = historied_tree_bindings::LastIndex;
 	type NeutralElt = historied_tree_bindings::NeutralElt;
 	type TreeMeta = historied_tree_bindings::TreeMeta;
@@ -782,12 +781,10 @@ impl historied_db::management::tree::TreeManagementStorage for TreeManagementPer
 }
 
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistenceNoTx {
-	const JOURNAL_DELETE: bool = true;
+	const JOURNAL_CHANGES: bool = true;
 	type Storage = RocksdbStorage;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
-	type TouchedGC = historied_tree_bindings::TouchedGC;
-	type CurrentGC = historied_tree_bindings::CurrentGC;
 	type LastIndex = historied_tree_bindings::LastIndex;
 	type NeutralElt = historied_tree_bindings::NeutralElt;
 	type TreeMeta = historied_tree_bindings::TreeMeta;
@@ -1083,7 +1080,7 @@ pub struct BlockchainDb<Block: BlockT> {
 impl<Block: BlockT> BlockchainDb<Block> {
 	fn new(
 		db: Arc<dyn Database<DbHash>>,
-		transaction_storage: TransactionStorageMode
+		transaction_storage: TransactionStorageMode,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
 	) -> ClientResult<Self> {
 		let meta = read_meta::<Block>(&*db, columns::HEADER)?;
@@ -1760,7 +1757,7 @@ impl<Block: BlockT> Backend<Block> {
 
 	/// Create new memory-backed client backend for tests.
 	#[cfg(any(test, feature = "test-helpers"))]
-	fn new_test_with_tx_storage(
+	pub fn new_test_with_tx_storage(
 		keep_blocks: u32,
 		canonicalization_delay: u64,
 		transaction_storage: TransactionStorageMode,
@@ -1797,7 +1794,7 @@ impl<Block: BlockT> Backend<Block> {
 		)?;
 		let meta = blockchain.meta.clone();
 		let map_e = |e: sc_state_db::Error<io::Error>| sp_blockchain::Error::from_state_db(e);
-		let historied_pruning_window = match &config.pruning {
+		let historied_pruning_window = match &config.state_pruning {
 			PruningMode::Constrained(constraint) => constraint.max_blocks.map(|nb| nb.into()),
 			_ => None,
 		};
@@ -1838,10 +1835,18 @@ impl<Block: BlockT> Backend<Block> {
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
+		// TODO allow to skip those locks through config (putting in db config feels awkward but could
+		// do the job).
+		// Reminder, without the locks if the offchain worker do not manage its concurrency properly
+		// the data will get corrupted (modified historied value cache writing over concurrent changes
+		// and probably some detached backend nodes that will not get pruned).
+		// TODO maybe use a panicky lock mode to assert worker concurrency is correct.
+		let safe_offchain_locks = true;
 		let offchain_local_storage = offchain::BlockChainLocalStorage::new(
 			db,
 			historied_management.clone(),
 			management_db_2,
+			safe_offchain_locks,
 		);
 		let mut historied_management_consumer: RegisteredConsumer<
 			<HashFor<Block> as Hasher>::Out,
@@ -2079,16 +2084,17 @@ impl<Block: BlockT> Backend<Block> {
 				{
 					// TODO could use result as update plan (need to check if true)
 					let _ = management.append_external_state(hash.clone(), &state)
-						.ok_or(ClientError::Msg("correct state resolution".into()))?;
+						.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
 					// TODO could make sense to use previous query plan since it
 					// should mainly be use to read previous value.
 					let query_plan = management.get_db_state(&hash)
-						.ok_or(ClientError::Msg("correct state resolution".into()))?;
+						.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
 					let update_plan = management.get_db_state_mut(&hash)
-						.ok_or(ClientError::Msg("correct state resolution".into()))?;
+						// TODO could have a ClientError::StateManagement error.
+						.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
 					(query_plan, update_plan)
 				} else {
-					return Err("missing update plan".into());
+					return Err(ClientError::StateDatabase("missing update plan".into()));
 				}
 			};
 			(Some(HistoriedDBMut {
@@ -2107,7 +2113,7 @@ impl<Block: BlockT> Backend<Block> {
 		{
 			use historied_db::management::tree::TreeManagementStorage;
 			let mut management;
-			let journals = if TreeManagementPersistence::JOURNAL_DELETE {
+			let journals = if TreeManagementPersistence::JOURNAL_CHANGES {
 				management = self.historied_management.write();
 				Some(management.ser())
 			} else {
@@ -2878,7 +2884,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					let current_state = management.get_db_state(&h)
 						.or_else(|| management.append_external_state(h.clone(), &state)
 							.and_then(|_| management.get_db_state(&h))
-						).ok_or("Historied management error")?;
+						).ok_or(ClientError::StateDatabase("Historied management error".into()))?;
 					HistoriedDB {
 						current_state,
 						db: self.blockchain.ordered_db.clone(),
@@ -3799,7 +3805,7 @@ pub(crate) mod tests {
 	#[test]
 	fn prune_blocks_on_finalize() {
 		for storage in &[TransactionStorageMode::BlockBody, TransactionStorageMode::StorageChain] {
-			let backend = Backend::<Block>::new_test_with_tx_storage(2, 0, *storage);
+			let backend = Backend::<Block>::new_test_with_tx_storage(2, 0, *storage, Default::default());
 			let mut blocks = Vec::new();
 			let mut prev_hash = Default::default();
 			for i in 0 .. 5 {

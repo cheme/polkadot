@@ -40,7 +40,7 @@ prometheus-endpoint = { package = "substrate-prometheus-endpoint", version = "0.
 historied-db = { version = "0.8.0", path = "../../utils/historied-db", features = ["force-data", "db-traits", "encoded-array-backend", "temp-size-impl", "xdelta3-diff"] }
 tempfile = "3"
 
-trie-db = { version = "0.22.0", default-features = false } # TODO remove, just for testing in upgrade
+trie-db = { version = "0.22.3", default-features = false } # TODO remove, just for testing in upgrade
 rocksdb = { version = "0.14", features = ["snappy"], default-features = false } # TODO remove, just to get collection size
 
 [dev-dependencies]

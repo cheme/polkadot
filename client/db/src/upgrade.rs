@@ -651,8 +651,8 @@ impl<Block: BlockT> sp_state_machine::Storage<HashFor<Block>> for StorageDb<Bloc
 fn migrate_1_to_2<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
 	let db_path = db_path.to_str()
 		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
-	let db_cfg = DatabaseConfig::with_columns(V1_NUM_COLUMNS);
-	let db = Database::open(&db_cfg, db_path).map_err(db_err)?;
+	let db_cfg = kvdb_rocksdb::DatabaseConfig::with_columns(V1_NUM_COLUMNS);
+	let db = kvdb_rocksdb::Database::open(&db_cfg, db_path).map_err(db_err)?;
 	db.add_column().map_err(db_err)
 }
 
