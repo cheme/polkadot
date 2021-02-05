@@ -314,11 +314,12 @@ pub fn with_lookup<R, H: Clone>(db: &dyn Database<H>, hash: &H, mut f: impl FnMu
 
 mod ordered {
 	use super::*;
+	use codec::Codec;
 	use std::sync::Arc;
 	use parking_lot::RwLock;
 	use radix_tree::{Derivative, RadixConf, Children, NodeConf, Node,
 		Children256, Radix256Conf, Value};
-	use codec::Codec;
+
 	use core::fmt::Debug;
 
 	radix_tree::flatten_children!(
@@ -328,7 +329,9 @@ mod ordered {
 		Node256LazyHashBackend,
 		Children256,
 		Radix256Conf,
-		radix_tree::backend::LazyExt<radix_tree::backend::ArcBackend<radix_tree::backend::TransactionBackend<WrapColumnDb<H>>>>,
+		radix_tree::backend::LazyExt<
+			radix_tree::backend::ArcBackend<radix_tree::backend::TransactionBackend<WrapColumnDb<H>>>
+		>,
 		H,
 		{ H: Debug + PartialEq + Clone}
 	);
@@ -366,8 +369,7 @@ mod ordered {
 	/// Ordered database implementation through a indexing radix tree overlay.
 	pub struct RadixTreeDatabase<H: Clone + PartialEq + Debug> {
 		inner: Arc<dyn Database<H>>,
-		// Small vec?
-		trees: Arc<RwLock<Vec<radix_tree::Tree<Node256LazyHashBackend<Vec<u8>, H>>>>>, // TODO not the right type
+		trees: Arc<RwLock<Vec<radix_tree::Tree<Node256LazyHashBackend<Vec<u8>, H>>>>>,
 	}
 
 	impl<H: Clone + PartialEq + Debug> RadixTreeDatabase<H> {
