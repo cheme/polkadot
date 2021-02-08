@@ -693,9 +693,11 @@ impl<B: BlockT> CacheChanges<B> {
 			let mut existing = false;
 			if let Some(ph) = self.parent_hash.as_ref() {
 				let mut cache = cache.0.write();
-				if let Some(qp) = cache.management.get_db_state(ph) {
-					existing = true;
-					self.experimental_query_plan = Some(qp);
+				if is_best {
+					if let Some(qp) = cache.management.get_db_state(ph) {
+						existing = true;
+						self.experimental_query_plan = Some(qp);
+					}
 				}
 				if let Some(qp) = cache.management.get_db_state_mut(ph) {
 					existing = true;
@@ -707,9 +709,9 @@ impl<B: BlockT> CacheChanges<B> {
 				let mut cache = cache.0.write();
 				// TODO why so many param in 'sync' function.
 				if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
-					// TODO this is a bit unclear why we init it (especially when not is_best).
-					// actually when double update this would shit next one.
-					self.experimental_query_plan = Some(qp);
+					if is_best {
+						self.experimental_query_plan = Some(qp);
+					}
 					experimental_update = Some(eu);
 				}
 			}
