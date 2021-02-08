@@ -629,9 +629,8 @@ pub struct CacheChanges<B: BlockT> {
 	/// Hash of the block on top of which this instance was created or
 	/// `None` if cache is disabled
 	pub parent_hash: Option<B::Hash>,
-	pub experimental_query_plan: Option<ForkPlan<u32, u64>>, // TODO remove? not read.
-	// TODO rather unused as we update on hresh fork.
-	pub experimental_update: Option<Latest<(u32, u64)>>,
+	/// Current canonical query plan if fetched
+	pub experimental_query_plan: Option<ForkPlan<u32, u64>>,
 	/// disable checking experimental cache value
 	pub no_assert: bool,
 	/// avoid doing assert against backend result (no backend in qc test)
@@ -688,6 +687,8 @@ impl<B: BlockT> CacheChanges<B> {
 		let mut shared_cache = self.shared_cache.lock();
 		let cache = &mut *shared_cache;
 
+		let mut experimental_update: Option<Latest<(u32, u64)>> = None;
+
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut existing = false;
 			if let Some(ph) = self.parent_hash.as_ref() {
@@ -698,7 +699,7 @@ impl<B: BlockT> CacheChanges<B> {
 				}
 				if let Some(qp) = cache.management.get_db_state_mut(ph) {
 					existing = true;
-					self.experimental_update = Some(qp);
+					experimental_update = Some(qp);
 				}
 			}
 
@@ -709,7 +710,7 @@ impl<B: BlockT> CacheChanges<B> {
 					// TODO this is a bit unclear why we init it (especially when not is_best).
 					// actually when double update this would shit next one.
 					self.experimental_query_plan = Some(qp);
-					self.experimental_update = Some(eu);
+					experimental_update = Some(eu);
 				}
 			}
 		}// else { TODO EMCH do not sync when exp -> warn need to extract some exp udate from sync cache default fn
@@ -750,7 +751,7 @@ impl<B: BlockT> CacheChanges<B> {
 		if let Some(_) = self.parent_hash {
 			let mut local_cache = self.local_cache.write();
 			warn!("isbest: {:?}", is_best);
-				let eu = &self.experimental_update;
+				let eu = &experimental_update;
 				let mut exp_cache = self.experimental_cache.as_mut().map(|c| c.0.write())
 					.and_then(|c| eu.as_ref().map(|eu| (c, eu)));
 				trace!(
@@ -800,7 +801,7 @@ impl<B: BlockT> CacheChanges<B> {
 				= (commit_number, commit_hash, self.parent_hash)
 		{
 			let mut exp_cache = {
-				let eu = &self.experimental_update;
+				let eu = &experimental_update;
 				self.experimental_cache.as_mut().map(|c| c.0.write())
 					.and_then(|c| eu.as_ref().map(|eu| (c, eu)))
 			};
@@ -888,21 +889,11 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 					let mut cache = ec.0.write();
 					cache.management.get_db_state(ph)
 				}));
-		// TODO factor with previous exp, ok for now
-		let experimental_update = parent_hash.as_ref().and_then(|ph|
-				experimental_cache.as_ref().and_then(|ec| {
-					let mut cache = ec.0.write();
-					cache.management.get_db_state_mut(ph)
-				}));
-
 		if experimental_query_plan.is_none() && parent_hash.is_some() {
 			warn!("No query plan for cache {:?}", parent_hash);
 		}
 		experimental_query_plan.as_ref().map(|qp|
 			warn!("Query plan for new cache = {:?}", qp)
-		);
-		experimental_update.as_ref().map(|eu|
-			warn!("Update at for new cache = {:?}", eu)
 		);
 		CachingState {
 			usage: StateUsageStats::new(),
@@ -918,7 +909,6 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 				}),
 				parent_hash,
 				experimental_query_plan,
-				experimental_update,
 				no_assert: false,
 				qc: false,
 			},
