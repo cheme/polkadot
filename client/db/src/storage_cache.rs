@@ -691,7 +691,7 @@ impl<B: BlockT> CacheChanges<B> {
 
 		if let Some(cache) = self.experimental_cache.as_ref() {
 			let mut existing = false;
-			if let Some(ph) = self.parent_hash.as_ref() {
+			if let Some(ph) = commit_hash.as_ref() {
 				let mut cache = cache.0.write();
 				if is_best {
 					if let Some(qp) = cache.management.get_db_state(ph) {
@@ -705,8 +705,8 @@ impl<B: BlockT> CacheChanges<B> {
 				}
 			}
 
+			let mut cache = cache.0.write();
 			if !existing {
-				let mut cache = cache.0.write();
 				// TODO why so many param in 'sync' function.
 				if let Some((qp, eu)) = cache.sync(pivot, enacted, retracted, commit_hash.as_ref(), self.parent_hash.as_ref(), self.experimental_query_plan.as_ref()) {
 					if is_best {
@@ -892,11 +892,13 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 					cache.management.get_db_state(ph)
 				}));
 		if experimental_query_plan.is_none() && parent_hash.is_some() {
+			println!("No query plan for cache {:?}", parent_hash);
 			warn!("No query plan for cache {:?}", parent_hash);
 		}
-		experimental_query_plan.as_ref().map(|qp|
-			warn!("Query plan for new cache = {:?}", qp)
-		);
+		experimental_query_plan.as_ref().map(|qp| {
+			println!("Query plan for new cache = {:?}", qp);
+			warn!("Query plan for new cache = {:?}", qp);
+		});
 		CachingState {
 			usage: StateUsageStats::new(),
 			overlay_stats: sp_state_machine::StateMachineStats::default(),
