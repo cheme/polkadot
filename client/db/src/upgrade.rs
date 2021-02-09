@@ -65,14 +65,6 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 				migrate_2_to_3::<Block>(db_path, db_type)?;
 			},
 			2 => migrate_2_to_3::<Block>(db_path, db_type)?,
-			2 => (),
-			42 => {
-				delete_historied::<Block>(db_path, db_type)?;
-/*				let now = Instant::now();
-				let hash_for_root = inject_non_canonical::<Block>(db_path, db_type)?;
-				println!("inject non canonnical in {}", now.elapsed().as_millis());
-				compare_latest_roots::<Block>(db_path, db_type, hash_for_root)?;*/
-			},
 			CURRENT_VERSION => (),
 			_ => Err(sp_blockchain::Error::Backend(format!("Future database version: {}", db_version)))?,
 		}
@@ -81,8 +73,18 @@ pub fn upgrade_db<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 	update_version(db_path)
 }
 
+/// 1) the number of columns has changed from 11 to 12;
+/// 2) transactions column is added;
+fn migrate_1_to_2<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
+	let db_path = db_path.to_str()
+		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+	let db_cfg = kvdb_rocksdb::DatabaseConfig::with_columns(V1_NUM_COLUMNS);
+	let db = kvdb_rocksdb::Database::open(&db_cfg, db_path).map_err(db_err)?;
+	db.add_column().map_err(db_err)
+}
+
 /// Migration from version2 to version3:
-/// the number of columns has changed from 12 to 15;
+/// the number of columns has changed from 12 to 13, adding snapshot column;
 fn migrate_2_to_3<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
 	// Number of columns in v0.
 	const V2_NUM_COLUMNS: u32 = 12;
@@ -93,15 +95,10 @@ fn migrate_2_to_3<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 		let db = kvdb_rocksdb::Database::open(&db_config, &path)
 			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
 		db.add_column().map_err(db_err)?;
-		db.add_column().map_err(db_err)?;
-		db.add_column().map_err(db_err)?;
-		db.add_column().map_err(db_err)?;
-		db.add_column().map_err(db_err)?;
 	}
 
 	Ok(())
 }
-
 
 /// This does not seems to work, there is still no reimport of the blocks.
 fn delete_non_canonical<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
@@ -329,15 +326,13 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	tx.delete(2, b"tree_mgmt/last_index");
 	tx.delete(2, b"tree_mgmt/neutral_elt");
 	tx.delete(2, b"tree_mgmt/tree_meta");
+	
+	tx.delete_prefix(8, b"tree_mgmt/mapping");
+	tx.delete_prefix(8, b"tree_mgmt/state");
+	tx.delete_prefix(8, b"tree_mgmt/journal_delete");
 	tx.delete_prefix(12, &[]);
-	tx.delete_prefix(13, &[]);
-	tx.delete_prefix(14, &[]);
-	tx.delete_prefix(15, &[]);
 	for i in 0u8..255 {
 		tx.delete_prefix(12, &[i]);
-		tx.delete_prefix(13, &[i]);
-		tx.delete_prefix(14, &[i]);
-		tx.delete_prefix(15, &[i]);
 	}
 	tx.put(2, b"tree_mgmt/neutral_elt", &[0].encode()); // only for storing Vec<u8>, if changing type, change this.
 	db.write(tx).map_err(db_err)?;
@@ -553,16 +548,6 @@ impl<Block: BlockT> sp_state_machine::Storage<HashFor<Block>> for StorageDb<Bloc
 	}
 }
 
-/// 1) the number of columns has changed from 11 to 12;
-/// 2) transactions column is added;
-fn migrate_1_to_2<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
-	let db_path = db_path.to_str()
-		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
-	let db_cfg = kvdb_rocksdb::DatabaseConfig::with_columns(V1_NUM_COLUMNS);
-	let db = kvdb_rocksdb::Database::open(&db_cfg, db_path).map_err(db_err)?;
-	db.add_column().map_err(db_err)
-}
-
 /// Reads current database version from the file at given path.
 /// If the file does not exist returns 0.
 fn current_version(path: &Path) -> sp_blockchain::Result<u32> {
@@ -646,7 +631,6 @@ mod tests {
 	#[test]
 	fn open_empty_database_works() {
 		let db_dir = tempfile::TempDir::new().unwrap();
-		open_database(db_dir.path()).unwrap();
 		open_database(db_dir.path()).unwrap();
 		assert_eq!(current_version(db_dir.path()).unwrap(), CURRENT_VERSION);
 	}

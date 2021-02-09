@@ -38,7 +38,7 @@ mod children;
 mod cache;
 mod changes_tries_storage;
 mod storage_cache;
-// #[cfg(any(feature = "with-kvdb-rocksdb", test))] // TODO restore when historied db conditional
+#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 mod upgrade;
 mod utils;
 mod stats;
@@ -625,10 +625,12 @@ pub(crate) mod columns {
 /// history index).
 pub struct TreeManagementPersistence;
 
+#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 #[derive(Clone)]
 /// Database backed tree management, no transaction.
 pub struct TreeManagementPersistenceNoTx;
 
+#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 #[derive(Clone)]
 /// Database backed tree management for a rocksdb database.
 pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
@@ -640,7 +642,7 @@ pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeData
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
 	const JOURNAL_CHANGES: bool = true;
 	// Use pointer to serialize db with a transactional layer.
-	type Storage = TransactionalMappedDB<historied_db::mapped_db::MappedDBDyn>;
+	type Storage = TransactionalMappedDB<MappedDBDyn>;
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type LastIndex = historied_tree_bindings::LastIndex;
@@ -649,6 +651,7 @@ impl historied_db::management::tree::TreeManagementStorage for TreeManagementPer
 	type TreeState = historied_tree_bindings::TreeState;
 }
 
+#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistenceNoTx {
 	const JOURNAL_CHANGES: bool = true;
 	type Storage = RocksdbStorage;
@@ -704,6 +707,7 @@ const fn resolve_collection_inner<'a>(c: &'a [u8]) -> u32 {
 	u32::from_le_bytes(buf)
 }
 
+#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 impl historied_db::mapped_db::MappedDB for RocksdbStorage {
 	#[inline(always)]
 	fn is_active(&self) -> bool {
@@ -765,6 +769,7 @@ impl historied_db::mapped_db::MappedDB for RocksdbStorage {
 	}
 }
 
+#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 // redundant code with kvdb implementation, here only to get iter_from implementation
 // without putting iter_from into kvdb on patched branch
 impl<H: Clone> Database<H> for RocksdbStorage {
@@ -795,6 +800,7 @@ impl<H: Clone> Database<H> for RocksdbStorage {
 	}
 }
 
+#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 impl<H: Clone> OrderedDatabase<H> for RocksdbStorage {
 	fn iter<'a>(&'a self, col: u32) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
 		Box::new(self.0.iter(col).map(|(k, v)| (k.to_vec(), v.to_vec())))
@@ -903,7 +909,6 @@ pub mod historied_tree_bindings {
 	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
 	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
 	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
-	static_instance!(LocalOffchainDelete, b"\x08\x00\x00\x00offchain/journal_delete");
 }
 
 struct PendingBlock<Block: BlockT> {
@@ -1264,23 +1269,6 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 				},
 			}
 		}
-		if let (
-			Some(journal_keys),
-			Some(ordered_db),
-			Some(historied),
-		) = (journal_keys, journals, historied.as_ref()) {
-			// Note that this is safe because we import a new block.
-			// Otherwhise we would need to share cache with a single journal instance.
-			let mut journals = historied_db::management::JournalForMigrationBasis
-				::<_, _, _, crate::historied_tree_bindings::LocalOffchainDelete>
-				::from_db(ordered_db);
-			journals.add_changes(
-				ordered_db,
-				historied.0.current_state.latest().clone(),
-				journal_keys,
-				true, // New block, no need for fetch.
-			)
-		}
 
 		historied.as_mut().map(|(_historied_db, block_nodes, branch_nodes)| {
 			block_nodes.apply_transaction(transaction);
@@ -1601,11 +1589,11 @@ impl<Block: BlockT> Backend<Block> {
 	///
 	/// The pruning window is how old a block must be before the state is pruned.
 	pub fn new(config: DatabaseSettings, canonicalization_delay: u64) -> ClientResult<Self> {
-		let (db, ordered) = crate::utils::open_database_and_historied::<Block>(
+		let (db, ordered, management) = crate::utils::open_database_and_historied::<Block>(
 			&config,
 			DatabaseType::Full,
 		)?;
-		Self::from_database(db as Arc<_>, ordered, canonicalization_delay, &config)
+		Self::from_database(db as Arc<_>, ordered, management, canonicalization_delay, &config)
 	}
 
 	/// Create new memory-backed client backend for tests.
@@ -1642,6 +1630,7 @@ impl<Block: BlockT> Backend<Block> {
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
+		management_db: historied_db::mapped_db::MappedDBDyn,
 		canonicalization_delay: u64,
 		config: &DatabaseSettings,
 	) -> ClientResult<Self> {
@@ -1685,7 +1674,7 @@ impl<Block: BlockT> Backend<Block> {
 		)?;
 
 		let historied_persistence = TransactionalMappedDB {
-			db: ordered_db,
+			db: management_db,
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
@@ -1709,7 +1698,10 @@ impl<Block: BlockT> Backend<Block> {
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
-			shared_cache,
+			shared_cache: new_shared_cache(
+				config.state_cache_size,
+				config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
+			),
 			import_lock: Default::default(),
 			is_archive: is_archive_pruning,
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
