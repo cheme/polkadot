@@ -90,8 +90,6 @@ impl TestPersistentOffchainDB {
 			match value_operation {
 				OffchainOverlayedChange::SetValue(val) => me.set(Self::PREFIX, key.as_slice(), val.as_slice()),
 				OffchainOverlayedChange::Remove => me.remove(Self::PREFIX, key.as_slice()),
-				OffchainOverlayedChange::SetLocalValue(..)
-				| OffchainOverlayedChange::RemoveLocal => unimplemented!("No blockchain context, not implemented."),
 			}
 		}
 	}

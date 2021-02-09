@@ -51,27 +51,19 @@ impl OffchainOverlayedChanges {
 	}
 
 	/// Remove a key and its associated value from the offchain database.
-	pub fn remove(&mut self, prefix: &[u8], key: &[u8], is_local: bool) {
+	pub fn remove(&mut self, prefix: &[u8], key: &[u8]) {
 		let _ = self.0.set(
 			(prefix.to_vec(), key.to_vec()),
-			if is_local {
-				OffchainOverlayedChange::RemoveLocal
-			} else {
-				OffchainOverlayedChange::Remove
-			},
+			OffchainOverlayedChange::Remove,
 			None,
 		);
 	}
 
 	/// Set the value associated with a key under a prefix to the value provided.
-	pub fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8], is_local: bool) {
+	pub fn set(&mut self, prefix: &[u8], key: &[u8], value: &[u8]) {
 		let _ = self.0.set(
 			(prefix.to_vec(), key.to_vec()),
-			if is_local {
-				OffchainOverlayedChange::SetLocalValue(value.to_vec())
-			} else {
-				OffchainOverlayedChange::SetValue(value.to_vec())
-			},
+			OffchainOverlayedChange::SetValue(value.to_vec()),
 			None,
 		);
 	}
@@ -101,30 +93,30 @@ mod test {
 	#[test]
 	fn test_drain() {
 		let mut ooc = OffchainOverlayedChanges::default();
-		ooc.set(STORAGE_PREFIX, b"kkk", b"vvv", false);
+		ooc.set(STORAGE_PREFIX, b"kkk", b"vvv");
 		let drained = ooc.drain().count();
 		assert_eq!(drained, 1);
 		let leftover = ooc.iter().count();
 		assert_eq!(leftover, 0);
 
-		ooc.set(STORAGE_PREFIX, b"a", b"v", false);
-		ooc.set(STORAGE_PREFIX, b"b", b"v", false);
-		ooc.set(STORAGE_PREFIX, b"c", b"v", false);
-		ooc.set(STORAGE_PREFIX, b"d", b"v", false);
-		ooc.set(STORAGE_PREFIX, b"e", b"v", false);
+		ooc.set(STORAGE_PREFIX, b"a", b"v");
+		ooc.set(STORAGE_PREFIX, b"b", b"v");
+		ooc.set(STORAGE_PREFIX, b"c", b"v");
+		ooc.set(STORAGE_PREFIX, b"d", b"v");
+		ooc.set(STORAGE_PREFIX, b"e", b"v");
 		assert_eq!(ooc.iter().count(), 5);
 	}
 
 	#[test]
 	fn test_accumulated_set_remove_set() {
 		let mut ooc = OffchainOverlayedChanges::default();
-		ooc.set(STORAGE_PREFIX, b"ppp", b"qqq", false);
-		ooc.remove(STORAGE_PREFIX, b"ppp", false);
+		ooc.set(STORAGE_PREFIX, b"ppp", b"qqq");
+		ooc.remove(STORAGE_PREFIX, b"ppp");
 		// keys are equiv, so it will overwrite the value and the overlay will contain
 		// one item
 		assert_eq!(ooc.iter().count(), 1);
 
-		ooc.set(STORAGE_PREFIX, b"ppp", b"rrr", false);
+		ooc.set(STORAGE_PREFIX, b"ppp", b"rrr");
 		let mut iter = ooc.into_iter();
 		assert_eq!(
 			iter.next(),

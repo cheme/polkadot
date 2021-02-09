@@ -62,7 +62,6 @@ use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::io;
 use std::collections::{HashMap, HashSet};
-use offchain::{BlockNodes, BranchNodes};
 use parking_lot::{Mutex, RwLock};
 use linked_hash_map::LinkedHashMap;
 use log::{trace, debug, warn};
@@ -99,7 +98,6 @@ use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTra
 use sc_state_db::StateDb;
 use sp_blockchain::{CachedHeaderMetadata, HeaderMetadata, HeaderMetadataCache};
 use crate::storage_cache::{CachingState, SyncingCachingState, SharedCache, new_shared_cache};
-use sc_client_api::ExpCacheConf;
 use crate::stats::StateUsageStats;
 
 // Re-export the Database trait so that one can pass an implementation of it.
@@ -183,8 +181,8 @@ impl KVBackend for HistoriedDB {
 }
 
 impl HistoriedDB {
+	/// Iterator on key values. 
 	pub fn iter<'a>(&'a self, column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
-		let current_state = &self.current_state;
 		self.db.iter(column).filter_map(move |(k, v)| {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.or_else(|| {
@@ -198,8 +196,9 @@ impl HistoriedDB {
 			v.map(|v| (k, v))
 		})
 	}
+
+	/// Iterator on key values, starting at a given position. TODO is it use???
 	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
-		let current_state = &self.current_state;
 		self.db.iter_from(column, start).filter_map(move |(k, v)| {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.or_else(|| {
@@ -231,63 +230,8 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		Transaction::new()
 	}
 
-	/// Update transaction for a offchain local storage historied value.
-	pub fn update_single_offchain(
-		&mut self,
-		k: &[u8],
-		change: Option<Vec<u8>>,
-		change_set: &mut Transaction<DbHash>,
-		branch_nodes: &BranchNodes,
-		block_nodes: &BlockNodes,
-	) {
-		use crate::offchain::HValue;
-		let column = crate::columns::OFFCHAIN;
-		let init_nodes = ContextHead {
-			key: k.to_vec(),
-			backend: block_nodes.clone(),
-			encoded_indexes: Vec::new(),
-			node_init_from: (),
-		};
-		let init = ContextHead {
-			key: k.to_vec(),
-			backend: branch_nodes.clone(),
-			encoded_indexes: Vec::new(),
-			node_init_from: init_nodes.clone(),
-		};
-
-		let histo = if let Some(histo) = self.db.get(column, k) {
-			Some(HValue::decode_with_context(&mut &histo[..], &(init.clone(), init_nodes.clone()))
-				.expect("Corrupted db, wrong historied value encoding, closing."))
-		} else {
-			if change.is_none() {
-				return;
-			}
-			None
-		};
-
-		let mut new_value;
-		match if let Some(histo) = histo {
-			new_value = histo;
-			new_value.set(change, &self.current_state)
-		} else {
-			new_value = HValue::new(change, &self.current_state, (init, init_nodes));
-			historied_db::UpdateResult::Changed(())
-		} {
-			historied_db::UpdateResult::Changed(()) => {
-				use historied_db::Trigger;
-				new_value.trigger_flush();
-				change_set.set_from_vec(column, k, new_value.encode());
-			},
-			historied_db::UpdateResult::Cleared(()) => {
-				use historied_db::Trigger;
-				new_value.trigger_flush();
-				change_set.remove(column, k);
-			},
-			historied_db::UpdateResult::Unchanged => (),
-		}
-	}
-
 	/// write a single value in change set.
+	/// TODO use branch and block nodes backend as in offchain-storage
 	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
 		self.update_single_inner(k, change, change_set, crate::columns::STATE_SNAPSHOT)
 	}
@@ -309,7 +253,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			None
 		};
 		let mut new_value;
-		match if let Some(mut v) = change {
+		match if let Some(v) = change {
 			if let Some(histo) = histo {
 				if let Some(previous) = {
 					let h = TreeSum::<_, _, BytesDelta, _, _>(&histo);
@@ -349,7 +293,8 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	pub fn unchecked_new_single(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>) {
 		self.unchecked_new_single_inner(k, v, change_set, crate::columns::STATE_SNAPSHOT)
 	}
-	pub fn unchecked_new_single_inner(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
+
+	fn unchecked_new_single_inner(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
 		let value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
 		let value = value.encode();
 		change_set.set_from_vec(column, k, value);
@@ -771,7 +716,7 @@ impl historied_db::mapped_db::MappedDB for RocksdbStorage {
 
 #[cfg(any(feature = "with-kvdb-rocksdb", test))]
 // redundant code with kvdb implementation, here only to get iter_from implementation
-// without putting iter_from into kvdb on patched branch
+// without putting iter_from into kvdb on patched branch TODO ?? remove
 impl<H: Clone> Database<H> for RocksdbStorage {
 	fn commit(&self, transaction: Transaction<H>) -> sp_database::error::Result<()> {
 		use sp_database::Change;
@@ -1236,18 +1181,7 @@ pub struct BlockImportOperation<Block: BlockT> {
 }
 
 impl<Block: BlockT> BlockImportOperation<Block> {
-	fn apply_offchain(
-		&mut self,
-		transaction: &mut Transaction<DbHash>,
-		historied: Option<&mut HistoriedDBMut<Arc<dyn Database<DbHash>>>>,
-		journals: Option<&mut TransactionalMappedDB<historied_db::mapped_db::MappedDBDyn>>,
-	) {
-		let mut historied = historied.map(|historied_db| {
-			let block_nodes = BlockNodes::new(historied_db.db.clone());
-			let branch_nodes = BranchNodes::new(historied_db.db.clone());
-			(historied_db, block_nodes, branch_nodes)
-		});
-		let mut journal_keys = journals.as_ref().map(|_| Vec::new());
+	fn apply_offchain(&mut self, transaction: &mut Transaction<DbHash>) {
 		for ((prefix, key), value_operation) in self.offchain_storage_updates.drain(..) {
 			let key = crate::offchain::concatenate_prefix_and_key(&prefix, &key);
 			match value_operation {
@@ -1255,25 +1189,8 @@ impl<Block: BlockT> BlockImportOperation<Block> {
 					transaction.set_from_vec(columns::OFFCHAIN, &key, val),
 				OffchainOverlayedChange::Remove =>
 					transaction.remove(columns::OFFCHAIN, &key),
-				OffchainOverlayedChange::SetLocalValue(val) => {
-					historied.as_mut().map(|(historied_db, block_nodes, branch_nodes)|
-						historied_db.update_single_offchain(&key, Some(val), transaction, branch_nodes, block_nodes)
-					);
-					journal_keys.as_mut().map(|journal| journal.push(key));
-				},
-				OffchainOverlayedChange::RemoveLocal => {
-					historied.as_mut().map(|(historied_db, block_nodes, branch_nodes)|
-						historied_db.update_single_offchain(&key, None, transaction, branch_nodes, block_nodes)
-					);
-					journal_keys.as_mut().map(|journal| journal.push(key));
-				},
 			}
 		}
-
-		historied.as_mut().map(|(_historied_db, block_nodes, branch_nodes)| {
-			block_nodes.apply_transaction(transaction);
-			branch_nodes.apply_transaction(transaction);
-		});
 	}
 
 	fn apply_aux(&mut self, transaction: &mut Transaction<DbHash>) {
@@ -1678,13 +1595,6 @@ impl<Block: BlockT> Backend<Block> {
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
-		// TODO allow to skip those locks through config (putting in db config feels awkward but could
-		// do the job).
-		// Reminder, without the locks if the offchain worker do not manage its concurrency properly
-		// the data will get corrupted (modified historied value cache writing over concurrent changes
-		// and probably some detached backend nodes that will not get pruned).
-		// TODO maybe use a panicky lock mode to assert worker concurrency is correct.
-		let safe_offchain_locks = true;
 		// TODO register the journals for state change!! (actually would probably need new
 		// journals: see offchain storage branch + need child trie support).
 		let historied_management_consumer: RegisteredConsumer<
@@ -1890,7 +1800,7 @@ impl<Block: BlockT> Backend<Block> {
 			(hash, parent_hash)
 		});
 
-		let (mut historied_db, mut ordered_historied_db) = if let Some((hash, parent_hash)) = hashes {
+		let mut ordered_historied_db = if let Some((hash, parent_hash)) = hashes {
 			// lazy init, not that this can lead to no finalization
 			// if the node get close to often, with current windows
 			// size, this is fine, otherwhise this value will need
@@ -1930,31 +1840,17 @@ impl<Block: BlockT> Backend<Block> {
 					return Err(ClientError::StateDatabase("missing update plan".into()));
 				}
 			};
-			(Some(HistoriedDBMut {
-				current_state: update_plan.clone(),
-				current_state_read: query_plan.clone(),
-				db: self.blockchain.db.clone(),
-			}), Some(HistoriedDBMut {
+			Some(HistoriedDBMut {
 				current_state: update_plan,
 				current_state_read: query_plan,
 				db: self.blockchain.ordered_db.clone(),
-			}))
+			})
 		} else {
-			(None, None)
+			None
 		};
 
-		{
-			use historied_db::management::tree::TreeManagementStorage;
-			let mut management;
-			let journals = if TreeManagementPersistence::JOURNAL_CHANGES {
-				management = self.historied_management.write();
-				Some(management.ser())
-			} else {
-				None
-			};
 
-			operation.apply_offchain(&mut transaction, historied_db.as_mut(), journals);
-		}
+		operation.apply_offchain(&mut transaction);
 
 		// write management state changes
 		apply_historied_management_changes::<Block>(self.historied_management.write(), &mut transaction);
@@ -2317,7 +2213,6 @@ impl<Block: BlockT> Backend<Block> {
 
 		let switch_index = historied_management.get_db_state_for_fork(hash);
 		let path = {
-			use historied_db::management::Management;
 			historied_management.get_db_state(hash)
 		};
 
@@ -2845,7 +2740,7 @@ pub(crate) mod tests {
 		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
 		extrinsics_root: H256,
 	) -> H256 {
-		insert_block(backend, number, parent_hash, changes, None, extrinsics_root, Vec::new())
+		insert_block(backend, number, parent_hash, changes, extrinsics_root, Vec::new())
 	}
 
 	pub fn insert_block(
@@ -2853,7 +2748,6 @@ pub(crate) mod tests {
 		number: u64,
 		parent_hash: H256,
 		changes: Option<Vec<(Vec<u8>, Vec<u8>)>>,
-		offchain: Option<OffchainOverlayedChanges>,
 		extrinsics_root: H256,
 		body: Vec<ExtrinsicWrapper<u64>>,
 	) -> H256 {
@@ -3489,7 +3383,7 @@ pub(crate) mod tests {
 			let mut blocks = Vec::new();
 			let mut prev_hash = Default::default();
 			for i in 0 .. 5 {
-				let hash = insert_block(&backend, i, prev_hash, None, Default::default(), Default::default(), vec![i.into()]);
+				let hash = insert_block(&backend, i, prev_hash, None, Default::default(), vec![i.into()]);
 				blocks.push(hash);
 				prev_hash = hash;
 			}

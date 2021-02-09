@@ -271,6 +271,7 @@ pub trait OrderedDatabase<H: Clone>: Database<H> {
 		trim_prefix: bool,
 	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
 
+	/// Iterate from a start position (same seek then iterate).
 	fn iter_from<'a>(
 		&'a self,
 		col: ColumnId,
