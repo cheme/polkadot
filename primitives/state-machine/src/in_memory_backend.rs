@@ -24,13 +24,16 @@ use sp_std::collections::btree_map::BTreeMap;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 use hash_db::Hasher;
-use sp_trie::{MemoryDB, empty_trie_root, Layout, TrieMut, trie_types::TrieDBMut};
+use sp_trie::{MemoryDB, empty_trie_root, Layout};
 use codec::Codec;
 use sp_core::storage::ChildInfo;
 #[cfg(feature = "std")]
 use sp_core::storage::Storage;
-use sp_std::{sync::Arc, vec::Vec};
+use sp_std::vec::Vec;
 
+/// In memory alternative key value backend to use
+/// instead of a trie backend when operation do not need
+/// trie usage.
 #[derive(Default, Clone, Debug, Eq, PartialEq)]
 pub struct KVInMem(BTreeMap<Vec<u8>, Vec<u8>>);
 
@@ -43,57 +46,16 @@ impl crate::kv_backend::KVBackend for KVInMem {
 	}
 }
 
-/// Insert input pairs into memory db. TODO check if can delete
-fn insert_into_memory_db<H, I>(mut root: H::Out, mdb: &mut MemoryDB<H>, input: I) -> H::Out
-where
-	H: Hasher,
-	I: IntoIterator<Item=(StorageKey, Option<StorageValue>)>,
-{
-	{
-		let mut trie = if root == Default::default() {
-			TrieDBMut::<H>::new(mdb, &mut root)
-		} else {
-			match TrieDBMut::<H>::from_existing(mdb, &mut root) {
-				Ok(trie) => trie,
-				Err(_) => panic!("Error building trie from values."),
-			}
-		};
-		for (key, value) in input {
-			if let Err(e) = match value {
-				Some(value) => {
-					trie.insert(&key, &value)
-				},
-				None => {
-					trie.remove(&key)
-				},
-			}  {
-				#[cfg(feature = "std")]
-				panic!("Failed to write to trie: {}", e);
-				#[cfg(not(feature = "std"))]
-				panic!("Failed to write to trie.");
-			}
-		}
-		trie.commit();
-	}
-	root
-}
-
 /// Create a new empty instance of in-memory backend.
 pub fn new_in_mem<H: Hasher>() -> TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
 {
 	let db = MemoryDB::default();
-	let kv_db = KVInMem::default();
-	// this does not share values with kvdb that is bad TODO ??
-	let kv_db_2 = BTreeMap::new();
-	let indexes = BTreeMap::new();
 	let mut backend = TrieBackend::new(
 		db,
 		empty_trie_root::<Layout<H>>(),
-		Arc::new(kv_db),
-		Arc::new(kv_db_2),
-		Arc::new(indexes),
+		None,
 	);
 	backend.insert(sp_std::iter::empty());
 	backend
@@ -142,8 +104,6 @@ where
 			clone,
 			root,
 			self.alternative.clone(),
-			self.alternative_trie_values.clone(),
-			self.alternative_indexes.clone(),
 		)
 	}
 
@@ -168,8 +128,6 @@ where
 			self.backend_storage().clone(),
 			self.root().clone(),
 			self.alternative.clone(),
-			self.alternative_trie_values.clone(),
-			self.alternative_indexes.clone(),
 		)
 	}
 }

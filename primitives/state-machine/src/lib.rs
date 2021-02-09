@@ -123,8 +123,7 @@ pub use crate::overlayed_changes::{
 	OffchainOverlayedChanges,
 };
 pub use crate::backend::Backend;
-pub use crate::trie_backend_essence::{TrieBackendStorage, Storage,
-	OverlayWithIndexes};
+pub use crate::trie_backend_essence::{TrieBackendStorage, Storage};
 pub use crate::trie_backend::TrieBackend;
 pub use crate::stats::{UsageInfo, UsageUnit, StateMachineStats};
 pub use error::{Error, ExecutionError};
@@ -859,12 +858,20 @@ mod execution {
 }
 
 /// Simple key value backend support.
+/// TODO fn use_backend (sometime we do not use it).
+/// TODO fn next_key (returning option... and an error for incomplete proof).
 pub mod kv_backend {
 	/// KVBackend trait.
+	/// Will be use when we do not need to use an actual trie structure
+	/// (content must be trusted).
 	pub trait KVBackend: Send + Sync {
+		/// When true we check that the value from this backend
+		/// is the same as the value from the trie backend.
 		fn assert_value(&self) -> bool {
 			true
 		}
+
+		/// Access to this backend value for a given key.
 		fn storage(&self, key: &[u8]) -> Result<Option<sp_std::vec::Vec<u8>>, crate::DefaultError>;
 	}
 }
@@ -1492,7 +1499,7 @@ mod tests {
 			cache.transaction.unwrap()
 		};
 		let mut duplicate = false;
-		for (k, (value, rc)) in transaction.db.drain().iter() {
+		for (k, (value, rc)) in transaction.drain().iter() {
 			// look for a key inserted twice: transaction rc is 2
 			if *rc == 2 {
 				duplicate = true;
