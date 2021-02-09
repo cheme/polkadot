@@ -23,7 +23,7 @@
 pub mod genesismap;
 pub mod system;
 
-use sp_std::{prelude::*, marker::PhantomData, sync::Arc};
+use sp_std::{prelude::*, marker::PhantomData};
 use codec::{Encode, Decode, Input, Error};
 
 use sp_core::{offchain::KeyTypeId, ChangesTrieConfiguration, OpaqueMetadata, RuntimeDebug};
@@ -1149,15 +1149,10 @@ fn test_read_child_storage() {
 fn test_witness(proof: StorageProof, root: crate::Hash) {
 	use sp_externalities::Externalities;
 	let db: sp_trie::MemoryDB<crate::Hashing> = proof.into_memory_db();
-	let alternative = sp_state_machine::KVInMem::default();
-	let kv_db_2 = sp_std::collections::btree_map::BTreeMap::new();
-	let indexes = sp_std::collections::btree_map::BTreeMap::new();
 	let backend = sp_state_machine::TrieBackend::<_, crate::Hashing>::new(
 		db,
 		root,
-		Arc::new(alternative),
-		Arc::new(kv_db_2),
-		Arc::new(indexes),
+		None,
 	);
 	let mut overlay = sp_state_machine::OverlayedChanges::default();
 	let mut cache = sp_state_machine::StorageTransactionCache::<_, _, BlockNumber>::default();
@@ -1190,7 +1185,6 @@ mod tests {
 	use sp_state_machine::ExecutionStrategy;
 	use codec::Encode;
 	use sc_block_builder::BlockBuilderProvider;
-	use std::sync::Arc;
 
 	#[test]
 	fn heap_pages_is_respected() {
@@ -1251,16 +1245,10 @@ mod tests {
 	#[test]
 	fn witness_backend_works() {
 		let (db, root) = witness_backend();
-
-		let alternative = sp_state_machine::KVInMem::default();
-		let kv_db_2 = std::collections::BTreeMap::new();
-		let indexes = std::collections::BTreeMap::new();
 		let backend = sp_state_machine::TrieBackend::<_, crate::Hashing>::new(
 			db,
 			root,
-			Arc::new(alternative),
-			Arc::new(kv_db_2),
-			Arc::new(indexes),
+			None,
 		);
 		let proof = sp_state_machine::prove_read(backend, vec![b"value3"]).unwrap();
 		let client = TestClientBuilder::new()

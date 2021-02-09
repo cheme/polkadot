@@ -92,7 +92,7 @@ use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
 	StorageCollection, ChildStorageCollection, OffchainChangesCollection,
 	backend::Backend as StateBackend, StateMachineStats,
-	kv_backend::KVBackend, OverlayWithIndexes,
+	kv_backend::KVBackend,
 };
 use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
@@ -172,6 +172,7 @@ impl HistoriedDB {
 	}
 
 }
+
 impl KVBackend for HistoriedDB {
 	fn assert_value(&self) -> bool {
 		self.do_assert
@@ -179,122 +180,6 @@ impl KVBackend for HistoriedDB {
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
 		self.storage_inner(key, crate::columns::StateValues)
-	}
-}
-
-// TODO those trait needs error handling
-// TODO split trait between mut and not mut.
-impl trie_db::partial_db::KVBackend for HistoriedDB {
-	fn read(&self, key: &[u8]) -> Option<Vec<u8>> {
-		self.storage_inner(key, crate::columns::StateValues)
-			.unwrap()
-	}
-	fn write(&mut self, _key: &[u8], _value: &[u8]) {
-		unimplemented!("Historied db is read only")
-	}
-	fn remove(&mut self, _key: &[u8]) {
-		unimplemented!("Historied db is read only")
-	}
-	fn iter<'a>(&'a self) -> trie_db::partial_db::KVBackendIter<'a> {
-		Box::new(self.iter(crate::columns::StateValues).map(|(k, v)| (k.to_vec(), v)))
-	}
-	fn iter_from<'a>(&'a self, start: &[u8]) -> trie_db::partial_db::KVBackendIter<'a> {
-		Box::new(self.iter_from(start, crate::columns::StateValues).map(|(k, v)| (k.to_vec(), v)))
-	}
-}
-fn decode_index(mut encoded: Vec<u8>) -> trie_db::partial_db::Index {
-	let mut buff: [u8; 4] = [0, 0, 0, 0];
-	let start = encoded.len() - 9;
-	buff.copy_from_slice(&encoded[start..start + 4]);
-	let actual_depth = u32::from_le_bytes(buff) as usize;
-	buff.copy_from_slice(&encoded[start + 4..start + 8]);
-	let top_depth = u32::from_le_bytes(buff) as usize;
-	let is_top_index = encoded[start + 8] == 1;
-	encoded.truncate(start);
-	trie_db::partial_db::Index {
-		hash: encoded,
-		actual_depth,
-		top_depth,
-		is_top_index,
-	}
-}
-fn encode_index(index: trie_db::partial_db::Index) -> Vec<u8> {
-	let mut result = index.hash;
-	let depth = (index.actual_depth as u32).to_le_bytes();
-	result.extend_from_slice(&depth[..]);
-	let top_depth = (index.top_depth as u32).to_le_bytes();
-	result.extend_from_slice(&top_depth[..]);
-	if index.is_top_index {
-		result.push(1);
-	} else {
-		result.push(0);
-	}
-	result
-}
-#[test]
-fn enc_dec() {
-	let index = trie_db::partial_db::Index {
-		hash: vec![1u8, 2, 3],
-		actual_depth: 18,
-		top_depth: 26,
-		is_top_index: false,
-	};
-	let index2 = decode_index(encode_index(index.clone()));
-	assert_eq!(index.hash, index2.hash);
-	assert_eq!(index.actual_depth, index2.actual_depth);
-	assert_eq!(index.top_depth, index2.top_depth);
-	assert_eq!(index.is_top_index, index2.is_top_index);
-}
-mod impl_index_backend {
-	use super::*;
-	use trie_db::partial_db::{index_tree_key, value_prefix_index, Index, IndexPosition, IndexBackendIter};
-	// TODO those trait needs error handling
-	impl trie_db::partial_db::IndexBackend for HistoriedDB {
-		fn read(&self, depth: usize, index: &[u8]) -> Option<Index> {
-			self.storage_inner(&index_tree_key(depth, index)[..], crate::columns::StateIndexes)
-				.unwrap()
-				.map(decode_index)
-		}
-		fn write(&mut self, _depth: usize, _position: IndexPosition, _index: Index) {
-			unimplemented!("Historied db is read only")
-		}
-		fn remove(&mut self, _depth: usize, _index: IndexPosition) {
-			unimplemented!("Historied db is read only")
-		}
-		fn iter<'a>(&'a self, depth: usize, depth_base: usize, change: &[u8]) -> IndexBackendIter<'a> {
-			let l_size = std::mem::size_of::<u32>();
-			let depth_prefix = &(depth as u32).to_be_bytes()[..];
-			let base = depth_prefix.len();
-			let start = if depth_base > 0 {
-
-				let mut start = index_tree_key(depth, change);
-				let truncate = ((depth_base - 1) / trie_db::nibble_ops::NIBBLE_PER_BYTE) + 1;
-				start.truncate(truncate + base);
-				let unaligned = depth_base % trie_db::nibble_ops::NIBBLE_PER_BYTE;
-				if unaligned != 0 {
-					start.last_mut().map(|l|
-						*l = *l & !(255 >> (unaligned * trie_db::nibble_ops::BIT_PER_NIBBLE))
-					);
-				}
-				start
-			} else {
-				index_tree_key(depth, &[])
-			};
-
-			let iter = self.iter_from(&start, crate::columns::StateIndexes);
-			// TODO switch to IndexPosition instead of vecs
-			let end = value_prefix_index(depth_base, start.to_vec(), base);
-			// TODO the end filter is not optimal, can result in more query
-			// and there is primitive to do it in rocksdb
-			Box::new(iter.into_iter().filter_map(move |(k, ix)| {
-				if end.as_ref().map(|end| &k[..] < &end[..]).unwrap_or(true) {
-					let k = k[l_size..].to_vec();
-					Some((k, decode_index(ix)))
-				} else {
-					None
-				}
-			}))
-		}
 	}
 }
 
@@ -406,9 +291,6 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	/// write a single value in change set.
 	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
 		self.update_single_inner(k, change, change_set, crate::columns::StateValues)
-	}
-	pub fn update_single_index(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
-		self.update_single_inner(k, change, change_set, crate::columns::StateIndexes)
 	}
 
 	/// write a single value in change set.
@@ -1347,7 +1229,7 @@ impl<Block: BlockT> ProvideChtRoots<Block> for BlockchainDb<Block> {
 /// Database transaction
 pub struct BlockImportOperation<Block: BlockT> {
 	old_state: SyncingCachingState<RefTrackingState<Block>, Block>,
-	db_updates: OverlayWithIndexes<HashFor<Block>>,
+	db_updates: PrefixedMemoryDB<HashFor<Block>>,
 	storage_updates: StorageCollection,
 	child_storage_updates: ChildStorageCollection,
 	offchain_storage_updates: OffchainChangesCollection,
@@ -1460,7 +1342,7 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 		// Currently cache isn't implemented on full nodes.
 	}
 
-	fn update_db_storage(&mut self, update: OverlayWithIndexes<HashFor<Block>>) -> ClientResult<()> {
+	fn update_db_storage(&mut self, update: PrefixedMemoryDB<HashFor<Block>>) -> ClientResult<()> {
 		self.db_updates = update;
 		Ok(())
 	}
@@ -2126,22 +2008,6 @@ impl<Block: BlockT> Backend<Block> {
 		// write management state changes
 		apply_historied_management_changes::<Block>(self.historied_management.write(), &mut transaction);
 
-		// index uses non ordered historied_db
-		if let Some(historied_db) = historied_db.as_mut() {
-			// write indexes
-			let mut nb = 0;
-			let index_changeset = operation.db_updates.indexes.clone(); // TODO see how to avoid this clone later (using a single tx would do the trick)
-			for (k, index) in index_changeset {
-				nb += 1;
-				historied_db.update_single_index(
-					k.as_slice(),
-					Some(crate::encode_index(index)),
-					&mut transaction,
-				);
-			}
-			warn!("committed {:?} index in historied db", nb);
-		}
-
 		// state change uses ordered db
 		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
 			let historied_update = operation.storage_updates.clone();
@@ -2232,7 +2098,7 @@ impl<Block: BlockT> Backend<Block> {
 				let mut bytes: u64 = 0;
 				let mut removal: u64 = 0;
 				let mut bytes_removal: u64 = 0;
-				for (mut key, (val, rc)) in operation.db_updates.db.drain() {
+				for (mut key, (val, rc)) in operation.db_updates.drain() {
 					if !self.storage.prefix_keys {
 						// Strip prefix
 						key.drain(0 .. key.len() - DB_HASH_LEN);
@@ -2632,7 +2498,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		Ok(BlockImportOperation {
 			pending_block: None,
 			old_state,
-			db_updates: OverlayWithIndexes::default(),
+			db_updates: PrefixedMemoryDB::default(),
 			storage_updates: Default::default(),
 			child_storage_updates: Default::default(),
 			offchain_storage_updates: Default::default(),
@@ -2895,9 +2761,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				let db_state = DbState::<Block>::new(
 					Arc::new(genesis_storage),
 					root,
-					alternative.clone(),
-					alternative.clone(),
-					alternative.clone(),
+					Some(alternative.clone()), // TODO make it configurable
 				);
 				let state = RefTrackingState::new(db_state, self.storage.clone(), None);
 				let caching_state = CachingState::new(
@@ -2953,9 +2817,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					let db_state = DbState::<Block>::new(
 						self.storage.clone(),
 						root,
-						alternative.clone(),
-						alternative.clone(),
-						alternative.clone(),
+						Some(alternative.clone()), // TODO make it configurable.
 					);
 					let state = RefTrackingState::new(
 						db_state,

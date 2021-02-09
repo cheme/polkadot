@@ -140,7 +140,7 @@ impl<B: BlockT> BenchmarkingState<B> {
 			genesis.top.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref()))),
 			child_delta,
 		);
-		state.genesis = transaction.db.clone().drain();
+		state.genesis = transaction.clone().drain();
 		state.genesis_root = root.clone();
 		state.commit(root, transaction, Vec::new(), Vec::new())?;
 		state.record.take();
@@ -155,16 +155,11 @@ impl<B: BlockT> BenchmarkingState<B> {
 		};
 		self.db.set(Some(db.clone()));
 		let storage_db = Arc::new(StorageDb::<B> { db, _block: Default::default() });
-		let alternative = sp_state_machine::KVInMem::default();
-		let kv_db_2 = std::collections::BTreeMap::new();
-		let indexes = std::collections::BTreeMap::new();
 		*self.state.borrow_mut() = Some(State::new(
 			DbState::<B>::new(
 				storage_db,
 				self.root.get(),
-				Arc::new(alternative),
-				Arc::new(kv_db_2),
-				Arc::new(indexes),
+				None,
 			),
 			self.shared_cache.clone(),
 			None,
@@ -427,7 +422,7 @@ impl<B: BlockT> StateBackend<HashFor<B>> for BenchmarkingState<B> {
 	) -> Result<(), Self::Error> {
 		if let Some(db) = self.db.take() {
 			let mut db_transaction = DBTransaction::new();
-			let changes = transaction.db.drain();
+			let changes = transaction.drain();
 			let mut keys = Vec::with_capacity(changes.len());
 			for (key, (val, rc)) in changes {
 				if rc > 0 {
