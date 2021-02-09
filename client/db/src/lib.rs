@@ -98,8 +98,7 @@ use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
 use sc_state_db::StateDb;
 use sp_blockchain::{CachedHeaderMetadata, HeaderMetadata, HeaderMetadataCache};
-use crate::storage_cache::{CachingState, SyncingCachingState, SharedCache, new_shared_cache,
-	SyncExperimentalCache};
+use crate::storage_cache::{CachingState, SyncingCachingState, SharedCache, new_shared_cache};
 use sc_client_api::ExpCacheConf;
 use crate::stats::StateUsageStats;
 
@@ -522,8 +521,6 @@ pub struct DatabaseSettings {
 	pub state_cache_size: usize,
 	/// Ratio of cache size dedicated to child tries.
 	pub state_cache_child_ratio: Option<(usize, usize)>,
-	/// Use experimental cache implementation.
-	pub experimental_cache: ExpCacheConf,
 	/// State pruning mode.
 	pub state_pruning: PruningMode,
 	/// Where to find the database.
@@ -1563,7 +1560,6 @@ pub struct Backend<Block: BlockT> {
 	blockchain: BlockchainDb<Block>,
 	canonicalization_delay: u64,
 	shared_cache: SharedCache<Block>,
-	experimental_cache: Option<SyncExperimentalCache<Block>>,
 	import_lock: Arc<RwLock<()>>,
 	is_archive: bool,
 	keep_blocks: KeepBlocks,
@@ -1633,7 +1629,6 @@ impl<Block: BlockT> Backend<Block> {
 			keep_blocks,
 			canonicalization_delay,
 			TransactionStorageMode::BlockBody,
-			Default::default(),
 		)
 	}
 
@@ -1643,7 +1638,6 @@ impl<Block: BlockT> Backend<Block> {
 		keep_blocks: u32,
 		canonicalization_delay: u64,
 		transaction_storage: TransactionStorageMode,
-		experimental_cache: ExpCacheConf,
 	) -> Self {
 		let db = kvdb_memorydb::create(crate::utils::NUM_COLUMNS);
 		let db = sp_database::as_database(db);
@@ -1652,7 +1646,6 @@ impl<Block: BlockT> Backend<Block> {
 			state_cache_child_ratio: Some((50, 100)),
 			state_pruning: PruningMode::keep_blocks(keep_blocks),
 			source: DatabaseSettingsSrc::Custom(db),
-			experimental_cache,
 			keep_blocks: KeepBlocks::Some(keep_blocks),
 			transaction_storage,
 		};
@@ -1707,10 +1700,9 @@ impl<Block: BlockT> Backend<Block> {
 			},
 		)?;
 
-		let (shared_cache, experimental_cache) = new_shared_cache(
+		let shared_cache = new_shared_cache(
 			config.state_cache_size,
 			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
-			config.experimental_cache,
 		);
 		let historied_persistence = TransactionalMappedDB {
 			db: management_db,
@@ -1750,7 +1742,6 @@ impl<Block: BlockT> Backend<Block> {
 			blockchain,
 			canonicalization_delay,
 			shared_cache,
-			experimental_cache,
 			import_lock: Default::default(),
 			is_archive: is_archive_pruning,
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
@@ -1783,10 +1774,9 @@ impl<Block: BlockT> Backend<Block> {
 		transaction: &mut Transaction<DbHash>,
 		route_to: Block::Hash,
 		best_to: (NumberFor<Block>, Block::Hash),
-	) -> ClientResult<(Option<Block::Hash>, Vec<Block::Hash>, Vec<Block::Hash>)> {
+	) -> ClientResult<(Vec<Block::Hash>, Vec<Block::Hash>)> {
 		let mut enacted = Vec::default();
 		let mut retracted = Vec::default();
-		let mut pivot = None;
 
 		let meta = self.blockchain.meta.read();
 
@@ -1798,7 +1788,6 @@ impl<Block: BlockT> Backend<Block> {
 				route_to,
 			)?;
 
-			pivot = Some(tree_route.common_block().hash.clone());
 			// uncanonicalize: check safety violations and ensure the numbers no longer
 			// point to these block hashes in the key mapping.
 			for r in tree_route.retracted() {
@@ -1840,7 +1829,7 @@ impl<Block: BlockT> Backend<Block> {
 			best_to.1,
 		)?;
 
-		Ok((pivot, enacted, retracted))
+		Ok((enacted, retracted))
 	}
 
 	fn ensure_sequential_finalization(
@@ -2047,10 +2036,10 @@ impl<Block: BlockT> Backend<Block> {
 			// blocks are keyed by number + hash.
 			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
 
-			let (pivot, enacted, retracted) = if pending_block.leaf_state.is_best() {
+			let (enacted, retracted) = if pending_block.leaf_state.is_best() {
 				self.set_head_with_transaction(&mut transaction, parent_hash, (number, hash))?
 			} else {
-				(None, Default::default(), Default::default())
+				(Default::default(), Default::default())
 			};
 
 			utils::insert_hash_to_key_mapping(
@@ -2220,7 +2209,7 @@ impl<Block: BlockT> Backend<Block> {
 
 			meta_updates.push((hash, number, pending_block.leaf_state.is_best(), finalized));
 
-			Some((pending_block.header, number, hash, pivot, enacted, retracted, displaced_leaf, is_best, cache))
+			Some((pending_block.header, number, hash, enacted, retracted, displaced_leaf, is_best, cache))
 		} else {
 			None
 		};
@@ -2230,13 +2219,13 @@ impl<Block: BlockT> Backend<Block> {
 				let number = header.number();
 				let hash = header.hash();
 
-				let (pivot, enacted, retracted) = self.set_head_with_transaction(
+				let (enacted, retracted) = self.set_head_with_transaction(
 					&mut transaction,
 					hash.clone(),
 					(number.clone(), hash.clone())
 				)?;
 				meta_updates.push((hash, *number, true, false));
-				Some((pivot, enacted, retracted))
+				Some((enacted, retracted))
 			} else {
 				return Err(sp_blockchain::Error::UnknownBlock(format!("Cannot set head {:?}", set_head)))
 			}
@@ -2253,7 +2242,6 @@ impl<Block: BlockT> Backend<Block> {
 			header,
 			number,
 			hash,
-			pivot,
 			enacted,
 			retracted,
 			_displaced_leaf,
@@ -2267,7 +2255,6 @@ impl<Block: BlockT> Backend<Block> {
 			);
 			cache_header(&mut self.blockchain.header_cache.lock(), hash, Some(header));
 			cache.sync_cache(
-				pivot.as_ref(),
 				&enacted,
 				&retracted,
 				operation.storage_updates,
@@ -2283,13 +2270,8 @@ impl<Block: BlockT> Backend<Block> {
 		}
 		self.changes_tries_storage.post_commit(changes_trie_cache_ops);
 
-		if let Some((pivot, enacted, retracted)) = cache_update {
-			if let Some(cache) = self.experimental_cache.as_ref() {
-				let mut cache = cache.0.write();
-				cache.sync(pivot.as_ref(), &enacted, &retracted, None, None, None);
-			} // else { TODO disable for experimental use
-				self.shared_cache.lock().sync(&enacted, &retracted);
-			// }
+		if let Some((enacted, retracted)) = cache_update {
+			self.shared_cache.lock().sync(&enacted, &retracted);
 		}
 
 		for (hash, number, is_best, is_finalized) in meta_updates {
@@ -2767,7 +2749,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				let caching_state = CachingState::new(
 					state,
 					self.shared_cache.clone(),
-					self.experimental_cache.clone(),
 					None,
 				);
 				return Ok(SyncingCachingState::new(
@@ -2827,7 +2808,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					let caching_state = CachingState::new(
 						state,
 						self.shared_cache.clone(),
-						self.experimental_cache.clone(),
 						Some(hash),
 					);
 					Ok(SyncingCachingState::new(
@@ -3007,7 +2987,6 @@ pub(crate) mod tests {
 			source: DatabaseSettingsSrc::Custom(backing),
 			keep_blocks: KeepBlocks::All,
 			transaction_storage: TransactionStorageMode::BlockBody,
-			experimental_cache: Default::default(),
 		}, 0).unwrap();
 		assert_eq!(backend.blockchain().info().best_number, 9);
 		for i in 0..10 {
@@ -3667,7 +3646,7 @@ pub(crate) mod tests {
 	#[test]
 	fn prune_blocks_on_finalize() {
 		for storage in &[TransactionStorageMode::BlockBody, TransactionStorageMode::StorageChain] {
-			let backend = Backend::<Block>::new_test_with_tx_storage(2, 0, *storage, Default::default());
+			let backend = Backend::<Block>::new_test_with_tx_storage(2, 0, *storage);
 			let mut blocks = Vec::new();
 			let mut prev_hash = Default::default();
 			for i in 0 .. 5 {

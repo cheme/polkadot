@@ -114,7 +114,6 @@ impl<B: BlockT> BenchmarkingState<B> {
 		let mut mdb = MemoryDB::<HashFor<B>>::default();
 		sp_state_machine::TrieDBMut::<HashFor<B>>::new(&mut mdb, &mut root);
 
-		let (shared_cache, _exp_cache) = new_shared_cache(0, (1, 10), sc_client_api::ExpCacheConf::None);
 		let mut state = BenchmarkingState {
 			state: RefCell::new(None),
 			db: Cell::new(None),
@@ -122,7 +121,7 @@ impl<B: BlockT> BenchmarkingState<B> {
 			genesis: Default::default(),
 			genesis_root: Default::default(),
 			record: Default::default(),
-			shared_cache,
+			shared_cache: new_shared_cache(0, (1, 10)),
 			main_key_tracker: Default::default(),
 			child_key_tracker: Default::default(),
 			read_write_tracker: Default::default(),
@@ -162,7 +161,6 @@ impl<B: BlockT> BenchmarkingState<B> {
 				None,
 			),
 			self.shared_cache.clone(),
-			None,
 			None,
 		));
 		Ok(())

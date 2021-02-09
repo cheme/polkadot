@@ -96,8 +96,6 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 			std::u32::MAX,
 			std::u64::MAX,
 			sc_client_db::TransactionStorageMode::BlockBody,
-			// TODO EMCH ExpCacheConf::Retracted??
-			ExpCacheConf::LRUOnly(std::usize::MAX),
 		));
 		Self::with_backend(backend)
 	}
@@ -108,7 +106,6 @@ impl<Block: BlockT, Executor, G: GenesisInit> TestClientBuilder<Block, Executor,
 			keep_blocks,
 			0,
 			sc_client_db::TransactionStorageMode::BlockBody,
-			ExpCacheConf::GCRange(keep_blocks as usize),
 		));
 		Self::with_backend(backend)
 	}

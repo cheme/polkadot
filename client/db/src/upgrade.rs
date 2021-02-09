@@ -631,7 +631,6 @@ mod tests {
 			state_cache_child_ratio: None,
 			state_pruning: PruningMode::ArchiveAll,
 			source: DatabaseSettingsSrc::RocksDb { path: db_path.to_owned(), cache_size: 128 },
-			experimental_cache: Default::default(),
 			keep_blocks: KeepBlocks::All,
 			transaction_storage: TransactionStorageMode::BlockBody,
 		}, DatabaseType::Full).map(|_| ())
