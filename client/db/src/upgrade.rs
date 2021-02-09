@@ -287,7 +287,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
 	let _state = management.get_db_state(&hash_for_root).expect("just added");
-	let iter_kv = historied_db.iter(crate::columns::StateValues);
+	let iter_kv = historied_db.iter(crate::columns::STATE_SNAPSHOT);
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 	let hash = root_callback.root;
@@ -456,7 +456,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		do_assert: false,
 	};
 	let mut count = 0;
-	for (_k, _v) in historied_db.iter(crate::columns::StateValues) {
+	for (_k, _v) in historied_db.iter(crate::columns::STATE_SNAPSHOT) {
 		count += 1;
 	}
 	println!("iter kvstate {} state in : {}", count, now.elapsed().as_millis());
@@ -465,7 +465,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
 	let _state = management.get_db_state(&block_hash).expect("just added");
-	let iter_kv = historied_db.iter(crate::columns::StateValues);
+	let iter_kv = historied_db.iter(crate::columns::STATE_SNAPSHOT);
 
 	trie_db::trie_visit::<sp_trie::Layout<HashFor<Block>>, _, _, _, _>(iter_kv, &mut root_callback);
 	let hash = root_callback.root;

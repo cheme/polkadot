@@ -36,7 +36,7 @@ use crate::{DatabaseSettings, DatabaseSettingsSrc, Database, OrderedDatabase, Db
 
 /// Number of columns in the db. Must be the same for both full && light dbs.
 /// Otherwise RocksDb will fail to open database && check its type.
-pub const NUM_COLUMNS: u32 = 17;
+pub const NUM_COLUMNS: u32 = 13;
 
 /// Meta column. The set of keys in the column is shared by full && light storages.
 pub const COLUMN_META: u32 = 0;
@@ -222,8 +222,6 @@ pub fn open_database_and_historied<Block: BlockT>(
 ) -> sp_blockchain::Result<(
 	Arc<dyn Database<DbHash>>,
 	Arc<dyn OrderedDatabase<DbHash>>,
-	historied_db::mapped_db::MappedDBDyn,
-	historied_db::mapped_db::MappedDBDyn,
 )> {
 	#[allow(unused)]
 	fn db_open_error(feat: &'static str) -> sp_blockchain::Error {
@@ -235,8 +233,6 @@ pub fn open_database_and_historied<Block: BlockT>(
 	let db: (
 		Arc<dyn Database<DbHash>>,
 		Arc<dyn OrderedDatabase<DbHash>>,
-		historied_db::mapped_db::MappedDBDyn,
-		historied_db::mapped_db::MappedDBDyn,
 	) = match &config.source {
 		#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 		DatabaseSettingsSrc::RocksDb { path, cache_size } => {
@@ -290,9 +286,7 @@ pub fn open_database_and_historied<Block: BlockT>(
 
 			let rocks_db = Arc::new(db);
 			let ordered = Arc::new(crate::RocksdbStorage(rocks_db.clone()));
-			let management = Box::new(crate::RocksdbStorage(rocks_db.clone()));
-			let management2 = Box::new(crate::RocksdbStorage(rocks_db.clone()));
-			(sp_database::arc_as_database(rocks_db), ordered, management, management2)
+			(sp_database::arc_as_database(rocks_db), ordered)
 		},
 		#[cfg(not(any(feature = "with-kvdb-rocksdb", test)))]
 		DatabaseSettingsSrc::RocksDb { .. } => {
@@ -304,10 +298,7 @@ pub fn open_database_and_historied<Block: BlockT>(
 				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
 			let inner = sp_database::RadixTreeDatabase::new(parity_db.clone());
 			let ordered = Arc::new(inner.clone());
-			let management = Box::new(crate::DatabaseStorage(inner.clone()));
-			let management2 = Box::new(crate::DatabaseStorage(inner));
-
-			(parity_db, ordered, management, management2)
+			(parity_db, ordered)
 		},
 		#[cfg(not(feature = "with-parity-db"))]
 		DatabaseSettingsSrc::ParityDb { .. } => {
@@ -316,9 +307,7 @@ pub fn open_database_and_historied<Block: BlockT>(
 		DatabaseSettingsSrc::Custom(db) => {
 			let inner = sp_database::RadixTreeDatabase::new(db.clone());
 			let ordered = Arc::new(inner.clone());
-			let management = Box::new(crate::DatabaseStorage(inner.clone()));
-			let management2 = Box::new(crate::DatabaseStorage(inner));
-			(db.clone(), ordered, management, management2)
+			(db.clone(), ordered)
 		},
 	};
 

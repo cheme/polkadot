@@ -178,7 +178,7 @@ impl KVBackend for HistoriedDB {
 	}
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		self.storage_inner(key, crate::columns::StateValues)
+		self.storage_inner(key, crate::columns::STATE_SNAPSHOT)
 	}
 }
 
@@ -289,7 +289,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 
 	/// write a single value in change set.
 	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
-		self.update_single_inner(k, change, change_set, crate::columns::StateValues)
+		self.update_single_inner(k, change, change_set, crate::columns::STATE_SNAPSHOT)
 	}
 
 	/// write a single value in change set.
@@ -347,10 +347,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	/// write a single value, without checking current state,
 	/// please only use on new empty db.
 	pub fn unchecked_new_single(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>) {
-		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateValues)
-	}
-	pub fn unchecked_new_single_index(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>) {
-		self.unchecked_new_single_inner(k, v, change_set, crate::columns::StateIndexes)
+		self.unchecked_new_single_inner(k, v, change_set, crate::columns::STATE_SNAPSHOT)
 	}
 	pub fn unchecked_new_single_inner(&mut self, k: &[u8], mut v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
 		let value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
@@ -616,15 +613,8 @@ pub(crate) mod columns {
 	pub const CACHE: u32 = 10;
 	/// Transactions
 	pub const TRANSACTION: u32 = 11;
-	/// Map 1 tree management for historied db
-	/// TODO dynamic collection in state_meta
-	pub const TreeRefs: u32 = 12;
-	/// Map 2 tree management for historied db
-	/// TODO dynamic collection in state_meta
-	pub const TreeBranchs: u32 = 13;
-	pub const StateValues: u32 = 14;
-	pub const StateIndexes: u32 = 15;
-	pub const JournalDelete: u32 = 16;
+	/// Snapshot state values.
+	pub const STATE_SNAPSHOT: u32 = 12;
 }
 
 #[derive(Clone)]
@@ -1611,11 +1601,11 @@ impl<Block: BlockT> Backend<Block> {
 	///
 	/// The pruning window is how old a block must be before the state is pruned.
 	pub fn new(config: DatabaseSettings, canonicalization_delay: u64) -> ClientResult<Self> {
-		let (db, ordered, management, management2) = crate::utils::open_database_and_historied::<Block>(
+		let (db, ordered) = crate::utils::open_database_and_historied::<Block>(
 			&config,
 			DatabaseType::Full,
 		)?;
-		Self::from_database(db as Arc<_>, ordered, management, management2, canonicalization_delay, &config)
+		Self::from_database(db as Arc<_>, ordered, canonicalization_delay, &config)
 	}
 
 	/// Create new memory-backed client backend for tests.
@@ -1652,8 +1642,6 @@ impl<Block: BlockT> Backend<Block> {
 	fn from_database(
 		db: Arc<dyn Database<DbHash>>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
-		management_db: historied_db::mapped_db::MappedDBDyn,
-		management_db_2: historied_db::mapped_db::MappedDBDyn,
 		canonicalization_delay: u64,
 		config: &DatabaseSettings,
 	) -> ClientResult<Self> {
@@ -1696,12 +1684,8 @@ impl<Block: BlockT> Backend<Block> {
 			},
 		)?;
 
-		let shared_cache = new_shared_cache(
-			config.state_cache_size,
-			config.state_cache_child_ratio.unwrap_or(DEFAULT_CHILD_RATIO),
-		);
 		let historied_persistence = TransactionalMappedDB {
-			db: management_db,
+			db: ordered_db,
 			pending: Default::default(),
 		};
 		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
