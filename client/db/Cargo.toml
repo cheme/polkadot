@@ -35,7 +35,7 @@ sp-trie = { version = "2.0.0", path = "../../primitives/trie" }
 sp-consensus = { version = "0.8.0", path = "../../primitives/consensus/common" }
 sp-blockchain = { version = "2.0.0", path = "../../primitives/blockchain" }
 sp-database = { version = "2.0.0", path = "../../primitives/database" }
-parity-db = { version = "0.1.2", optional = true }
+parity-db = { version = "0.2.2", optional = true }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", version = "0.8.0", path = "../../utils/prometheus" }
 historied-db = { version = "0.8.0", path = "../../utils/historied-db", features = ["force-data", "db-traits", "encoded-array-backend", "temp-size-impl", "xdelta3-diff"] }
 tempfile = "3"
@@ -47,7 +47,7 @@ rocksdb = { version = "0.14", features = ["snappy"], default-features = false } 
 sp-keyring = { version = "2.0.0", path = "../../primitives/keyring" }
 sp-tracing = { version = "2.0.0", path = "../../primitives/tracing" }
 substrate-test-runtime-client = { version = "2.0.0", path = "../../test-utils/runtime/client" }
-quickcheck = "0.9"
+quickcheck = "1.0.3"
 tempfile = "3"
 
 [features]
