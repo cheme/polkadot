@@ -42,19 +42,18 @@ use std::{
 
 use parking_lot::Mutex;
 use threadpool::ThreadPool;
-use sp_api::{ApiExt, ProvideRuntimeApi, Hasher};
+use sp_api::{ApiExt, ProvideRuntimeApi};
 use futures::future::Future;
 use log::{debug, warn};
 use sc_network::{ExHashT, NetworkService, NetworkStateInfo, PeerId};
-use sp_core::{offchain::{self, OffchainStorage, BlockChainOffchainStorage},
-	ExecutionContext, traits::SpawnNamed};
-use sp_runtime::{generic::BlockId, traits::{self, Header, HashFor}};
+use sp_core::{offchain::{self, OffchainStorage}, ExecutionContext, traits::SpawnNamed};
+use sp_runtime::{generic::BlockId, traits::{self, Header}};
 use futures::{prelude::*, future::ready};
 
 mod api;
 use api::SharedClient;
 
-pub use sp_offchain::{OffchainWorkerApi, STORAGE_PREFIX, LOCAL_STORAGE_PREFIX};
+pub use sp_offchain::{OffchainWorkerApi, STORAGE_PREFIX};
 
 /// NetworkProvider provides [`OffchainWorkers`] with all necessary hooks into the
 /// underlying Substrate networking.
@@ -81,28 +80,21 @@ where
 }
 
 /// An offchain workers manager.
-pub struct OffchainWorkers<Client, PersistentStorage, LocalStorage, Block: traits::Block> {
+pub struct OffchainWorkers<Client, Storage, Block: traits::Block> {
 	client: Arc<Client>,
-	db: PersistentStorage,
-	local_db: LocalStorage,
+	db: Storage,
 	_block: PhantomData<Block>,
 	thread_pool: Mutex<ThreadPool>,
 	shared_client: SharedClient,
 }
 
-impl<
-	Client,
-	PersistentStorage,
-	LocalStorage,
-	Block: traits::Block,
-> OffchainWorkers<Client, PersistentStorage, LocalStorage, Block> {
+impl<Client, Storage, Block: traits::Block> OffchainWorkers<Client, Storage, Block> {
 	/// Creates new `OffchainWorkers`.
-	pub fn new(client: Arc<Client>, db: PersistentStorage, local_db: LocalStorage) -> Self {
+	pub fn new(client: Arc<Client>, db: Storage) -> Self {
 		let shared_client = SharedClient::new();
 		Self {
 			client,
 			db,
-			local_db,
 			_block: PhantomData,
 			thread_pool: Mutex::new(ThreadPool::new(num_cpus::get())),
 			shared_client,
@@ -110,10 +102,9 @@ impl<
 	}
 }
 
-impl<Client, PersistentStorage, LocalStorage, Block: traits::Block> fmt::Debug for OffchainWorkers<
+impl<Client, Storage, Block: traits::Block> fmt::Debug for OffchainWorkers<
 	Client,
-	PersistentStorage,
-	LocalStorage,
+	Storage,
 	Block,
 > {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -121,17 +112,15 @@ impl<Client, PersistentStorage, LocalStorage, Block: traits::Block> fmt::Debug f
 	}
 }
 
-impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
+impl<Client, Storage, Block> OffchainWorkers<
 	Client,
-	PersistentStorage,
-	LocalStorage,
+	Storage,
 	Block,
 > where
 	Block: traits::Block,
 	Client: ProvideRuntimeApi<Block> + Send + Sync + 'static,
 	Client::Api: OffchainWorkerApi<Block>,
-	PersistentStorage: OffchainStorage + 'static,
-	LocalStorage: BlockChainOffchainStorage<BlockId = <HashFor<Block> as Hasher>::Out> + 'static,
+	Storage: OffchainStorage + 'static,
 {
 	/// Start the offchain workers after given block.
 	#[must_use]
@@ -160,15 +149,8 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 		};
 		debug!("Checking offchain workers at {:?}: version:{}", at, version);
 		if version > 0 {
-			let local_db_at = if let Some(local_db_at) = self.local_db.at(header.hash()) {
-				local_db_at
-			} else {
-				log::error!("Error no chain state for offchain local db at {:?}", at);
-				return futures::future::Either::Right(futures::future::ready(()));
-			};
 			let (api, runner) = api::AsyncApi::new(
 				self.db.clone(),
-				local_db_at.clone(),
 				network_provider,
 				is_validator,
 				self.shared_client.clone(),
@@ -215,10 +197,10 @@ impl<Client, PersistentStorage, LocalStorage, Block> OffchainWorkers<
 }
 
 /// Inform the offchain worker about new imported blocks
-pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block, Spawner>(
+pub async fn notification_future<Client, Storage, Block, Spawner>(
 	is_validator: bool,
 	client: Arc<Client>,
-	offchain: Arc<OffchainWorkers<Client, PersistentStorage, LocalStorage, Block>>,
+	offchain: Arc<OffchainWorkers<Client, Storage, Block>>,
 	spawner: Spawner,
 	network_provider: Arc<dyn NetworkProvider + Send + Sync>,
 )
@@ -226,8 +208,7 @@ pub async fn notification_future<Client, PersistentStorage, LocalStorage, Block,
 		Block: traits::Block,
 		Client: ProvideRuntimeApi<Block> + sc_client_api::BlockchainEvents<Block> + Send + Sync + 'static,
 		Client::Api: OffchainWorkerApi<Block>,
-		PersistentStorage: OffchainStorage + 'static,
-		LocalStorage: BlockChainOffchainStorage<BlockId = <HashFor<Block> as Hasher>::Out> + 'static,
+		Storage: OffchainStorage + 'static,
 		Spawner: SpawnNamed
 {
 	client.import_notification_stream().for_each(move |n| {
@@ -308,16 +289,9 @@ mod tests {
 
 	#[test]
 	fn should_call_into_runtime_and_produce_extrinsic() {
-		use sc_client_api::Backend;
-		use substrate_test_runtime_client::{
-			TestClientBuilder,
-			DefaultTestClientBuilderExt,
-			TestClientBuilderExt,
-		};
 		sp_tracing::try_init_simple();
-		let builder = TestClientBuilder::new();
-		let local_db = builder.backend().offchain_local_storage().unwrap();
-		let client = Arc::new(builder.build());
+
+		let client = Arc::new(substrate_test_runtime_client::new());
 		let spawner = sp_core::testing::TaskExecutor::new();
 		let pool = TestPool(BasicPool::new_full(
 			Default::default(),
@@ -327,12 +301,11 @@ mod tests {
 			client.clone(),
 		));
 		let db = sc_client_db::offchain::LocalStorage::new_test();
-	
 		let network = Arc::new(TestNetwork());
 		let header = client.header(&BlockId::number(0)).unwrap().unwrap();
 
 		// when
-		let offchain = OffchainWorkers::new(client, db, local_db);
+		let offchain = OffchainWorkers::new(client, db);
 		futures::executor::block_on(
 			offchain.on_block_imported(&header, network, false)
 		);
@@ -351,7 +324,7 @@ mod tests {
 				.enable_offchain_indexing_api()
 				.build_with_backend();
 		let mut client = Arc::new(client);
-		let offchain_db = backend.offchain_persistent_storage().unwrap();
+		let offchain_db = backend.offchain_storage().unwrap();
 
 		let key = &b"hello"[..];
 		let value = &b"world"[..];

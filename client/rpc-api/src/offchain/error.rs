@@ -26,10 +26,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Offchain RPC errors.
 #[derive(Debug, derive_more::Display, derive_more::From)]
 pub enum Error {
-	/// Could not fetch state for the local storage access.
-	/// (invalid block id or missing reference to latest block).
-	#[display(fmt="Missing state for local storage kind.")]
-	UnavailableStorageState,
+	/// Unavailable storage kind error.
+	#[display(fmt="This storage kind is not available yet.")]
+	UnavailableStorageKind,
 	/// Call to an unsafe RPC was denied.
 	UnsafeRpcCalled(crate::policy::UnsafeRpcError),
 }
@@ -49,9 +48,9 @@ const BASE_ERROR: i64 = 5000;
 impl From<Error> for rpc::Error {
 	fn from(e: Error) -> Self {
 		match e {
-			Error::UnavailableStorageState => rpc::Error {
+			Error::UnavailableStorageKind => rpc::Error {
 				code: rpc::ErrorCode::ServerError(BASE_ERROR + 1),
-				message: "Missing state for local storage kind." .into(),
+				message: "This storage kind is not available yet" .into(),
 				data: None,
 			},
 			Error::UnsafeRpcCalled(e) => e.into(),

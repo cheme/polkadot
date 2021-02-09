@@ -21,7 +21,7 @@
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
 use sp_core::ChangesTrieConfigurationRange;
-use sp_core::offchain::{OffchainStorage, BlockChainOffchainStorage};
+use sp_core::offchain::OffchainStorage;
 use sp_runtime::{generic::BlockId, Justification, Storage};
 use sp_runtime::traits::{Block as BlockT, NumberFor, HashFor};
 use sp_state_machine::{
@@ -39,7 +39,6 @@ use crate::{
 use sp_blockchain;
 use sp_consensus::BlockOrigin;
 use parking_lot::RwLock;
-use hash_db::Hasher;
 
 pub use sp_state_machine::Backend as StateBackend;
 use std::marker::PhantomData;
@@ -403,10 +402,8 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	type Blockchain: BlockchainBackend<Block>;
 	/// Associated state backend type.
 	type State: StateBackend<HashFor<Block>> + Send;
-	/// Offchain workers persistent storage.
-	type OffchainPersistentStorage: OffchainStorage;
 	/// Offchain workers local storage.
-	type OffchainLocalStorage: BlockChainOffchainStorage<BlockId = <HashFor<Block> as Hasher>::Out>;
+	type OffchainStorage: OffchainStorage;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	///
@@ -444,11 +441,8 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// Returns reference to changes trie storage.
 	fn changes_trie_storage(&self) -> Option<&dyn PrunableStateChangesTrieStorage<Block>>;
 
-	/// Returns a handle to offchain persistent storage.
-	fn offchain_persistent_storage(&self) -> Option<Self::OffchainPersistentStorage>;
-
-	/// Returns a handle to offchain local storage.
-	fn offchain_local_storage(&self) -> Option<Self::OffchainLocalStorage>;
+	/// Returns a handle to offchain storage.
+	fn offchain_storage(&self) -> Option<Self::OffchainStorage>;
 
 	/// Returns true if state for given block is available.
 	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {

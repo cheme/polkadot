@@ -1552,10 +1552,6 @@ pub type RegisteredConsumer<H, S> = historied_db::management::tree::RegisteredCo
 pub struct Backend<Block: BlockT> {
 	storage: Arc<StorageDb<Block>>,
 	offchain_storage: offchain::LocalStorage,
-	offchain_local_storage: offchain::BlockChainLocalStorage<
-		<HashFor<Block> as Hasher>::Out,
-		TreeManagementPersistence,
-	>,
 	changes_tries_storage: DbChangesTrieStorage<Block>,
 	blockchain: BlockchainDb<Block>,
 	canonicalization_delay: u64,
@@ -1716,12 +1712,6 @@ impl<Block: BlockT> Backend<Block> {
 		// and probably some detached backend nodes that will not get pruned).
 		// TODO maybe use a panicky lock mode to assert worker concurrency is correct.
 		let safe_offchain_locks = true;
-		let offchain_local_storage = offchain::BlockChainLocalStorage::new(
-			db,
-			historied_management.clone(),
-			management_db_2,
-			safe_offchain_locks,
-		);
 		let mut historied_management_consumer: RegisteredConsumer<
 			<HashFor<Block> as Hasher>::Out,
 			TreeManagementPersistence,
@@ -1729,15 +1719,9 @@ impl<Block: BlockT> Backend<Block> {
 		let historied_management_consumer_transaction = Arc::new(RwLock::new(
 			Default::default()
 		));
-		historied_management_consumer.register_consumer(Box::new(
-			offchain::TransactionalConsumer {
-				storage: offchain_local_storage.clone(),
-				pending: historied_management_consumer_transaction.clone(),
-			}));
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
-			offchain_local_storage,
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
@@ -2467,11 +2451,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	type BlockImportOperation = BlockImportOperation<Block>;
 	type Blockchain = BlockchainDb<Block>;
 	type State = SyncingCachingState<RefTrackingState<Block>, Block>;
-	type OffchainPersistentStorage = offchain::LocalStorage;
-	type OffchainLocalStorage = offchain::BlockChainLocalStorage<
-		<HashFor<Block> as Hasher>::Out,
-		TreeManagementPersistence,
-	>;
+	type OffchainStorage = offchain::LocalStorage;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		let mut old_state = self.state_at(BlockId::Hash(Default::default()))?;
@@ -2569,12 +2549,8 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		Some(&self.changes_tries_storage)
 	}
 
-	fn offchain_persistent_storage(&self) -> Option<Self::OffchainPersistentStorage> {
+	fn offchain_storage(&self) -> Option<Self::OffchainStorage> {
 		Some(self.offchain_storage.clone())
-	}
-
-	fn offchain_local_storage(&self) -> Option<Self::OffchainLocalStorage> {
-		Some(self.offchain_local_storage.clone())
 	}
 
 	fn usage_info(&self) -> Option<UsageInfo> {
@@ -2930,9 +2906,6 @@ pub(crate) mod tests {
 		backend.begin_state_operation(&mut op, block_id).unwrap();
 		op.set_block_data(header, Some(body), None, NewBlockState::Best).unwrap();
 		op.update_changes_trie((changes_trie_update, ChangesTrieCacheAction::Clear)).unwrap();
-		if let Some(offchain) = offchain {
-			op.update_offchain_storage(offchain.into_iter().collect()).unwrap();
-		}
 		backend.commit_operation(op).unwrap();
 
 		header_hash
@@ -3529,118 +3502,6 @@ pub(crate) mod tests {
 			.unwrap().unwrap();
 		assert_eq!(cht_root_1, cht_root_2);
 		assert_eq!(cht_root_2, cht_root_3);
-	}
-
-	#[test]
-	fn offchain_backends_indexing() {
-		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
-
-		let backend = Backend::<Block>::new_test(10, 10);
-
-		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
-		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		let offchain_local_storage = offchain_local_storage.at(block0).unwrap();
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
-
-		let mut ooc = OffchainOverlayedChanges::default();
-		ooc.set(b"prefix1", b"key1", b"value1", true);
-		let block1 = insert_block(&backend, 1, block0, None, Some(ooc), Default::default(), Default::default());
-		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
-		let offchain_local_storage = offchain_local_storage.at(block1).unwrap();
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-
-		let mut ooc = OffchainOverlayedChanges::default();
-		ooc.set(b"prefix1", b"key1", vec![4u8; 20_000].as_slice(), true);
-		let block2 = insert_block(&backend, 2, block1, None, Some(ooc), Default::default(), Default::default());
-		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-		let offchain_local_storage = offchain_local_storage.at(block2).unwrap();
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1").map(|v| v.len()), Some(20_000));
-
-		let mut ooc = OffchainOverlayedChanges::default();
-		ooc.remove(b"prefix1", b"key1", true);
-		let block3 = insert_block(&backend, 3, block2, None, Some(ooc), Default::default(), Default::default());
-		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
-		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-		assert_eq!(offchain_local_storage.at(block2).unwrap().get(b"prefix1", b"key1").map(|v| v.len()), Some(20_000));
-		let offchain_local_storage = offchain_local_storage.at(block3).unwrap();
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1").map(|v| v.len()), None);
-
-		let mut ooc = OffchainOverlayedChanges::default();
-		ooc.remove(b"prefix1", b"key1", true);
-		let block1_b = insert_block(&backend, 1, block0, None, Some(ooc), [1; 32].into(), Default::default());
-		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
-		assert_eq!(offchain_local_storage.at(block1).unwrap().get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-		let offchain_local_storage = offchain_local_storage.at(block1_b).unwrap();
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
-	}
-
-	#[test]
-	fn offchain_backends_change_new() {
-		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
-
-		let backend = Backend::<Block>::new_test(10, 10);
-
-		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
-		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		let offchain_local_storage = offchain_local_storage.at(block0).unwrap();
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), None);
-
-		let mut ooc = OffchainOverlayedChanges::default();
-		ooc.set(b"prefix1", b"key1", b"value1", true);
-		let block1 = insert_block(&backend, 1, block0, None, Some(ooc), Default::default(), Default::default());
-		let offchain_local_storage = backend.offchain_local_storage().unwrap();
-		assert_eq!(offchain_local_storage.at(block0).unwrap().get(b"prefix1", b"key1"), None);
-		assert!(!offchain_local_storage.at_new(block0).unwrap().can_update()); // TODO change
-		let mut offchain_local_storage = offchain_local_storage.at_new(block1).unwrap();
-		assert!(offchain_local_storage.can_update());
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"value1".to_vec()));
-		offchain_local_storage.set(b"prefix1", b"key1", b"test");
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test".to_vec()));
-		offchain_local_storage.set(b"prefix1", b"key2", b"test");
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test".to_vec()));
-	}
-
-	#[test]
-	fn offchain_backends_change_current_new_value() {
-		use sp_core::offchain::{BlockChainOffchainStorage, OffchainStorage};
-
-		let backend = Backend::<Block>::new_test(10, 10);
-
-		let block0 = insert_block(&backend, 0, Default::default(), None, None, Default::default(), Default::default());
-		let offchain_local = backend.offchain_local_storage().unwrap();
-		let mut offchain_local_storage = offchain_local.at(block0).unwrap();
-		assert!(offchain_local_storage.can_update());
-		offchain_local_storage.set(b"prefix1", b"key1", b"test");
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test".to_vec()));
-
-		let block1 = insert_block(&backend, 1, block0, None, None, Default::default(), Default::default());
-		let mut offchain_local_storage = offchain_local.at(block1).unwrap();
-		offchain_local_storage.set(b"prefix1", b"key2", b"test2");
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
-
-		let _block2 = insert_block(&backend, 2, block1, None, None, Default::default(), Default::default());
-		// can insert in the past if there is no following change
-		let mut offchain_local_storage = offchain_local.at(block1).unwrap();
-		assert!(offchain_local_storage.can_update());
-		offchain_local_storage.set(b"prefix1", b"key3", b"test3");
-		offchain_local_storage.set(b"prefix1", b"key1", b"test1");
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key3"), Some(b"test3".to_vec()));
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test1".to_vec()));
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
-		let mut offchain_local_storage = offchain_local.at(block0).unwrap();
-		// actual force set backward
-		offchain_local_storage.set(b"prefix1", b"key1", b"test11");
-		offchain_local_storage.set(b"prefix1", b"key2", b"test12");
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test11".to_vec()));
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test12".to_vec()));
-		assert!(offchain_local_storage.can_update());
-		let offchain_local_storage = offchain_local.at(block1).unwrap();
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key1"), Some(b"test1".to_vec()));
-		assert_eq!(offchain_local_storage.get(b"prefix1", b"key2"), Some(b"test2".to_vec()));
 	}
 
 	#[test]
