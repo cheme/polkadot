@@ -1363,7 +1363,7 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 			storage_child.push((child_key, storage));
 		}
 		// feed cache but more importantly the historied db
-		self.update_storage(storage_top, storage_child);
+		self.update_storage(storage_top, storage_child)?;
 
 		self.commit_state = true;
 		Ok(root)
@@ -1685,7 +1685,9 @@ impl<Block: BlockT> Backend<Block> {
 		// and probably some detached backend nodes that will not get pruned).
 		// TODO maybe use a panicky lock mode to assert worker concurrency is correct.
 		let safe_offchain_locks = true;
-		let mut historied_management_consumer: RegisteredConsumer<
+		// TODO register the journals for state change!! (actually would probably need new
+		// journals: see offchain storage branch + need child trie support).
+		let historied_management_consumer: RegisteredConsumer<
 			<HashFor<Block> as Hasher>::Out,
 			TreeManagementPersistence,
 		> = Default::default();
