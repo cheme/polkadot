@@ -68,6 +68,11 @@ pub struct SnapshotManageCmd {
 	#[structopt(long)]
 	pub do_init: bool,
 
+	/// Update configuration in parameter, some parameter do not
+	/// support update.
+	#[structopt(long)]
+	pub do_update_conf: bool,
+
 	/// Experimental, same as do init, but also revert state at the given
 	/// block number.
 	/// TODO can be implemented later (revert), as clear and later init
@@ -75,6 +80,14 @@ pub struct SnapshotManageCmd {
 	/// it is not).
 	#[structopt(long, value_name = "HASH or NUMBER")]
 	pub init_at: Option<BlockNumberOrHash>,
+
+	#[structopt(long)]
+	/// Snapshot db is used as primary key value backend.
+	pub use_as_primary: bool,
+
+	#[structopt(long)]
+	/// Snapshot db checked against trie state for debugging.
+	pub debug_assert: bool,
 
 	#[structopt(long)]
 	/// Db pruning uses key change journals.
@@ -177,6 +190,14 @@ pub struct SnapshotImportCmd {
 	/// it is not).
 	#[structopt(long, value_name = "HASH or NUMBER")]
 	pub init_at: Option<BlockNumberOrHash>,
+
+	#[structopt(long)]
+	/// Snapshot db is used as primary key value backend.
+	pub use_as_primary: bool,
+
+	#[structopt(long)]
+	/// Snapshot db checked against trie state for debugging.
+	pub debug_assert: bool,
 
 	#[structopt(long)]
 	/// Db pruning uses key change journals.
