@@ -126,6 +126,7 @@ where
 			enable_color: false,
 		},
 		disable_log_reloading: false,
+		snapshot_param: Default::default(),
 	};
 
 	Ok(config)

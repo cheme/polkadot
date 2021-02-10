@@ -825,36 +825,32 @@ impl<H> historied_db::mapped_db::MappedDB for DatabaseStorage<H>
 	}
 }
 
-/// Definition of mappings used by `TreeManagementPersistence`.
-pub mod historied_tree_bindings {
-	macro_rules! static_instance {
-		($name: ident, $col: expr) => {
+macro_rules! static_instance {
+	($name: ident, $col: expr) => {
 
-		/// Simple db map or instance definition for $name.
-		#[derive(Default, Clone)]
-		pub struct $name;
-		impl historied_db::mapped_db::MapInfo for $name {
-			const STATIC_COL: &'static [u8] = $col;
-		}
-	}}
-	macro_rules! static_instance_variable {
-		($name: ident, $col: expr, $path: expr, $lazy: expr) => {
-			static_instance!($name, $col);
-		impl historied_db::mapped_db::VariableInfo for $name {
-			const PATH: &'static [u8] = $path;
-			const LAZY: bool = $lazy;
-		}
-	}}
-	static_instance!(Mapping, b"\x08\x00\x00\x00tree_mgmt/mapping");
-	static_instance!(TreeState, b"\x08\x00\x00\x00tree_mgmt/state");
-	static_instance!(JournalDelete, b"\x08\x00\x00\x00tree_mgmt/journal_delete");
-	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
-	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
-	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
-	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
-	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
-	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
-}
+	/// Simple db map or instance definition for $name.
+	#[derive(Default, Clone)]
+	pub struct $name;
+	impl historied_db::mapped_db::MapInfo for $name {
+		const STATIC_COL: &'static [u8] = $col;
+	}
+}}
+
+macro_rules! static_instance_variable {
+	($name: ident, $col: expr, $path: expr, $lazy: expr) => {
+		static_instance!($name, $col);
+	impl historied_db::mapped_db::VariableInfo for $name {
+		const PATH: &'static [u8] = $path;
+		const LAZY: bool = $lazy;
+	}
+}}
+
+mod tree_management;
+mod snapshot;
+
+pub use snapshot::snapshot_db_conf;
+
+use tree_management::historied_tree_bindings;
 
 struct PendingBlock<Block: BlockT> {
 	header: Block::Header,

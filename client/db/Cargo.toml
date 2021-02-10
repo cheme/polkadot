@@ -26,6 +26,7 @@ blake2-rfc = "0.2.18"
 
 sc-client-api = { version = "2.0.0", path = "../api" }
 sp-arithmetic = { version = "2.0.0", path = "../../primitives/arithmetic" }
+sp-chain-spec = { version = "2.0.0", path = "../../primitives/chain-spec" }
 sp-core = { version = "2.0.0", path = "../../primitives/core" }
 sp-runtime = { version = "2.0.0", path = "../../primitives/runtime" }
 sp-state-machine = { version = "0.8.0", path = "../../primitives/state-machine" }

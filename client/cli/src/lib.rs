@@ -228,4 +228,8 @@ pub trait SubstrateCli: Sized {
 
 	/// Native runtime version.
 	fn native_runtime_version(chain_spec: &Box<dyn ChainSpec>) -> &'static RuntimeVersion;
+
+	/// Snapshot db configuration.
+	/// TODO this might be useless: for run we usually don't have it.
+	fn snapshot_db_conf(&self) -> std::result::Result<sc_client_api::SnapshotDbConf, String>;
 }

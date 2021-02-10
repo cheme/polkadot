@@ -83,11 +83,11 @@ pub struct SnapshotManageCmd {
 
 	#[structopt(long)]
 	/// Snapshot db is used as primary key value backend.
-	pub use_as_primary: bool,
+	pub use_as_primary: Option<bool>,
 
 	#[structopt(long)]
 	/// Snapshot db checked against trie state for debugging.
-	pub debug_assert: bool,
+	pub debug_assert: Option<bool>,
 
 	#[structopt(long)]
 	/// Db pruning uses key change journals.
@@ -193,11 +193,11 @@ pub struct SnapshotImportCmd {
 
 	#[structopt(long)]
 	/// Snapshot db is used as primary key value backend.
-	pub use_as_primary: bool,
+	pub use_as_primary: Option<bool>,
 
 	#[structopt(long)]
 	/// Snapshot db checked against trie state for debugging.
-	pub debug_assert: bool,
+	pub debug_assert: Option<bool>,
 
 	#[structopt(long)]
 	/// Db pruning uses key change journals.
@@ -249,40 +249,6 @@ pub struct SnapshotImportCmd {
 	pub database_params: DatabaseParams,
 }
 
-impl SnapshotExportCmd {
-	/// Run the export-blocks command
-	pub async fn run<B, C>(
-		&self,
-		client: Arc<C>,
-		database_config: DatabaseConfig,
-	) -> error::Result<()>
-	where
-		B: BlockT,
-		C: BlockBackend<B> + UsageProvider<B> + 'static,
-		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
-	{
-		if let DatabaseConfig::RocksDb { ref path, .. } = database_config {
-			info!("DB path: {}", path.display());
-		}
-		unimplemented!()
-/*
-		let from = self.from.as_ref().and_then(|f| f.parse().ok()).unwrap_or(1u32);
-		let to = self.to.as_ref().and_then(|t| t.parse().ok());
-
-		let binary = self.binary;
-
-		let file: Box<dyn io::Write> = match &self.output {
-			Some(filename) => Box::new(fs::File::create(filename)?),
-			None => Box::new(io::stdout()),
-		};
-
-		export_blocks(client, file, from.into(), to, binary)
-			.await
-			.map_err(Into::into)
-*/
-	}
-}
-
 impl CliConfiguration for SnapshotExportCmd {
 	fn shared_params(&self) -> &SharedParams {
 		&self.shared_params
@@ -318,5 +284,82 @@ impl CliConfiguration for SnapshotImportCmd {
 
 	fn shared_params(&self) -> &SharedParams {
 		&self.shared_params
+	}
+}
+
+impl SnapshotManageCmd {
+	/// Run the export-snapshot command
+	pub async fn run<B, C>(
+		&self,
+		client: Arc<C>,
+		database_config: DatabaseConfig,
+	) -> error::Result<()>
+	where
+		B: BlockT,
+		C: BlockBackend<B> + UsageProvider<B> + 'static,
+		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
+	{
+		if let DatabaseConfig::RocksDb { ref path, .. } = database_config {
+			info!("DB path: {}", path.display());
+		}
+
+		// TODO fetch config and updat to value from cmd.
+		unimplemented!()
+	}
+}
+
+impl SnapshotImportCmd {
+	/// Run the import-snapshot command
+	pub async fn run<B, C>(
+		&self,
+		client: Arc<C>,
+		database_config: DatabaseConfig,
+	) -> error::Result<()>
+	where
+		B: BlockT,
+		C: BlockBackend<B> + UsageProvider<B> + 'static,
+		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
+	{
+		if let DatabaseConfig::RocksDb { ref path, .. } = database_config {
+			info!("DB path: {}", path.display());
+		}
+
+		unimplemented!()
+	}
+}
+
+impl SnapshotExportCmd {
+	/// Run the export-snapshot command
+	pub async fn run<B, C>(
+		&self,
+		client: Arc<C>,
+		database_config: DatabaseConfig,
+	) -> error::Result<()>
+	where
+		B: BlockT,
+		C: BlockBackend<B> + UsageProvider<B> + 'static,
+		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
+	{
+		if let DatabaseConfig::RocksDb { ref path, .. } = database_config {
+			info!("DB path: {}", path.display());
+		}
+
+		unimplemented!()
+/*
+		let from = self.from.as_ref().and_then(|f| f.parse().ok()).unwrap_or(1u32);
+		let to = self.to.as_ref().and_then(|t| t.parse().ok());
+
+		let binary = self.binary;
+
+		let file: Box<dyn io::Write> = match &self.output {
+			Some(filename) => Box::new(fs::File::create(filename)?),
+			None => Box::new(io::stdout()),
+		};
+
+		export_blocks(client, file, from.into(), to, binary)
+			.await
+			.map_err(Into::into)
+*/
+
 	}
 }

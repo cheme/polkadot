@@ -66,6 +66,10 @@ impl SubstrateCli for Cli {
 	fn native_runtime_version(_: &Box<dyn ChainSpec>) -> &'static RuntimeVersion {
 		&node_runtime::VERSION
 	}
+
+	fn snapshot_db_conf(&self) -> std::result::Result<sc_client_api::SnapshotDbConf, String> {
+		unimplemented!("TODO")
+	}
 }
 
 /// Parse command line arguments into service configuration.
@@ -147,6 +151,30 @@ pub fn run() -> Result<()> {
 				let PartialComponents { client, task_manager, backend, ..}
 					= new_partial(&config)?;
 				Ok((cmd.run(client, backend), task_manager))
+			})
+		},
+		Some(Subcommand::SnapshotManage(cmd)) => {
+			let runner = cli.create_runner(cmd)?;
+			runner.async_run(|config| {
+				let PartialComponents { client, task_manager, ..}
+					= new_partial(&config)?;
+				Ok((cmd.run(client, config.database), task_manager))
+			})
+		},
+		Some(Subcommand::SnapshotImport(cmd)) => {
+			let runner = cli.create_runner(cmd)?;
+			runner.async_run(|config| {
+				let PartialComponents { client, task_manager, ..}
+					= new_partial(&config)?;
+				Ok((cmd.run(client, config.database), task_manager))
+			})
+		},
+		Some(Subcommand::SnapshotExport(cmd)) => {
+			let runner = cli.create_runner(cmd)?;
+			runner.async_run(|config| {
+				let PartialComponents { client, task_manager, ..}
+					= new_partial(&config)?;
+				Ok((cmd.run(client, config.database), task_manager))
 			})
 		},
 	}

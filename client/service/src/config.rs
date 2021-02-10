@@ -20,7 +20,7 @@
 
 pub use sc_client_db::{
 	Database, PruningMode, DatabaseSettingsSrc as DatabaseConfig,
-	KeepBlocks, TransactionStorageMode
+	KeepBlocks, TransactionStorageMode, snapshot_db_conf::SnapshotDbConf,
 };
 pub use sc_network::Multiaddr;
 pub use sc_network::config::{ExtTransport, MultiaddrWithPeerId, NetworkConfiguration, Role, NodeKeyConfig};
@@ -57,6 +57,8 @@ pub struct Configuration {
 	pub keystore_remote: Option<String>,
 	/// Configuration for the database.
 	pub database: DatabaseConfig,
+	/// Configuration for the snapshot_db.
+	pub snapshot_param: SnapshotDbConf,
 	/// Size of internal state cache in Bytes
 	pub state_cache_size: usize,
 	/// Size in percent of cache size dedicated to child tries

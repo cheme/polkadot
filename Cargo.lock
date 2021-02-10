@@ -6897,6 +6897,7 @@ dependencies = [
  "sc-state-db",
  "sp-arithmetic",
  "sp-blockchain",
+ "sp-chain-spec",
  "sp-consensus",
  "sp-core",
  "sp-database",

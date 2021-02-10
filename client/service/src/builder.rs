@@ -337,6 +337,15 @@ pub fn new_full_parts<TBl, TRtApi, TExecDisp>(
 			transaction_storage: config.transaction_storage.clone(),
 		};
 
+		let snapshot_db_config = sc_client_db::snapshot_db_conf::initiate(
+			(),
+			sc_client_db::snapshot_db_conf::from_chain_spec(
+				&config.chain_spec.properties()
+			),
+			config.snapshot_param.clone(),
+			false,
+		);
+
 		let extensions = sc_client_api::execution_extensions::ExecutionExtensions::new(
 			config.execution_strategies.clone(),
 			Some(keystore_container.sync_keystore()),

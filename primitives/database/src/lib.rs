@@ -494,3 +494,41 @@ mod ordered {
 		}
 	}
 }
+
+#[derive(Clone, Debug)]
+/// Different storage mode.
+pub enum SnapshotDBMode {
+	/// Do not apply binary diff between consecutive values.
+	NoDiff,
+	/// Use xdelta3 VcDiff.
+	Xdelta3Diff,
+}
+
+impl Default for SnapshotDBMode {
+	fn default() -> Self {
+		SnapshotDBMode::NoDiff
+	}
+}
+
+#[derive(Clone, Debug, Default)]
+/// Configuration of snapshot db conf.
+pub struct SnapshotDbConf {
+	/// Is snapshot db active.
+	pub enabled: bool,
+	/// Should we use this db value instead of trie value in state machine
+	/// when possible.
+	pub primary_source: bool,
+	/// Do we use node backend.
+	pub no_node_backend: bool,
+	/// Do we maintain key modification journaling for pruning?
+	pub journal_pruning: bool,
+	/// Should we debug value access in state machine against the trie values.
+	pub debug_assert: bool,
+	/// Lower block support, this should block reorg before it.
+	/// TODO use actual block nb type.
+	pub start_block: Option<u32>,
+	/// Diff usage.
+	pub diff_mode: SnapshotDBMode,
+	/// Lazy pruning window. (place holder TODO unimplemented)
+	pub lazy_pruning: Option<u32>,
+}
