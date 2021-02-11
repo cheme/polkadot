@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
 use sp_runtime::traits::{Block as BlockT, HashFor, NumberFor, Header as HeaderT};
-use crate::HValue;
+use crate::snapshot::HValue;
 use crate::utils::DatabaseType;
 use crate::{StateDb, PruningMode, StateMetaDb};
 use historied_db::management::tree::TreeManagement;
@@ -137,7 +137,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	}
 	let current_state = management.get_db_state(&hash_for_root).expect("just added");
 	println!("current state {:?}", current_state);
-	let historied_db = crate::HistoriedDB {
+	let historied_db = crate::snapshot::HistoriedDB {
 		current_state,
 		db: db.clone(),
 		do_assert: false,
@@ -274,7 +274,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let mut count = 0;
 
 	let db_tmp: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
-	let mut kv_db = crate::HistoriedDBMut {
+	let mut kv_db = crate::snapshot::HistoriedDBMut {
 		current_state: state,
 		current_state_read: unimplemented!(),
 		db: db_tmp,
@@ -307,7 +307,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	let current_state = management.get_db_state(&block_hash).expect("just added");
 	let db_tmp: Arc<dyn OrderedDatabase<_>> = Arc::new(historied_persistence.clone());
-	let historied_db = crate::HistoriedDB {
+	let historied_db = crate::snapshot::HistoriedDB {
 		current_state,
 		db: db_tmp,
 		do_assert: false,

@@ -121,190 +121,6 @@ pub type DbState<B> = sp_state_machine::TrieBackend<
 	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
 >;
 
-/// Key value db at a given block for an historied DB.
-pub struct HistoriedDB {
-	current_state: historied_db::management::tree::ForkPlan<u32, u64>,
-	db: Arc<dyn OrderedDatabase<DbHash>>,
-	// only assert when spawned from cli command (so tests pass)
-	do_assert: bool,
-}
-
-type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
-	Vec<u8>,
-	u64,
->;
-/*
-type LinearBackend<'a> = historied_db::backend::encoded_array::EncodedArray<
-	'a,
-	Vec<u8>,
-	historied_db::backend::encoded_array::NoVersion,
->;
-*/
-/*
-type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
-	'a,
-	historied_db::historied::linear::Linear<Vec<u8>, u64, LinearBackend<'a>>,
-	historied_db::historied::encoded_array::NoVersion,
->;
-*/
-type TreeBackend = historied_db::backend::in_memory::MemoryOnly4<
-	historied_db::historied::linear::Linear<BytesDiff, u64, LinearBackend>,
-	u32,
->;
-
-// Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
-// None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
-/// Historied value with multiple parallel branches.
-pub type HValue = Tree<u32, u64, BytesDiff, TreeBackend, LinearBackend>;
-//pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
-
-impl HistoriedDB {
-	fn storage_inner(&self, key: &[u8], column: u32) -> Result<Option<Vec<u8>>, String> {
-		if let Some(v) = self.db.get(column, key) {
-			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
-				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			let v = v.get_sum(&self.current_state);
-			Ok(v.map(|v| v.into()).flatten())
-		} else {
-			Ok(None)
-		}
-	}
-
-}
-
-impl KVBackend for HistoriedDB {
-	fn assert_value(&self) -> bool {
-		self.do_assert
-	}
-
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		self.storage_inner(key, crate::columns::STATE_SNAPSHOT)
-	}
-}
-
-impl HistoriedDB {
-	/// Iterator on key values. 
-	pub fn iter<'a>(&'a self, column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
-		self.db.iter(column).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
-				.or_else(|| {
-					warn!("Invalid historied value k {:?}, v {:?}", k, v);
-					None
-				})
-				.expect("Invalid encoded historied value, DB corrupted");
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
-			v.map(|v| (k, v))
-		})
-	}
-
-	/// Iterator on key values, starting at a given position. TODO is it use???
-	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
-		self.db.iter_from(column, start).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
-				.or_else(|| {
-					warn!("decoding fail for k {:?}, v {:?}", k, v);
-					None
-				})
-				.expect("Invalid encoded historied value, DB corrupted");
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
-			v.map(|v| (k, v))
-		})
-	}
-}
-
-/// Key value db change for at a given block of an historied DB.
-pub struct HistoriedDBMut<DB> {
-	/// Branch head indexes to change values of a latest block.
-	pub current_state: historied_db::Latest<(u32, u64)>,
-	/// Branch head indexes to change values of a latest block.
-	pub current_state_read: historied_db::management::tree::ForkPlan<u32, u64>,
-	/// Inner database to modify historied values.
-	pub db: DB,
-}
-
-impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
-	/// Create a transaction for this historied db.
-	pub fn transaction(&self) -> Transaction<DbHash> {
-		Transaction::new()
-	}
-
-	/// write a single value in change set.
-	/// TODO use branch and block nodes backend as in offchain-storage
-	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
-		self.update_single_inner(k, change, change_set, crate::columns::STATE_SNAPSHOT)
-	}
-
-	/// write a single value in change set.
-	pub fn update_single_inner(
-		&mut self,
-		k: &[u8],
-		change: Option<Vec<u8>>,
-		change_set: &mut Transaction<DbHash>,
-		column: u32,
-	) {
-		let histo = if let Some(histo) = self.db.get(column, k) {
-			Some(HValue::decode_with_context(&mut &histo[..], &((), ())).expect("Bad encoded value in db, closing"))
-		} else {
-			if change.is_none() {
-				return;
-			}
-			None
-		};
-		let mut new_value;
-		match if let Some(v) = change {
-			if let Some(histo) = histo {
-				if let Some(previous) = {
-					let h = TreeSum::<_, _, BytesDelta, _, _>(&histo);
-					// we should use previous state, but since we know this
-					// is a first write for this state (write only once per keys)
-					// current state will always return previous state
-					h.get_sum(&self.current_state_read)
-				} {
-					let target_value = Some(v).into();
-					let v_diff = historied_db::historied::aggregate::xdelta::substract(&previous, &target_value).into();
-					new_value = histo;
-					new_value.set(v_diff, &self.current_state)
-				} else {
-					new_value = histo;
-					new_value.set(BytesDiff::Value(v), &self.current_state)
-				}
-			} else {
-				new_value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
-				historied_db::UpdateResult::Changed(())
-			}
-		} else {
-			new_value = histo.expect("returned above.");
-			new_value.set(BytesDiff::None, &self.current_state)
-		} {
-			historied_db::UpdateResult::Changed(()) => {
-				change_set.set_from_vec(column, k, new_value.encode());
-			},
-			historied_db::UpdateResult::Cleared(()) => {
-				change_set.remove(column, k);
-			},
-			historied_db::UpdateResult::Unchanged => (),
-		}
-	}
-
-	/// write a single value, without checking current state,
-	/// please only use on new empty db.
-	pub fn unchecked_new_single(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>) {
-		self.unchecked_new_single_inner(k, v, change_set, crate::columns::STATE_SNAPSHOT)
-	}
-
-	fn unchecked_new_single_inner(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
-		let value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
-		let value = value.encode();
-		change_set.set_from_vec(column, k, value);
-		// no need for no value set
-	}
-}
-
 const DB_HASH_LEN: usize = 32;
 
 /// Hash type that this backend uses for the database.
@@ -817,8 +633,6 @@ mod tree_management;
 mod snapshot;
 
 pub use snapshot::snapshot_db_conf;
-
-use tree_management::historied_tree_bindings;
 
 struct PendingBlock<Block: BlockT> {
 	header: Block::Header,
@@ -1401,9 +1215,6 @@ pub struct Backend<Block: BlockT> {
 	transaction_storage: TransactionStorageMode,
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
 	state_usage: Arc<StateUsageStats>,
-	historied_state_do_assert: bool,
-	historied_pruning_window: Option<NumberFor<Block>>,
-	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
 	snapshot_db: snapshot::SnapshotDb<Block>,
 }
 
@@ -1465,10 +1276,6 @@ impl<Block: BlockT> Backend<Block> {
 		)?;
 		let meta = blockchain.meta.clone();
 		let map_e = |e: sc_state_db::Error<io::Error>| sp_blockchain::Error::from_state_db(e);
-		let historied_pruning_window = match &config.state_pruning {
-			PruningMode::Constrained(constraint) => constraint.max_blocks.map(|nb| nb.into()),
-			_ => None,
-		};
 		let state_db: StateDb<_, _> = StateDb::new(
 			config.state_pruning.clone(),
 			!config.source.supports_ref_counting(),
@@ -1501,11 +1308,10 @@ impl<Block: BlockT> Backend<Block> {
 			pending: Default::default(),
 		};
 		let historied_management = TreeManagementSync::from_persistence(historied_persistence);
-		let snapshot_db = snapshot::SnapshotDb {
+		let snapshot_db = snapshot::SnapshotDb::new(
 			historied_management,
-			ordered_db: ordered_db.clone(),
-			_ph: Default::default(),
-		};
+			ordered_db,
+		)?;
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
@@ -1523,15 +1329,7 @@ impl<Block: BlockT> Backend<Block> {
 			state_usage: Arc::new(StateUsageStats::new()),
 			keep_blocks: config.keep_blocks.clone(),
 			transaction_storage: config.transaction_storage.clone(),
-			historied_next_finalizable: Arc::new(RwLock::new(None)),
-			historied_state_do_assert: false,
-			historied_pruning_window,
 		})
-	}
-
-	/// Compare historied state with trie state results.
-	pub fn do_assert_state_machine(&mut self) {
-		self.historied_state_do_assert = true;
 	}
 
 	/// Handle setting head within a transaction. `route_to` should be the last
@@ -1701,25 +1499,9 @@ impl<Block: BlockT> Backend<Block> {
 		});
 
 		let mut ordered_historied_db = if let Some((hash, parent_hash)) = hashes {
-			// lazy init, not that this can lead to no finalization
-			// if the node get close to often, with current windows
-			// size, this is fine, otherwhise this value will need
-			// to persist.
-			if self.historied_next_finalizable.read().is_none() {
-				let parent_block = BlockId::Hash(parent_hash.clone());
-				if let Some(nb) = self.blockchain.block_number_from_id(&parent_block)? {
-					*self.historied_next_finalizable.write() = Some(nb + HISTORIED_FINALIZATION_WINDOWS.into());
-				}
-			}
-
 			// Ensure pending layer is clean
 			let _ = self.snapshot_db.historied_management.extract_changes();
-			let (query_plan, update_plan) = self.snapshot_db.historied_management.register_new_block(&parent_hash, &hash)?;
-			Some(HistoriedDBMut {
-				current_state: update_plan,
-				current_state_read: query_plan,
-				db: self.blockchain.ordered_db.clone(),
-			})
+			self.snapshot_db.get_historied_db_mut(&parent_hash, &hash)?
 		} else {
 			None
 		};
@@ -1729,7 +1511,7 @@ impl<Block: BlockT> Backend<Block> {
 
 		// write management state changes
 		TreeManagementSync::<Block, _>::apply_historied_management_changes(
-			&mut self.snapshot_db.historied_management.0.write().instance,
+			&mut self.snapshot_db.historied_management.inner.write().instance,
 			&mut transaction,
 		);
 
@@ -2064,22 +1846,7 @@ impl<Block: BlockT> Backend<Block> {
 
 	fn historied_pruning(&self, hash: &Block::Hash, number: NumberFor<Block>)
 		-> ClientResult<()> {
-		// TODO this currently only cover offchain storage (the only one to manage its journals).
-		// Journal and pruning should also be needed for state and index, but with adiffernet pruning
-		// period?
-		let do_finalize = &number > &self.historied_next_finalizable.read().as_ref()
-			.unwrap_or(&0u16.into());
-		if !do_finalize {
-			return Ok(())
-		}
-
-		let prune_index = self.historied_pruning_window.map(|nb| {
-			number.saturating_sub(nb).saturated_into::<u64>()
-		});
-
-		self.snapshot_db.historied_management.migrate(hash, prune_index, &self.storage.db)?;
-
-		*self.historied_next_finalizable.write() = Some(number + HISTORIED_FINALIZATION_WINDOWS.into());
+		self.snapshot_db.historied_management.migrate(hash, number, &self.storage.db)?;
 		Ok(())
 	}
 
@@ -2127,9 +1894,6 @@ impl<Block: BlockT> Backend<Block> {
 		Ok(())
 	}
 }
-
-/// Avoid finalizing at every block.
-const HISTORIED_FINALIZATION_WINDOWS: u8 = 101;
 
 fn apply_state_commit(transaction: &mut Transaction<DbHash>, commit: sc_state_db::CommitSet<Vec<u8>>) {
 	for (key, val) in commit.data.inserted.into_iter() {

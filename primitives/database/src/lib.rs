@@ -529,6 +529,8 @@ pub struct SnapshotDbConf {
 	pub start_block: Option<u32>,
 	/// Diff usage.
 	pub diff_mode: SnapshotDBMode,
+	/// Pruning window size to apply, `None` for archive.
+	pub pruning: Option<u32>,
 	/// Lazy pruning window. (place holder TODO unimplemented)
 	pub lazy_pruning: Option<u32>,
 }
@@ -543,6 +545,7 @@ pub trait SnapshotDb {
 		&self,
 		use_as_primary: Option<bool>,
 		debug_assert: Option<bool>,
+		pruning_window: Option<u32>,
 		lazy_pruning_window: Option<u32>,
 	) -> error::Result<()>;
 }
@@ -583,6 +586,7 @@ impl SnapshotDb for () {
 		&self,
 		_use_as_primary: Option<bool>,
 		_debug_assert: Option<bool>,
+		_pruning_window: Option<u32>,
 		_lazy_pruning_window: Option<u32>,
 	) -> error::Result<()> {
 		unsupported_error()

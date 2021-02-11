@@ -35,6 +35,7 @@ use historied_db::{
 	backend::nodes::ContextHead,
 	historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 };
+use sp_arithmetic::traits::Saturating;
 use sp_runtime::traits::{
 	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion, HashFor,
 };
@@ -45,6 +46,9 @@ use crate::DbHash;
 use log::{trace, debug, warn};
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
+
+/// Avoid finalizing at every block.
+const HISTORIED_FINALIZATION_WINDOWS: u8 = 101;
 
 /// Historied db state tree management for substrate.
 ///
@@ -127,10 +131,13 @@ pub struct TreeManagementPersistenceNoTx;
 
 /// Tree management shareable sync instance.
 #[derive(Clone)]
-pub struct TreeManagementSync<Block: BlockT, S: TreeManagementStorage + 'static>(
-	// TODO remove pub
-	pub Arc<RwLock<TreeManagementInner<Block, S>>>,
-);
+pub struct TreeManagementSync<Block: BlockT, S: TreeManagementStorage + 'static> {
+	///  TODO remove pub
+	/// Mutable shared state.
+	pub inner: Arc<RwLock<TreeManagementInner<Block, S>>>,
+	/// Pruning window.
+	pub pruning_window: Option<NumberFor<Block>>,
+}
 
 // TODO remove pub
 pub struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 'static> {
@@ -146,6 +153,8 @@ pub struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 'static
 	>,
 	// TODO rem pub
 	pub consumer_transaction: Transaction<DbHash>,
+	/// Next block to apply migrate.
+	pub next_migrate: Option<NumberFor<Block>>,
 }
 
 // TODO move in dep
@@ -158,11 +167,15 @@ impl<Block, S> TreeManagementSync<Block, S>
 {
 	/// Initiate from persistence storage.
 	pub fn from_persistence(persistence: S::Storage) -> Self {
-		TreeManagementSync(Arc::new(RwLock::new(TreeManagementInner {
-			instance: TreeManagement::from_ser(persistence),
-			consumer: Default::default(),
-			consumer_transaction: Default::default(),
-		})))
+		TreeManagementSync {
+			inner: Arc::new(RwLock::new(TreeManagementInner {
+				instance: TreeManagement::from_ser(persistence),
+				consumer: Default::default(),
+				consumer_transaction: Default::default(),
+				next_migrate: None,
+			})),
+			pruning_window: None, // This get set by consumer.
+		}
 	}
 
 	/// Write management state changes to transaction container.
@@ -197,7 +210,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 	}
 
 	pub fn extract_changes(&self) -> PendingChanges {
-		std::mem::replace(&mut self.0.write().instance.ser().pending, Default::default())
+		std::mem::replace(&mut self.inner.write().instance.ser().pending, Default::default())
 	}
 
 	pub fn register_new_block(
@@ -206,7 +219,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 		hash: &Block::Hash,
 	) -> ClientResult<(ForkPlan<u32, u64>, Latest<(u32, u64)>)> {
 		// lock does notinclude update of value as we do not have concurrent block creation
-		let mut lock = self.0.write();
+		let mut lock = self.inner.write();
 		let mut management = &mut lock.instance;
 		if let Some(state) = Some(management.get_db_state_for_fork(parent_hash)
 			.unwrap_or_else(|| {
@@ -235,9 +248,23 @@ impl<Block, S> TreeManagementSync<Block, S>
 	pub fn migrate(
 		&self,
 		hash: &Block::Hash,
-		prune_index: Option<u64>,
+		number: NumberFor<Block>,
 		db: &Arc<dyn Database<DbHash>>,
 	) -> ClientResult<()> {
+
+		// lazy init, not that this can lead to no finalization
+		// if the node get close to often, with current windows
+		// size, this is fine, otherwhise this value will need
+		// to persist.
+		if self.pruning_window.is_none() {
+			return Ok(());
+		}
+	
+
+		let prune_index = self.pruning_window.map(|nb| {
+			number.saturating_sub(nb).saturated_into::<u64>()
+		});
+
 		// This lock can be rather long, so we really need to migrate occasionally.
 		// TODO this is bad design, migrate requires this lock, but the actual
 		// pruning does not require it that much: we should be able to run
@@ -246,12 +273,26 @@ impl<Block, S> TreeManagementSync<Block, S>
 		// rather atomically.
 		// TODO create TransactionalMigration that do not require locking?
 		// Maybe some api like AssertUnwindSafe : AssertTransactionalMigrate.
-		let mut historied_management = self.0.write();
+		let mut historied_management = self.inner.write();
+
 		let TreeManagementInner {
 			instance,
 			consumer,
 			consumer_transaction,
+			next_migrate,
 		} = &mut *historied_management;
+
+		if next_migrate.is_none() {
+			*next_migrate = Some(number + HISTORIED_FINALIZATION_WINDOWS.into());
+			return Ok(());
+		}
+
+		let do_finalize = &number > &next_migrate.as_ref()
+			.unwrap_or(&0u16.into());
+		if !do_finalize {
+			return Ok(())
+		}
+
 		// Ensure pending layer is clean: TODO call outside ??
 		let _ = std::mem::replace(&mut instance.ser().pending, Default::default());
 
@@ -273,6 +314,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 		TreeManagementSync::<Block, _>::apply_historied_management_changes(instance, &mut transaction);
 
 		db.commit(transaction)?;
+		*next_migrate = Some(number + HISTORIED_FINALIZATION_WINDOWS.into());
 		Ok(())
 	}
 }

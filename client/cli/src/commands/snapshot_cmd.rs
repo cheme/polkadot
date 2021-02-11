@@ -21,7 +21,7 @@ use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, 
 use crate::CliConfiguration;
 use log::info;
 use sc_service::{
-	config::DatabaseConfig, chain_ops::export_blocks,
+	config::DatabaseConfig, chain_ops::export_blocks, PruningMode, Role,
 };
 use sc_client_api::{SnapshotProvider, SnapshotDb};
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
@@ -100,6 +100,16 @@ pub struct SnapshotConf {
 	pub db_mode: SnapshotMode,
 }
 
+fn pruning_conf(params: &PruningParams) -> Option<u32> {
+	match params.state_pruning(true, &Role::Full)
+		.expect("Using unsafe pruning.") {
+		PruningMode::ArchiveAll => None,
+		// TODO align pruning to allow this.
+		PruningMode::ArchiveCanonical => None,
+		PruningMode::Constrained(constraint) => constraint.max_blocks,
+	}
+}
+
 impl Into<sc_client_api::SnapshotDbConf> for SnapshotConf {
 	fn into(self) -> sc_client_api::SnapshotDbConf {
 		sc_client_api::SnapshotDbConf {
@@ -109,6 +119,7 @@ impl Into<sc_client_api::SnapshotDbConf> for SnapshotConf {
 			debug_assert: self.debug_assert.unwrap_or(false),
 			lazy_pruning: self.lazy_pruning_window,
 			no_node_backend: self.no_node_backend,
+			pruning: pruning_conf(&self.pruning_params),
 			journal_pruning: self.with_journals,
 			diff_mode: match self.db_mode {
 				SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
@@ -347,6 +358,7 @@ impl SnapshotManageCmd {
 		db.update_running_conf(
 			self.snapshot_conf.use_as_primary,
 			self.snapshot_conf.debug_assert,
+			pruning_conf(&self.snapshot_conf.pruning_params),
 			self.snapshot_conf.lazy_pruning_window,
 		)?;
 		Ok(())
