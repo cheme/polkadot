@@ -40,7 +40,7 @@ pub use notifications::*;
 pub use proof_provider::*;
 
 pub use sp_state_machine::{StorageProof, ExecutionStrategy};
-pub use sp_database::SnapshotDbConf;
+pub use sp_database::{SnapshotDb, SnapshotDbConf, SnapshotDBMode, error::DatabaseError};
 
 /// Usage Information Provider interface
 ///

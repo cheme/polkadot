@@ -123,6 +123,7 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 	type Blockchain = Blockchain<S>;
 	type State = GenesisOrUnavailableState<HashFor<Block>>;
 	type OffchainStorage = InMemOffchainStorage;
+	type SnapshotDb = ();
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		Ok(ImportOperation {
@@ -212,6 +213,10 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 	}
 
 	fn offchain_storage(&self) -> Option<Self::OffchainStorage> {
+		None
+	}
+
+	fn snapshot_db(&self) -> Option<Self::SnapshotDb> {
 		None
 	}
 

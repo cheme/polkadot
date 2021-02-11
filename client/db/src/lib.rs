@@ -1465,6 +1465,7 @@ pub struct Backend<Block: BlockT> {
 		TreeManagementPersistence,
 	>,
 	historied_management_consumer_transaction: Arc<RwLock<Transaction<DbHash>>>,
+	snapshot_db: snapshot::SnapshotDb,
 }
 
 // write management state changes
@@ -1603,6 +1604,7 @@ impl<Block: BlockT> Backend<Block> {
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
+			snapshot_db: snapshot::SnapshotDb,
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
@@ -2321,6 +2323,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	type Blockchain = BlockchainDb<Block>;
 	type State = SyncingCachingState<RefTrackingState<Block>, Block>;
 	type OffchainStorage = offchain::LocalStorage;
+	type SnapshotDb = snapshot::SnapshotDb;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		let mut old_state = self.state_at(BlockId::Hash(Default::default()))?;
@@ -2420,6 +2423,10 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 
 	fn offchain_storage(&self) -> Option<Self::OffchainStorage> {
 		Some(self.offchain_storage.clone())
+	}
+
+	fn snapshot_db(&self) -> Option<Self::SnapshotDb> {
+		Some(self.snapshot_db.clone())
 	}
 
 	fn usage_info(&self) -> Option<UsageInfo> {

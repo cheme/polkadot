@@ -153,7 +153,6 @@ pub enum Error {
 	#[error("Failed to get header for hash {0}")]
 	MissingHeader(String),
 
-
 	#[error("State Database error: {0}")]
 	StateDatabase(String),
 

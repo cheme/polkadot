@@ -385,6 +385,16 @@ pub trait StorageProvider<Block: BlockT, B: Backend<Block>> {
 	) -> sp_blockchain::Result<Vec<(NumberFor<Block>, u32)>>;
 }
 
+/// Provides acess to snapshot primitives.
+/// TODO check if we can use Backend trait instead
+pub trait SnapshotProvider<Block: BlockT, B: Backend<Block>> {
+	/// Associted snapshot db type, if no support '()' can be use.
+	type SnapshotDb: sp_database::SnapshotDb;
+
+	/// Access inner snapshot db implementation if available.
+	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
+}
+
 /// Client backend.
 ///
 /// Manages the data layer.
@@ -404,6 +414,8 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	type State: StateBackend<HashFor<Block>> + Send;
 	/// Offchain workers local storage.
 	type OffchainStorage: OffchainStorage;
+	/// Associted snapshot db type, if no support '()' can be use.
+	type SnapshotDb: sp_database::SnapshotDb;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	///
@@ -443,6 +455,9 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 
 	/// Returns a handle to offchain storage.
 	fn offchain_storage(&self) -> Option<Self::OffchainStorage>;
+
+	/// Access inner snapshot db implementation if available.
+	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
 
 	/// Returns true if state for given block is available.
 	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {

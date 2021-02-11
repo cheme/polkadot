@@ -532,3 +532,59 @@ pub struct SnapshotDbConf {
 	/// Lazy pruning window. (place holder TODO unimplemented)
 	pub lazy_pruning: Option<u32>,
 }
+
+/// Implement exposed acces method to the snapshot db.
+pub trait SnapshotDb {
+	/// Disable snapshot db and remove its content.
+	fn clear_snapshot_db(&self) -> error::Result<()>;
+
+	/// Change current snapshot db behavior.
+	fn update_running_conf(
+		&self,
+		use_as_primary: Option<bool>,
+		debug_assert: Option<bool>,
+		lazy_pruning_window: Option<u32>,
+	) -> error::Result<()>;
+}
+
+/// The error type for snapshot database operations.
+#[derive(Debug)]
+pub enum SnapshotDbError {
+	Unsupported,
+}
+
+impl std::fmt::Display for SnapshotDbError {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			SnapshotDbError::Unsupported => {
+				write!(f, "Unsupported snapshot db.")
+			},
+		}
+	}
+}
+
+impl std::error::Error for SnapshotDbError {
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+		None
+	}
+}
+
+fn unsupported_error() -> error::Result<()> {
+	Err(error::DatabaseError(Box::new(SnapshotDbError::Unsupported)))
+}
+
+/// Use '()' when no snapshot implementation.
+impl SnapshotDb for () {
+	fn clear_snapshot_db(&self) -> error::Result<()> {
+		unsupported_error()
+	}
+
+	fn update_running_conf(
+		&self,
+		_use_as_primary: Option<bool>,
+		_debug_assert: Option<bool>,
+		_lazy_pruning_window: Option<u32>,
+	) -> error::Result<()> {
+		unsupported_error()
+	}
+}
