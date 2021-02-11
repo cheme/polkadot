@@ -426,3 +426,33 @@ impl SnapshotExportCmd {
 
 	}
 }
+
+impl CliConfiguration for SnapshotManageCmd {
+	fn shared_params(&self) -> &SharedParams {
+		&self.shared_params
+	}
+
+	fn database_params(&self) -> Option<&DatabaseParams> {
+		Some(&self.database_params)
+	}
+}
+
+impl CliConfiguration for SnapshotExportCmd {
+	fn shared_params(&self) -> &SharedParams {
+		&self.shared_params
+	}
+
+	fn database_params(&self) -> Option<&DatabaseParams> {
+		Some(&self.database_params)
+	}
+}
+
+impl CliConfiguration for SnapshotImportCmd {
+	fn shared_params(&self) -> &SharedParams {
+		&self.shared_params
+	}
+
+	fn database_params(&self) -> Option<&DatabaseParams> {
+		Some(&self.database_params)
+	}
+}
