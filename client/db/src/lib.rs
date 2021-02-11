@@ -104,6 +104,8 @@ use crate::stats::StateUsageStats;
 pub use sp_database::{Database, OrderedDatabase};
 pub use sc_state_db::PruningMode;
 
+use tree_management::TreeManagementSync;
+
 #[cfg(any(feature = "with-kvdb-rocksdb", test))]
 pub use bench::BenchmarkingState;
 
@@ -114,6 +116,7 @@ const CACHE_HEADERS: usize = 8;
 const DEFAULT_CHILD_RATIO: (usize, usize) = (1, 10);
 
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
+/// TODO looks like Arc is not necessary (Box could be use).
 pub type DbState<B> = sp_state_machine::TrieBackend<
 	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
 >;
@@ -562,19 +565,6 @@ pub(crate) mod columns {
 	pub const STATE_SNAPSHOT: u32 = 12;
 }
 
-#[derive(Clone)]
-/// Database backed tree management.
-///
-/// Definitions for storage of historied
-/// db tree state (maps block hashes to internal
-/// history index).
-pub struct TreeManagementPersistence;
-
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-#[derive(Clone)]
-/// Database backed tree management, no transaction.
-pub struct TreeManagementPersistenceNoTx;
-
 #[cfg(any(feature = "with-kvdb-rocksdb", test))]
 #[derive(Clone)]
 /// Database backed tree management for a rocksdb database.
@@ -584,30 +574,7 @@ pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
 /// We set any Hash as inner type,
 pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeDatabase<H>);
 
-impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistence {
-	const JOURNAL_CHANGES: bool = true;
-	// Use pointer to serialize db with a transactional layer.
-	type Storage = TransactionalMappedDB<MappedDBDyn>;
-	type Mapping = historied_tree_bindings::Mapping;
-	type JournalDelete = historied_tree_bindings::JournalDelete;
-	type LastIndex = historied_tree_bindings::LastIndex;
-	type NeutralElt = historied_tree_bindings::NeutralElt;
-	type TreeMeta = historied_tree_bindings::TreeMeta;
-	type TreeState = historied_tree_bindings::TreeState;
-}
-
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-impl historied_db::management::tree::TreeManagementStorage for TreeManagementPersistenceNoTx {
-	const JOURNAL_CHANGES: bool = true;
-	type Storage = RocksdbStorage;
-	type Mapping = historied_tree_bindings::Mapping;
-	type JournalDelete = historied_tree_bindings::JournalDelete;
-	type LastIndex = historied_tree_bindings::LastIndex;
-	type NeutralElt = historied_tree_bindings::NeutralElt;
-	type TreeMeta = historied_tree_bindings::TreeMeta;
-	type TreeState = historied_tree_bindings::TreeState;
-}
-
+// TODO move in module for mapped db
 macro_rules! subcollection_prefixed_key {
 	($prefix: ident, $key: ident) => {
 		let mut prefixed_key;
@@ -622,6 +589,7 @@ macro_rules! subcollection_prefixed_key {
 	}
 }
 
+// TODO move in module for mapped db
 /// We resolve rocksdb collection or subcollection.
 /// Collections are defined by four byte encoding of their index.
 /// Subcollection are located into the collection defined by four first byte,
@@ -884,6 +852,7 @@ fn cache_header<Hash: std::cmp::Eq + std::hash::Hash, Header>(
 /// Block database
 pub struct BlockchainDb<Block: BlockT> {
 	db: Arc<dyn Database<DbHash>>,
+	// TODO check if use in this PR?? (if not rem)
 	ordered_db: Arc<dyn OrderedDatabase<DbHash>>, // TODO might be better located in parent struct
 	meta: Arc<RwLock<Meta<NumberFor<Block>, Block::Hash>>>,
 	leaves: RwLock<LeafSet<Block::Hash, NumberFor<Block>>>,
@@ -1415,27 +1384,6 @@ impl<T: Clone> FrozenForDuration<T> {
 	}
 }
 
-/// Historied db state tree management for substrate.
-///
-/// Branch indexes are `u32`, block indexes `u64`,
-/// and values ar encoded as `Vec<u8>`.
-pub type TreeManagement<H, S> = historied_db::management::tree::TreeManagement<
-	H,
-	u32,
-	u64,
-	S,
->;
-
-/// Registered historied db state consumer.
-///
-/// Mainly a way to trigger migration over all component using the state.
-pub type RegisteredConsumer<H, S> = historied_db::management::tree::RegisteredConsumer<
-	H,
-	u32,
-	u64,
-	S,
->;
-
 /// Disk backend.
 ///
 /// Disk backend keeps data in a key-value store. In archive mode, trie nodes are kept from all blocks.
@@ -1453,49 +1401,10 @@ pub struct Backend<Block: BlockT> {
 	transaction_storage: TransactionStorageMode,
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
 	state_usage: Arc<StateUsageStats>,
-	historied_management: Arc<RwLock<TreeManagement<
-		<HashFor<Block> as Hasher>::Out,
-		TreeManagementPersistence,
-	>>>,
 	historied_state_do_assert: bool,
 	historied_pruning_window: Option<NumberFor<Block>>,
 	historied_next_finalizable: Arc<RwLock<Option<NumberFor<Block>>>>,
-	historied_management_consumer: RegisteredConsumer<
-		<HashFor<Block> as Hasher>::Out,
-		TreeManagementPersistence,
-	>,
-	historied_management_consumer_transaction: Arc<RwLock<Transaction<DbHash>>>,
-	snapshot_db: snapshot::SnapshotDb,
-}
-
-// write management state changes
-fn apply_historied_management_changes<'a, Block: BlockT>(
-	mut historied_management: parking_lot::RwLockWriteGuard<'a, TreeManagement<
-		<HashFor<Block> as Hasher>::Out,
-		TreeManagementPersistence,
-	>>,
-	transaction: &mut Transaction<DbHash>,
-) {
-	let pending = std::mem::replace(&mut historied_management.ser().pending, Default::default());
-	for (col, (mut changes, dropped)) in pending {
-		if dropped {
-			use historied_db::mapped_db::MappedDB;
-			for (key, _v) in historied_management.ser_ref().iter(col) {
-				changes.insert(key, None);
-			}
-		}
-		if let Some((col, p)) = resolve_collection(col) {
-			for (key, change) in changes {
-				subcollection_prefixed_key!(p, key);
-				match change {
-					Some(value) => transaction.set_from_vec(col, key, value),
-					None => transaction.remove(col, key),
-				}
-			}
-		} else {
-			warn!("Unknown collection for tree management pending transaction {:?}", col);
-		}
-	}
+	snapshot_db: snapshot::SnapshotDb<Block>,
 }
 
 impl<Block: BlockT> Backend<Block> {
@@ -1591,20 +1500,16 @@ impl<Block: BlockT> Backend<Block> {
 			db: management_db,
 			pending: Default::default(),
 		};
-		let historied_management = Arc::new(RwLock::new(TreeManagement::from_ser(historied_persistence)));
-		// TODO register the journals for state change!! (actually would probably need new
-		// journals: see offchain storage branch + need child trie support).
-		let historied_management_consumer: RegisteredConsumer<
-			<HashFor<Block> as Hasher>::Out,
-			TreeManagementPersistence,
-		> = Default::default();
-		let historied_management_consumer_transaction = Arc::new(RwLock::new(
-			Default::default()
-		));
+		let historied_management = TreeManagementSync::from_persistence(historied_persistence);
+		let snapshot_db = snapshot::SnapshotDb {
+			historied_management,
+			ordered_db: ordered_db.clone(),
+			_ph: Default::default(),
+		};
 		Ok(Backend {
 			storage: Arc::new(storage_db),
 			offchain_storage,
-			snapshot_db: snapshot::SnapshotDb,
+			snapshot_db,
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
@@ -1618,12 +1523,9 @@ impl<Block: BlockT> Backend<Block> {
 			state_usage: Arc::new(StateUsageStats::new()),
 			keep_blocks: config.keep_blocks.clone(),
 			transaction_storage: config.transaction_storage.clone(),
-			historied_management,
 			historied_next_finalizable: Arc::new(RwLock::new(None)),
 			historied_state_do_assert: false,
-			historied_management_consumer,
 			historied_pruning_window,
-			historied_management_consumer_transaction,
 		})
 	}
 
@@ -1811,33 +1713,8 @@ impl<Block: BlockT> Backend<Block> {
 			}
 
 			// Ensure pending layer is clean
-			let _ = std::mem::replace(&mut self.historied_management.write().ser().pending, Default::default());
-			let (query_plan, update_plan) = {
-				// lock does notinclude update of value as we do not have concurrent block creation
-				let mut management = self.historied_management.write();
-				if let Some(state) = Some(management.get_db_state_for_fork(&parent_hash)
-					.unwrap_or_else(|| {
-						// allow this to start from existing state TODO add a stored boolean to only allow
-						// that once in genesis or in tests
-						warn!("state not found for parent hash, appending to latest");
-						management.latest_state_fork()
-					}))
-				{
-					// TODO could use result as update plan (need to check if true)
-					let _ = management.append_external_state(hash.clone(), &state)
-						.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
-					// TODO could make sense to use previous query plan since it
-					// should mainly be use to read previous value.
-					let query_plan = management.get_db_state(&hash)
-						.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
-					let update_plan = management.get_db_state_mut(&hash)
-						// TODO could have a ClientError::StateManagement error.
-						.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
-					(query_plan, update_plan)
-				} else {
-					return Err(ClientError::StateDatabase("missing update plan".into()));
-				}
-			};
+			let _ = self.snapshot_db.historied_management.extract_changes();
+			let (query_plan, update_plan) = self.snapshot_db.historied_management.register_new_block(&parent_hash, &hash)?;
 			Some(HistoriedDBMut {
 				current_state: update_plan,
 				current_state_read: query_plan,
@@ -1851,7 +1728,10 @@ impl<Block: BlockT> Backend<Block> {
 		operation.apply_offchain(&mut transaction);
 
 		// write management state changes
-		apply_historied_management_changes::<Block>(self.historied_management.write(), &mut transaction);
+		TreeManagementSync::<Block, _>::apply_historied_management_changes(
+			&mut self.snapshot_db.historied_management.0.write().instance,
+			&mut transaction,
+		);
 
 		// state change uses ordered db
 		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
@@ -2197,36 +2077,8 @@ impl<Block: BlockT> Backend<Block> {
 			number.saturating_sub(nb).saturated_into::<u64>()
 		});
 
-		// This lock can be rather long, so we really need to migrate occasionally.
-		// TODO this is bad design, migrate requires this lock, but the actual
-		// pruning does not require it that much: we should be able to run
-		// a migration without attaching the historied_management to it.
-		// This is due to the fact that transaction is use, and we can apply thing
-		// rather atomically.
-		// TODO create TransactionalMigration that do not require locking?
-		// Maybe some api like AssertUnwindSafe : AssertTransactionalMigrate.
-		let mut historied_management = self.historied_management.write();
-		// Ensure pending layer is clean
-		let _ = std::mem::replace(&mut historied_management.ser().pending, Default::default());
+		self.snapshot_db.historied_management.migrate(hash, prune_index, &self.storage.db)?;
 
-		let switch_index = historied_management.get_db_state_for_fork(hash);
-		let path = {
-			historied_management.get_db_state(hash)
-		};
-
-		if let (Some(switch_index), Some(path)) = (switch_index, path) {
-			historied_management.canonicalize(path, switch_index, prune_index);
-			// do migrate data
-			self.historied_management_consumer.migrate(&mut *historied_management);
-		} else {
-			return Err(ClientError::UnknownBlock("Missing in historied management".to_string()));
-		}
-
-		// flush historied management changes
-		let mut transaction = std::mem::replace(&mut *self.historied_management_consumer_transaction.write(), Default::default());
-		apply_historied_management_changes::<Block>(historied_management, &mut transaction);
-
-		self.storage.db.commit(transaction)?;
 		*self.historied_next_finalizable.write() = Some(number + HISTORIED_FINALIZATION_WINDOWS.into());
 		Ok(())
 	}
@@ -2323,7 +2175,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	type Blockchain = BlockchainDb<Block>;
 	type State = SyncingCachingState<RefTrackingState<Block>, Block>;
 	type OffchainStorage = offchain::LocalStorage;
-	type SnapshotDb = snapshot::SnapshotDb;
+	type SnapshotDb = snapshot::SnapshotDb<Block>;
 
 	fn begin_operation(&self) -> ClientResult<Self::BlockImportOperation> {
 		let mut old_state = self.state_at(BlockId::Hash(Default::default()))?;
@@ -2575,27 +2427,11 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			BlockId::Hash(h) if h == Default::default() => {
 				let genesis_storage = DbGenesisStorage::<Block>::new();
 				let root = genesis_storage.0.clone();
-				let alternative = {
-					let mut management = self.historied_management.write();
-					let state = management.latest_state_fork();
-					// starting a new state at default hash is not strictly necessary,
-					// but we lack a historied db primitive to get default query state
-					// on (0, 0).
-					let current_state = management.get_db_state(&h)
-						.or_else(|| management.append_external_state(h.clone(), &state)
-							.and_then(|_| management.get_db_state(&h))
-						).ok_or(ClientError::StateDatabase("Historied management error".into()))?;
-					HistoriedDB {
-						current_state,
-						db: self.blockchain.ordered_db.clone(),
-						do_assert: self.historied_state_do_assert,
-					}
-				};
-				let alternative = Arc::new(alternative);
+				let alternative = self.snapshot_db.get_kvbackend(None)?;
 				let db_state = DbState::<Block>::new(
 					Arc::new(genesis_storage),
 					root,
-					Some(alternative.clone()), // TODO make it configurable
+					alternative,
 				);
 				let state = RefTrackingState::new(db_state, self.storage.clone(), None);
 				let caching_state = CachingState::new(
@@ -2631,26 +2467,11 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				}
 				if let Ok(()) = self.storage.state_db.pin(&hash) {
 					let root = hdr.state_root;
-					let alternative = {
-						let mut management = self.historied_management.write();
-						let current_state = management.get_db_state(&hash)
-							.unwrap_or_else(|| {
-								warn!("Historied management missing state");
-								Default::default()
-							}); // TODO get rid of this, just to restore state
-//							.ok_or_else(|| format!("Historied management missing state for hash {:?}", hash))?;
-						HistoriedDB {
-							current_state,
-							db: self.blockchain.ordered_db.clone(),
-							do_assert: self.historied_state_do_assert,
-						}
-					};
-
-					let alternative = Arc::new(alternative);
+					let alternative = self.snapshot_db.get_kvbackend(Some(&hash))?;
 					let db_state = DbState::<Block>::new(
 						self.storage.clone(),
 						root,
-						Some(alternative.clone()), // TODO make it configurable.
+						alternative,
 					);
 					let state = RefTrackingState::new(
 						db_state,

@@ -129,7 +129,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 		<HashFor<Block> as hash_db::Hasher>::Out,
 		u32,
 		u64,
-		crate::TreeManagementPersistenceNoTx,
+		crate::tree_management::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence);
 
 	if hash_for_root != block_hash {
@@ -263,7 +263,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		<HashFor<Block> as hash_db::Hasher>::Out,
 		u32,
 		u64,
-		crate::TreeManagementPersistenceNoTx,
+		crate::tree_management::TreeManagementPersistenceNoTx,
 	>::from_ser(historied_persistence.clone());
 	let state = management.latest_state_fork();
 	let test = management.get_db_state_for_fork(&Default::default());
