@@ -45,6 +45,7 @@ use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
 use codec::{Decode, Encode};
+use sp_database::{SnapshotDbConf, SnapshotDBMode};
 pub use sc_state_db::PruningMode;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
@@ -140,6 +141,8 @@ pub struct SnapshotDb<Block: BlockT> {
 	pub historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
 	/// Database with historied items. Warning, this is non transactional.
 	pub ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
+	/// Configuration for this db.
+	config: SnapshotDbConf,
 	// TODO config from db !!!
 	pub _ph: PhantomData<Block>,
 }
@@ -199,13 +202,17 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		mut historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
 	) -> ClientResult<Self> {
-		// TODO fetch conf and init from chainspec (or init from chainspec done elsewher)
-		let config: sp_database::SnapshotDbConf = Default::default(); 
+		let config = {
+			let management = historied_management.inner.read();
+			let db = &management.instance.ser_ref().db;
+			snapshot_db_conf::fetch_config(db)?
+		};
 		historied_management.pruning_window = config.pruning.clone()
 			.flatten().map(|nb| nb.into());
 		Ok(SnapshotDb {
 			historied_management,
 			ordered_db,
+			config,
 			_ph: Default::default(),
 		})
 	}
