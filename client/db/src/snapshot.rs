@@ -50,6 +50,8 @@ pub use sc_state_db::PruningMode;
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
 	pub use sp_database::{SnapshotDbConf, SnapshotDBMode};
+	use sp_blockchain::{Result as ClientResult, Error as ClientError};
+	use historied_db::mapped_db::MappedDBDyn;
 
 	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
 
@@ -59,7 +61,8 @@ pub mod snapshot_db_conf {
 	/// Mapping to store journal of change keys
 	static_instance!(JournalChanges, b"\x08\x00\x00\x00snapshot_db/journal_changes");
 
-	/// Get initial conf from chain_spec
+	/// Get initial conf from chain_spec.
+	/// TODO not public
 	pub fn from_chain_spec(properties: &sp_chain_spec::Properties) -> SnapshotDbConf {
 		let mut conf = SnapshotDbConf::default();
 		if Some(Some(true)) != properties.get("snapshotEnabled").map(|v| v.as_bool()) {
@@ -87,26 +90,27 @@ pub mod snapshot_db_conf {
 		conf
 	}
 
-	/// Initiate conf from client command.
-	pub fn from_cmd() -> SnapshotDbConf {
-		unimplemented!()
+	/// Lazy initialization of snapshot db configuration from chain spec.
+	pub fn lazy_init_from_chain_spec(
+		db: &mut MappedDBDyn,
+		genesis_conf: &SnapshotDbConf,
+	) -> sp_blockchain::Result<()> {
+		let mut conf = historied_db::mapped_db::Variable::<SnapshotDbConf, _, SnapConfSer>::from_ser(db);
+		if !conf.get().lazy_set {
+			let mut conf_mapping = conf.mapping(db);
+			let mut genesis_conf = genesis_conf.clone();
+			genesis_conf.lazy_set = true;
+			conf_mapping.set(genesis_conf);
+		}
+		Ok(())
 	}
 
-	/// Initiate conf from client command.
-	pub fn initiate(
-		db: (),
-		from_chain_spec: SnapshotDbConf,
-		from_cmd: SnapshotDbConf,
-		new: bool,
-	) -> SnapshotDbConf {
-		unimplemented!()
-		// TODO query db to see if genesis: simply if undefined it is genesis, otherwhise we always
-		// got a conf (with enabled false possibly).
-		// TODO maybe on genesis fail, remove the entry.
-
-		// if genesis, use all chainspec and consider new.
-
-		// if new use all from_cmd field to override from_chainspec
+	/// Get snapshot db configuration from chain spec.
+	pub fn fetch_config(
+		db: &MappedDBDyn,
+	) -> ClientResult<SnapshotDbConf> {
+		let conf = historied_db::mapped_db::Variable::<SnapshotDbConf, _, SnapConfSer>::from_ser(db);
+		Ok(conf.get().clone())
 	}
 }
 
@@ -403,4 +407,3 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		// no need for no value set
 	}
 }
-

@@ -480,6 +480,7 @@ mod tests {
 			source: DatabaseSettingsSrc::RocksDb { path: db_path.to_owned(), cache_size: 128 },
 			keep_blocks: KeepBlocks::All,
 			transaction_storage: TransactionStorageMode::BlockBody,
+			genesis_snapshot_db_conf: Default::default(),
 		}, DatabaseType::Full).map(|_| ())
 	}
 

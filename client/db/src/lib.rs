@@ -78,7 +78,7 @@ use sp_blockchain::{
 use codec::{Decode, Encode};
 use hash_db::Prefix;
 use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
-use sp_database::{Transaction, RadixTreeDatabase};
+use sp_database::{Transaction, RadixTreeDatabase, SnapshotDbConf};
 use sp_core::{Hasher, ChangesTrieConfiguration};
 use sp_core::offchain::OffchainOverlayedChange;
 use sp_core::storage::{well_known_keys, ChildInfo};
@@ -290,6 +290,8 @@ pub struct DatabaseSettings {
 	pub keep_blocks: KeepBlocks,
 	/// Block body/Transaction storage scheme.
 	pub transaction_storage: TransactionStorageMode,
+	/// Initial configuration for snapshot db.
+	pub genesis_snapshot_db_conf: SnapshotDbConf,
 }
 
 /// Block pruning settings.
@@ -1256,6 +1258,7 @@ impl<Block: BlockT> Backend<Block> {
 			source: DatabaseSettingsSrc::Custom(db),
 			keep_blocks: KeepBlocks::Some(keep_blocks),
 			transaction_storage,
+			genesis_snapshot_db_conf: Default::default(),
 		};
 
 		Self::new(db_setting, canonicalization_delay).expect("failed to create test-db")
@@ -2420,6 +2423,7 @@ pub(crate) mod tests {
 			source: DatabaseSettingsSrc::Custom(backing),
 			keep_blocks: KeepBlocks::All,
 			transaction_storage: TransactionStorageMode::BlockBody,
+			genesis_snapshot_db_conf: Default::default(),
 		}, 0).unwrap();
 		assert_eq!(backend.blockchain().info().best_number, 9);
 		for i in 0..10 {

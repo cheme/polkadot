@@ -21,6 +21,7 @@ pub mod error;
 mod mem;
 mod kvdb;
 
+use codec::{Encode, Decode};
 pub use mem::MemDb;
 pub use crate::kvdb::{as_database, arc_as_database};
 pub use ordered::RadixTreeDatabase;
@@ -495,7 +496,7 @@ mod ordered {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Encode, Decode)]
 /// Different storage mode.
 pub enum SnapshotDBMode {
 	/// Do not apply binary diff between consecutive values.
@@ -510,7 +511,7 @@ impl Default for SnapshotDBMode {
 	}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Encode, Decode)]
 /// Configuration of snapshot db conf.
 pub struct SnapshotDbConf {
 	/// Is snapshot db active.
@@ -533,6 +534,9 @@ pub struct SnapshotDbConf {
 	pub pruning: Option<u32>,
 	/// Lazy pruning window. (place holder TODO unimplemented)
 	pub lazy_pruning: Option<u32>,
+	/// Technical field to identify if the conf has been initialized.
+	/// TODO remove and have Variable::is_defined function in remote historied_db
+	pub lazy_set: bool,
 }
 
 /// Implement exposed acces method to the snapshot db.

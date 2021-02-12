@@ -335,16 +335,10 @@ pub fn new_full_parts<TBl, TRtApi, TExecDisp>(
 			source: config.database.clone(),
 			keep_blocks: config.keep_blocks.clone(),
 			transaction_storage: config.transaction_storage.clone(),
-		};
-
-		let snapshot_db_config = sc_client_db::snapshot_db_conf::initiate(
-			(),
-			sc_client_db::snapshot_db_conf::from_chain_spec(
+			genesis_snapshot_db_conf: sc_client_db::snapshot_db_conf::from_chain_spec(
 				&config.chain_spec.properties()
 			),
-			config.snapshot_param.clone(),
-			false,
-		);
+		};
 
 		let extensions = sc_client_api::execution_extensions::ExecutionExtensions::new(
 			config.execution_strategies.clone(),
@@ -404,6 +398,9 @@ pub fn new_light_parts<TBl, TRtApi, TExecDisp>(
 			source: config.database.clone(),
 			keep_blocks: config.keep_blocks.clone(),
 			transaction_storage: config.transaction_storage.clone(),
+			genesis_snapshot_db_conf: sc_client_db::snapshot_db_conf::from_chain_spec(
+				&config.chain_spec.properties()
+			),
 		};
 		sc_client_db::light::LightStorage::new(db_settings)?
 	};

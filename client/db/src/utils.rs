@@ -231,7 +231,7 @@ pub fn open_database_and_historied<Block: BlockT>(
 		)
 	}
 
-	let db: (
+	let mut db: (
 		Arc<dyn Database<DbHash>>,
 		Arc<dyn OrderedDatabase<DbHash>>,
 		historied_db::mapped_db::MappedDBDyn,
@@ -318,6 +318,11 @@ pub fn open_database_and_historied<Block: BlockT>(
 	};
 
 	check_database_type(&*db.0, db_type)?;
+
+	crate::snapshot::snapshot_db_conf::lazy_init_from_chain_spec(
+		&mut db.2,
+		&config.genesis_snapshot_db_conf,
+	)?;
 
 	Ok(db)
 }
