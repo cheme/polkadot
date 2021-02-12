@@ -278,6 +278,22 @@ pub trait OrderedDatabase<H: Clone>: Database<H> {
 		col: ColumnId,
 		start: &[u8],
 	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
+
+	/// Clear by prefix
+	fn clear_prefix(
+		&self,
+		col: ColumnId,
+		prefix: &[u8],
+	) {
+		// Default implementation got problematic memory consumption,
+		// specific implementation should be use for backend targetting
+		// large volume.
+		let keys: Vec<_> = self.prefix_iter(col, prefix, false).map(|kv| kv.0).collect();
+		for key in keys {
+			// iterating on remove individually is bad for perf.
+			self.remove(col, key.as_slice());
+		}
+	}
 }
 
 impl<H> std::fmt::Debug for dyn Database<H> {
@@ -530,8 +546,8 @@ pub struct SnapshotDbConf {
 	pub start_block: Option<u32>,
 	/// Diff usage.
 	pub diff_mode: SnapshotDBMode,
-	/// Pruning window size to apply, `None` for archive.
-	pub pruning: Option<u32>,
+	/// If defined, pruning window size to apply, `None` for archive.
+	pub pruning: Option<Option<u32>>,
 	/// Lazy pruning window. (place holder TODO unimplemented)
 	pub lazy_pruning: Option<u32>,
 	/// Technical field to identify if the conf has been initialized.
@@ -549,7 +565,7 @@ pub trait SnapshotDb {
 		&self,
 		use_as_primary: Option<bool>,
 		debug_assert: Option<bool>,
-		pruning_window: Option<u32>,
+		pruning_window: Option<Option<u32>>,
 		lazy_pruning_window: Option<u32>,
 	) -> error::Result<()>;
 }
@@ -590,7 +606,7 @@ impl SnapshotDb for () {
 		&self,
 		_use_as_primary: Option<bool>,
 		_debug_assert: Option<bool>,
-		_pruning_window: Option<u32>,
+		_pruning_window: Option<Option<u32>>,
 		_lazy_pruning_window: Option<u32>,
 	) -> error::Result<()> {
 		unsupported_error()

@@ -414,6 +414,7 @@ impl BenchDb {
 			source: database_type.into_settings(dir.into()),
 			keep_blocks: sc_client_db::KeepBlocks::All,
 			transaction_storage: sc_client_db::TransactionStorageMode::BlockBody,
+			genesis_snapshot_db_conf: Default::default(),
 		};
 		let task_executor = TaskExecutor::new();
 

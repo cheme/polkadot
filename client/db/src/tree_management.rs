@@ -317,4 +317,10 @@ impl<Block, S> TreeManagementSync<Block, S>
 		*next_migrate = Some(number + HISTORIED_FINALIZATION_WINDOWS.into());
 		Ok(())
 	}
+
+	/// Delete all tree management information.
+	pub fn clear(db: &Arc<dyn OrderedDatabase<DbHash>>) -> ClientResult<()> {
+		db.clear_prefix(crate::columns::AUX, b"tree_mgmt/");
+		Ok(())
+	}
 }

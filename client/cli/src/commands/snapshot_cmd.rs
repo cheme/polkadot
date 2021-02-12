@@ -100,13 +100,17 @@ pub struct SnapshotConf {
 	pub db_mode: SnapshotMode,
 }
 
-fn pruning_conf(params: &PruningParams) -> Option<u32> {
-	match params.state_pruning(true, &Role::Full)
-		.expect("Using unsafe pruning.") {
-		PruningMode::ArchiveAll => None,
-		// TODO align pruning to allow this.
-		PruningMode::ArchiveCanonical => None,
-		PruningMode::Constrained(constraint) => constraint.max_blocks,
+fn pruning_conf(params: &PruningParams) -> Option<Option<u32>> {
+	if params.pruning.is_some() {
+		Some(match params.state_pruning(true, &Role::Full)
+			.expect("Using unsafe pruning.") {
+			PruningMode::ArchiveAll => None,
+			// TODO align pruning to allow this.
+			PruningMode::ArchiveCanonical => None,
+			PruningMode::Constrained(constraint) => constraint.max_blocks,
+		})
+	} else {
+		None
 	}
 }
 
@@ -114,6 +118,7 @@ impl Into<sc_client_api::SnapshotDbConf> for SnapshotConf {
 	fn into(self) -> sc_client_api::SnapshotDbConf {
 		sc_client_api::SnapshotDbConf {
 			enabled: true,
+			lazy_set: true,
 			start_block: None,
 			primary_source: self.use_as_primary.unwrap_or(false),
 			debug_assert: self.debug_assert.unwrap_or(false),

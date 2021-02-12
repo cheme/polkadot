@@ -1274,6 +1274,7 @@ fn doesnt_import_blocks_that_revert_finality() {
 				path: tmp.path().into(),
 				cache_size: 1024,
 			},
+			genesis_snapshot_db_conf: Default::default(),
 		},
 		u64::max_value(),
 	).unwrap());
@@ -1477,6 +1478,7 @@ fn returns_status_for_pruned_blocks() {
 				path: tmp.path().into(),
 				cache_size: 1024,
 			},
+			genesis_snapshot_db_conf: Default::default(),
 		},
 		u64::max_value(),
 	).unwrap());

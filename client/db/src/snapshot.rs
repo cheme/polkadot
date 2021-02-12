@@ -49,7 +49,7 @@ pub use sc_state_db::PruningMode;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
-	pub use sp_database::{SnapshotDbConf, SnapshotDBMode};
+	use sp_database::{SnapshotDbConf, SnapshotDBMode};
 	use sp_blockchain::{Result as ClientResult, Error as ClientError};
 	use historied_db::mapped_db::MappedDBDyn;
 
@@ -91,6 +91,21 @@ pub mod snapshot_db_conf {
 	}
 
 	/// Lazy initialization of snapshot db configuration from chain spec.
+	pub fn update_db_conf(
+		db: &mut MappedDBDyn,
+		mut f: impl FnMut(&mut SnapshotDbConf) -> sp_blockchain::Result<()>,
+	) -> sp_blockchain::Result<()> {
+		let mut conf = historied_db::mapped_db::Variable::<SnapshotDbConf, _, SnapConfSer>::from_ser(db);
+		let mut conf_mapping = conf.mapping(db);
+		let mut conf = conf_mapping.get().clone();
+		let res = f(&mut conf);
+		if res.is_ok() {
+			conf_mapping.set(conf);
+		}
+		res
+	}
+
+	/// Lazy initialization of snapshot db configuration from chain spec.
 	pub fn lazy_init_from_chain_spec(
 		db: &mut MappedDBDyn,
 		genesis_conf: &SnapshotDbConf,
@@ -121,8 +136,9 @@ pub struct SnapshotDb<Block: BlockT> {
 	/// Historied management use by snapshot db.
 	/// Currently snapshot db is single consumer, so init and clear
 	/// operation also act on `historied_management`.
+	/// This use a transactional layer in storage.
 	pub historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
-	/// Database with historied items.
+	/// Database with historied items. Warning, this is non transactional.
 	pub ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
 	// TODO config from db !!!
 	pub _ph: PhantomData<Block>,
@@ -130,17 +146,51 @@ pub struct SnapshotDb<Block: BlockT> {
 
 impl<Block: BlockT> SnapshotDbT for SnapshotDb<Block> {
 	fn clear_snapshot_db(&self) -> sp_database::error::Result<()> {
-		unimplemented!();
+		let mut management = self.historied_management.inner.write();
+		TreeManagementSync::<Block, TreeManagementPersistence>::clear(&self.ordered_db)
+			.map_err(|e| sp_database::error::DatabaseError(Box::new(e)))?;
+		// get non transactional mappeddb.
+		let db = &mut management.instance.ser().db;
+		snapshot_db_conf::update_db_conf(db, |mut genesis_conf| {
+			*genesis_conf = Default::default();
+			Ok(())
+		}).map_err(|e| sp_database::error::DatabaseError(Box::new(e)))?;
+	
+		self.ordered_db.clear_prefix(crate::columns::AUX, b"snapshot_db/");
+		self.ordered_db.clear_prefix(crate::columns::STATE_SNAPSHOT, b"");
+
+		Ok(())
 	}
 
 	fn update_running_conf(
 		&self,
-		_use_as_primary: Option<bool>,
-		_debug_assert: Option<bool>,
-		_pruning_window: Option<u32>,
-		_lazy_pruning_window: Option<u32>,
+		use_as_primary: Option<bool>,
+		debug_assert: Option<bool>,
+		pruning_window: Option<Option<u32>>,
+		lazy_pruning_window: Option<u32>,
 	) -> sp_database::error::Result<()> {
-		unimplemented!();
+		let mut management = self.historied_management.inner.write();
+		let db = &mut management.instance.ser().db;
+		snapshot_db_conf::update_db_conf(db, |mut genesis_conf| {
+			if !genesis_conf.enabled {
+				return Err(ClientError::StateDatabase(
+					format!("Disabled snapshot db need to be created first"),
+				))
+			}
+			if let Some(primary) = use_as_primary {
+				genesis_conf.primary_source = primary;
+			}
+			if let Some(debug) = debug_assert {
+				genesis_conf.debug_assert = debug;
+			}
+			if let Some(window) = pruning_window {
+				genesis_conf.pruning = Some(window);
+			}
+			if let Some(window) = lazy_pruning_window {
+				genesis_conf.lazy_pruning = Some(window);
+			}
+			Ok(())
+		}).map_err(|e| sp_database::error::DatabaseError(Box::new(e)))
 	}
 }
 
@@ -152,7 +202,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		// TODO fetch conf and init from chainspec (or init from chainspec done elsewher)
 		let config: sp_database::SnapshotDbConf = Default::default(); 
 		historied_management.pruning_window = config.pruning.clone()
-			.map(|nb| nb.into());
+			.flatten().map(|nb| nb.into());
 		Ok(SnapshotDb {
 			historied_management,
 			ordered_db,
