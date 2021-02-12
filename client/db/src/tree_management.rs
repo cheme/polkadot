@@ -245,6 +245,29 @@ impl<Block, S> TreeManagementSync<Block, S>
 		}
 	}
 
+	pub fn init_new_management(
+		&self,
+		hash: &Block::Hash,
+		db: &Arc<dyn OrderedDatabase<DbHash>>,
+	) -> ClientResult<(ForkPlan<u32, u64>, Latest<(u32, u64)>)> {
+		let mut lock = self.inner.write();
+		let mut management = &mut lock.instance;
+		let state = management.latest_state_fork();
+		management.append_external_state(hash.clone(), &state);
+
+		let mut transaction = Default::default();
+		TreeManagementSync::<Block, _>::apply_historied_management_changes(management, &mut transaction);
+
+		db.commit(transaction)?;
+
+		let query_plan = management.get_db_state(&hash)
+			.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
+		let update_plan = management.get_db_state_mut(&hash)
+			.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
+
+		Ok((query_plan, update_plan))
+	}
+
 	pub fn migrate(
 		&self,
 		hash: &Block::Hash,

@@ -46,6 +46,7 @@ use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
 use codec::{Decode, Encode};
 use sp_database::{SnapshotDbConf, SnapshotDBMode};
+use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
@@ -147,17 +148,17 @@ pub struct SnapshotDb<Block: BlockT> {
 	pub _ph: PhantomData<Block>,
 }
 
-impl<Block: BlockT> SnapshotDbT for SnapshotDb<Block> {
+impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 	fn clear_snapshot_db(&self) -> sp_database::error::Result<()> {
 		let mut management = self.historied_management.inner.write();
 		TreeManagementSync::<Block, TreeManagementPersistence>::clear(&self.ordered_db)
-			.map_err(|e| sp_database::error::DatabaseError(Box::new(e)))?;
+			.map_err(|e| DatabaseError(Box::new(e)))?;
 		// get non transactional mappeddb.
 		let db = &mut management.instance.ser().db;
 		snapshot_db_conf::update_db_conf(db, |mut genesis_conf| {
 			*genesis_conf = Default::default();
 			Ok(())
-		}).map_err(|e| sp_database::error::DatabaseError(Box::new(e)))?;
+		}).map_err(|e| DatabaseError(Box::new(e)))?;
 	
 		self.ordered_db.clear_prefix(crate::columns::AUX, b"snapshot_db/");
 		self.ordered_db.clear_prefix(crate::columns::STATE_SNAPSHOT, b"");
@@ -177,8 +178,8 @@ impl<Block: BlockT> SnapshotDbT for SnapshotDb<Block> {
 		snapshot_db_conf::update_db_conf(db, |mut genesis_conf| {
 			if !genesis_conf.enabled {
 				return Err(ClientError::StateDatabase(
-					format!("Disabled snapshot db need to be created first"),
-				))
+					"Disabled snapshot db need to be created first".into(),
+				));
 			}
 			if let Some(primary) = use_as_primary {
 				genesis_conf.primary_source = primary;
@@ -193,7 +194,57 @@ impl<Block: BlockT> SnapshotDbT for SnapshotDb<Block> {
 				genesis_conf.lazy_pruning = Some(window);
 			}
 			Ok(())
-		}).map_err(|e| sp_database::error::DatabaseError(Box::new(e)))
+		}).map_err(|e| DatabaseError(Box::new(e)))
+	}
+
+	fn re_init(
+		&self,
+		mut config: SnapshotDbConf,
+		best_block: Block::Hash,
+	) -> sp_database::error::Result<()> {
+		self.clear_snapshot_db()?;
+
+		config.lazy_set = true;
+
+		{
+			let mut management = self.historied_management.inner.write();
+			let db = &mut management.instance.ser().db;
+			snapshot_db_conf::update_db_conf(db, |mut genesis_conf| {
+				*genesis_conf = config.clone();
+				Ok(())
+			}).map_err(|e| DatabaseError(Box::new(e)))?;
+		}
+	
+		let (query_plan, update_plan) = self.historied_management.init_new_management(
+			&best_block,
+			&self.ordered_db,
+		).map_err(|e| DatabaseError(Box::new(e)))?;
+		let mut historied_db = HistoriedDBMut {
+			current_state: update_plan,
+			current_state_read: query_plan,
+			db: self.ordered_db.clone(),
+			config,
+		};
+
+		// TODO commit management
+
+		let mut tx = Default::default();
+		/* TODO state iterate as in export state!!
+		while let Some(Ok((k, v))) = iter.next() {
+			kv_db.unchecked_new_single(k.as_slice(), v, &mut tx);
+			count_tx += 1;
+			if count_tx == 1000 {
+				count += 1;
+				warn!("write a thousand {} {:?}", count, &k[..20]);
+				kv_db.db.commit(tx).expect("write_tx");
+				tx = kv_db.transaction();
+				count_tx = 0;
+			}
+		}
+		*/
+		self.ordered_db.commit(tx).expect("write_tx last");
+
+		Ok(())
 	}
 }
 
@@ -217,6 +268,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		})
 	}
 
+	// TODO rename (it does add state)
 	pub fn get_historied_db_mut(
 		&self,
 		parent: &Block::Hash,
@@ -390,6 +442,7 @@ pub struct HistoriedDBMut<DB> {
 	/// Branch head indexes to change values of a latest block.
 	pub current_state: historied_db::Latest<(u32, u64)>,
 	/// Branch head indexes to change values of a latest block.
+	/// TODO is it of any use?? (remove)
 	pub current_state_read: historied_db::management::tree::ForkPlan<u32, u64>,
 	/// Inner database to modify historied values.
 	pub db: DB,

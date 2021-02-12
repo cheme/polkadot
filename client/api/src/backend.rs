@@ -389,7 +389,7 @@ pub trait StorageProvider<Block: BlockT, B: Backend<Block>> {
 /// TODO check if we can use Backend trait instead
 pub trait SnapshotProvider<Block: BlockT, B: Backend<Block>> {
 	/// Associted snapshot db type, if no support '()' can be use.
-	type SnapshotDb: sp_database::SnapshotDb;
+	type SnapshotDb: sp_database::SnapshotDb<Block::Hash>;
 
 	/// Access inner snapshot db implementation if available.
 	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
@@ -415,7 +415,7 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// Offchain workers local storage.
 	type OffchainStorage: OffchainStorage;
 	/// Associted snapshot db type, if no support '()' can be use.
-	type SnapshotDb: sp_database::SnapshotDb;
+	type SnapshotDb: sp_database::SnapshotDb<Block::Hash>;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	///

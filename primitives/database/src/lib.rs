@@ -291,7 +291,8 @@ pub trait OrderedDatabase<H: Clone>: Database<H> {
 		let keys: Vec<_> = self.prefix_iter(col, prefix, false).map(|kv| kv.0).collect();
 		for key in keys {
 			// iterating on remove individually is bad for perf.
-			self.remove(col, key.as_slice());
+			self.remove(col, key.as_slice())
+				.expect("Fail clearing prefix");
 		}
 	}
 }
@@ -556,7 +557,7 @@ pub struct SnapshotDbConf {
 }
 
 /// Implement exposed acces method to the snapshot db.
-pub trait SnapshotDb {
+pub trait SnapshotDb<H> {
 	/// Disable snapshot db and remove its content.
 	fn clear_snapshot_db(&self) -> error::Result<()>;
 
@@ -567,6 +568,13 @@ pub trait SnapshotDb {
 		debug_assert: Option<bool>,
 		pruning_window: Option<Option<u32>>,
 		lazy_pruning_window: Option<u32>,
+	) -> error::Result<()>;
+
+	/// Reset db at a given block.
+	fn re_init(
+		&self,
+		config: SnapshotDbConf,
+		best_block: H,
 	) -> error::Result<()>;
 }
 
@@ -597,7 +605,7 @@ fn unsupported_error() -> error::Result<()> {
 }
 
 /// Use '()' when no snapshot implementation.
-impl SnapshotDb for () {
+impl<H> SnapshotDb<H> for () {
 	fn clear_snapshot_db(&self) -> error::Result<()> {
 		unsupported_error()
 	}
@@ -608,6 +616,14 @@ impl SnapshotDb for () {
 		_debug_assert: Option<bool>,
 		_pruning_window: Option<Option<u32>>,
 		_lazy_pruning_window: Option<u32>,
+	) -> error::Result<()> {
+		unsupported_error()
+	}
+
+	fn re_init(
+		&self,
+		_config: SnapshotDbConf,
+		_best_block: H,
 	) -> error::Result<()> {
 		unsupported_error()
 	}

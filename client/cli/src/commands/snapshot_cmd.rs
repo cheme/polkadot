@@ -342,8 +342,21 @@ impl SnapshotManageCmd {
 		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
 	{
 		let db = client.snapshot_db().expect(UNSUPPORTED);
+		
+ /* TODO move to call
+		if block.is_some() {
+			let err = ClientError::StateDatabase(
+				"Unimplemented TODO revert chain & then same call".into(),
+			);
+			return Err(DatabaseError(Box::new(err)));
+		}
+		*/
+
+ // TODO put in config inserted 		best_block_number: NumberFor<Block>,
+ //
+ // db.reinit(config, best_block_hash)?; 
+
 		unimplemented!();
-		db.clear_snapshot_db()?;
 		Ok(())
 	}
 
