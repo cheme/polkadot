@@ -222,12 +222,15 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		parent: &Block::Hash,
 		at: &Block::Hash,
 	) -> ClientResult<Option<HistoriedDBMut<Arc<dyn OrderedDatabase<DbHash>>>>> {
-		// TODO filter if !enabled...
+		if !self.config.enabled {
+			return Ok(None);
+		}
 		let (query_plan, update_plan) = self.historied_management.register_new_block(&parent, &at)?;
 		Ok(Some(HistoriedDBMut {
 			current_state: update_plan,
 			current_state_read: query_plan,
 			db: self.ordered_db.clone(),
+			config: self.config.clone(),
 		}))
 	}
 	
@@ -235,8 +238,10 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		&self,
 		at: Option<&Block::Hash>,
 	) -> ClientResult<Option<HistoriedDB>> {
-		// TODO if enabled && (primary_source || assert_db)... else None 
-		let do_assert: bool = true;
+		if !self.config.enabled || !(self.config.primary_source || self.config.debug_assert) {
+			return Ok(None);
+		}
+
 		let mut management = self.historied_management.inner.write();
 		let current_state = if let Some(hash) = at {
 			management.instance.get_db_state(&hash)
@@ -258,7 +263,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		Ok(Some(HistoriedDB {
 			current_state,
 			db: self.ordered_db.clone(),
-			do_assert,
+			config: self.config.clone(),
 		}))
 	}
 
@@ -283,9 +288,8 @@ pub struct HistoriedDB {
 	pub current_state: historied_db::management::tree::ForkPlan<u32, u64>,
 	// TODO rem pub as upgrade is cleaned
 	pub db: Arc<dyn OrderedDatabase<DbHash>>,
-	// TODO rem pub as upgrade is cleaned
-	// only assert when spawned from cli command (so tests pass)
-	pub do_assert: bool,
+	/// Configuration for this db.
+	pub config: SnapshotDbConf,
 }
 
 type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
@@ -333,8 +337,12 @@ impl HistoriedDB {
 }
 
 impl KVBackend for HistoriedDB {
+	fn use_as_primary(&self) -> bool {
+		self.config.primary_source
+	}
+
 	fn assert_value(&self) -> bool {
-		self.do_assert
+		self.config.debug_assert
 	}
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
@@ -385,6 +393,8 @@ pub struct HistoriedDBMut<DB> {
 	pub current_state_read: historied_db::management::tree::ForkPlan<u32, u64>,
 	/// Inner database to modify historied values.
 	pub db: DB,
+	/// Configuration for this db.
+	pub config: SnapshotDbConf,
 }
 
 impl<DB: Database<DbHash>> HistoriedDBMut<DB> {

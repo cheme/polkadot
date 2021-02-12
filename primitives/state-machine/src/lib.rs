@@ -865,10 +865,16 @@ pub mod kv_backend {
 	/// Will be use when we do not need to use an actual trie structure
 	/// (content must be trusted).
 	pub trait KVBackend: Send + Sync {
+		/// When true we check use this backend value instead of the trie
+		/// values.
+		fn use_as_primary(&self) -> bool {
+			false
+		}
+
 		/// When true we check that the value from this backend
 		/// is the same as the value from the trie backend.
 		fn assert_value(&self) -> bool {
-			true
+			false
 		}
 
 		/// Access to this backend value for a given key.

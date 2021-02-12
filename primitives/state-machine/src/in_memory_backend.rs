@@ -38,9 +38,6 @@ use sp_std::vec::Vec;
 pub struct KVInMem(BTreeMap<Vec<u8>, Vec<u8>>);
 
 impl crate::kv_backend::KVBackend for KVInMem {
-	fn assert_value(&self) -> bool {
-		false
-	}
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, crate::DefaultError> {
 		Ok(self.0.get(key).cloned())
 	}

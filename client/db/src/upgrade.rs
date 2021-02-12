@@ -140,7 +140,7 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	let historied_db = crate::snapshot::HistoriedDB {
 		current_state,
 		db: db.clone(),
-		do_assert: false,
+		config: Default::default(),
 	};
 
 
@@ -278,6 +278,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 		current_state: state,
 		current_state_read: unimplemented!(),
 		db: db_tmp,
+		config: Default::default(),
 	};
 	let mut tx = kv_db.transaction();
 	let mut longest_key = 0;
@@ -310,7 +311,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let historied_db = crate::snapshot::HistoriedDB {
 		current_state,
 		db: db_tmp,
-		do_assert: false,
+		config: Default::default(),
 	};
 	let mut count = 0;
 	for (_k, _v) in historied_db.iter(crate::columns::STATE_SNAPSHOT) {

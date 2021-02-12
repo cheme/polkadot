@@ -93,17 +93,17 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
 		if let Some(alternative) = self.alternative.as_ref() {
-			let reference = self.essence.storage(key);
-			// TODO also alternative.use_value() that skip reference access
 			if alternative.assert_value() {
+				let reference = self.essence.storage(key);
 				let alter = alternative.storage(key);
 				assert!(alter == reference, "mistmatch in sm for key {:?}", key);
+				return alter;
 			}
-			//warn!("a match");
-			reference
-		} else {
-			self.essence.storage(key)
+			if alternative.use_as_primary() {
+				return alternative.storage(key);
+			}
 		}
+		self.essence.storage(key)
 	}
 
 	fn child_storage(
