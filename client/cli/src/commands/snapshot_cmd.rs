@@ -24,6 +24,7 @@ use sc_service::{
 	config::DatabaseConfig, chain_ops::export_blocks, PruningMode, Role,
 };
 use sc_client_api::{SnapshotProvider, SnapshotDb};
+use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use std::fmt::Debug;
 use std::fs;
@@ -48,7 +49,7 @@ arg_enum! {
 }
 
 /// Snapshot configuration.
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Clone, StructOpt)]
 pub struct SnapshotConf {
 	#[structopt(long)]
 	/// Snapshot db is used as primary key value backend.
@@ -264,6 +265,7 @@ impl SnapshotManageCmd {
 	pub async fn run<B, BA, C>(
 		&self,
 		client: Arc<C>,
+		backend: Arc<BA>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where
@@ -281,7 +283,7 @@ impl SnapshotManageCmd {
 		match (self.do_prune, self.do_clear, self.do_init, self.do_update_conf) {
 			(true, false, false, false) => self.do_prune(client),
 			(false, true, false, false) => self.do_clear(client),
-			(false, false, true, false) => self.do_init(client),
+			(false, false, true, false) => self.do_init(client, backend),
 			(false, false, false, true) => self.do_update_conf(client),
 			_ => {
 				let error = "Need one and only one of 'do_prune', 'do_clear', 'do_init' \
@@ -332,6 +334,7 @@ impl SnapshotManageCmd {
 	fn do_init<B, BA, C>(
 		&self,
 		client: Arc<C>,
+		backend: Arc<BA>,
 	) -> error::Result<()>
 	where
 		B: BlockT,
@@ -343,20 +346,21 @@ impl SnapshotManageCmd {
 	{
 		let db = client.snapshot_db().expect(UNSUPPORTED);
 		
- /* TODO move to call
-		if block.is_some() {
-			let err = ClientError::StateDatabase(
-				"Unimplemented TODO revert chain & then same call".into(),
-			);
-			return Err(DatabaseError(Box::new(err)));
+		let chain_info = backend.blockchain().info();
+	
+		if self.init_at.is_some() {
+			unimplemented!("Unimplemented TODO revert chain & then same call");
 		}
-		*/
 
- // TODO put in config inserted 		best_block_number: NumberFor<Block>,
- //
- // db.reinit(config, best_block_hash)?; 
-
-		unimplemented!();
+		let mut config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
+		// TODO consider using NumberFor<Block>
+		use std::convert::TryInto;
+		if let Ok(start) = chain_info.best_number.try_into() {
+			config.start_block = Some(start);
+		} else {
+			unimplemented!("Support for large block number");
+		}
+		db.re_init(config, chain_info.best_hash)?; 
 		Ok(())
 	}
 

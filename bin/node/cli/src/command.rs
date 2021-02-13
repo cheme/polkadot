@@ -158,7 +158,7 @@ pub fn run() -> Result<()> {
 			runner.async_run(|config| {
 				let PartialComponents { client, task_manager, ..}
 					= new_partial(&config)?;
-				Ok((cmd.run(client, config.database), task_manager))
+				Ok((cmd.run(client, backend, config.database), task_manager))
 			})
 		},
 		Some(Subcommand::SnapshotImport(cmd)) => {
