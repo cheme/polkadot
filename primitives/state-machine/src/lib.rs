@@ -114,6 +114,16 @@ impl sp_std::fmt::Display for DefaultError {
 	}
 }
 
+#[cfg(not(feature = "std"))]
+fn default_error(err: &str) -> DefaultError {
+	DefaultError
+}
+
+#[cfg(feature = "std")]
+fn default_error(err: &str) -> DefaultError {
+	err.to_string()
+}
+
 pub use crate::in_memory_backend::{new_in_mem, KVInMem};
 pub use crate::overlayed_changes::{
 	OverlayedChanges, StorageKey, StorageValue,

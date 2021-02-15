@@ -295,7 +295,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where
 							|key, value| f(Some(&child_info), key, value),
 						);
 					},
-					_ => return Err("Invalid child trie type in state".into()), 
+					_ => return Err(crate::default_error("Invalid child trie type in state")),
 				}
 			} else {
 				break;

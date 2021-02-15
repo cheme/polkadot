@@ -284,7 +284,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let mut longest_key = 0;
 	while let Some(Ok((k, v))) = iter.next() {
 		longest_key = std::cmp::max(longest_key, k.as_slice().len());
-		kv_db.unchecked_new_single(k.as_slice(), v, &mut tx);
+		kv_db.unchecked_new_single(None, k.as_slice(), v, &mut tx);
 		count_tx += 1;
 		if count_tx == 1000 {
 			count += 1;
