@@ -575,6 +575,19 @@ pub trait SnapshotDb<H> {
 		&self,
 		config: SnapshotDbConf,
 		best_block: H,
+		state_visit: impl StateVisitor,
+	) -> error::Result<()>;
+}
+
+/// Visitor trait use to initiate a snapshot db.
+pub trait StateVisitor {
+	/// Visit with call back taking the child trie root path and related key values for arguments.
+	///
+	/// The ordered is required to be top trie then child trie by prefixed storage key order, with
+	/// every trie key values consecutively ordered.
+	fn state_visit(
+		&self,
+		visitor: impl FnMut(Option<&[u8]>, Vec<u8>, Vec<u8>) -> error::Result<()>,
 	) -> error::Result<()>;
 }
 
@@ -624,6 +637,7 @@ impl<H> SnapshotDb<H> for () {
 		&self,
 		_config: SnapshotDbConf,
 		_best_block: H,
+		_state_visit: impl StateVisitor,
 	) -> error::Result<()> {
 		unsupported_error()
 	}

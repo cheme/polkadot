@@ -23,9 +23,11 @@ use log::info;
 use sc_service::{
 	config::DatabaseConfig, chain_ops::export_blocks, PruningMode, Role,
 };
-use sc_client_api::{SnapshotProvider, SnapshotDb};
+use sc_client_api::{SnapshotProvider, SnapshotDb, StateBackend, StateVisitor, DatabaseError};
 use sp_blockchain::HeaderBackend;
+use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
+use sp_runtime::generic::BlockId;
 use std::fmt::Debug;
 use std::fs;
 use std::io;
@@ -345,9 +347,9 @@ impl SnapshotManageCmd {
 		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
 	{
 		let db = client.snapshot_db().expect(UNSUPPORTED);
-		
+
 		let chain_info = backend.blockchain().info();
-	
+
 		if self.init_at.is_some() {
 			unimplemented!("Unimplemented TODO revert chain & then same call");
 		}
@@ -360,7 +362,12 @@ impl SnapshotManageCmd {
 		} else {
 			unimplemented!("Support for large block number");
 		}
-		db.re_init(config, chain_info.best_hash)?; 
+		let state_visitor = StateVisitorImpl(&backend, &chain_info.best_hash);
+		db.re_init(
+			config,
+			chain_info.best_hash,
+			state_visitor,
+		)?;
 		Ok(())
 	}
 
@@ -383,6 +390,43 @@ impl SnapshotManageCmd {
 			pruning_conf(&self.snapshot_conf.pruning_params),
 			self.snapshot_conf.lazy_pruning_window,
 		)?;
+		Ok(())
+	}
+}
+
+struct StateVisitorImpl<'a, B: BlockT, BA>(&'a Arc<BA>, &'a B::Hash);
+
+impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
+	where
+		B: BlockT,
+		BA: sc_client_api::backend::Backend<B>,
+{
+	fn state_visit(
+		&self,
+		mut visitor: impl FnMut(Option<&[u8]>, Vec<u8>, Vec<u8>) -> std::result::Result<(), DatabaseError>,
+	) -> std::result::Result<(), DatabaseError> {
+		let mut state = self.0.state_at(BlockId::Hash(self.1.clone()))
+			.map_err(|e| DatabaseError(Box::new(e)))?;
+		let trie_state = state.as_trie_backend().expect("Snapshot runing on a trie backend.");
+
+		let mut prev_child = None;
+		let prev_child = &mut prev_child;
+		let mut prefixed_storage_key = None;
+		let prefixed_storage_key = &mut prefixed_storage_key;
+		trie_state.for_key_values(|child, key, value| {
+			if child != prev_child.as_ref() {
+				*prefixed_storage_key = child.map(|ci| ci.prefixed_storage_key().into_inner());
+				*prev_child = child.cloned();
+			}
+			visitor(
+				prefixed_storage_key.as_ref().map(Vec::as_slice),
+				key,
+				value,
+			).expect("Failure adding value to snapshot db.");
+		}).map_err(|e| {
+			let error: error::Error = e.into();
+			DatabaseError(Box::new(error))
+		})?;
 		Ok(())
 	}
 }

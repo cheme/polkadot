@@ -21,7 +21,7 @@ use crate::{warn, debug};
 use hash_db::Hasher;
 use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
-use sp_core::storage::{ChildInfo, ChildType};
+use sp_core::storage::{ChildInfo, ChildType, well_known_keys};
 use codec::{Codec, Decode};
 use crate::{
 	StorageKey, StorageValue, Backend,
@@ -264,6 +264,40 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 	}
 
 	fn wipe(&self) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where
+	H::Out: Ord + Codec,
+{
+	/// Visit the full state.
+	pub fn for_key_values<F: FnMut(Option<&ChildInfo>, Vec<u8>, Vec<u8>)>(
+		&self,
+		mut f: F,
+	) -> Result<(), crate::DefaultError> {
+		let essence = &self.essence;
+
+		essence.for_key_values_with_prefix_owned(&[], |key, value| f(None, key, value));
+
+		// using next api to avoid lock when accessing storage
+		// (RwLock on double read from same thread).
+		let mut previous = well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX.to_vec();
+		while let Some(key) = essence.next_storage_key(&previous)? {
+			if key.starts_with(well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX) { // TODO replace by from_prefixed_key
+				previous = key;
+				let child = previous.as_slice();
+				let child_info = ChildInfo::new_default(&child[well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX.len()..]);
+				essence.for_child_key_values_with_prefix_owned(
+					&child_info,
+					&[],
+					|key, value| f(Some(&child_info), key, value),
+				);
+			} else {
+				break;
+			}
+		}
+
 		Ok(())
 	}
 }

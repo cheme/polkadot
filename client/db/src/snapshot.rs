@@ -35,6 +35,7 @@ use historied_db::{
 use sp_runtime::traits::{
 	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion, HashFor,
 };
+use sp_core::storage::{ChildInfo, ChildType, PrefixedStorageKey, well_known_keys};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use parking_lot::{Mutex, RwLock};
@@ -148,6 +149,30 @@ pub struct SnapshotDb<Block: BlockT> {
 	pub _ph: PhantomData<Block>,
 }
 
+fn child_prefixed_key(child_info: Option<&ChildInfo>, key: &[u8]) -> Vec<u8> {
+	if let Some(child_info) = child_info {
+		child_prefixed_key_inner_default(child_info.storage_key(), key)
+	} else {
+		child_prefixed_key_inner_top(key)
+	}
+}
+
+fn child_prefixed_key_inner_top(key: &[u8]) -> Vec<u8> {
+	let mut prefixed_key = Vec::with_capacity(1 + key.len());
+	prefixed_key.push(0);
+	prefixed_key.extend_from_slice(key);
+	prefixed_key
+}
+
+
+fn child_prefixed_key_inner_default(prefix: &[u8], key: &[u8]) -> Vec<u8> {
+	let mut prefixed_key = Vec::with_capacity(1 + prefix.size_hint() + key.len());
+	prefixed_key.push(1);
+	prefix.encode_to(&mut prefixed_key);
+	prefixed_key.extend_from_slice(key);
+	prefixed_key
+}
+
 impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 	fn clear_snapshot_db(&self) -> sp_database::error::Result<()> {
 		let mut management = self.historied_management.inner.write();
@@ -201,6 +226,7 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 		&self,
 		mut config: SnapshotDbConf,
 		best_block: Block::Hash,
+		state_visit: impl sc_client_api::StateVisitor,
 	) -> sp_database::error::Result<()> {
 		self.clear_snapshot_db()?;
 
@@ -226,23 +252,48 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 			config,
 		};
 
-		// TODO commit management
-
 		let mut tx = Default::default();
-		/* TODO state iterate as in export state!!
-		while let Some(Ok((k, v))) = iter.next() {
-			kv_db.unchecked_new_single(k.as_slice(), v, &mut tx);
-			count_tx += 1;
-			if count_tx == 1000 {
-				count += 1;
-				warn!("write a thousand {} {:?}", count, &k[..20]);
-				kv_db.db.commit(tx).expect("write_tx");
-				tx = kv_db.transaction();
-				count_tx = 0;
+		let mut count_tx = 0;
+		let tx = &mut tx;
+		let count_tx = &mut count_tx;
+		let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
+		let child_storage_key = &mut child_storage_key;
+		let mut last_child: Option<Vec<u8>> = None;
+		let last_child = &mut last_child;
+		state_visit.state_visit(|child, key, value| {
+			let key = if let Some(child) = child {
+				if Some(child) != last_child.as_ref().map(Vec::as_slice) {
+					*child_storage_key = PrefixedStorageKey::new(child.to_vec());
+					*last_child = Some(child.to_vec());
+				}
+				match ChildType::from_prefixed_key(&child_storage_key) {
+					Some((ChildType::ParentKeyId, storage_key)) => {
+						child_prefixed_key_inner_default(
+							storage_key,
+							key.as_slice(),
+						)
+					},
+					_ => {
+						let e = ClientError::StateDatabase("Unknown child trie type in state".into());
+						return Err(DatabaseError(Box::new(e)));
+					},
+				}
+			} else {
+				child_prefixed_key_inner_top(key.as_slice())
+			};
+			historied_db.unchecked_new_single_inner(key.as_slice(), value, tx, crate::columns::STATE_SNAPSHOT);
+			*count_tx = *count_tx + 1;
+			if *count_tx == 1000 {
+				//count += 1;
+				//warn!("write a thousand {} {:?}", count, &k[..20]);
+				let to_commit = std::mem::take(tx);
+				self.ordered_db.commit(to_commit)?;
+				*count_tx = 0;
 			}
-		}
-		*/
-		self.ordered_db.commit(tx).expect("write_tx last");
+			Ok(())
+		})?;
+		let to_commit = std::mem::take(tx);
+		self.ordered_db.commit(to_commit)?;
 
 		Ok(())
 	}
@@ -374,8 +425,14 @@ pub type HValue = Tree<u32, u64, BytesDiff, TreeBackend, LinearBackend>;
 //pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 
 impl HistoriedDB {
-	fn storage_inner(&self, key: &[u8], column: u32) -> Result<Option<Vec<u8>>, String> {
-		if let Some(v) = self.db.get(column, key) {
+	fn storage_inner(
+		&self,
+		child_info: Option<&ChildInfo>,
+		key: &[u8],
+		column: u32,
+	) -> Result<Option<Vec<u8>>, String> {
+		let key = child_prefixed_key(child_info, key);
+		if let Some(v) = self.db.get(column, key.as_slice()) {
 			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
 				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
 			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
@@ -385,7 +442,6 @@ impl HistoriedDB {
 			Ok(None)
 		}
 	}
-
 }
 
 impl KVBackend for HistoriedDB {
@@ -398,7 +454,7 @@ impl KVBackend for HistoriedDB {
 	}
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		self.storage_inner(key, crate::columns::STATE_SNAPSHOT)
+		self.storage_inner(None, key, crate::columns::STATE_SNAPSHOT)
 	}
 }
 
@@ -458,8 +514,15 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 
 	/// write a single value in change set.
 	/// TODO use branch and block nodes backend as in offchain-storage
-	pub fn update_single(&mut self, k: &[u8], change: Option<Vec<u8>>, change_set: &mut Transaction<DbHash>) {
-		self.update_single_inner(k, change, change_set, crate::columns::STATE_SNAPSHOT)
+	pub fn update_single(
+		&mut self,
+		child_info: Option<&ChildInfo>,
+		k: &[u8],
+		change: Option<Vec<u8>>,
+		change_set: &mut Transaction<DbHash>,
+	) {
+		let key = child_prefixed_key(child_info, k);
+		self.update_single_inner(key.as_slice(), change, change_set, crate::columns::STATE_SNAPSHOT)
 	}
 
 	/// write a single value in change set.
@@ -516,8 +579,15 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 
 	/// write a single value, without checking current state,
 	/// please only use on new empty db.
-	pub fn unchecked_new_single(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>) {
-		self.unchecked_new_single_inner(k, v, change_set, crate::columns::STATE_SNAPSHOT)
+	pub fn unchecked_new_single(
+		&mut self,
+		child_info: Option<&ChildInfo>,
+		k: &[u8],
+		v: Vec<u8>,
+		change_set: &mut Transaction<DbHash>,
+	) {
+		let key = child_prefixed_key(child_info, k);
+		self.unchecked_new_single_inner(key.as_slice(), v, change_set, crate::columns::STATE_SNAPSHOT)
 	}
 
 	fn unchecked_new_single_inner(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {

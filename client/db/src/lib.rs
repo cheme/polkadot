@@ -1523,9 +1523,22 @@ impl<Block: BlockT> Backend<Block> {
 			let historied_update = operation.storage_updates.clone();
 			let mut nb = 0;
 			for (k, change) in historied_update {
-				ordered_historied_db.update_single(k.as_slice(), change, &mut transaction);
+				ordered_historied_db.update_single(None, k.as_slice(), change, &mut transaction);
 				nb += 1;
 			}
+
+			let historied_update = operation.child_storage_updates.clone();
+			for (storage_key, historied_update) in historied_update {
+				assert!(storage_key.starts_with(well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX));
+
+				let child_info = ChildInfo::new_default_from_vec(storage_key);
+				for (k, change) in historied_update {
+					ordered_historied_db.update_single(Some(&child_info), k.as_slice(), change, &mut transaction);
+					nb += 1;
+				}
+			}
+
+
 			warn!("committed {:?} change in historied db", nb);
 		}
 
