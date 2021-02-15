@@ -21,7 +21,7 @@ use crate::{warn, debug};
 use hash_db::Hasher;
 use sp_trie::{Trie, delta_trie_root, empty_child_trie_root, child_delta_trie_root};
 use sp_trie::trie_types::{TrieDB, TrieError, Layout};
-use sp_core::storage::{ChildInfo, ChildType, well_known_keys};
+use sp_core::storage::{ChildInfo, ChildType, PrefixedStorageKey, well_known_keys};
 use codec::{Codec, Decode};
 use crate::{
 	StorageKey, StorageValue, Backend,
@@ -282,17 +282,21 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where
 
 		// using next api to avoid lock when accessing storage
 		// (RwLock on double read from same thread).
-		let mut previous = well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX.to_vec();
+		let mut previous = PrefixedStorageKey::new(Vec::new());
 		while let Some(key) = essence.next_storage_key(&previous)? {
-			if key.starts_with(well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX) { // TODO replace by from_prefixed_key
-				previous = key;
-				let child = previous.as_slice();
-				let child_info = ChildInfo::new_default(&child[well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX.len()..]);
-				essence.for_child_key_values_with_prefix_owned(
-					&child_info,
-					&[],
-					|key, value| f(Some(&child_info), key, value),
-				);
+			if key.starts_with(well_known_keys::CHILD_STORAGE_KEY_PREFIX) {
+				previous = PrefixedStorageKey::new(key);
+				match ChildType::from_prefixed_key(&previous) {
+					Some((ChildType::ParentKeyId, storage_key)) => {
+						let child_info = ChildInfo::new_default(storage_key);
+						essence.for_child_key_values_with_prefix_owned(
+							&child_info,
+							&[],
+							|key, value| f(Some(&child_info), key, value),
+						);
+					},
+					_ => return Err("Invalid child trie type in state".into()), 
+				}
 			} else {
 				break;
 			}
