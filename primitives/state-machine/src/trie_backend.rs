@@ -95,12 +95,12 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		if let Some(alternative) = self.alternative.as_ref() {
 			if alternative.assert_value() {
 				let reference = self.essence.storage(key);
-				let alter = alternative.storage(key);
+				let alter = alternative.storage(None, key);
 				assert!(alter == reference, "mistmatch in sm for key {:?}", key);
 				return alter;
 			}
 			if alternative.use_as_primary() {
-				return alternative.storage(key);
+				return alternative.storage(None, key);
 			}
 		}
 		self.essence.storage(key)
@@ -111,10 +111,34 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>, Self::Error> {
+		if let Some(alternative) = self.alternative.as_ref() {
+			if alternative.assert_value() {
+				let reference = self.essence.storage(key);
+				let alter = alternative.storage(Some(child_info), key);
+				assert!(alter == reference, "mistmatch in sm for key {:?}", key);
+				return alter;
+			}
+			if alternative.use_as_primary() {
+				return alternative.storage(Some(child_info), key);
+			}
+		}
+
 		self.essence.child_storage(child_info, key)
 	}
 
 	fn next_storage_key(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
+		if let Some(alternative) = self.alternative.as_ref() {
+			if alternative.assert_value() {
+				let reference = self.essence.next_storage_key(key)?;
+				let alter = alternative.next_storage(None, key)?.map(|kv| kv.0);
+				assert!(alter == reference, "mistmatch in sm for key {:?}", key);
+				return Ok(alter);
+			}
+			if alternative.use_as_primary() {
+				return Ok(alternative.next_storage(None, key)?.map(|kv| kv.0));
+			}
+		}
+
 		self.essence.next_storage_key(key)
 	}
 
@@ -123,6 +147,18 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>, Self::Error> {
+		if let Some(alternative) = self.alternative.as_ref() {
+			if alternative.assert_value() {
+				let reference = self.essence.next_child_storage_key(child_info, key)?;
+				let alter = alternative.next_storage(Some(child_info), key)?.map(|kv| kv.0);
+				assert!(alter == reference, "mistmatch in sm for key {:?}", key);
+				return Ok(alter);
+			}
+			if alternative.use_as_primary() {
+				return Ok(alternative.next_storage(Some(child_info), key)?.map(|kv| kv.0));
+			}
+		}
+
 		self.essence.next_child_storage_key(child_info, key)
 	}
 

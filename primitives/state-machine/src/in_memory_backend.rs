@@ -35,11 +35,39 @@ use sp_std::vec::Vec;
 /// instead of a trie backend when operation do not need
 /// trie usage.
 #[derive(Default, Clone, Debug, Eq, PartialEq)]
-pub struct KVInMem(BTreeMap<Vec<u8>, Vec<u8>>);
+pub struct KVInMem {
+	top: BTreeMap<Vec<u8>, Vec<u8>>,
+	children: BTreeMap<ChildInfo, BTreeMap<Vec<u8>, Vec<u8>>>,
+}
 
 impl crate::kv_backend::KVBackend for KVInMem {
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, crate::DefaultError> {
-		Ok(self.0.get(key).cloned())
+	fn storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<Vec<u8>>, crate::DefaultError> {
+		Ok(if let Some(child) = child {
+			self.children.get(child).and_then(|child| child.get(key).cloned())
+		} else {
+			self.top.get(key).cloned()
+		})
+	}
+
+	fn next_storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<(Vec<u8>, Vec<u8>)>, crate::DefaultError> {
+		fn next(storage: &BTreeMap<Vec<u8>, Vec<u8>>, key: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+			use sp_std::ops::Bound;
+			let range = (Bound::Excluded(key), Bound::Unbounded);
+			storage.range::<[u8], _>(range).next().map(|(k, v)| (k.clone(), v.clone()))
+		}
+		Ok(if let Some(child) = child {
+			self.children.get(child).and_then(|child| next(child, key))
+		} else {
+			next(&self.top, key)
+		})
 	}
 }
 

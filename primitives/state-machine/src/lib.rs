@@ -871,6 +871,9 @@ mod execution {
 /// TODO fn use_backend (sometime we do not use it).
 /// TODO fn next_key (returning option... and an error for incomplete proof).
 pub mod kv_backend {
+	use sp_core::storage::ChildInfo;
+	use sp_std::vec::Vec;
+
 	/// KVBackend trait.
 	/// Will be use when we do not need to use an actual trie structure
 	/// (content must be trusted).
@@ -888,7 +891,18 @@ pub mod kv_backend {
 		}
 
 		/// Access to this backend value for a given key.
-		fn storage(&self, key: &[u8]) -> Result<Option<sp_std::vec::Vec<u8>>, crate::DefaultError>;
+		fn storage(
+			&self,
+			child: Option<&ChildInfo>,
+			key: &[u8],
+		) -> Result<Option<Vec<u8>>, crate::DefaultError>;
+
+		/// Access next storage element.
+		fn next_storage(
+			&self,
+			child: Option<&ChildInfo>,
+			key: &[u8],
+		) -> Result<Option<(Vec<u8>, Vec<u8>)>, crate::DefaultError>;
 	}
 }
 

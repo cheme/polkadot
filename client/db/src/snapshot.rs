@@ -184,7 +184,7 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 			*genesis_conf = Default::default();
 			Ok(())
 		}).map_err(|e| DatabaseError(Box::new(e)))?;
-	
+
 		self.ordered_db.clear_prefix(crate::columns::AUX, b"snapshot_db/");
 		self.ordered_db.clear_prefix(crate::columns::STATE_SNAPSHOT, b"");
 
@@ -240,7 +240,7 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 				Ok(())
 			}).map_err(|e| DatabaseError(Box::new(e)))?;
 		}
-	
+
 		let (query_plan, update_plan) = self.historied_management.init_new_management(
 			&best_block,
 			&self.ordered_db,
@@ -336,7 +336,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			config: self.config.clone(),
 		}))
 	}
-	
+
 	pub fn get_historied_db(
 		&self,
 		at: Option<&Block::Hash>,
@@ -381,14 +381,13 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			Ok(None)
 		}
 	}
-	
 }
 
 
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
 	// TODO rem pub as upgrade is cleaned
-	pub current_state: historied_db::management::tree::ForkPlan<u32, u64>,
+	pub current_state: ForkPlan<u32, u64>,
 	// TODO rem pub as upgrade is cleaned
 	pub db: Arc<dyn OrderedDatabase<DbHash>>,
 	/// Configuration for this db.
@@ -433,15 +432,23 @@ impl HistoriedDB {
 	) -> Result<Option<Vec<u8>>, String> {
 		let key = child_prefixed_key(child_info, key);
 		if let Some(v) = self.db.get(column, key.as_slice()) {
-			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
-				.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, v))?;
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			let v = v.get_sum(&self.current_state);
-			Ok(v.map(|v| v.into()).flatten())
+			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state)
 		} else {
 			Ok(None)
 		}
 	}
+	fn decode_inner(
+		key: &[u8],
+		encoded: &[u8],
+		current_state: &ForkPlan<u32, u64>,
+	) -> Result<Option<Vec<u8>>, String> {
+		let v = HValue::decode_with_context(&mut &encoded[..], &((), ()))
+			.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, encoded))?;
+		let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+		let v = v.get_sum(current_state);
+		Ok(v.map(|v| v.into()).flatten())
+	}
+
 }
 
 impl KVBackend for HistoriedDB {
@@ -453,9 +460,41 @@ impl KVBackend for HistoriedDB {
 		self.config.debug_assert
 	}
 
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-		self.storage_inner(None, key, crate::columns::STATE_SNAPSHOT)
+	fn storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<Vec<u8>>, String> {
+		self.storage_inner(child, key, crate::columns::STATE_SNAPSHOT)
 	}
+
+	fn next_storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<(Vec<u8>, Vec<u8>)>, String> {
+		let trie_prefix = child_prefixed_key(child, &[]);
+		let start = child_prefixed_key(child, key);
+
+		let mut iter = self.db.iter_from(crate::columns::STATE_SNAPSHOT, start.as_slice());
+		while let Some((key, value)) = iter.next() {
+			if !key.starts_with(trie_prefix.as_slice()) {
+				return Ok(None);
+			}
+			if key == start {
+				continue;
+			}
+			if let Some(value) = HistoriedDB::decode_inner(
+				key.as_slice(),
+				value.as_slice(),
+				&self.current_state,
+			)? {
+				return Ok(Some((key, value)));
+			}
+		}
+		Ok(None)
+	}
+
 }
 
 impl HistoriedDB {
