@@ -148,6 +148,8 @@ pub struct SnapshotDb<Block: BlockT> {
 	config: SnapshotDbConf,
 	/// Historied value variant.
 	hvalue_type: HValueType,
+	/// Db for storing nodes. 
+	pub nodes_db: Arc<dyn Database<DbHash>>,
 	// TODO config from db !!!
 	pub _ph: PhantomData<Block>,
 }
@@ -258,6 +260,7 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 			db: self.ordered_db.clone(),
 			config,
 			hvalue_type,
+			nodes_db: self.nodes_db.clone(),
 		};
 
 		let mut tx = Default::default();
@@ -311,6 +314,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 	pub fn new(
 		mut historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
+		nodes_db: Arc<dyn Database<DbHash>>,
 	) -> ClientResult<Self> {
 		let config = {
 			let management = historied_management.inner.read();
@@ -328,6 +332,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			ordered_db,
 			config,
 			hvalue_type,
+			nodes_db,
 			_ph: Default::default(),
 		})
 	}
@@ -348,6 +353,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			db: self.ordered_db.clone(),
 			config: self.config.clone(),
 			hvalue_type: self.hvalue_type,
+			nodes_db: self.nodes_db.clone(),
 		}))
 	}
 
@@ -383,6 +389,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			db: self.ordered_db.clone(),
 			hvalue_type: self.hvalue_type,
 			config: self.config.clone(),
+			nodes_db: self.nodes_db.clone(),
 		}))
 	}
 
@@ -410,6 +417,8 @@ pub struct HistoriedDB {
 	pub config: SnapshotDbConf,
 	/// Historied value type for the given conf.
 	pub hvalue_type: HValueType,
+	/// Db for storing nodes. 
+	pub nodes_db: Arc<dyn Database<DbHash>>,
 }
 
 /*
@@ -441,6 +450,9 @@ mod nodes_database {
 
 	#[derive(Clone)]
 	pub(super) struct DatabasePending {
+		// TODO this is limited to changes of nodes of a single value and should be small -> switch
+		// from HashMap to Vec. TODO also try refcell inner mut (inner mut is needde cause branch
+		// changes are not reported back.
 		pending: Arc<RwLock<HashMap<Vec<u8>, Option<Vec<u8>>>>>,
 		database: Arc<dyn Database<DbHash>>,
 	}
@@ -557,7 +569,7 @@ mod nodes_backend {
 		const APPLY_SIZE_LIMIT: bool = true;
 		const MAX_NODE_LEN: usize = 2048; // This should be benched.
 		const MAX_NODE_ITEMS: usize = 8;
-		const STORAGE_PREFIX: &'static [u8] = b"tree_mgmt/branch_nodes";
+		const STORAGE_PREFIX: &'static [u8] = b"tree_mgmt/branch_nodes"; // TODO tree_mgmt in AUX does not make much sense: put with trie(we already got 0 for top and 1 for children: make an enum and add those two.
 	}
 
 	impl NodesMeta for MetaBlocks {
@@ -860,7 +872,7 @@ mod single_node_xdelta {
 /// Historied value with multiple parallel branches.
 /// Support multiple implementation from config.
 pub enum HValue {
-	NodesNoDiff(nodes_nodiff::HValue),
+	NodesNoDiff(nodes_nodiff::HValue, BranchNodes, BlockNodes),
 	SingleNodeNoDiff(single_node_nodiff::HValue),
 	SingleNodeXDelta(single_node_xdelta::HValue),
 }
@@ -886,13 +898,55 @@ impl HValueType {
 	}
 }
 impl HValue {
+	/// Get context for the nodes backend of this value.
+	pub fn build_context(key: &[u8], nodes_db: &Arc<dyn Database<DbHash>>) -> (Context, BranchNodes, BlockNodes) {
+		let block_nodes = BlockNodes::new(nodes_db.clone());
+		let branch_nodes = BranchNodes::new(nodes_db.clone());
+
+		let init_nodes = ContextHead {
+			key: key.to_vec(),
+			backend: block_nodes.clone(),
+			encoded_indexes: Vec::new(),
+			node_init_from: (),
+		};
+		let init = ContextHead {
+			key: key.to_vec(),
+			backend: branch_nodes.clone(),
+			encoded_indexes: Vec::new(),
+			node_init_from: init_nodes.clone(),
+		};
+		((init, init_nodes), branch_nodes, block_nodes)
+	}
+
+	/// Apply local nodes backend change to transaction.
+	pub fn apply_nodes_backend_to_transaction(&self, transaction: &mut Transaction<DbHash>) {
+		match self {
+			HValue::NodesNoDiff(inner, branches, blocks) => {
+				branches.apply_transaction(transaction);
+				blocks.apply_transaction(transaction);
+			},
+			HValue::SingleNodeNoDiff(inner) => (),
+			HValue::SingleNodeXDelta(inner) => (),
+		}
+	}
+
 	/// Instantiate new value.
-	pub fn new(value_at: Vec<u8>, state: &Latest<(u32, u64)>, kind: HValueType) -> Self {
+	pub fn new(
+		key: &[u8],
+		value_at: Vec<u8>,
+		state: &Latest<(u32, u64)>,
+		kind: HValueType,
+		nodes_db: &Arc<dyn Database<DbHash>>,
+	) -> Self {
 		match kind {
-			HValueType::NodesNoDiff => HValue::NodesNoDiff({
-				let context: Context = unimplemented!();
-				nodes_nodiff::HValue::new(Some(value_at), state, context)
-			}),
+			HValueType::NodesNoDiff => {
+				let (context, branch_nodes, block_nodes) = Self::build_context(key, nodes_db);
+				HValue::NodesNoDiff(
+					nodes_nodiff::HValue::new(Some(value_at), state, context),
+					branch_nodes,
+					block_nodes,
+				)
+			},
 			HValueType::SingleNodeNoDiff => HValue::SingleNodeNoDiff(
 				single_node_nodiff::HValue::new(Some(value_at), state, ((), ())),
 			),
@@ -903,12 +957,21 @@ impl HValue {
 	}
 
 	/// Decode existing value.
-	pub fn decode_with_context(encoded: &[u8], kind: HValueType) -> Option<Self> {
+	pub fn decode_with_context(
+		key: &[u8],
+		encoded: &[u8],
+		kind: HValueType,
+		nodes_db: &Arc<dyn Database<DbHash>>,
+	) -> Option<Self> {
 		match kind {
-			HValueType::NodesNoDiff => Some(HValue::NodesNoDiff({
-				let context: Context = unimplemented!();
-				nodes_nodiff::HValue::decode_with_context(&mut &encoded[..], &context)?
-			})),
+			HValueType::NodesNoDiff => {
+				let (context, branch_nodes, block_nodes) = Self::build_context(key, nodes_db);
+				Some(HValue::NodesNoDiff(
+					nodes_nodiff::HValue::decode_with_context(&mut &encoded[..], &context)?,
+					branch_nodes,
+					block_nodes,
+				))
+			},
 			HValueType::SingleNodeNoDiff => Some(HValue::SingleNodeNoDiff(
 				single_node_nodiff::HValue::decode_with_context(&mut &encoded[..], &((), ()))?,
 			)),
@@ -921,7 +984,7 @@ impl HValue {
 	/// Access existing value.
 	fn value(&self, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
 		Ok(match self {
-			HValue::NodesNoDiff(inner) => nodes_nodiff::value(inner, current_state)?, 
+			HValue::NodesNoDiff(inner, _, _) => nodes_nodiff::value(inner, current_state)?, 
 			HValue::SingleNodeNoDiff(inner) => single_node_nodiff::value(inner, current_state)?, 
 			HValue::SingleNodeXDelta(inner) => single_node_xdelta::value(inner, current_state)?, 
 		})
@@ -934,7 +997,7 @@ impl HValue {
 		current_state_read: &ForkPlan<u32, u64>,
 	) -> Result<UpdateResult<()>, String> {
 		Ok(match self {
-			HValue::NodesNoDiff(inner) => {
+			HValue::NodesNoDiff(inner, _, _) => {
 				inner.set(change, current_state)
 			},
 			HValue::SingleNodeNoDiff(inner) => {
@@ -966,7 +1029,7 @@ impl HValue {
 	// TODO consider no error returned (check with node how it behave).
 	fn encode(&self) -> Result<Vec<u8>, String> {
 		Ok(match self {
-			HValue::NodesNoDiff(inner) => inner.encode(),
+			HValue::NodesNoDiff(inner, _, _) => inner.encode(),
 			HValue::SingleNodeNoDiff(inner) => inner.encode(),
 			HValue::SingleNodeXDelta(inner) => inner.encode(),
 		})
@@ -982,7 +1045,7 @@ impl HistoriedDB {
 	) -> Result<Option<Vec<u8>>, String> {
 		let key = child_prefixed_key(child_info, key);
 		if let Some(v) = self.db.get(column, key.as_slice()) {
-			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type)
+			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type, &self.nodes_db)
 		} else {
 			Ok(None)
 		}
@@ -993,8 +1056,9 @@ impl HistoriedDB {
 		encoded: &[u8],
 		current_state: &ForkPlan<u32, u64>,
 		hvalue_type: HValueType,
+		nodes_db: &Arc<dyn Database<DbHash>>,
 	) -> Result<Option<Vec<u8>>, String> {
-		let h_value = HValue::decode_with_context(&mut &encoded[..], hvalue_type)
+		let h_value = HValue::decode_with_context(key, &mut &encoded[..], hvalue_type, nodes_db)
 			.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, encoded))?;
 		Ok(h_value.value(current_state)?)
 	}
@@ -1038,6 +1102,7 @@ impl KVBackend for HistoriedDB {
 				value.as_slice(),
 				&self.current_state,
 				self.hvalue_type,
+				&self.nodes_db,
 			)? {
 				return Ok(Some((key, value)));
 			}
@@ -1051,7 +1116,7 @@ impl HistoriedDB {
 	/// Iterator on key values. 
 	pub fn iter<'a>(&'a self, column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter(column).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..], self.hvalue_type)
+			let v = HValue::decode_with_context(&k[..], &mut &v[..], self.hvalue_type, &self.nodes_db)
 				.or_else(|| {
 					warn!("Invalid historied value k {:?}, v {:?}", k, v);
 					None
@@ -1066,7 +1131,7 @@ impl HistoriedDB {
 	/// Iterator on key values, starting at a given position. TODO is it use???
 	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter_from(column, start).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..], self.hvalue_type)
+			let v = HValue::decode_with_context(&k[..], &mut &v[..], self.hvalue_type, &self.nodes_db)
 				.or_else(|| {
 					warn!("decoding fail for k {:?}, v {:?}", k, v);
 					None
@@ -1093,6 +1158,8 @@ pub struct HistoriedDBMut<DB> {
 	pub config: SnapshotDbConf,
 	/// Historied value type for the given conf.
 	pub hvalue_type: HValueType,
+	/// Db for storing nodes. 
+	pub nodes_db: Arc<dyn Database<DbHash>>,
 }
 
 impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
@@ -1123,7 +1190,8 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		column: u32,
 	) {
 		let histo = if let Some(histo) = self.db.get(column, k) {
-			Some(HValue::decode_with_context(&mut &histo[..], self.hvalue_type).expect("Bad encoded value in db, closing"))
+			Some(HValue::decode_with_context(k, &mut &histo[..], self.hvalue_type, &self.nodes_db)
+				.expect("Bad encoded value in db, closing"))
 		} else {
 			if change.is_none() {
 				return;
@@ -1136,17 +1204,19 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			(histo, update)
 		} else {
 			if let Some(v) = change {
-				let value = HValue::new(v, &self.current_state, self.hvalue_type);
+				let value = HValue::new(k, v, &self.current_state, self.hvalue_type, &self.nodes_db);
 				(value, UpdateResult::Changed(()))
 			} else {
 				return;
 			}
 		} {
 			(value, UpdateResult::Changed(())) => {
+				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.set_from_vec(column, k, value.encode()
 					.expect("Could not encode."));
 			},
-			(_value, UpdateResult::Cleared(())) => {
+			(value, UpdateResult::Cleared(())) => {
+				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.remove(column, k);
 			},
 			(_value, UpdateResult::Unchanged) => (),
@@ -1167,7 +1237,8 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	}
 
 	fn unchecked_new_single_inner(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
-		let value = HValue::new(v, &self.current_state, self.hvalue_type);
+		let value = HValue::new(k, v, &self.current_state, self.hvalue_type, &self.nodes_db);
+		value.apply_nodes_backend_to_transaction(change_set); // should be no ops, but cost nothing to call
 		let value = value.encode()
 			.expect("Could not encode.");
 		change_set.set_from_vec(column, k, value);

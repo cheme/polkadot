@@ -1314,6 +1314,7 @@ impl<Block: BlockT> Backend<Block> {
 		let snapshot_db = snapshot::SnapshotDb::new(
 			historied_management,
 			ordered_db,
+			db,
 		)?;
 		Ok(Backend {
 			storage: Arc::new(storage_db),
