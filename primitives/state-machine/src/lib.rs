@@ -124,7 +124,7 @@ fn default_error(err: &str) -> DefaultError {
 	err.to_string()
 }
 
-pub use crate::in_memory_backend::{new_in_mem, KVInMem};
+pub use crate::in_memory_backend::{new_in_mem, KVInMem, PartialKVInMem};
 pub use crate::overlayed_changes::{
 	OverlayedChanges, StorageKey, StorageValue,
 	StorageCollection, ChildStorageCollection,

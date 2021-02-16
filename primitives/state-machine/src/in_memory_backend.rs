@@ -31,25 +31,104 @@ use sp_core::storage::ChildInfo;
 use sp_core::storage::Storage;
 use sp_std::vec::Vec;
 
+/// Base collection for key values backend.
+///
+/// This does not support child collection.
+/// TODO consider inner trait without child.
+#[derive(Default, Clone, Debug, Eq, PartialEq)]
+pub struct KVInMemCollection(pub BTreeMap<Vec<u8>, Vec<u8>>);
+
+impl crate::kv_backend::KVBackend for KVInMemCollection {
+	fn storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<Vec<u8>>, crate::DefaultError> {
+		assert!(child.is_none());
+		Ok(self.0.get(key).cloned())
+	}
+
+	fn next_storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<(Vec<u8>, Vec<u8>)>, crate::DefaultError> {
+		assert!(child.is_none());
+		use sp_std::ops::Bound;
+		let range = (Bound::Excluded(key), Bound::Unbounded);
+		Ok(self.0.range::<[u8], _>(range).next().map(|(k, v)| (k.clone(), v.clone())))
+	}
+}
+
+/// Base collection for key values backend.
+///
+/// This does not support child collection.
+///
+/// A boolean is paired with value to indicate if next value is in collection.
+/// (false for a missing value)
+#[derive(Default, Clone, Debug, Eq, PartialEq)]
+pub struct PartialKVInMemCollection(pub BTreeMap<Vec<u8>, (Vec<u8>, bool)>);
+
+impl crate::kv_backend::KVBackend for PartialKVInMemCollection {
+	fn storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<Vec<u8>>, crate::DefaultError> {
+		assert!(child.is_none());
+		Ok(self.0.get(key).map(|value_next| value_next.0.clone()))
+	}
+
+	fn next_storage(
+		&self,
+		child: Option<&ChildInfo>,
+		key: &[u8],
+	) -> Result<Option<(Vec<u8>, Vec<u8>)>, crate::DefaultError> {
+		assert!(child.is_none());
+		use sp_std::ops::Bound;
+		let range = (Bound::Excluded(key), Bound::Unbounded);
+		let next = self.0.range::<[u8], _>(range).next();
+		if let Some((_, (_, false))) = next {
+			return Err(crate::default_error("Incomplete base data."));
+		}
+		Ok(next.map(|(k, (v, _))| (k.clone(), v.clone())))
+	}
+}
+
 /// In memory alternative key value backend to use
 /// instead of a trie backend when operation do not need
 /// trie usage.
+pub type KVInMem = KVInMemWithChildren<KVInMemCollection>;
+
+/// In memory alternative key value backend to use
+/// instead of a trie backend when operation do not need
+/// trie usage.
+/// This allows collection with only a subset of the key
+/// existing keys (proof support).
+pub type PartialKVInMem = KVInMemWithChildren<PartialKVInMemCollection>;
+
+/// Struct dispatching `KVBackend` into multiple children
+/// implementation.
 #[derive(Default, Clone, Debug, Eq, PartialEq)]
-pub struct KVInMem {
-	top: BTreeMap<Vec<u8>, Vec<u8>>,
-	children: BTreeMap<ChildInfo, BTreeMap<Vec<u8>, Vec<u8>>>,
+pub struct KVInMemWithChildren<B> {
+	pub top: B,
+	pub children: BTreeMap<ChildInfo, B>,
 }
 
-impl crate::kv_backend::KVBackend for KVInMem {
+impl<B: crate::kv_backend::KVBackend> crate::kv_backend::KVBackend for KVInMemWithChildren<B> {
 	fn storage(
 		&self,
 		child: Option<&ChildInfo>,
 		key: &[u8],
 	) -> Result<Option<Vec<u8>>, crate::DefaultError> {
 		Ok(if let Some(child) = child {
-			self.children.get(child).and_then(|child| child.get(key).cloned())
+			if let Some(child) = self.children.get(child) {
+				child.storage(None, key)?
+			} else {
+				None
+			}
 		} else {
-			self.top.get(key).cloned()
+			self.top.storage(None, key)?
 		})
 	}
 
@@ -58,15 +137,14 @@ impl crate::kv_backend::KVBackend for KVInMem {
 		child: Option<&ChildInfo>,
 		key: &[u8],
 	) -> Result<Option<(Vec<u8>, Vec<u8>)>, crate::DefaultError> {
-		fn next(storage: &BTreeMap<Vec<u8>, Vec<u8>>, key: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
-			use sp_std::ops::Bound;
-			let range = (Bound::Excluded(key), Bound::Unbounded);
-			storage.range::<[u8], _>(range).next().map(|(k, v)| (k.clone(), v.clone()))
-		}
 		Ok(if let Some(child) = child {
-			self.children.get(child).and_then(|child| next(child, key))
+			if let Some(child) = self.children.get(child) {
+				child.next_storage(None, key)?
+			} else {
+				None
+			}
 		} else {
-			next(&self.top, key)
+			self.top.next_storage(None, key)?
 		})
 	}
 }
