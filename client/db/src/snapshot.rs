@@ -49,6 +49,7 @@ use codec::{Decode, Encode};
 use sp_database::{SnapshotDbConf, SnapshotDBMode};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
+use nodes_database::{BranchNodes, BlockNodes, Context};
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
@@ -429,6 +430,366 @@ mod SingleNodeEncodedNoDiff {
 }
 */
 
+mod nodes_database {
+	use std::sync::Arc;
+	use parking_lot::RwLock;
+	use std::collections::HashMap;
+	use crate::DbHash;
+	use sp_database::Database;
+	use sp_database::Transaction;
+	use historied_db::backend::nodes::ContextHead;
+
+	#[derive(Clone)]
+	pub(super) struct DatabasePending {
+		pending: Arc<RwLock<HashMap<Vec<u8>, Option<Vec<u8>>>>>,
+		database: Arc<dyn Database<DbHash>>,
+	}
+
+	impl DatabasePending {
+		pub(super) fn clear_and_extract_changes(&self) -> HashMap<Vec<u8>, Option<Vec<u8>>> {
+			std::mem::replace(&mut self.pending.write(), HashMap::new())
+		}
+
+		pub(super) fn apply_transaction(
+			&self,
+			col: sp_database::ColumnId,
+			transaction: &mut Transaction<DbHash>,
+		) {
+			let pending = self.clear_and_extract_changes();
+			for (key, change) in pending {
+				if let Some(value) = change {
+					transaction.set_from_vec(col, &key, value);
+				} else {
+					transaction.remove(col, &key);
+				}
+			}
+		}
+
+		pub(super) fn read(&self, col: sp_database::ColumnId, key: &[u8]) -> Option<Vec<u8>> {
+			if let Some(pending) = self.pending.read().get(key).cloned() {
+				pending
+			} else {
+				self.database.get(col, key)
+			}
+		}
+
+		pub(super) fn write(&self, key: Vec<u8>, value: Vec<u8>) {
+			self.pending.write().insert(key, Some(value));
+		}
+
+		pub(super) fn remove(&self, key: Vec<u8>) {
+			self.pending.write().insert(key, None);
+		}
+	}
+
+	/// Node backend for historied value that need to be
+	/// split in backend database.
+	///
+	/// This is transactional and `apply_transaction` need
+	/// to be call to extract changes into an actual db transaction.
+	#[derive(Clone)]
+	pub struct BlockNodes(pub(super) DatabasePending);
+
+	/// Branch backend for historied value that need to be
+	/// split in backend database.
+	///
+	/// This is transactional and `apply_transaction` need
+	/// to be call to extract changes into an actual db transaction.
+	#[derive(Clone)]
+	pub struct BranchNodes(pub(super) DatabasePending);
+
+	impl BlockNodes {
+		/// Initialize from clonable pointer to backend database.
+		pub fn new(database: Arc<dyn Database<DbHash>>) -> Self {
+			BlockNodes(DatabasePending {
+				pending: Arc::new(RwLock::new(HashMap::new())),
+				database,
+			})
+		}
+
+		/// Flush pending changes into a database transaction.
+		pub fn apply_transaction(&self, transaction: &mut Transaction<DbHash>) {
+			self.0.apply_transaction(crate::columns::AUX, transaction)
+		}
+	}
+
+	impl BranchNodes {
+		/// Initialize from clonable pointer to backend database.
+		pub fn new(database: Arc<dyn Database<DbHash>>) -> Self {
+			BranchNodes(DatabasePending {
+				pending: Arc::new(RwLock::new(HashMap::new())),
+				database,
+			})
+		}
+
+		/// Flush pending changes into a database transaction.
+		pub fn apply_transaction(&self, transaction: &mut Transaction<DbHash>) {
+			self.0.apply_transaction(crate::columns::AUX, transaction)
+		}
+	}
+
+	/// Alias for tree context. TODO move to nodes_backend
+	pub type Context = (ContextHead<BranchNodes, ContextHead<BlockNodes, ()>>, ContextHead<BlockNodes, ()>);
+}
+
+mod nodes_backend {
+	use super::nodes_database::{BranchNodes, BlockNodes};
+	use historied_db::{Latest, UpdateResult,
+		DecodeWithContext,
+		management::{Management, ManagementMut},
+		management::tree::{TreeManagementStorage, ForkPlan},
+		historied::tree::Tree,
+		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead, EstimateSize},
+	};
+	use codec::{Encode, Decode}; 
+
+	/// Multiple node splitting strategy based on content
+	/// size.
+	#[derive(Clone, Copy)]
+	pub struct MetaBranches;
+
+	/// Multiple node splitting strategy based on content
+	/// size.
+	#[derive(Clone, Copy)]
+	pub struct MetaBlocks;
+
+	impl NodesMeta for MetaBranches {
+		const APPLY_SIZE_LIMIT: bool = true;
+		const MAX_NODE_LEN: usize = 2048; // This should be benched.
+		const MAX_NODE_ITEMS: usize = 8;
+		const STORAGE_PREFIX: &'static [u8] = b"tree_mgmt/branch_nodes";
+	}
+
+	impl NodesMeta for MetaBlocks {
+		const APPLY_SIZE_LIMIT: bool = true;
+		// This needs to be less than for `MetaBranches`, the point is to
+		// be able to store multiple branche in the immediate storage and
+		// avoid having a single branch occupy the whole item.
+		const MAX_NODE_LEN: usize = 512;
+		const MAX_NODE_ITEMS: usize = 4;
+		const STORAGE_PREFIX: &'static [u8] = b"tree_mgmt/block_nodes";
+	}
+
+	impl<C> NodeStorage<C, u64, LinearBackendInner<C>, MetaBlocks> for BlockNodes
+		where C: Decode,
+	{
+		fn get_node(
+			&self,
+			reference_key: &[u8],
+			parent_encoded_indexes: &[u8],
+			relative_index: u64,
+		) -> Option<LinearNode<C>> {
+			let key = <Self as NodeStorage<C, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			self.0.read(crate::columns::AUX, &key).and_then(|value| {
+				// use encoded len as size (this is bigger than the call to estimate size
+				// but not really an issue, otherwhise could adjust).
+				let reference_len = value.len();
+
+				let input = &mut value.as_slice();
+				LinearBackendInner::decode(input).ok().map(|data| Node::new(
+					data,
+					reference_len,
+				))
+			})
+		}
+	}
+
+	impl<C> NodeStorageMut<C, u64, LinearBackendInner<C>, MetaBlocks> for BlockNodes
+		where C: Encode + Decode,
+	{
+		fn set_node(
+			&mut self,
+			reference_key: &[u8],
+			parent_encoded_indexes: &[u8],
+			relative_index: u64,
+			node: &LinearNode<C>,
+		) {
+			let key = <Self as NodeStorage<C, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			let encoded = node.inner().encode();
+			self.0.write(key, encoded);
+		}
+		fn remove_node(
+			&mut self,
+			reference_key: &[u8],
+			parent_encoded_indexes: &[u8],
+			relative_index: u64,
+		) {
+			let key = <Self as NodeStorage<C, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			self.0.remove(key);
+		}
+	}
+
+	impl<C> NodeStorage<BranchLinear<C>, u32, TreeBackendInner<C>, MetaBranches> for BranchNodes
+		where C: DecodeWithContext<Context = ()> + EstimateSize,
+	{
+		fn get_node(
+			&self,
+			reference_key: &[u8],
+			parent_encoded_indexes: &[u8],
+			relative_index: u64,
+		) -> Option<TreeNode<C>> {
+			let key = <Self as NodeStorage<BranchLinear<C>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			self.0.read(crate::columns::AUX, &key).and_then(|value| {
+				// use encoded len as size (this is bigger than the call to estimate size
+				// but not an issue, otherwhise could adjust).
+				let reference_len = value.len();
+
+				let block_nodes = BlockNodes(self.0.clone());
+				let input = &mut value.as_slice();
+				TreeBackendInner::decode_with_context(
+					input,
+					&ContextHead {
+						key: reference_key.to_vec(),
+						backend: block_nodes,
+						encoded_indexes: parent_encoded_indexes.to_vec(),
+						node_init_from: (),
+					},
+				).map(|data| Node::new (
+					data,
+					reference_len,
+				))
+			})
+		}
+	}
+
+	impl<C> NodeStorageMut<BranchLinear<C>, u32, TreeBackendInner<C>, MetaBranches> for BranchNodes
+		where C: Encode + DecodeWithContext<Context = ()> + EstimateSize,
+	{
+		fn set_node(
+			&mut self,
+			reference_key: &[u8],
+			parent_encoded_indexes: &[u8],
+			relative_index: u64,
+			node: &TreeNode<C>,
+		) {
+			let key = <Self as NodeStorage<BranchLinear<C>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			let encoded = node.inner().encode();
+			self.0.write(key, encoded);
+		}
+		fn remove_node(
+			&mut self,
+			reference_key: &[u8],
+			parent_encoded_indexes: &[u8],
+			relative_index: u64,
+		) {
+			let key = <Self as NodeStorage<BranchLinear<C>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			self.0.remove(key);
+		}
+	}
+
+	// Values are stored in memory in Vec like structure
+	type LinearBackendInner<C> = historied_db::backend::in_memory::MemoryOnly< // TODO switch to MemoryOnly8 : require to implement EstimateSize upstream
+		C,
+		u64,
+	>;
+
+	// A multiple nodes wraps multiple vec like structure
+	pub(super) type LinearBackend<C> = historied_db::backend::nodes::Head<
+		C,
+		u64,
+		LinearBackendInner<C>,
+		MetaBlocks,
+		BlockNodes,
+		(),
+	>;
+
+	// Nodes storing these
+	type LinearNode<C> = historied_db::backend::nodes::Node<
+		C,
+		u64,
+		LinearBackendInner<C>,
+		MetaBlocks,
+	>;
+
+	// Branch
+	type BranchLinear<C> = historied_db::historied::linear::Linear<C, u64, LinearBackend<C>>;
+
+	// Branch are stored in memory
+	type TreeBackendInner<C> = historied_db::backend::in_memory::MemoryOnly< // TODO switch to MemoryOnly8 : require to implement EstimateSize upstream
+		BranchLinear<C>,
+		u32,
+	>;
+
+	// Head of branches
+	pub(super) type TreeBackend<C> = historied_db::backend::nodes::Head<
+		BranchLinear<C>,
+		u32,
+		TreeBackendInner<C>,
+		MetaBranches,
+		BranchNodes,
+		ContextHead<BlockNodes, ()>
+	>;
+
+	// Node with branches
+	type TreeNode<C> = historied_db::backend::nodes::Node<
+		BranchLinear<C>,
+		u32,
+		TreeBackendInner<C>,
+		MetaBranches,
+	>;
+}
+
+mod nodes_nodiff {
+	use historied_db::{
+		DecodeWithContext,
+		management::{ManagementMut, ForkableManagement, Management},
+		historied::{DataMut, Data, DataRef, aggregate::Sum as _},
+		mapped_db::{TransactionalMappedDB, MappedDBDyn},
+		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
+		Latest, UpdateResult,
+		historied::tree::{Tree, aggregate::Sum as TreeSum},
+		management::tree::{Tree as TreeMgmt, ForkPlan},
+		backend::nodes::ContextHead,
+	};
+
+
+	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
+	pub type HValue = Tree<
+		u32,
+		u64,
+		Option<Vec<u8>>,
+		super::nodes_backend::TreeBackend<Option<Vec<u8>>>,
+		super::nodes_backend::LinearBackend<Option<Vec<u8>>>,
+	>;
+
+	/// Access current value.
+	pub fn value(v: &HValue, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
+		Ok(v.get(current_state).flatten())
+	}
+}
+
+/* TODO needs Context implemented to Bytes Diff, also probably EstimateSize
+mod node_xdelta {
+	use historied_db::{
+		DecodeWithContext,
+		management::{ManagementMut, ForkableManagement, Management},
+		historied::{DataMut, Data, DataRef, aggregate::Sum as _},
+		mapped_db::{TransactionalMappedDB, MappedDBDyn},
+		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
+		Latest, UpdateResult,
+		historied::tree::{Tree, aggregate::Sum as TreeSum},
+		management::tree::{Tree as TreeMgmt, ForkPlan},
+		backend::nodes::ContextHead,
+		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
+	};
+
+
+	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
+	pub type HValue = Tree<
+		u32,
+		u64,
+		BytesDiff,
+		super::nodes_backend::TreeBackend<BytesDiff>,
+		super::nodes_backend::LinearBackend<Vec<u8>>,
+	>;
+
+	/// Access current value.
+	pub fn value(v: &HValue, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
+		Ok(v.get(current_state).flatten())
+	}
+}
+*/
+
 mod single_node_nodiff {
 	use historied_db::{
 		DecodeWithContext,
@@ -499,6 +860,7 @@ mod single_node_xdelta {
 /// Historied value with multiple parallel branches.
 /// Support multiple implementation from config.
 pub enum HValue {
+	NodesNoDiff(nodes_nodiff::HValue),
 	SingleNodeNoDiff(single_node_nodiff::HValue),
 	SingleNodeXDelta(single_node_xdelta::HValue),
 }
@@ -507,6 +869,7 @@ pub enum HValue {
 /// TODO rem pub (after clean upgrade code).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HValueType {
+	NodesNoDiff,
 	SingleNodeNoDiff,
 	SingleNodeXDelta,
 }
@@ -518,8 +881,7 @@ impl HValueType {
 			(SnapshotDBMode::Xdelta3Diff, true) => HValueType::SingleNodeXDelta,
 			(SnapshotDBMode::Xdelta3Diff, false) => unimplemented!(),
 			(SnapshotDBMode::NoDiff, true) => HValueType::SingleNodeNoDiff,
-			(SnapshotDBMode::NoDiff, false) => unimplemented!(),
-			_ => return None,
+			(SnapshotDBMode::NoDiff, false) => HValueType::NodesNoDiff,
 		})
 	}
 }
@@ -527,11 +889,15 @@ impl HValue {
 	/// Instantiate new value.
 	pub fn new(value_at: Vec<u8>, state: &Latest<(u32, u64)>, kind: HValueType) -> Self {
 		match kind {
-			HValueType::SingleNodeXDelta => HValue::SingleNodeXDelta(
-				single_node_xdelta::HValue::new(BytesDiff::Value(value_at), state, ((), ())),
-			),
+			HValueType::NodesNoDiff => HValue::NodesNoDiff({
+				let context: Context = unimplemented!();
+				nodes_nodiff::HValue::new(Some(value_at), state, context)
+			}),
 			HValueType::SingleNodeNoDiff => HValue::SingleNodeNoDiff(
 				single_node_nodiff::HValue::new(Some(value_at), state, ((), ())),
+			),
+			HValueType::SingleNodeXDelta => HValue::SingleNodeXDelta(
+				single_node_xdelta::HValue::new(BytesDiff::Value(value_at), state, ((), ())),
 			),
 		}
 	}
@@ -539,6 +905,10 @@ impl HValue {
 	/// Decode existing value.
 	pub fn decode_with_context(encoded: &[u8], kind: HValueType) -> Option<Self> {
 		match kind {
+			HValueType::NodesNoDiff => Some(HValue::NodesNoDiff({
+				let context: Context = unimplemented!();
+				nodes_nodiff::HValue::decode_with_context(&mut &encoded[..], &context)?
+			})),
 			HValueType::SingleNodeNoDiff => Some(HValue::SingleNodeNoDiff(
 				single_node_nodiff::HValue::decode_with_context(&mut &encoded[..], &((), ()))?,
 			)),
@@ -551,6 +921,7 @@ impl HValue {
 	/// Access existing value.
 	fn value(&self, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
 		Ok(match self {
+			HValue::NodesNoDiff(inner) => nodes_nodiff::value(inner, current_state)?, 
 			HValue::SingleNodeNoDiff(inner) => single_node_nodiff::value(inner, current_state)?, 
 			HValue::SingleNodeXDelta(inner) => single_node_xdelta::value(inner, current_state)?, 
 		})
@@ -563,6 +934,9 @@ impl HValue {
 		current_state_read: &ForkPlan<u32, u64>,
 	) -> Result<UpdateResult<()>, String> {
 		Ok(match self {
+			HValue::NodesNoDiff(inner) => {
+				inner.set(change, current_state)
+			},
 			HValue::SingleNodeNoDiff(inner) => {
 				inner.set(change, current_state)
 			},
@@ -592,6 +966,7 @@ impl HValue {
 	// TODO consider no error returned (check with node how it behave).
 	fn encode(&self) -> Result<Vec<u8>, String> {
 		Ok(match self {
+			HValue::NodesNoDiff(inner) => inner.encode(),
 			HValue::SingleNodeNoDiff(inner) => inner.encode(),
 			HValue::SingleNodeXDelta(inner) => inner.encode(),
 		})
