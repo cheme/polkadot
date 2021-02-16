@@ -145,6 +145,8 @@ pub struct SnapshotDb<Block: BlockT> {
 	pub ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
 	/// Configuration for this db.
 	config: SnapshotDbConf,
+	/// Historied value variant.
+	hvalue_type: HValueType,
 	// TODO config from db !!!
 	pub _ph: PhantomData<Block>,
 }
@@ -311,10 +313,15 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		};
 		historied_management.pruning_window = config.pruning.clone()
 			.flatten().map(|nb| nb.into());
+		let hvalue_type = HValueType::resolve(&config)
+			.ok_or_else(|| ClientError::StateDatabase(
+				format!("Invalid snapshot config {:?}", config)
+			))?;
 		Ok(SnapshotDb {
 			historied_management,
 			ordered_db,
 			config,
+			hvalue_type,
 			_ph: Default::default(),
 		})
 	}
@@ -394,34 +401,137 @@ pub struct HistoriedDB {
 	pub config: SnapshotDbConf,
 }
 
-type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
-	Vec<u8>,
-	u64,
->;
 /*
-type LinearBackend<'a> = historied_db::backend::encoded_array::EncodedArray<
-	'a,
-	Vec<u8>,
-	historied_db::backend::encoded_array::NoVersion,
->;
+mod SingleNodeEncodedNoDiff {
+	type LinearBackend<'a> = historied_db::backend::encoded_array::EncodedArray<
+		'a,
+		Vec<u8>,
+		historied_db::backend::encoded_array::NoVersion,
+	>;
+	type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
+		'a,
+		historied_db::historied::linear::Linear<Vec<u8>, u64, LinearBackend<'a>>,
+		historied_db::historied::encoded_array::NoVersion,
+	>;
+	// Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
+	// None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
+	pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
+}
 */
-/*
-type TreeBackend<'a> = historied_db::historied::encoded_array::EncodedArray<
-	'a,
-	historied_db::historied::linear::Linear<Vec<u8>, u64, LinearBackend<'a>>,
-	historied_db::historied::encoded_array::NoVersion,
->;
-*/
-type TreeBackend = historied_db::backend::in_memory::MemoryOnly4<
-	historied_db::historied::linear::Linear<BytesDiff, u64, LinearBackend>,
-	u32,
->;
 
-// Warning we use Vec<u8> instead of Some(Vec<u8>) to be able to use encoded_array.
-// None is &[0] when Some are postfixed with a 1. TODO use a custom type instead.
+mod single_node_xdelta {
+	use historied_db::{
+		DecodeWithContext,
+		management::{ManagementMut, ForkableManagement, Management},
+		historied::{DataMut, DataRef, aggregate::Sum as _},
+		mapped_db::{TransactionalMappedDB, MappedDBDyn},
+		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
+		Latest, UpdateResult,
+		historied::tree::{Tree, aggregate::Sum as TreeSum},
+		management::tree::{Tree as TreeMgmt, ForkPlan},
+		backend::nodes::ContextHead,
+		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
+	};
+
+	type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
+		Vec<u8>,
+		u64,
+	>;
+
+	type TreeBackend = historied_db::backend::in_memory::MemoryOnly4<
+		historied_db::historied::linear::Linear<BytesDiff, u64, LinearBackend>,
+		u32,
+	>;
+
+	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
+	pub type HValue = Tree<u32, u64, BytesDiff, TreeBackend, LinearBackend>;
+
+	/// Access current value.
+	pub fn value(v: &HValue, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
+		let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+		let v = v.get_sum(current_state);
+		Ok(v.map(|v| v.into()).flatten())
+	}
+}
+
 /// Historied value with multiple parallel branches.
-pub type HValue = Tree<u32, u64, BytesDiff, TreeBackend, LinearBackend>;
-//pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
+/// Support multiple implementation from config.
+pub enum HValue {
+	SingleNodeXDelta(single_node_xdelta::HValue),
+}
+
+/// Compact resolved type from snapshot config.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HValueType {
+	SingleNodeXDelta,
+}
+
+impl HValueType {
+	fn resolve(config: &SnapshotDbConf) -> Option<Self> {
+		Some(match (&config.diff_mode, &config.no_node_backend) {
+			(SnapshotDBMode::Xdelta3Diff, true) => HValueType::SingleNodeXDelta,
+			(SnapshotDBMode::Xdelta3Diff, false) => unimplemented!(),
+			(SnapshotDBMode::NoDiff, true) => unimplemented!(),
+			(SnapshotDBMode::NoDiff, false) => unimplemented!(),
+			_ => return None,
+		})
+	}
+}
+impl HValue {
+	/// Instantiate new value.
+	pub fn new(value_at: Vec<u8>, state: &Latest<(u32, u64)>) -> Self {
+		unimplemented!();
+		//BytesDiff::Value(v)
+	}
+	/// Decode existing value.
+	pub fn decode_with_context(encoded: &[u8]) -> Option<Self> {
+		unimplemented!();
+	}
+
+	/// Access existing value.
+	fn value(&self, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
+		Ok(match self {
+			HValue::SingleNodeXDelta(inner) => single_node_xdelta::value(inner, current_state)?, 
+		})
+	}
+
+	fn set_change(
+		&mut self,
+		change: Option<Vec<u8>>,
+		current_state: &Latest<(u32, u64)>,
+		current_state_read: &ForkPlan<u32, u64>,
+	) -> Result<UpdateResult<()>, String> {
+		Ok(match self {
+			HValue::SingleNodeXDelta(inner) => {
+				if let Some(v) = change {
+					if let Some(previous) = {
+						// we should use previous state, but since we know this
+						// is a first write for this state (write only once per keys)
+						// current state will always return previous state
+						// TODO this assumption may not stand (see cumulus issue with storage cache).
+						let h = TreeSum::<_, _, BytesDelta, _, _>(inner);
+						h.get_sum(current_state_read)
+					} {
+						let target_value = Some(v).into();
+						let v_diff = historied_db::historied::aggregate::xdelta::substract(&previous, &target_value).into();
+						inner.set(v_diff, current_state)
+					} else {
+						inner.set(BytesDiff::Value(v), current_state)
+					}
+				} else {
+					inner.set(BytesDiff::None, current_state)
+				}
+			},
+		})
+	}
+
+	// TODO consider no error returned (check with node how it behave).
+	fn encode(&self) -> Result<Vec<u8>, String> {
+		Ok(match self {
+			HValue::SingleNodeXDelta(inner) => inner.encode(),
+		})
+	}
+}
 
 impl HistoriedDB {
 	fn storage_inner(
@@ -437,18 +547,16 @@ impl HistoriedDB {
 			Ok(None)
 		}
 	}
+
 	fn decode_inner(
 		key: &[u8],
 		encoded: &[u8],
 		current_state: &ForkPlan<u32, u64>,
 	) -> Result<Option<Vec<u8>>, String> {
-		let v = HValue::decode_with_context(&mut &encoded[..], &((), ()))
+		let h_value = HValue::decode_with_context(&mut &encoded[..])
 			.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, encoded))?;
-		let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-		let v = v.get_sum(current_state);
-		Ok(v.map(|v| v.into()).flatten())
+		Ok(h_value.value(current_state)?)
 	}
-
 }
 
 impl KVBackend for HistoriedDB {
@@ -501,15 +609,14 @@ impl HistoriedDB {
 	/// Iterator on key values. 
 	pub fn iter<'a>(&'a self, column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter(column).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
+			let v = HValue::decode_with_context(&mut &v[..])
 				.or_else(|| {
 					warn!("Invalid historied value k {:?}, v {:?}", k, v);
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
+			let v = v.value(&self.current_state)
+				.expect("Invalid encoded historied value, DB corrupted");
 			v.map(|v| (k, v))
 		})
 	}
@@ -517,15 +624,14 @@ impl HistoriedDB {
 	/// Iterator on key values, starting at a given position. TODO is it use???
 	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter_from(column, start).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..], &((), ()))
+			let v = HValue::decode_with_context(&mut &v[..])
 				.or_else(|| {
 					warn!("decoding fail for k {:?}, v {:?}", k, v);
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
-			let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
-			let v = v.get_sum(&self.current_state);
-			let v: Option<Vec<u8>> = v.map(|v| v.into()).flatten();
+			let v = v.value(&self.current_state)
+				.expect("Invalid encoded historied value, DB corrupted");
 			v.map(|v| (k, v))
 		})
 	}
@@ -535,10 +641,10 @@ impl HistoriedDB {
 /// TODO should we remove DB for the pr?
 pub struct HistoriedDBMut<DB> {
 	/// Branch head indexes to change values of a latest block.
-	pub current_state: historied_db::Latest<(u32, u64)>,
+	pub current_state: Latest<(u32, u64)>,
 	/// Branch head indexes to change values of a latest block.
 	/// TODO is it of any use?? (remove)
-	pub current_state_read: historied_db::management::tree::ForkPlan<u32, u64>,
+	pub current_state_read: ForkPlan<u32, u64>,
 	/// Inner database to modify historied values.
 	pub db: DB,
 	/// Configuration for this db.
@@ -573,46 +679,33 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		column: u32,
 	) {
 		let histo = if let Some(histo) = self.db.get(column, k) {
-			Some(HValue::decode_with_context(&mut &histo[..], &((), ())).expect("Bad encoded value in db, closing"))
+			Some(HValue::decode_with_context(&mut &histo[..]).expect("Bad encoded value in db, closing"))
 		} else {
 			if change.is_none() {
 				return;
 			}
 			None
 		};
-		let mut new_value;
-		match if let Some(v) = change {
-			if let Some(histo) = histo {
-				if let Some(previous) = {
-					let h = TreeSum::<_, _, BytesDelta, _, _>(&histo);
-					// we should use previous state, but since we know this
-					// is a first write for this state (write only once per keys)
-					// current state will always return previous state
-					h.get_sum(&self.current_state_read)
-				} {
-					let target_value = Some(v).into();
-					let v_diff = historied_db::historied::aggregate::xdelta::substract(&previous, &target_value).into();
-					new_value = histo;
-					new_value.set(v_diff, &self.current_state)
-				} else {
-					new_value = histo;
-					new_value.set(BytesDiff::Value(v), &self.current_state)
-				}
-			} else {
-				new_value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
-				historied_db::UpdateResult::Changed(())
-			}
+		match if let Some(mut histo) = histo {
+			let update = histo.set_change(change, &self.current_state, &self.current_state_read)
+				.expect("Could not write change in snapshot db, DB corrupted");
+			(histo, update)
 		} else {
-			new_value = histo.expect("returned above.");
-			new_value.set(BytesDiff::None, &self.current_state)
+			if let Some(v) = change {
+				let value = HValue::new(v, &self.current_state);
+				(value, UpdateResult::Changed(()))
+			} else {
+				return;
+			}
 		} {
-			historied_db::UpdateResult::Changed(()) => {
-				change_set.set_from_vec(column, k, new_value.encode());
+			(value, UpdateResult::Changed(())) => {
+				change_set.set_from_vec(column, k, value.encode()
+					.expect("Could not encode."));
 			},
-			historied_db::UpdateResult::Cleared(()) => {
+			(_value, UpdateResult::Cleared(())) => {
 				change_set.remove(column, k);
 			},
-			historied_db::UpdateResult::Unchanged => (),
+			(_value, UpdateResult::Unchanged) => (),
 		}
 	}
 
@@ -630,8 +723,9 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	}
 
 	fn unchecked_new_single_inner(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
-		let value = HValue::new(BytesDiff::Value(v), &self.current_state, ((), ()));
-		let value = value.encode();
+		let value = HValue::new(v, &self.current_state);
+		let value = value.encode()
+			.expect("Could not encode.");
 		change_set.set_from_vec(column, k, value);
 		// no need for no value set
 	}
