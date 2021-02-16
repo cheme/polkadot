@@ -247,11 +247,16 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 			&best_block,
 			&self.ordered_db,
 		).map_err(|e| DatabaseError(Box::new(e)))?;
+		let hvalue_type = HValueType::resolve(&config).ok_or_else(|| {
+			let e = ClientError::StateDatabase(format!("Invalid snapshot config {:?}", config));
+			DatabaseError(Box::new(e))
+		})?;
 		let mut historied_db = HistoriedDBMut {
 			current_state: update_plan,
 			current_state_read: query_plan,
 			db: self.ordered_db.clone(),
 			config,
+			hvalue_type,
 		};
 
 		let mut tx = Default::default();
@@ -341,6 +346,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			current_state_read: query_plan,
 			db: self.ordered_db.clone(),
 			config: self.config.clone(),
+			hvalue_type: self.hvalue_type,
 		}))
 	}
 
@@ -370,9 +376,11 @@ impl<Block: BlockT> SnapshotDb<Block> {
 					.and_then(|_| management.instance.get_db_state(&h))
 				).ok_or_else(|| ClientError::StateDatabase("Historied management error".into()))?
 		};
+
 		Ok(Some(HistoriedDB {
 			current_state,
 			db: self.ordered_db.clone(),
+			hvalue_type: self.hvalue_type,
 			config: self.config.clone(),
 		}))
 	}
@@ -397,8 +405,10 @@ pub struct HistoriedDB {
 	pub current_state: ForkPlan<u32, u64>,
 	// TODO rem pub as upgrade is cleaned
 	pub db: Arc<dyn OrderedDatabase<DbHash>>,
-	/// Configuration for this db.
+	/// Configuration for this db. TODO is it of any use??
 	pub config: SnapshotDbConf,
+	/// Historied value type for the given conf.
+	pub hvalue_type: HValueType,
 }
 
 /*
@@ -463,14 +473,17 @@ pub enum HValue {
 /// Compact resolved type from snapshot config.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HValueType {
+//	SingleNodeNoDiff,
 	SingleNodeXDelta,
 }
 
 impl HValueType {
-	fn resolve(config: &SnapshotDbConf) -> Option<Self> {
+	/// Get historied value type corresponding to a given config.
+	pub fn resolve(config: &SnapshotDbConf) -> Option<Self> {
 		Some(match (&config.diff_mode, &config.no_node_backend) {
 			(SnapshotDBMode::Xdelta3Diff, true) => HValueType::SingleNodeXDelta,
 			(SnapshotDBMode::Xdelta3Diff, false) => unimplemented!(),
+			//(SnapshotDBMode::NoDiff, true) => HValueType::SingleNodeEncodedNoDiff,
 			(SnapshotDBMode::NoDiff, true) => unimplemented!(),
 			(SnapshotDBMode::NoDiff, false) => unimplemented!(),
 			_ => return None,
@@ -479,13 +492,21 @@ impl HValueType {
 }
 impl HValue {
 	/// Instantiate new value.
-	pub fn new(value_at: Vec<u8>, state: &Latest<(u32, u64)>) -> Self {
-		unimplemented!();
-		//BytesDiff::Value(v)
+	pub fn new(value_at: Vec<u8>, state: &Latest<(u32, u64)>, kind: HValueType) -> Self {
+		match kind {
+			HValueType::SingleNodeXDelta => HValue::SingleNodeXDelta(
+				single_node_xdelta::HValue::new(BytesDiff::Value(value_at), state, ((), ())),
+			),
+		}
 	}
+
 	/// Decode existing value.
-	pub fn decode_with_context(encoded: &[u8]) -> Option<Self> {
-		unimplemented!();
+	pub fn decode_with_context(encoded: &[u8], kind: HValueType) -> Option<Self> {
+		match kind {
+			HValueType::SingleNodeXDelta => Some(HValue::SingleNodeXDelta(
+				single_node_xdelta::HValue::decode_with_context(&mut &encoded[..], &((), ()))?,
+			)),
+		}
 	}
 
 	/// Access existing value.
@@ -542,7 +563,7 @@ impl HistoriedDB {
 	) -> Result<Option<Vec<u8>>, String> {
 		let key = child_prefixed_key(child_info, key);
 		if let Some(v) = self.db.get(column, key.as_slice()) {
-			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state)
+			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type)
 		} else {
 			Ok(None)
 		}
@@ -552,8 +573,9 @@ impl HistoriedDB {
 		key: &[u8],
 		encoded: &[u8],
 		current_state: &ForkPlan<u32, u64>,
+		hvalue_type: HValueType,
 	) -> Result<Option<Vec<u8>>, String> {
-		let h_value = HValue::decode_with_context(&mut &encoded[..])
+		let h_value = HValue::decode_with_context(&mut &encoded[..], hvalue_type)
 			.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, encoded))?;
 		Ok(h_value.value(current_state)?)
 	}
@@ -596,6 +618,7 @@ impl KVBackend for HistoriedDB {
 				key.as_slice(),
 				value.as_slice(),
 				&self.current_state,
+				self.hvalue_type,
 			)? {
 				return Ok(Some((key, value)));
 			}
@@ -609,7 +632,7 @@ impl HistoriedDB {
 	/// Iterator on key values. 
 	pub fn iter<'a>(&'a self, column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter(column).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..])
+			let v = HValue::decode_with_context(&mut &v[..], self.hvalue_type)
 				.or_else(|| {
 					warn!("Invalid historied value k {:?}, v {:?}", k, v);
 					None
@@ -624,7 +647,7 @@ impl HistoriedDB {
 	/// Iterator on key values, starting at a given position. TODO is it use???
 	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter_from(column, start).filter_map(move |(k, v)| {
-			let v = HValue::decode_with_context(&mut &v[..])
+			let v = HValue::decode_with_context(&mut &v[..], self.hvalue_type)
 				.or_else(|| {
 					warn!("decoding fail for k {:?}, v {:?}", k, v);
 					None
@@ -647,8 +670,10 @@ pub struct HistoriedDBMut<DB> {
 	pub current_state_read: ForkPlan<u32, u64>,
 	/// Inner database to modify historied values.
 	pub db: DB,
-	/// Configuration for this db.
+	/// Configuration for this db. TODO check if use
 	pub config: SnapshotDbConf,
+	/// Historied value type for the given conf.
+	pub hvalue_type: HValueType,
 }
 
 impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
@@ -679,7 +704,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		column: u32,
 	) {
 		let histo = if let Some(histo) = self.db.get(column, k) {
-			Some(HValue::decode_with_context(&mut &histo[..]).expect("Bad encoded value in db, closing"))
+			Some(HValue::decode_with_context(&mut &histo[..], self.hvalue_type).expect("Bad encoded value in db, closing"))
 		} else {
 			if change.is_none() {
 				return;
@@ -692,7 +717,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			(histo, update)
 		} else {
 			if let Some(v) = change {
-				let value = HValue::new(v, &self.current_state);
+				let value = HValue::new(v, &self.current_state, self.hvalue_type);
 				(value, UpdateResult::Changed(()))
 			} else {
 				return;
@@ -723,7 +748,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	}
 
 	fn unchecked_new_single_inner(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
-		let value = HValue::new(v, &self.current_state);
+		let value = HValue::new(v, &self.current_state, self.hvalue_type);
 		let value = value.encode()
 			.expect("Could not encode.");
 		change_set.set_from_vec(column, k, value);

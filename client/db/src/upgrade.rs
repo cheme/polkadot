@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
 use sp_runtime::traits::{Block as BlockT, HashFor, NumberFor, Header as HeaderT};
-use crate::snapshot::HValue;
+use crate::snapshot::{HValue, HValueType};
 use crate::utils::DatabaseType;
 use crate::{StateDb, PruningMode, StateMetaDb};
 use historied_db::management::tree::TreeManagement;
@@ -137,12 +137,14 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	}
 	let current_state = management.get_db_state(&hash_for_root).expect("just added");
 	println!("current state {:?}", current_state);
+	let config = Default::default();
+	let hvalue_type = HValueType::resolve(&config).expect("invalid conf");
 	let historied_db = crate::snapshot::HistoriedDB {
 		current_state,
 		db: db.clone(),
-		config: Default::default(),
+		config,
+		hvalue_type,
 	};
-
 
 	let mut root_callback = trie_db::TrieRoot::<HashFor<Block>, _>::default();
 	let _state = management.get_db_state(&hash_for_root).expect("just added");
@@ -274,11 +276,14 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 	let mut count = 0;
 
 	let db_tmp: Arc<dyn Database<_>> = Arc::new(historied_persistence.clone());
+	let config = Default::default();
+	let hvalue_type = HValueType::resolve(&config).expect("invalid conf");
 	let mut kv_db = crate::snapshot::HistoriedDBMut {
 		current_state: state,
 		current_state_read: unimplemented!(),
 		db: db_tmp,
-		config: Default::default(),
+		config,
+		hvalue_type,
 	};
 	let mut tx = kv_db.transaction();
 	let mut longest_key = 0;
@@ -308,10 +313,13 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	let current_state = management.get_db_state(&block_hash).expect("just added");
 	let db_tmp: Arc<dyn OrderedDatabase<_>> = Arc::new(historied_persistence.clone());
+	let config = Default::default();
+	let hvalue_type = HValueType::resolve(&config).expect("invalid conf");
 	let historied_db = crate::snapshot::HistoriedDB {
 		current_state,
 		db: db_tmp,
-		config: Default::default(),
+		config,
+		hvalue_type,
 	};
 	let mut count = 0;
 	for (_k, _v) in historied_db.iter(crate::columns::STATE_SNAPSHOT) {
