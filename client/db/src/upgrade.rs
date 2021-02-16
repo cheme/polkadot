@@ -99,7 +99,7 @@ fn migrate_2_to_3<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_bl
 
 	Ok(())
 }
-
+/*
 fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, hash_for_root: Block::Hash) -> sp_blockchain::Result<()> {
 	let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(crate::utils::NUM_COLUMNS);
 	let path = db_path.to_str()
@@ -155,8 +155,8 @@ fn compare_latest_roots<Block: BlockT>(db_path: &Path, db_type: DatabaseType, ha
 	println!("hash calculated {:?} : {}", hash, now.elapsed().as_millis());
 
 	Ok(())
-}
-
+}*/
+/*
 /// Hacky migrate to trigger action on db.
 /// Here drop historied state content.
 fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_blockchain::Result<()> {
@@ -339,7 +339,7 @@ fn delete_historied<Block: BlockT>(db_path: &Path, db_type: DatabaseType) -> sp_
 
 	Ok(())
 }
-
+*/
 struct ArcKVDB<D: KeyValueDB>(Arc<D>);
 
 impl<D: KeyValueDB> parity_util_mem::MallocSizeOf for ArcKVDB<D> {
