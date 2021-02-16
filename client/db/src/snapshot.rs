@@ -429,6 +429,38 @@ mod SingleNodeEncodedNoDiff {
 }
 */
 
+mod single_node_nodiff {
+	use historied_db::{
+		DecodeWithContext,
+		management::{ManagementMut, ForkableManagement, Management},
+		historied::{DataMut, Data, DataRef, aggregate::Sum as _},
+		mapped_db::{TransactionalMappedDB, MappedDBDyn},
+		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
+		Latest, UpdateResult,
+		historied::tree::{Tree, aggregate::Sum as TreeSum},
+		management::tree::{Tree as TreeMgmt, ForkPlan},
+		backend::nodes::ContextHead,
+	};
+
+	type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
+		Option<Vec<u8>>,
+		u64,
+	>;
+
+	type TreeBackend = historied_db::backend::in_memory::MemoryOnly4<
+		historied_db::historied::linear::Linear<Option<Vec<u8>>, u64, LinearBackend>,
+		u32,
+	>;
+
+	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
+	pub type HValue = Tree<u32, u64, Option<Vec<u8>>, TreeBackend, LinearBackend>;
+
+	/// Access current value.
+	pub fn value(v: &HValue, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
+		Ok(v.get(current_state).flatten())
+	}
+}
+
 mod single_node_xdelta {
 	use historied_db::{
 		DecodeWithContext,
@@ -467,13 +499,15 @@ mod single_node_xdelta {
 /// Historied value with multiple parallel branches.
 /// Support multiple implementation from config.
 pub enum HValue {
+	SingleNodeNoDiff(single_node_nodiff::HValue),
 	SingleNodeXDelta(single_node_xdelta::HValue),
 }
 
 /// Compact resolved type from snapshot config.
+/// TODO rem pub (after clean upgrade code).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HValueType {
-//	SingleNodeNoDiff,
+	SingleNodeNoDiff,
 	SingleNodeXDelta,
 }
 
@@ -483,8 +517,7 @@ impl HValueType {
 		Some(match (&config.diff_mode, &config.no_node_backend) {
 			(SnapshotDBMode::Xdelta3Diff, true) => HValueType::SingleNodeXDelta,
 			(SnapshotDBMode::Xdelta3Diff, false) => unimplemented!(),
-			//(SnapshotDBMode::NoDiff, true) => HValueType::SingleNodeEncodedNoDiff,
-			(SnapshotDBMode::NoDiff, true) => unimplemented!(),
+			(SnapshotDBMode::NoDiff, true) => HValueType::SingleNodeNoDiff,
 			(SnapshotDBMode::NoDiff, false) => unimplemented!(),
 			_ => return None,
 		})
@@ -497,12 +530,18 @@ impl HValue {
 			HValueType::SingleNodeXDelta => HValue::SingleNodeXDelta(
 				single_node_xdelta::HValue::new(BytesDiff::Value(value_at), state, ((), ())),
 			),
+			HValueType::SingleNodeNoDiff => HValue::SingleNodeNoDiff(
+				single_node_nodiff::HValue::new(Some(value_at), state, ((), ())),
+			),
 		}
 	}
 
 	/// Decode existing value.
 	pub fn decode_with_context(encoded: &[u8], kind: HValueType) -> Option<Self> {
 		match kind {
+			HValueType::SingleNodeNoDiff => Some(HValue::SingleNodeNoDiff(
+				single_node_nodiff::HValue::decode_with_context(&mut &encoded[..], &((), ()))?,
+			)),
 			HValueType::SingleNodeXDelta => Some(HValue::SingleNodeXDelta(
 				single_node_xdelta::HValue::decode_with_context(&mut &encoded[..], &((), ()))?,
 			)),
@@ -512,6 +551,7 @@ impl HValue {
 	/// Access existing value.
 	fn value(&self, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
 		Ok(match self {
+			HValue::SingleNodeNoDiff(inner) => single_node_nodiff::value(inner, current_state)?, 
 			HValue::SingleNodeXDelta(inner) => single_node_xdelta::value(inner, current_state)?, 
 		})
 	}
@@ -523,6 +563,9 @@ impl HValue {
 		current_state_read: &ForkPlan<u32, u64>,
 	) -> Result<UpdateResult<()>, String> {
 		Ok(match self {
+			HValue::SingleNodeNoDiff(inner) => {
+				inner.set(change, current_state)
+			},
 			HValue::SingleNodeXDelta(inner) => {
 				if let Some(v) = change {
 					if let Some(previous) = {
@@ -549,6 +592,7 @@ impl HValue {
 	// TODO consider no error returned (check with node how it behave).
 	fn encode(&self) -> Result<Vec<u8>, String> {
 		Ok(match self {
+			HValue::SingleNodeNoDiff(inner) => inner.encode(),
 			HValue::SingleNodeXDelta(inner) => inner.encode(),
 		})
 	}
