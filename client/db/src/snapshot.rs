@@ -136,22 +136,19 @@ pub mod snapshot_db_conf {
 /// Snapshot db implementation.
 #[derive(Clone)]
 pub struct SnapshotDb<Block: BlockT> {
-	// TODO rem pub
 	/// Historied management use by snapshot db.
 	/// Currently snapshot db is single consumer, so init and clear
 	/// operation also act on `historied_management`.
 	/// This use a transactional layer in storage.
-	pub historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
+	historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
 	/// Database with historied items. Warning, this is non transactional.
-	pub ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
+	ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
 	/// Configuration for this db.
 	config: SnapshotDbConf,
 	/// Historied value variant.
 	hvalue_type: HValueType,
 	/// Db for storing nodes. 
-	pub nodes_db: Arc<dyn Database<DbHash>>,
-	// TODO config from db !!!
-	pub _ph: PhantomData<Block>,
+	nodes_db: Arc<dyn Database<DbHash>>,
 }
 
 fn child_prefixed_key(child_info: Option<&ChildInfo>, key: &[u8]) -> Vec<u8> {
@@ -181,15 +178,15 @@ fn child_prefixed_key_inner_default(prefix: &[u8], key: &[u8]) -> Vec<u8> {
 impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 	fn clear_snapshot_db(&self) -> sp_database::error::Result<()> {
 		let mut management = self.historied_management.inner.write();
-		TreeManagementSync::<Block, TreeManagementPersistence>::clear(&self.ordered_db)
-			.map_err(|e| DatabaseError(Box::new(e)))?;
 		// get non transactional mappeddb.
 		let db = &mut management.instance.ser().db;
-		snapshot_db_conf::update_db_conf(db, |mut genesis_conf| {
+		snapshot_db_conf::update_db_conf(db, |genesis_conf| {
 			*genesis_conf = Default::default();
 			Ok(())
 		}).map_err(|e| DatabaseError(Box::new(e)))?;
 
+		TreeManagementSync::<Block, TreeManagementPersistence>::clear(&self.ordered_db)
+			.map_err(|e| DatabaseError(Box::new(e)))?;
 		self.ordered_db.clear_prefix(crate::columns::AUX, b"snapshot_db/");
 		self.ordered_db.clear_prefix(crate::columns::STATE_SNAPSHOT, b"");
 
@@ -240,7 +237,7 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 		{
 			let mut management = self.historied_management.inner.write();
 			let db = &mut management.instance.ser().db;
-			snapshot_db_conf::update_db_conf(db, |mut genesis_conf| {
+			snapshot_db_conf::update_db_conf(db, |genesis_conf| {
 				*genesis_conf = config.clone();
 				Ok(())
 			}).map_err(|e| DatabaseError(Box::new(e)))?;
@@ -337,10 +334,8 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			config,
 			hvalue_type,
 			nodes_db,
-			_ph: Default::default(),
 		};
 
-		// TODO awkward registration, code should be part of tree management.
 		let storage = snapshot_db.clone();
 		let pending = snapshot_db.historied_management.inner.read().consumer_transaction.clone();
 		snapshot_db.historied_management.register_consumer(Box::new(TransactionalConsumer {
@@ -351,8 +346,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		Ok(snapshot_db)
 	}
 
-	// TODO rename (it does add state)
-	pub fn get_historied_db_mut(
+	pub fn new_block_historied_db_mut(
 		&self,
 		parent: &Block::Hash,
 		at: &Block::Hash,
@@ -443,7 +437,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		let mut ordered_historied_db = if let Some((hash, parent_hash)) = hashes {
 			// Ensure pending layer is clean
 			let _ = self.historied_management.extract_changes();
-			self.get_historied_db_mut(&parent_hash, &hash)?
+			self.new_block_historied_db_mut(&parent_hash, &hash)?
 		} else {
 			None
 		};
@@ -502,6 +496,11 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		);
 
 		Ok(())
+	}
+
+	/// Access underlying historied management
+	pub fn historied_management(&self) -> &TreeManagementSync<Block, TreeManagementPersistence> {
+		&self.historied_management
 	}
 }
 

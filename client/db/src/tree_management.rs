@@ -149,14 +149,8 @@ pub struct TreeManagementSync<Block: BlockT, S: TreeManagementStorage + 'static>
 // TODO remove pub
 pub struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 'static> {
 	// TODO rem pub
-	pub instance: TreeManagement<
-		<HashFor<Block> as Hasher>::Out, // TODO Block::Hash?
-		S,
-	>,
-	consumer: RegisteredConsumer<
-		<HashFor<Block> as Hasher>::Out, // TODO Block::Hash?
-		S,
-	>,
+	pub instance: TreeManagement<Block::Hash, S>,
+	consumer: RegisteredConsumer<Block::Hash, S>,
 	// TODO rem pub
 	// TODO upstream consumer could return tx to avoid inner mutability but no asumption on type.
 	pub consumer_transaction: Arc<RwLock<Transaction<DbHash>>>,
@@ -191,8 +185,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 		self.inner.write().consumer.register_consumer(consumer);
 	}
 
-	/// Write management state changes to transaction container.
-	/// TODO rename?
+	/// Write management state changes to input transaction.
 	pub fn apply_historied_management_changes(
 		historied_management: &mut TreeManagement<
 			<HashFor<Block> as Hasher>::Out,
@@ -231,9 +224,18 @@ impl<Block, S> TreeManagementSync<Block, S>
 		parent_hash: &Block::Hash,
 		hash: &Block::Hash,
 	) -> ClientResult<(ForkPlan<u32, u64>, Latest<(u32, u64)>)> {
+
 		// lock does notinclude update of value as we do not have concurrent block creation
 		let mut lock = self.inner.write();
-		let mut management = &mut lock.instance;
+		let management = &mut lock.instance;
+
+		// We check if exists first.
+		if let Some(query_plan) = management.get_db_state(hash) {
+			let update_plan = management.get_db_state_mut(&hash)
+				.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
+			return Ok((query_plan, update_plan));
+		}
+
 		if let Some(state) = Some(management.get_db_state_for_fork(parent_hash)
 			.unwrap_or_else(|| {
 				// allow this to start from existing state TODO add a stored boolean to only allow
@@ -245,8 +247,6 @@ impl<Block, S> TreeManagementSync<Block, S>
 			// TODO could use result as update plan (need to check if true)
 			let _ = management.append_external_state(hash.clone(), &state)
 				.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
-			// TODO could make sense to use previous query plan since it
-			// should mainly be use to read previous value.
 			let query_plan = management.get_db_state(&hash)
 				.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
 			let update_plan = management.get_db_state_mut(&hash)
@@ -264,7 +264,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 		db: &Arc<dyn OrderedDatabase<DbHash>>,
 	) -> ClientResult<(ForkPlan<u32, u64>, Latest<(u32, u64)>)> {
 		let mut lock = self.inner.write();
-		let mut management = &mut lock.instance;
+		let management = &mut lock.instance;
 		let state = management.latest_state_fork();
 		management.append_external_state(hash.clone(), &state);
 

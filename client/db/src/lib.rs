@@ -1726,7 +1726,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					let block = latest_final.0;
 					if let (Some(number), Some(hash)) = (self.blockchain.block_number_from_id(&block)?,
 						self.blockchain.block_hash_from_id(&block)?) {
-						self.snapshot_db.historied_management.migrate(&hash, number, &self.storage.db)?;
+						self.snapshot_db.historied_management().migrate(&hash, number, &self.storage.db)?;
 					}
 				}
 
@@ -1763,7 +1763,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		self.blockchain.update_meta(hash, number, is_best, is_finalized);
 		self.changes_tries_storage.post_commit(changes_trie_cache_ops);
 		if let Some(number) = self.blockchain.block_number_from_id(&block)? {
-			self.snapshot_db.historied_management.migrate(&hash, number, &self.storage.db)?;
+			self.snapshot_db.historied_management().migrate(&hash, number, &self.storage.db)?;
 		}
 		Ok(())
 	}
