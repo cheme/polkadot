@@ -155,7 +155,6 @@ const CACHE_HEADERS: usize = 8;
 const DEFAULT_CHILD_RATIO: (usize, usize) = (1, 10);
 
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
-/// TODO looks like Arc is not necessary (Box could be use).
 pub type DbState<B> = sp_state_machine::TrieBackend<
 	Arc<dyn sp_state_machine::Storage<HashFor<B>>>, HashFor<B>
 >;
@@ -844,7 +843,7 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 				.map(|(k, v)| (k, Some(v))).collect();
 			storage_child.push((child_key, storage));
 		}
-		// feed cache but more importantly the historied db
+		// feed cache and the historied db
 		self.update_storage(storage_top, storage_child)?;
 
 		self.commit_state = true;
@@ -1278,81 +1277,8 @@ impl<Block: BlockT> Backend<Block> {
 		let mut finalization_displaced_leaves = None;
 
 		operation.apply_aux(&mut transaction);
-
-		let mut is_genesis = false;
-		let hashes = operation.pending_block.as_ref().map(|pending_block| {
-			if pending_block.header.number().is_zero() {
-				is_genesis = true;
-			}
-			let hash = pending_block.header.hash();
-			let parent_hash = *pending_block.header.parent_hash();
-			(hash, parent_hash)
-		});
-
-		let mut ordered_historied_db = if let Some((hash, parent_hash)) = hashes {
-			// Ensure pending layer is clean
-			let _ = self.snapshot_db.historied_management.extract_changes();
-			self.snapshot_db.get_historied_db_mut(&parent_hash, &hash)?
-		} else {
-			None
-		};
-
 		operation.apply_offchain(&mut transaction);
-
-		// Do not journal genesis. 
-		let mut management = (self.snapshot_db.do_journals() && !is_genesis)
-			.then(|| self.snapshot_db.historied_management.inner.write());
-		let journals = management.as_mut().map(|management| management.instance.ser());
-		let mut journal_keys = journals.is_some().then(|| Vec::new());
-		// state change uses ordered db
-		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
-			let historied_update = operation.storage_updates.clone();
-			let mut nb = 0;
-			for (k, change) in historied_update {
-				ordered_historied_db.update_single(None, k.as_slice(), change, &mut transaction, journal_keys.as_mut());
-				nb += 1;
-			}
-
-			let historied_update = operation.child_storage_updates.clone();
-			for (storage_key, historied_update) in historied_update {
-				assert!(storage_key.starts_with(well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX));
-
-				let child_info = ChildInfo::new_default_from_vec(storage_key);
-				for (k, change) in historied_update {
-					ordered_historied_db.update_single(Some(&child_info), k.as_slice(), change, &mut transaction, journal_keys.as_mut());
-					nb += 1;
-				}
-			}
-
-
-			warn!("committed {:?} change in historied db", nb);
-		}
-
-		if let (
-			Some(journal_keys),
-			Some(ordered_db),
-			Some(historied),
-		) = (journal_keys, journals, ordered_historied_db.as_ref()) {
-			// Note that this is safe because we import a new block.
-			// Otherwhise we would need to share cache with a single journal instance.
-			let mut journals = historied_db::management::JournalForMigrationBasis
-				::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
-				::from_db(ordered_db);
-			journals.add_changes(
-				ordered_db,
-				historied.current_state.latest().clone(),
-				journal_keys,
-				true, // New block, no need for fetch. TODO does this assertion stand?? (at least parameter
-				// when moving this code to snapshot_db.
-			)
-		}
-
-		// write management state changes (after changing values because change
-		// journal is using historied management db).
-		TreeManagementSync::<Block, _>::apply_historied_management_changes(
-			&mut self.snapshot_db.historied_management.inner.write().instance,
-			&mut transaction,
-		);
+		self.snapshot_db.apply_block_change(&operation, &mut transaction)?;
 
 		let mut meta_updates = Vec::with_capacity(operation.finalized_blocks.len());
 		let mut last_finalized_hash = self.blockchain.meta.read().finalized_hash;
@@ -1672,12 +1598,6 @@ impl<Block: BlockT> Backend<Block> {
 		Ok(())
 	}
 
-	fn historied_pruning(&self, hash: &Block::Hash, number: NumberFor<Block>)
-		-> ClientResult<()> {
-		self.snapshot_db.historied_management.migrate(hash, number, &self.storage.db)?;
-		Ok(())
-	}
-
 	fn prune_blocks(
 		&self,
 		transaction: &mut Transaction<DbHash>,
@@ -1819,7 +1739,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					let block = latest_final.0;
 					if let (Some(number), Some(hash)) = (self.blockchain.block_number_from_id(&block)?,
 						self.blockchain.block_hash_from_id(&block)?) {
-						self.historied_pruning(&hash, number)?;
+						self.snapshot_db.historied_management.migrate(&hash, number, &self.storage.db)?;
 					}
 				}
 
@@ -1856,7 +1776,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		self.blockchain.update_meta(hash, number, is_best, is_finalized);
 		self.changes_tries_storage.post_commit(changes_trie_cache_ops);
 		if let Some(number) = self.blockchain.block_number_from_id(&block)? {
-			self.historied_pruning(&hash, number)?;
+			self.snapshot_db.historied_management.migrate(&hash, number, &self.storage.db)?;
 		}
 		Ok(())
 	}

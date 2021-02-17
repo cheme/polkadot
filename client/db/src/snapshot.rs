@@ -423,6 +423,86 @@ impl<Block: BlockT> SnapshotDb<Block> {
 	pub fn do_journals(&self) -> bool {
 		self.config.journal_pruning
 	}
+
+	/// Process block changes, and update a input transaction.
+	pub fn apply_block_change(
+		&self,
+		operation: &crate::BlockImportOperation<Block>,
+		transaction: &mut Transaction<DbHash>,
+	) -> ClientResult<()> {
+		let mut is_genesis = false;
+		let hashes = operation.pending_block.as_ref().map(|pending_block| {
+			if pending_block.header.number().is_zero() {
+				is_genesis = true;
+			}
+			let hash = pending_block.header.hash();
+			let parent_hash = *pending_block.header.parent_hash();
+			(hash, parent_hash)
+		});
+
+		let mut ordered_historied_db = if let Some((hash, parent_hash)) = hashes {
+			// Ensure pending layer is clean
+			let _ = self.historied_management.extract_changes();
+			self.get_historied_db_mut(&parent_hash, &hash)?
+		} else {
+			None
+		};
+
+		// Do not journal genesis. 
+		let mut management = (self.do_journals() && !is_genesis)
+			.then(|| self.historied_management.inner.write());
+		let journals = management.as_mut().map(|management| management.instance.ser());
+		let mut journal_keys = journals.is_some().then(|| Vec::new());
+		// state change uses ordered db
+		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
+			let historied_update = operation.storage_updates.clone();
+			let mut nb = 0;
+			for (k, change) in historied_update {
+				ordered_historied_db.update_single(None, k.as_slice(), change, transaction, journal_keys.as_mut());
+				nb += 1;
+			}
+
+			let historied_update = operation.child_storage_updates.clone();
+			for (storage_key, historied_update) in historied_update {
+				assert!(storage_key.starts_with(well_known_keys::DEFAULT_CHILD_STORAGE_KEY_PREFIX));
+
+				let child_info = ChildInfo::new_default_from_vec(storage_key);
+				for (k, change) in historied_update {
+					ordered_historied_db.update_single(Some(&child_info), k.as_slice(), change, transaction, journal_keys.as_mut());
+					nb += 1;
+				}
+			}
+			warn!("committed {:?} change in historied db", nb);
+		}
+
+		if let (
+			Some(journal_keys),
+			Some(ordered_db),
+			Some(historied),
+		) = (journal_keys, journals, ordered_historied_db.as_ref()) {
+			// Note that this is safe because we import a new block.
+			// Otherwhise we would need to share cache with a single journal instance.
+			let mut journals = historied_db::management::JournalForMigrationBasis
+				::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
+				::from_db(ordered_db);
+			journals.add_changes(
+				ordered_db,
+				historied.current_state.latest().clone(),
+				journal_keys,
+				true, // New block, no need for fetch. TODO does this assertion stand?? (at least parameter
+				// when moving this code to snapshot_db.
+			)
+		}
+
+		// write management state changes (after changing values because change
+		// journal is using historied management db).
+		TreeManagementSync::<Block, _>::apply_historied_management_changes(
+			&mut self.historied_management.inner.write().instance,
+			transaction,
+		);
+
+		Ok(())
+	}
 }
 
 /// Key value db at a given block for an historied DB.
