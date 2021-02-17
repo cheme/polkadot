@@ -111,25 +111,6 @@ impl TreeManagementStorage for TreeManagementPersistence {
 	type TreeState = historied_tree_bindings::TreeState;
 }
 
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-impl TreeManagementStorage for TreeManagementPersistenceNoTx {
-	const JOURNAL_CHANGES: bool = true;
-	type Storage = crate::utils::ordered_database::RocksdbStorage; // TOOD MappedDBDyn instead??
-	type Mapping = historied_tree_bindings::Mapping;
-	type JournalDelete = historied_tree_bindings::JournalDelete;
-	type LastIndex = historied_tree_bindings::LastIndex;
-	type NeutralElt = historied_tree_bindings::NeutralElt;
-	type TreeMeta = historied_tree_bindings::TreeMeta;
-	type TreeState = historied_tree_bindings::TreeState;
-}
-
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-#[derive(Clone)]
-/// Database backed tree management, no transaction.
-pub struct TreeManagementPersistenceNoTx;
-
-
-
 /// Tree management shareable sync instance.
 #[derive(Clone)]
 pub struct TreeManagementSync<Block: BlockT, S: TreeManagementStorage + 'static> {

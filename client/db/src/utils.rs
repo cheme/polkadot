@@ -487,10 +487,11 @@ impl DatabaseType {
 
 /// `OrderedDatabase` trait implementations.
 pub(crate) mod ordered_database {
-
+	#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 	use std::sync::Arc;
-	use sp_database::{Transaction, RadixTreeDatabase};
-	use sp_database::{Database, OrderedDatabase};
+	#[cfg(any(feature = "with-kvdb-rocksdb", test))]
+	use sp_database::Transaction;
+	use sp_database::{RadixTreeDatabase, Database, OrderedDatabase};
 
 	#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 	#[derive(Clone)]

@@ -2035,7 +2035,7 @@ pub(crate) mod tests {
 	use sp_runtime::testing::{Header, Block as RawBlock, ExtrinsicWrapper};
 	use sp_runtime::traits::{Hash, BlakeTwo256};
 	use sp_runtime::generic::DigestItem;
-	use sp_state_machine::{TrieMut, TrieDBMut, OffchainOverlayedChanges};
+	use sp_state_machine::{TrieMut, TrieDBMut};
 	use sp_blockchain::{lowest_common_ancestor, tree_route};
 
 	pub(crate) type Block = RawBlock<ExtrinsicWrapper<u64>>;
