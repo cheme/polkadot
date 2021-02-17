@@ -139,23 +139,22 @@ pub struct TreeManagementPersistenceNoTx;
 /// Tree management shareable sync instance.
 #[derive(Clone)]
 pub struct TreeManagementSync<Block: BlockT, S: TreeManagementStorage + 'static> {
-	///  TODO remove pub
 	/// Mutable shared state.
-	pub inner: Arc<RwLock<TreeManagementInner<Block, S>>>,
+	pub(crate) inner: Arc<RwLock<TreeManagementInner<Block, S>>>,
 	/// Pruning window.
 	pub pruning_window: Option<NumberFor<Block>>,
 }
 
 // TODO remove pub
-pub struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 'static> {
-	// TODO rem pub
-	pub instance: TreeManagement<Block::Hash, S>,
-	consumer: RegisteredConsumer<Block::Hash, S>,
-	// TODO rem pub
-	// TODO upstream consumer could return tx to avoid inner mutability but no asumption on type.
-	pub consumer_transaction: Arc<RwLock<Transaction<DbHash>>>,
+pub(crate) struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 'static> {
+	/// Inner tree management instance.
+	pub(crate) instance: TreeManagement<Block::Hash, S>,
+	/// Registered consumer of the tree management.
+	pub(crate) consumer: RegisteredConsumer<Block::Hash, S>,
+	/// Reference to a usable consumer transaction layer.
+	pub(crate) consumer_transaction: Arc<RwLock<Transaction<DbHash>>>,
 	/// Next block to apply migrate.
-	pub next_migrate: Option<NumberFor<Block>>,
+	pub(crate) next_migrate: Option<NumberFor<Block>>,
 }
 
 // TODO move in dep
