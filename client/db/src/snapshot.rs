@@ -1320,43 +1320,42 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 {
 	fn migrate(&self, migrate: &mut historied_db::management::Migrate<B::Hash, TreeManagement<B::Hash>>) {
 		let mut keys_to_migrate = std::collections::BTreeSet::<Vec<u8>>::new();
-		let (prune, state_changes) = migrate.migrate().touched_state();
-		// this db is transactional.
-		let db = migrate.management().ser();
-		let mut journals = historied_db::management::JournalForMigrationBasis
-			::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
-			::from_db(db);
-	
-		if let Some(pruning) = prune {
-			journals.remove_changes_before(db, &(pruning, Default::default()), &mut keys_to_migrate);
-		}
+		if self.storage.do_journals() {
+			let (prune, state_changes) = migrate.migrate().touched_state();
+			// this db is transactional.
+			let db = migrate.management().ser();
+			let mut journals = historied_db::management::JournalForMigrationBasis
+				::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
+				::from_db(db);
+		
+			if let Some(pruning) = prune {
+				journals.remove_changes_before(db, &(pruning, Default::default()), &mut keys_to_migrate);
+			}
 
-		for state in state_changes {
-			let state = state.clone();
-			let state = (state.1, state.0);
-			if let Some(removed) = journals.remove_changes_at(db, &state) {
-				for key in removed {
-					keys_to_migrate.insert(key);
+			for state in state_changes {
+				let state = state.clone();
+				let state = (state.1, state.0);
+				if let Some(removed) = journals.remove_changes_at(db, &state) {
+					for key in removed {
+						keys_to_migrate.insert(key);
+					}
 				}
 			}
-		}
 
-		if keys_to_migrate.is_empty() {
-			return;
-		}
+			if keys_to_migrate.is_empty() {
+				return;
+			}
+		};
 
 		let mut pending = self.pending.write();
+		let hvalue_type = self.storage.hvalue_type;
 		let column = crate::columns::STATE_SNAPSHOT;
-		for k in keys_to_migrate {
-			let k = k.as_slice();
-
-			let mut histo: HValue = if let Some(histo) = self.storage.ordered_db.get(column, k) {
-				HValue::decode_with_context(k, &mut &histo[..], self.storage.hvalue_type, &self.storage.nodes_db)
-					.expect("Bad encoded value in db, closing")
-			} else {
-				continue;
-			};
-
+		let mut process_key = |
+			k: &[u8], histo: Vec<u8>,
+			nodes_db: &Arc<dyn Database<DbHash>>,
+		| {
+			let mut histo = HValue::decode_with_context(k, &mut &histo[..], hvalue_type, nodes_db)
+				.expect("Bad encoded value in db, closing");
 			match histo.migrate::<B>(migrate) {
 				historied_db::UpdateResult::Changed(()) => {
 					pending.set_from_vec(column, k, histo.encode().expect("Invalid encoding, closing"));
@@ -1365,6 +1364,20 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 					pending.remove(column, k);
 				},
 				historied_db::UpdateResult::Unchanged => (),
+			}
+		};
+
+		if self.storage.do_journals() {
+			for k in keys_to_migrate {
+				if let Some(histo) = self.storage.ordered_db.get(column, k.as_slice()) {
+					process_key(k.as_slice(), histo, &self.storage.nodes_db);
+				} else {
+					return;
+				};
+			}
+		} else {
+			for (k, histo) in self.storage.ordered_db.iter(column) {
+				process_key(k.as_slice(), histo, &self.storage.nodes_db);
 			}
 		}
 
