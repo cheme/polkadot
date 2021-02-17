@@ -84,19 +84,6 @@ mod parity_db;
 mod tree_management;
 mod snapshot;
 
-use historied_db::{
-	DecodeWithContext,
-	management::{ManagementMut, ForkableManagement, Management},
-	historied::{DataMut, DataRef, aggregate::Sum as _},
-	mapped_db::{TransactionalMappedDB, MappedDBDyn},
-	db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
-	Latest, UpdateResult,
-	historied::tree::{Tree, aggregate::Sum as TreeSum},
-	management::tree::{Tree as TreeMgmt, ForkPlan},
-	backend::nodes::ContextHead,
-	historied::aggregate::xdelta::{BytesDelta, BytesDiff},
-};
-
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::io;
@@ -117,7 +104,7 @@ use sp_blockchain::{
 use codec::{Decode, Encode};
 use hash_db::Prefix;
 use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
-use sp_database::{Transaction, RadixTreeDatabase, SnapshotDbConf};
+use sp_database::{Transaction, SnapshotDbConf};
 use sp_core::{Hasher, ChangesTrieConfiguration};
 use sp_core::offchain::OffchainOverlayedChange;
 use sp_core::storage::{well_known_keys, ChildInfo};
@@ -130,7 +117,6 @@ use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
 	StorageCollection, ChildStorageCollection, OffchainChangesCollection,
 	backend::Backend as StateBackend, StateMachineStats,
-	kv_backend::KVBackend,
 };
 use crate::utils::{DatabaseType, Meta, meta_keys, read_db, read_meta};
 use crate::changes_tries_storage::{DbChangesTrieStorage, DbChangesTrieStorageTransaction};
@@ -138,6 +124,7 @@ use sc_state_db::StateDb;
 use sp_blockchain::{CachedHeaderMetadata, HeaderMetadata, HeaderMetadataCache};
 use crate::storage_cache::{CachingState, SyncingCachingState, SharedCache, new_shared_cache};
 use crate::stats::StateUsageStats;
+use historied_db::mapped_db::TransactionalMappedDB;
 
 // Re-export the Database trait so that one can pass an implementation of it.
 pub use sp_database::{Database, OrderedDatabase};
