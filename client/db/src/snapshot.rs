@@ -292,7 +292,10 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 			} else {
 				child_prefixed_key_inner_top(key.as_slice())
 			};
-			historied_db.unchecked_new_single_inner(key.as_slice(), value, tx, crate::columns::STATE_SNAPSHOT);
+			// Do not journal initial change, since we will not prune them without another change
+			// journaled.
+			let journal_change = None;
+			historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change);
 			*count_tx = *count_tx + 1;
 			if *count_tx == 1000 {
 				//count += 1;
@@ -311,6 +314,7 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 }
 
 impl<Block: BlockT> SnapshotDb<Block> {
+	/// Instantiate new db.
 	pub fn new(
 		mut historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
@@ -403,6 +407,11 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		} else {
 			Ok(None)
 		}
+	}
+
+	/// Return handle to journaling db if needed.
+	pub fn do_journals(&self) -> bool {
+		self.config.journal_pruning
 	}
 }
 
@@ -1169,26 +1178,28 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	}
 
 	/// write a single value in change set.
-	/// TODO use branch and block nodes backend as in offchain-storage
 	pub fn update_single(
 		&mut self,
 		child_info: Option<&ChildInfo>,
 		k: &[u8],
 		change: Option<Vec<u8>>,
 		change_set: &mut Transaction<DbHash>,
+		journal_changes: Option<&mut Vec<Vec<u8>>>,
 	) {
 		let key = child_prefixed_key(child_info, k);
-		self.update_single_inner(key.as_slice(), change, change_set, crate::columns::STATE_SNAPSHOT)
+		self.update_single_inner(key, change, change_set, crate::columns::STATE_SNAPSHOT, journal_changes);
 	}
 
 	/// write a single value in change set.
 	pub fn update_single_inner(
 		&mut self,
-		k: &[u8],
+		key: Vec<u8>,
 		change: Option<Vec<u8>>,
 		change_set: &mut Transaction<DbHash>,
 		column: u32,
+		journal_changes: Option<&mut Vec<Vec<u8>>>,
 	) {
+		let k = key.as_slice();
 		let histo = if let Some(histo) = self.db.get(column, k) {
 			Some(HValue::decode_with_context(k, &mut &histo[..], self.hvalue_type, &self.nodes_db)
 				.expect("Bad encoded value in db, closing"))
@@ -1214,10 +1225,12 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.set_from_vec(column, k, value.encode()
 					.expect("Could not encode."));
+				journal_changes.map(|keys| keys.push(key));
 			},
 			(value, UpdateResult::Cleared(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.remove(column, k);
+				journal_changes.map(|keys| keys.push(key));
 			},
 			(_value, UpdateResult::Unchanged) => (),
 		}
@@ -1225,23 +1238,33 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 
 	/// write a single value, without checking current state,
 	/// please only use on new empty db.
+	/// TODO rather unused
 	pub fn unchecked_new_single(
 		&mut self,
 		child_info: Option<&ChildInfo>,
 		k: &[u8],
 		v: Vec<u8>,
 		change_set: &mut Transaction<DbHash>,
+		journal_changes: Option<&mut Vec<Vec<u8>>>,
 	) {
 		let key = child_prefixed_key(child_info, k);
-		self.unchecked_new_single_inner(key.as_slice(), v, change_set, crate::columns::STATE_SNAPSHOT)
+		self.unchecked_new_single_inner(key, v, change_set, crate::columns::STATE_SNAPSHOT, journal_changes);
 	}
 
-	fn unchecked_new_single_inner(&mut self, k: &[u8], v: Vec<u8>, change_set: &mut Transaction<DbHash>, column: u32) {
-		let value = HValue::new(k, v, &self.current_state, self.hvalue_type, &self.nodes_db);
+	fn unchecked_new_single_inner(
+		&mut self,
+		k: Vec<u8>,
+		v: Vec<u8>,
+		change_set: &mut Transaction<DbHash>,
+		column: u32,
+		journal_changes: Option<&mut Vec<Vec<u8>>>,
+	) {
+		let value = HValue::new(k.as_slice(), v, &self.current_state, self.hvalue_type, &self.nodes_db);
 		value.apply_nodes_backend_to_transaction(change_set); // should be no ops, but cost nothing to call
 		let value = value.encode()
 			.expect("Could not encode.");
-		change_set.set_from_vec(column, k, value);
+		change_set.set_from_vec(column, &k, value);
+		journal_changes.map(|keys| keys.push(k));
 		// no need for no value set
 	}
 }

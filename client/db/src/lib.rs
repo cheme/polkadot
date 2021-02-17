@@ -1496,7 +1496,11 @@ impl<Block: BlockT> Backend<Block> {
 
 		operation.apply_aux(&mut transaction);
 
+		let mut is_genesis = false;
 		let hashes = operation.pending_block.as_ref().map(|pending_block| {
+			if pending_block.header.number().is_zero() {
+				is_genesis = true;
+			}
 			let hash = pending_block.header.hash();
 			let parent_hash = *pending_block.header.parent_hash();
 			(hash, parent_hash)
@@ -1510,21 +1514,19 @@ impl<Block: BlockT> Backend<Block> {
 			None
 		};
 
-
 		operation.apply_offchain(&mut transaction);
 
-		// write management state changes
-		TreeManagementSync::<Block, _>::apply_historied_management_changes(
-			&mut self.snapshot_db.historied_management.inner.write().instance,
-			&mut transaction,
-		);
-
+		// Do not journal genesis. 
+		let mut management = (self.snapshot_db.do_journals() && !is_genesis)
+			.then(|| self.snapshot_db.historied_management.inner.write());
+		let journals = management.as_mut().map(|management| management.instance.ser());
+		let mut journal_keys = journals.is_some().then(|| Vec::new());
 		// state change uses ordered db
 		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
 			let historied_update = operation.storage_updates.clone();
 			let mut nb = 0;
 			for (k, change) in historied_update {
-				ordered_historied_db.update_single(None, k.as_slice(), change, &mut transaction);
+				ordered_historied_db.update_single(None, k.as_slice(), change, &mut transaction, journal_keys.as_mut());
 				nb += 1;
 			}
 
@@ -1534,7 +1536,7 @@ impl<Block: BlockT> Backend<Block> {
 
 				let child_info = ChildInfo::new_default_from_vec(storage_key);
 				for (k, change) in historied_update {
-					ordered_historied_db.update_single(Some(&child_info), k.as_slice(), change, &mut transaction);
+					ordered_historied_db.update_single(Some(&child_info), k.as_slice(), change, &mut transaction, journal_keys.as_mut());
 					nb += 1;
 				}
 			}
@@ -1542,6 +1544,32 @@ impl<Block: BlockT> Backend<Block> {
 
 			warn!("committed {:?} change in historied db", nb);
 		}
+
+		if let (
+			Some(journal_keys),
+			Some(ordered_db),
+			Some(historied),
+		) = (journal_keys, journals, ordered_historied_db.as_ref()) {
+			// Note that this is safe because we import a new block.
+			// Otherwhise we would need to share cache with a single journal instance.
+			let mut journals = historied_db::management::JournalForMigrationBasis
+				::<_, _, _, crate::tree_management::historied_tree_bindings::LocalKeyChangeJournal>
+				::from_db(ordered_db);
+			journals.add_changes(
+				ordered_db,
+				historied.current_state.latest().clone(),
+				journal_keys,
+				true, // New block, no need for fetch. TODO does this assertion stand?? (at least parameter
+				// when moving this code to snapshot_db.
+			)
+		}
+
+		// write management state changes (after changing values because change
+		// journal is using historied management db).
+		TreeManagementSync::<Block, _>::apply_historied_management_changes(
+			&mut self.snapshot_db.historied_management.inner.write().instance,
+			&mut transaction,
+		);
 
 		let mut meta_updates = Vec::with_capacity(operation.finalized_blocks.len());
 		let mut last_finalized_hash = self.blockchain.meta.read().finalized_hash;

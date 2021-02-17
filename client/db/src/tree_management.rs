@@ -73,20 +73,22 @@ pub type RegisteredConsumer<H, S> = historied_db::management::tree::RegisteredCo
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod historied_tree_bindings {
-	/// Mapping block hash with internal indexes.
+	// Mapping block hash with internal indexes.
 	static_instance!(Mapping, b"\x08\x00\x00\x00tree_mgmt/mapping");
-	/// Mapping fork index with branch state data.
+	// Mapping fork index with branch state data.
 	static_instance!(TreeState, b"\x08\x00\x00\x00tree_mgmt/state");
-	/// Mapping fork index with change range, to know touched state.
+	// Mapping fork index with change range, to know touched state.
 	static_instance!(JournalDelete, b"\x08\x00\x00\x00tree_mgmt/journal_delete");
+	// Journals of key with change for modified blocks.
+	static_instance!(LocalKeyChangeJournal, b"\x08\x00\x00\x00tree_mgmt/key_changes");
 	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
 	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
 	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
-	/// Last added block reference.
+	// Last added block reference.
 	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
-	/// TODO seems unused upstream: remove upstream
+	// TODO seems unused upstream: remove upstream
 	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
-	/// Serialized tree metadata.
+	// Serialized tree metadata.
 	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
 }
 
@@ -99,6 +101,8 @@ pub mod historied_tree_bindings {
 pub struct TreeManagementPersistence;
 
 impl TreeManagementStorage for TreeManagementPersistence {
+	// In theory we do not need to journal in some case, but disabling it
+	// is not worth the complexity.
 	const JOURNAL_CHANGES: bool = true;
 	// Use pointer to serialize db with a transactional layer.
 	type Storage = TransactionalMappedDB<MappedDBDyn>;
@@ -282,7 +286,6 @@ impl<Block, S> TreeManagementSync<Block, S>
 		if self.pruning_window.is_none() {
 			return Ok(());
 		}
-	
 
 		let prune_index = self.pruning_window.map(|nb| {
 			number.saturating_sub(nb).saturated_into::<u64>()
