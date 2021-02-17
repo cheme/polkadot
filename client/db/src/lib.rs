@@ -456,8 +456,6 @@ fn cache_header<Hash: std::cmp::Eq + std::hash::Hash, Header>(
 /// Block database
 pub struct BlockchainDb<Block: BlockT> {
 	db: Arc<dyn Database<DbHash>>,
-	// TODO check if use in this PR?? (if not rem)
-	ordered_db: Arc<dyn OrderedDatabase<DbHash>>, // TODO might be better located in parent struct
 	meta: Arc<RwLock<Meta<NumberFor<Block>, Block::Hash>>>,
 	leaves: RwLock<LeafSet<Block::Hash, NumberFor<Block>>>,
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
@@ -469,13 +467,11 @@ impl<Block: BlockT> BlockchainDb<Block> {
 	fn new(
 		db: Arc<dyn Database<DbHash>>,
 		transaction_storage: TransactionStorageMode,
-		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
 	) -> ClientResult<Self> {
 		let meta = read_meta::<Block>(&*db, columns::HEADER)?;
 		let leaves = LeafSet::read_from_db(&*db, columns::META, meta_keys::LEAF_PREFIX)?;
 		Ok(BlockchainDb {
 			db,
-			ordered_db,
 			leaves: RwLock::new(leaves),
 			meta: Arc::new(RwLock::new(meta)),
 			header_metadata_cache: Arc::new(HeaderMetadataCache::default()),
@@ -1063,7 +1059,6 @@ impl<Block: BlockT> Backend<Block> {
 		let blockchain = BlockchainDb::new(
 			db.clone(),
 			config.transaction_storage.clone(),
-			ordered_db.clone(),
 		)?;
 		let meta = blockchain.meta.clone();
 		let map_e = |e: sc_state_db::Error<io::Error>| sp_blockchain::Error::from_state_db(e);
