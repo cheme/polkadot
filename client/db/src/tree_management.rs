@@ -145,7 +145,7 @@ pub struct TreeManagementSync<Block: BlockT, S: TreeManagementStorage + 'static>
 	pub pruning_window: Option<NumberFor<Block>>,
 }
 
-// TODO remove pub
+/// Shared tree management instance.
 pub(crate) struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 'static> {
 	/// Inner tree management instance.
 	pub(crate) instance: TreeManagement<Block::Hash, S>,
