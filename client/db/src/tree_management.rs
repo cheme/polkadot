@@ -71,6 +71,9 @@ pub type RegisteredConsumer<H, S> = historied_db::management::tree::RegisteredCo
 	S,
 >;
 
+/// Type alias for consumer of this tree management.
+pub type Consumer<H, S> = Box<dyn historied_db::management::ManagementConsumer<H, TreeManagement<H, S>>>;
+
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod historied_tree_bindings {
 	// Mapping block hash with internal indexes.
@@ -80,7 +83,7 @@ pub mod historied_tree_bindings {
 	// Mapping fork index with change range, to know touched state.
 	static_instance!(JournalDelete, b"\x08\x00\x00\x00tree_mgmt/journal_delete");
 	// Journals of key with change for modified blocks.
-	static_instance!(LocalKeyChangeJournal, b"\x08\x00\x00\x00tree_mgmt/key_changes");
+	static_instance!(SnapshotKeyChangeJournal, b"\x08\x00\x00\x00tree_mgmt/snapshot_key_changes");
 	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
 	static_instance_variable!(TouchedGC, CST, b"tree_mgmt/touched_gc", false);
 	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
@@ -147,16 +150,16 @@ pub struct TreeManagementSync<Block: BlockT, S: TreeManagementStorage + 'static>
 pub struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 'static> {
 	// TODO rem pub
 	pub instance: TreeManagement<
-		<HashFor<Block> as Hasher>::Out,
+		<HashFor<Block> as Hasher>::Out, // TODO Block::Hash?
+		S,
+	>,
+	consumer: RegisteredConsumer<
+		<HashFor<Block> as Hasher>::Out, // TODO Block::Hash?
 		S,
 	>,
 	// TODO rem pub
-	pub consumer: RegisteredConsumer<
-		<HashFor<Block> as Hasher>::Out,
-		S,
-	>,
-	// TODO rem pub
-	pub consumer_transaction: Transaction<DbHash>,
+	// TODO upstream consumer could return tx to avoid inner mutability but no asumption on type.
+	pub consumer_transaction: Arc<RwLock<Transaction<DbHash>>>,
 	/// Next block to apply migrate.
 	pub next_migrate: Option<NumberFor<Block>>,
 }
@@ -180,6 +183,12 @@ impl<Block, S> TreeManagementSync<Block, S>
 			})),
 			pruning_window: None, // This get set by consumer.
 		}
+	}
+
+	/// Register a consumer of this instance.
+	/// TODO remove meth (public)?
+	pub fn register_consumer(&mut self, consumer: Consumer<Block::Hash, S>) {
+		self.inner.write().consumer.register_consumer(consumer);
 	}
 
 	/// Write management state changes to transaction container.
@@ -336,7 +345,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 		}
 
 		// flush historied management changes
-		let mut transaction = std::mem::replace(consumer_transaction, Default::default());
+		let mut transaction = std::mem::replace(&mut *consumer_transaction.write(), Default::default());
 		TreeManagementSync::<Block, _>::apply_historied_management_changes(instance, &mut transaction);
 
 		db.commit(transaction)?;

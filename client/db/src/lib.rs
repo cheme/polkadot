@@ -1553,7 +1553,7 @@ impl<Block: BlockT> Backend<Block> {
 			// Note that this is safe because we import a new block.
 			// Otherwhise we would need to share cache with a single journal instance.
 			let mut journals = historied_db::management::JournalForMigrationBasis
-				::<_, _, _, crate::tree_management::historied_tree_bindings::LocalKeyChangeJournal>
+				::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
 				::from_db(ordered_db);
 			journals.add_changes(
 				ordered_db,

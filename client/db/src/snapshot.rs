@@ -28,7 +28,7 @@ use historied_db::{
 	db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
 	Latest, UpdateResult,
 	historied::tree::{Tree, aggregate::Sum as TreeSum},
-	management::tree::{Tree as TreeMgmt, ForkPlan},
+	management::tree::{Tree as TreeMgmt, ForkPlan, TreeManagementStorage},
 	backend::nodes::ContextHead,
 	historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 };
@@ -331,14 +331,24 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			.ok_or_else(|| ClientError::StateDatabase(
 				format!("Invalid snapshot config {:?}", config)
 			))?;
-		Ok(SnapshotDb {
+		let mut snapshot_db = SnapshotDb {
 			historied_management,
 			ordered_db,
 			config,
 			hvalue_type,
 			nodes_db,
 			_ph: Default::default(),
-		})
+		};
+
+		// TODO awkward registration, code should be part of tree management.
+		let storage = snapshot_db.clone();
+		let pending = snapshot_db.historied_management.inner.read().consumer_transaction.clone();
+		snapshot_db.historied_management.register_consumer(Box::new(TransactionalConsumer {
+			storage,
+			pending,
+		}));
+
+		Ok(snapshot_db)
 	}
 
 	// TODO rename (it does add state)
@@ -414,7 +424,6 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		self.config.journal_pruning
 	}
 }
-
 
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
@@ -1043,6 +1052,27 @@ impl HValue {
 			HValue::SingleNodeXDelta(inner) => inner.encode(),
 		})
 	}
+
+	/// Migrate HValue
+	fn migrate<B: BlockT>(
+		&mut self,
+		migrate: &mut historied_db::management::Migrate<B::Hash, TreeManagement<B::Hash>>,
+	) -> UpdateResult<()> {
+		match self {
+			HValue::NodesNoDiff(inner, _, _) => {
+				let res = inner.migrate(migrate.migrate());
+				use historied_db::Trigger;
+				// TODO use match macro
+				if let UpdateResult::Unchanged = &res {
+				} else {
+					inner.trigger_flush();
+				}
+				res
+			},
+			HValue::SingleNodeNoDiff(inner) => inner.migrate(migrate.migrate()),
+			HValue::SingleNodeXDelta(inner) => inner.migrate(migrate.migrate()),
+		}
+	}
 }
 
 impl HistoriedDB {
@@ -1266,5 +1296,81 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		change_set.set_from_vec(column, &k, value);
 		journal_changes.map(|keys| keys.push(k));
 		// no need for no value set
+	}
+}
+
+
+/// Consumer with transactional support.
+///
+/// Read journaled keys and update inner transaction with requires
+/// migration changes.
+pub struct TransactionalConsumer<B: BlockT> {
+	/// Storage to use.
+	pub storage: SnapshotDb<B>,
+	/// Transaction to update on migrate.
+	pub pending: Arc<RwLock<Transaction<DbHash>>>,
+}
+
+type TreeManagement<H> = crate::tree_management::TreeManagement<H, TreeManagementPersistence>;
+
+impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::Hash>> for TransactionalConsumer<B>
+	where
+		B: BlockT,
+		B::Hash: Ord + Clone + Encode + Decode + Send + Sync + 'static, // TODO usefull bound??
+{
+	fn migrate(&self, migrate: &mut historied_db::management::Migrate<B::Hash, TreeManagement<B::Hash>>) {
+		let mut keys_to_migrate = std::collections::BTreeSet::<Vec<u8>>::new();
+		let (prune, state_changes) = migrate.migrate().touched_state();
+		// this db is transactional.
+		let db = migrate.management().ser();
+		let mut journals = historied_db::management::JournalForMigrationBasis
+			::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
+			::from_db(db);
+	
+		if let Some(pruning) = prune {
+			journals.remove_changes_before(db, &(pruning, Default::default()), &mut keys_to_migrate);
+		}
+
+		for state in state_changes {
+			let state = state.clone();
+			let state = (state.1, state.0);
+			if let Some(removed) = journals.remove_changes_at(db, &state) {
+				for key in removed {
+					keys_to_migrate.insert(key);
+				}
+			}
+		}
+
+		if keys_to_migrate.is_empty() {
+			return;
+		}
+
+		let mut pending = self.pending.write();
+		let column = crate::columns::STATE_SNAPSHOT;
+		for k in keys_to_migrate {
+			let k = k.as_slice();
+
+			let mut histo: HValue = if let Some(histo) = self.storage.ordered_db.get(column, k) {
+				HValue::decode_with_context(k, &mut &histo[..], self.storage.hvalue_type, &self.storage.nodes_db)
+					.expect("Bad encoded value in db, closing")
+			} else {
+				continue;
+			};
+
+			match histo.migrate::<B>(migrate) {
+				historied_db::UpdateResult::Changed(()) => {
+					pending.set_from_vec(column, k, histo.encode().expect("Invalid encoding, closing"));
+				},
+				historied_db::UpdateResult::Cleared(()) => {
+					pending.remove(column, k);
+				},
+				historied_db::UpdateResult::Unchanged => (),
+			}
+		}
+
+		let block_nodes = BlockNodes::new(self.storage.nodes_db.clone());
+		let branch_nodes = BranchNodes::new(self.storage.nodes_db.clone());
+		block_nodes.apply_transaction(&mut pending);
+		branch_nodes.apply_transaction(&mut pending);
 	}
 }
