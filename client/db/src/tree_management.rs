@@ -120,7 +120,7 @@ impl TreeManagementStorage for TreeManagementPersistence {
 #[cfg(any(feature = "with-kvdb-rocksdb", test))]
 impl TreeManagementStorage for TreeManagementPersistenceNoTx {
 	const JOURNAL_CHANGES: bool = true;
-	type Storage = crate::RocksdbStorage; // TOOD MappedDBDyn instead??
+	type Storage = crate::utils::ordered_database::RocksdbStorage; // TOOD MappedDBDyn instead??
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type LastIndex = historied_tree_bindings::LastIndex;
@@ -208,7 +208,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 					changes.insert(key, None);
 				}
 			}
-			if let Some((col, p)) = crate::resolve_collection(col) {
+			if let Some((col, p)) = crate::utils::ordered_database::resolve_collection(col) {
 				for (key, change) in changes {
 					subcollection_prefixed_key!(p, key);
 					match change {

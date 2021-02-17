@@ -28,6 +28,43 @@
 
 #![warn(missing_docs)]
 
+// Prefix for mapped db.
+macro_rules! subcollection_prefixed_key {
+	($prefix: ident, $key: ident) => {
+		let mut prefixed_key;
+		let $key = if let Some(k) = $prefix {
+			prefixed_key = Vec::with_capacity(k.len() + $key.len());
+			prefixed_key.extend_from_slice(&k[..]);
+			prefixed_key.extend_from_slice(&$key[..]);
+			&prefixed_key[..]
+		} else {
+			&$key[..]
+		};
+	}
+}
+
+macro_rules! static_instance {
+	($name: ident, $col: expr) => {
+
+	/// Simple db map or instance definition for $name.
+	#[derive(Default, Clone)]
+	pub struct $name;
+	impl historied_db::mapped_db::MapInfo for $name {
+		const STATIC_COL: &'static [u8] = $col;
+	}
+}}
+
+macro_rules! static_instance_variable {
+	($name: ident, $col: expr, $path: expr, $lazy: expr) => {
+		static_instance!($name, $col);
+	impl historied_db::mapped_db::VariableInfo for $name {
+		const PATH: &'static [u8] = $path;
+		const LAZY: bool = $lazy;
+	}
+}}
+
+
+
 pub mod light;
 pub mod offchain;
 
@@ -44,6 +81,8 @@ mod utils;
 mod stats;
 #[cfg(feature = "with-parity-db")]
 mod parity_db;
+mod tree_management;
+mod snapshot;
 
 use historied_db::{
 	DecodeWithContext,
@@ -382,257 +421,6 @@ pub(crate) mod columns {
 	/// Snapshot state values.
 	pub const STATE_SNAPSHOT: u32 = 12;
 }
-
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-#[derive(Clone)]
-/// Database backed tree management for a rocksdb database.
-pub struct RocksdbStorage(Arc<kvdb_rocksdb::Database>);
-
-/// Database backed tree management for an unoredered database.
-/// We set any Hash as inner type,
-pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(RadixTreeDatabase<H>);
-
-// TODO move in module for mapped db
-macro_rules! subcollection_prefixed_key {
-	($prefix: ident, $key: ident) => {
-		let mut prefixed_key;
-		let $key = if let Some(k) = $prefix {
-			prefixed_key = Vec::with_capacity(k.len() + $key.len());
-			prefixed_key.extend_from_slice(&k[..]);
-			prefixed_key.extend_from_slice(&$key[..]);
-			&prefixed_key[..]
-		} else {
-			&$key[..]
-		};
-	}
-}
-
-// TODO move in module for mapped db
-/// We resolve rocksdb collection or subcollection.
-/// Collections are defined by four byte encoding of their index.
-/// Subcollection are located into the collection defined by four first byte,
-/// and behind a prefixed location (remaining bytes).
-/// Note that subcollection should define their prefix in a way that no key
-/// collision happen.
-pub fn resolve_collection<'a>(c: &'a [u8]) -> Option<(u32, Option<&'a [u8]>)> {
-	if c.len() < 4 {
-		return None;
-	}
-	let index = resolve_collection_inner(&c[..4]);
-	let prefix = if c.len() == 4 {
-		None
-	} else {
-		Some(&c[4..])
-	};
-	if index < crate::utils::NUM_COLUMNS {
-		return Some((index, prefix));
-	}
-	None
-}
-const fn resolve_collection_inner<'a>(c: &'a [u8]) -> u32 {
-	let mut buf = [0u8; 4];
-	buf[0] = c[0];
-	buf[1] = c[1];
-	buf[2] = c[2];
-	buf[3] = c[3];
-	u32::from_le_bytes(buf)
-}
-
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-impl historied_db::mapped_db::MappedDB for RocksdbStorage {
-	#[inline(always)]
-	fn is_active(&self) -> bool {
-		true
-	}
-
-	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
-		resolve_collection(c).map(|(c, p)| {
-			subcollection_prefixed_key!(p, k);
-			let mut tx = self.0.transaction();
-			tx.put(c, k, v);
-			self.0.write(tx)
-				.expect("Unsupported serialize error")
-		});
-	}
-
-	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
-		resolve_collection(c).map(|(c, p)| {
-			subcollection_prefixed_key!(p, k);
-			let mut tx = self.0.transaction();
-			tx.delete(c, k);
-			self.0.write(tx)
-				.expect("Unsupported serialize error")
-		});
-	}
-
-	fn clear(&mut self, c: &'static [u8]) {
-		resolve_collection(c).map(|(c, p)| {
-			let mut tx = self.0.transaction();
-			tx.delete_prefix(c, p.unwrap_or(&[]));
-			self.0.write(tx)
-				.expect("Unsupported serialize error")
-		});
-	}
-
-	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
-		resolve_collection(c).and_then(|(c, p)| {
-			subcollection_prefixed_key!(p, k);
-			self.0.get(c, k)
-				.expect("Unsupported readdb error")
-		})
-	}
-
-	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::mapped_db::MappedDBIter<'a> {
-		let iter = resolve_collection(c).map(|(c, p)| {
-			use kvdb::KeyValueDB;
-			if let Some(p) = p {
-				<kvdb_rocksdb::Database as KeyValueDB>::iter_with_prefix(&*self.0, c, p)
-			} else {
-				<kvdb_rocksdb::Database as KeyValueDB>::iter(&*self.0, c)
-			}.map(|(k, v)| (Vec::<u8>::from(k), Vec::<u8>::from(v)))
-		}).into_iter().flat_map(|i| i);
-
-		Box::new(iter)
-	}
-
-	fn contains_collection(&self, collection: &'static [u8]) -> bool {
-		resolve_collection(collection).is_some()
-	}
-}
-
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-// redundant code with kvdb implementation, here only to get iter_from implementation
-// without putting iter_from into kvdb on patched branch TODO ?? remove
-impl<H: Clone> Database<H> for RocksdbStorage {
-	fn commit(&self, transaction: Transaction<H>) -> sp_database::error::Result<()> {
-		use sp_database::Change;
-		let mut tx = kvdb::DBTransaction::new();
-		for change in transaction.0.into_iter() {
-			match change {
-				Change::Set(col, key, value) => tx.put_vec(col, &key, value),
-				Change::Remove(col, key) => tx.delete(col, &key),
-				_ => unimplemented!(),
-			}
-		}
-		self.0.write(tx).map_err(|e| sp_database::error::DatabaseError(Box::new(e)))
-	}
-
-	fn get(&self, col: u32, key: &[u8]) -> Option<Vec<u8>> {
-		match self.0.get(col, key) {
-			Ok(r) => r,
-			Err(e) =>  {
-				panic!("Critical database eror: {:?}", e);
-			}
-		}
-	}
-
-	fn lookup(&self, _hash: &H) -> Option<Vec<u8>> {
-		unimplemented!();
-	}
-}
-
-#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-impl<H: Clone> OrderedDatabase<H> for RocksdbStorage {
-	fn iter<'a>(&'a self, col: u32) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
-		Box::new(self.0.iter(col).map(|(k, v)| (k.to_vec(), v.to_vec())))
-	}
-
-	fn prefix_iter<'a>(
-		&'a self,
-		col: u32,
-		prefix: &'a [u8],
-		trim_prefix: bool,
-	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
-		Box::new(self.0.iter_with_prefix(col, prefix).map(|(k, v)| (k.to_vec(), v.to_vec())))
-	}
-
-	fn iter_from<'a>(
-		&'a self,
-		col: u32,
-		start: &[u8],
-	) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
-		Box::new(self.0.iter_from(col, start).map(|(k, v)| (k.to_vec(), v.to_vec())))
-	}
-}
-
-impl<H> historied_db::mapped_db::MappedDB for DatabaseStorage<H>
-	where H: Clone + PartialEq + std::fmt::Debug + Default + 'static,
-{
-	#[inline(always)]
-	fn is_active(&self) -> bool {
-		true
-	}
-
-	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
-		resolve_collection(c).map(|(c, p)| {
-			subcollection_prefixed_key!(p, k);
-			self.0.set(c, k, v)
-				.expect("Unsupported database error");
-		});
-	}
-
-	fn remove(&mut self, c: &'static [u8], k: &[u8]) {
-		resolve_collection(c).map(|(c, p)| {
-			subcollection_prefixed_key!(p, k);
-			self.0.remove(c, k)
-				.expect("Unsupported database error");
-		});
-	}
-
-	fn clear(&mut self, c: &'static [u8]) {
-		// Inefficient implementation.
-		let keys: Vec<Vec<u8>> = self.iter(c).map(|kv| kv.0).collect();
-		for key in keys {
-			self.remove(c, key.as_slice());
-		}
-	}
-
-	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> {
-		resolve_collection(c).and_then(|(c, p)| {
-			subcollection_prefixed_key!(p, k);
-			self.0.get(c, k)
-		})
-	}
-
-	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::mapped_db::MappedDBIter<'a> {
-		let iter = resolve_collection(c).map(|(c, p)| {
-			if let Some(p) = p {
-				self.0.prefix_iter(c, p, true)
-			} else {
-				self.0.iter(c)
-			}
-		}).into_iter().flat_map(|i| i);
-
-		Box::new(iter)
-	}
-
-	fn contains_collection(&self, collection: &'static [u8]) -> bool {
-		resolve_collection(collection).is_some()
-	}
-}
-
-macro_rules! static_instance {
-	($name: ident, $col: expr) => {
-
-	/// Simple db map or instance definition for $name.
-	#[derive(Default, Clone)]
-	pub struct $name;
-	impl historied_db::mapped_db::MapInfo for $name {
-		const STATIC_COL: &'static [u8] = $col;
-	}
-}}
-
-macro_rules! static_instance_variable {
-	($name: ident, $col: expr, $path: expr, $lazy: expr) => {
-		static_instance!($name, $col);
-	impl historied_db::mapped_db::VariableInfo for $name {
-		const PATH: &'static [u8] = $path;
-		const LAZY: bool = $lazy;
-	}
-}}
-
-mod tree_management;
-mod snapshot;
 
 pub use snapshot::snapshot_db_conf;
 
