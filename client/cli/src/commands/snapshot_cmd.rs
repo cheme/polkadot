@@ -20,17 +20,12 @@ use crate::error;
 use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, BlockNumberOrHash};
 use crate::CliConfiguration;
 use log::info;
-use sc_service::{
-	config::DatabaseConfig, chain_ops::export_blocks, PruningMode, Role,
-};
+use sc_service::{Role, PruningMode, config::DatabaseConfig};
 use sc_client_api::{SnapshotProvider, SnapshotDb, StateBackend, StateVisitor, DatabaseError};
 use sp_blockchain::HeaderBackend;
-use sp_core::storage::ChildInfo;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use sp_runtime::generic::BlockId;
 use std::fmt::Debug;
-use std::fs;
-use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -302,7 +297,7 @@ const UNSUPPORTED: &str = "Unsupported snapshot.";
 impl SnapshotManageCmd {
 	fn do_prune<B, BA, C>(
 		&self,
-		client: Arc<C>,
+		_client: Arc<C>,
 	) -> error::Result<()>
 	where
 		B: BlockT,
@@ -435,7 +430,7 @@ impl SnapshotImportCmd {
 	/// Run the import-snapshot command
 	pub async fn run<B, BA, C>(
 		&self,
-		client: Arc<C>,
+		_client: Arc<C>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where
@@ -458,7 +453,7 @@ impl SnapshotExportCmd {
 	/// Run the export-snapshot command
 	pub async fn run<B, BA, C>(
 		&self,
-		client: Arc<C>,
+		_client: Arc<C>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where

@@ -24,26 +24,20 @@
 use sp_core::Hasher;
 use std::collections::BTreeMap;
 use historied_db::{
-	DecodeWithContext,
 	management::{ManagementMut, ForkableManagement, Management},
-	historied::{DataMut, DataRef, aggregate::Sum as _},
 	mapped_db::{TransactionalMappedDB, MappedDBDyn},
-	db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
-	Latest, UpdateResult,
-	historied::tree::{Tree, aggregate::Sum as TreeSum},
-	management::tree::{Tree as TreeMgmt, ForkPlan, TreeManagementStorage},
-	backend::nodes::ContextHead,
-	historied::aggregate::xdelta::{BytesDelta, BytesDiff},
+	Latest,
+	management::tree::{ForkPlan, TreeManagementStorage},
 };
 use sp_arithmetic::traits::Saturating;
 use sp_runtime::traits::{
-	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion, HashFor,
+	Block as BlockT, NumberFor, SaturatedConversion, HashFor,
 };
 use std::sync::Arc;
-use parking_lot::{Mutex, RwLock};
-use sp_database::{Transaction, RadixTreeDatabase};
+use parking_lot::RwLock;
+use sp_database::Transaction;
 use crate::DbHash;
-use log::{trace, debug, warn};
+use log::{warn};
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 

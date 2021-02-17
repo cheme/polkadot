@@ -18,30 +18,27 @@
 
 //! Key value snapshot db with history.
 
-use sp_database::{SnapshotDb as SnapshotDbT, SnapshotDbError};
+use sp_database::{SnapshotDb as SnapshotDbT};
 use crate::tree_management::{TreeManagementSync, TreeManagementPersistence};
 use historied_db::{
 	DecodeWithContext,
-	management::{ManagementMut, ForkableManagement, Management},
-	historied::{DataMut, DataRef, aggregate::Sum as _},
-	mapped_db::{TransactionalMappedDB, MappedDBDyn},
-	db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
+	management::{ForkableManagement, Management},
+	historied::{DataMut, aggregate::Sum as _},
 	Latest, UpdateResult,
-	historied::tree::{Tree, aggregate::Sum as TreeSum},
-	management::tree::{Tree as TreeMgmt, ForkPlan, TreeManagementStorage},
+	historied::tree::aggregate::Sum as TreeSum,
+	management::tree::ForkPlan,
 	backend::nodes::ContextHead,
 	historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 };
 use sp_runtime::traits::{
-	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion, HashFor,
+	Block as BlockT, Header as HeaderT, Zero,
 };
 use sp_core::storage::{ChildInfo, ChildType, PrefixedStorageKey, well_known_keys};
-use std::marker::PhantomData;
 use std::sync::Arc;
-use parking_lot::{Mutex, RwLock};
-use sp_database::{Transaction, RadixTreeDatabase};
+use parking_lot::RwLock;
+use sp_database::Transaction;
 use crate::DbHash;
-use log::{trace, debug, warn};
+use log::warn;
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
@@ -54,19 +51,18 @@ use nodes_database::{BranchNodes, BlockNodes, Context};
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
 	use sp_database::{SnapshotDbConf, SnapshotDBMode};
-	use sp_blockchain::{Result as ClientResult, Error as ClientError};
+	use sp_blockchain::Result as ClientResult;
 	use historied_db::mapped_db::MappedDBDyn;
 
 	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
 
-	/// Serialized configuration for snapshot.
+	// Serialized configuration for snapshot.
 	static_instance_variable!(SnapConfSer, CST, b"snapshot_db/config", false);
 
-	/// Mapping to store journal of change keys
+	// Mapping to store journal of change keys
 	static_instance!(JournalChanges, b"\x08\x00\x00\x00snapshot_db/journal_changes");
 
 	/// Get initial conf from chain_spec.
-	/// TODO not public
 	pub fn from_chain_spec(properties: &sp_chain_spec::Properties) -> SnapshotDbConf {
 		let mut conf = SnapshotDbConf::default();
 		if Some(Some(true)) != properties.get("snapshotEnabled").map(|v| v.as_bool()) {
@@ -151,6 +147,19 @@ pub struct SnapshotDb<Block: BlockT> {
 	nodes_db: Arc<dyn Database<DbHash>>,
 }
 
+/// First level partition of 'STATE_SNAPSHOT' column.
+#[repr(u8)]
+enum SnapshotColumnPrefixes {
+	/// Historied value from top trie.
+	Top = 0,
+	/// Historied value from children trie.
+	Children = 1,
+	/// Block nodes backend.
+	BlockNodes = 3,
+	/// Branch nodes backend.
+	BranchNodes = 4,
+}
+
 fn child_prefixed_key(child_info: Option<&ChildInfo>, key: &[u8]) -> Vec<u8> {
 	if let Some(child_info) = child_info {
 		child_prefixed_key_inner_default(child_info.storage_key(), key)
@@ -161,15 +170,14 @@ fn child_prefixed_key(child_info: Option<&ChildInfo>, key: &[u8]) -> Vec<u8> {
 
 fn child_prefixed_key_inner_top(key: &[u8]) -> Vec<u8> {
 	let mut prefixed_key = Vec::with_capacity(1 + key.len());
-	prefixed_key.push(0);
+	prefixed_key.push(SnapshotColumnPrefixes::Top as u8);
 	prefixed_key.extend_from_slice(key);
 	prefixed_key
 }
 
-
 fn child_prefixed_key_inner_default(prefix: &[u8], key: &[u8]) -> Vec<u8> {
 	let mut prefixed_key = Vec::with_capacity(1 + prefix.size_hint() + key.len());
-	prefixed_key.push(1);
+	prefixed_key.push(SnapshotColumnPrefixes::Children as u8);
 	prefix.encode_to(&mut prefixed_key);
 	prefixed_key.extend_from_slice(key);
 	prefixed_key
@@ -642,12 +650,10 @@ mod nodes_database {
 }
 
 mod nodes_backend {
+	use super::SnapshotColumnPrefixes;
 	use super::nodes_database::{BranchNodes, BlockNodes};
-	use historied_db::{Latest, UpdateResult,
+	use historied_db::{
 		DecodeWithContext,
-		management::{Management, ManagementMut},
-		management::tree::{TreeManagementStorage, ForkPlan},
-		historied::tree::Tree,
 		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead, EstimateSize},
 	};
 	use codec::{Encode, Decode}; 
@@ -662,11 +668,13 @@ mod nodes_backend {
 	#[derive(Clone, Copy)]
 	pub struct MetaBlocks;
 
+	const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
+
 	impl NodesMeta for MetaBranches {
 		const APPLY_SIZE_LIMIT: bool = true;
 		const MAX_NODE_LEN: usize = 2048; // This should be benched.
 		const MAX_NODE_ITEMS: usize = 8;
-		const STORAGE_PREFIX: &'static [u8] = b"tree_mgmt/branch_nodes"; // TODO tree_mgmt in AUX does not make much sense: put with trie(we already got 0 for top and 1 for children: make an enum and add those two.
+		const STORAGE_PREFIX: &'static [u8] = &[SnapshotColumnPrefixes::BranchNodes as u8];
 	}
 
 	impl NodesMeta for MetaBlocks {
@@ -676,7 +684,7 @@ mod nodes_backend {
 		// avoid having a single branch occupy the whole item.
 		const MAX_NODE_LEN: usize = 512;
 		const MAX_NODE_ITEMS: usize = 4;
-		const STORAGE_PREFIX: &'static [u8] = b"tree_mgmt/block_nodes";
+		const STORAGE_PREFIX: &'static [u8] = &[SnapshotColumnPrefixes::BlockNodes as u8];
 	}
 
 	impl<C> NodeStorage<C, u64, LinearBackendInner<C>, MetaBlocks> for BlockNodes
@@ -689,7 +697,7 @@ mod nodes_backend {
 			relative_index: u64,
 		) -> Option<LinearNode<C>> {
 			let key = <Self as NodeStorage<C, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			self.0.read(crate::columns::AUX, &key).and_then(|value| {
+			self.0.read(NODES_COL, &key).and_then(|value| {
 				// use encoded len as size (this is bigger than the call to estimate size
 				// but not really an issue, otherwhise could adjust).
 				let reference_len = value.len();
@@ -738,7 +746,7 @@ mod nodes_backend {
 			relative_index: u64,
 		) -> Option<TreeNode<C>> {
 			let key = <Self as NodeStorage<BranchLinear<C>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			self.0.read(crate::columns::AUX, &key).and_then(|value| {
+			self.0.read(NODES_COL, &key).and_then(|value| {
 				// use encoded len as size (this is bigger than the call to estimate size
 				// but not an issue, otherwhise could adjust).
 				let reference_len = value.len();
@@ -840,15 +848,9 @@ mod nodes_backend {
 
 mod nodes_nodiff {
 	use historied_db::{
-		DecodeWithContext,
-		management::{ManagementMut, ForkableManagement, Management},
-		historied::{DataMut, Data, DataRef, aggregate::Sum as _},
-		mapped_db::{TransactionalMappedDB, MappedDBDyn},
-		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
-		Latest, UpdateResult,
-		historied::tree::{Tree, aggregate::Sum as TreeSum},
-		management::tree::{Tree as TreeMgmt, ForkPlan},
-		backend::nodes::ContextHead,
+		historied::Data,
+		historied::tree::Tree,
+		management::tree::ForkPlan,
 	};
 
 
@@ -901,15 +903,9 @@ mod node_xdelta {
 
 mod single_node_nodiff {
 	use historied_db::{
-		DecodeWithContext,
-		management::{ManagementMut, ForkableManagement, Management},
-		historied::{DataMut, Data, DataRef, aggregate::Sum as _},
-		mapped_db::{TransactionalMappedDB, MappedDBDyn},
-		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
-		Latest, UpdateResult,
-		historied::tree::{Tree, aggregate::Sum as TreeSum},
-		management::tree::{Tree as TreeMgmt, ForkPlan},
-		backend::nodes::ContextHead,
+		historied::Data,
+		historied::tree::Tree,
+		management::tree::ForkPlan,
 	};
 
 	type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
@@ -933,15 +929,9 @@ mod single_node_nodiff {
 
 mod single_node_xdelta {
 	use historied_db::{
-		DecodeWithContext,
-		management::{ManagementMut, ForkableManagement, Management},
-		historied::{DataMut, DataRef, aggregate::Sum as _},
-		mapped_db::{TransactionalMappedDB, MappedDBDyn},
-		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
-		Latest, UpdateResult,
+		historied::aggregate::Sum as _,
 		historied::tree::{Tree, aggregate::Sum as TreeSum},
-		management::tree::{Tree as TreeMgmt, ForkPlan},
-		backend::nodes::ContextHead,
+		management::tree::ForkPlan,
 		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 	};
 
@@ -1018,12 +1008,12 @@ impl HValue {
 	/// Apply local nodes backend change to transaction.
 	pub fn apply_nodes_backend_to_transaction(&self, transaction: &mut Transaction<DbHash>) {
 		match self {
-			HValue::NodesNoDiff(inner, branches, blocks) => {
+			HValue::NodesNoDiff(_inner, branches, blocks) => {
 				branches.apply_transaction(transaction);
 				blocks.apply_transaction(transaction);
 			},
-			HValue::SingleNodeNoDiff(inner) => (),
-			HValue::SingleNodeXDelta(inner) => (),
+			HValue::SingleNodeNoDiff(..) => (),
+			HValue::SingleNodeXDelta(..) => (),
 		}
 	}
 

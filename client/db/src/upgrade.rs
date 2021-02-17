@@ -30,7 +30,7 @@ use crate::utils::DatabaseType;
 const VERSION_FILE_NAME: &'static str = "db_version";
 
 /// Current db version.
-const CURRENT_VERSION: u32 = 2;
+const CURRENT_VERSION: u32 = 3;
 
 /// Number of columns in v1.
 const V1_NUM_COLUMNS: u32 = 11;

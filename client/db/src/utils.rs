@@ -636,7 +636,15 @@ pub(crate) mod ordered_database {
 			prefix: &'a [u8],
 			trim_prefix: bool,
 		) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
-			Box::new(self.0.iter_with_prefix(col, prefix).map(|(k, v)| (k.to_vec(), v.to_vec())))
+			if trim_prefix {
+				let len = prefix.len();
+				Box::new(self.0.iter_with_prefix(col, prefix).map(move |(k, v)| {
+					(k[len..].to_vec(), v.to_vec())
+				}))
+			} else {
+				Box::new(self.0.iter_with_prefix(col, prefix).map(|(k, v)| (k.to_vec(), v.to_vec())))
+			}
+	
 		}
 
 		fn iter_from<'a>(
