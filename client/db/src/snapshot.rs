@@ -1113,13 +1113,12 @@ impl HValue {
 		})
 	}
 
-	// TODO consider no error returned (check with node how it behave).
-	fn encode(&self) -> Result<Vec<u8>, String> {
-		Ok(match self {
+	fn encode(&self) -> Vec<u8> {
+		match self {
 			HValue::NodesNoDiff(inner, _, _) => inner.encode(),
 			HValue::SingleNodeNoDiff(inner) => inner.encode(),
 			HValue::SingleNodeXDelta(inner) => inner.encode(),
-		})
+		}
 	}
 
 	/// Migrate HValue
@@ -1130,10 +1129,8 @@ impl HValue {
 		match self {
 			HValue::NodesNoDiff(inner, _, _) => {
 				let res = inner.migrate(migrate.migrate());
-				use historied_db::Trigger;
-				// TODO use match macro
-				if let UpdateResult::Unchanged = &res {
-				} else {
+				if !matches!(&res, UpdateResult::Unchanged) {
+					use historied_db::Trigger;
 					inner.trigger_flush();
 				}
 				res
@@ -1322,8 +1319,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		} {
 			(value, UpdateResult::Changed(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
-				change_set.set_from_vec(column, k, value.encode()
-					.expect("Could not encode."));
+				change_set.set_from_vec(column, k, value.encode());
 				journal_changes.map(|keys| keys.push(key));
 			},
 			(value, UpdateResult::Cleared(())) => {
@@ -1360,8 +1356,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 	) {
 		let value = HValue::new(k.as_slice(), v, &self.current_state, self.hvalue_type, &self.nodes_db);
 		value.apply_nodes_backend_to_transaction(change_set); // should be no ops, but cost nothing to call
-		let value = value.encode()
-			.expect("Could not encode.");
+		let value = value.encode();
 		change_set.set_from_vec(column, &k, value);
 		journal_changes.map(|keys| keys.push(k));
 		// no need for no value set
@@ -1427,7 +1422,7 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 				.expect("Bad encoded value in db, closing");
 			match histo.migrate::<B>(migrate) {
 				historied_db::UpdateResult::Changed(()) => {
-					pending.set_from_vec(column, k, histo.encode().expect("Invalid encoding, closing"));
+					pending.set_from_vec(column, k, histo.encode());
 				},
 				historied_db::UpdateResult::Cleared(()) => {
 					pending.remove(column, k);
