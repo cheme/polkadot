@@ -549,7 +549,6 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 			base_path: Some(base_path),
 			informant_output_format: Default::default(),
 			telemetry_handle,
-			snapshot_param: cli.snapshot_db_conf()?,
 		})
 	}
 

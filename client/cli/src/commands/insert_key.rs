@@ -151,10 +151,6 @@ mod tests {
 				),
 			)
 		}
-
-		fn snapshot_db_conf(&self) -> std::result::Result<sc_client_api::SnapshotDbConf, String> {
-			Ok(Default::default())
-		}
 	}
 
 	#[test]

@@ -59,11 +59,6 @@ impl SubstrateCli for Cli {
 	fn native_runtime_version(_: &Box<dyn ChainSpec>) -> &'static RuntimeVersion {
 		&node_template_runtime::VERSION
 	}
-
-	fn snapshot_db_conf(&self) -> std::result::Result<sc_client_api::SnapshotDbConf, String> {
-		let cli = Cli::from_args();
-		cli.snapshot_db_conf()
-	}
 }
 
 /// Parse and run command line arguments

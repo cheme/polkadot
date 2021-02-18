@@ -66,10 +66,6 @@ impl SubstrateCli for Cli {
 	fn native_runtime_version(_: &Box<dyn ChainSpec>) -> &'static RuntimeVersion {
 		&node_runtime::VERSION
 	}
-
-	fn snapshot_db_conf(&self) -> std::result::Result<sc_client_api::SnapshotDbConf, String> {
-		unimplemented!("TODO")
-	}
 }
 
 /// Parse command line arguments into service configuration.
