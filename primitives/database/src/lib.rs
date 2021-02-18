@@ -584,10 +584,12 @@ pub trait SnapshotDb<B: Block> {
 	fn export_snapshot(
 		&self,
 		output: Option<std::path::PathBuf>,
+		best_block: NumberFor<B>,
 		from: Option<NumberFor<B>>,
 		to: Option<NumberFor<B>>,
 		flat: bool,
 		db_mode: SnapshotDBMode,
+		default_flat: impl StateVisitor,
 	) -> error::Result<()>;
 }
 
@@ -657,10 +659,12 @@ impl<B: Block> SnapshotDb<B> for () {
 	fn export_snapshot(
 		&self,
 		_output: Option<std::path::PathBuf>,
+		_best_block: NumberFor<B>,
 		_from: Option<NumberFor<B>>,
 		_to: Option<NumberFor<B>>,
 		_flat: bool,
 		_db_mode: SnapshotDBMode,
+		_default_flat: impl StateVisitor,
 	) -> error::Result<()> {
 		unsupported_error()
 	}

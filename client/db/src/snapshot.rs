@@ -42,7 +42,7 @@ use log::warn;
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
-use codec::{Decode, Encode};
+use codec::{Decode, Encode, Compact};
 use sp_database::{SnapshotDbConf, SnapshotDBMode};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
@@ -320,11 +320,29 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	fn export_snapshot(
 		&self,
 		output: Option<std::path::PathBuf>,
+		best_block: NumberFor<Block>,
 		from: Option<NumberFor<Block>>,
 		to: Option<NumberFor<Block>>,
 		flat: bool,
 		db_mode: SnapshotDBMode,
+		default_flat: impl sc_client_api::StateVisitor,
 	) -> sp_database::error::Result<()> {
+		if !self.config.enabled {
+			if !flat {
+				let e = ClientError::StateDatabase("Disabled snapshot db need to be created first".into());
+				return Err(DatabaseError(Box::new(e)));
+			} else {
+				if let Some(path) = output {
+					let mut out = std::fs::File::create(path)
+						.map_err(|e| DatabaseError(Box::new(e)))?;
+					return self.flat_from_state(&mut out, default_flat);
+				} else {
+					let mut out = std::io::stdout();
+					return self.flat_from_state(&mut out, default_flat);
+				};
+			}
+		}
+	
 		unimplemented!("TODO next");
 	}
 }
@@ -520,6 +538,172 @@ impl<Block: BlockT> SnapshotDb<Block> {
 	/// Access underlying historied management
 	pub fn historied_management(&self) -> &TreeManagementSync<Block, TreeManagementPersistence> {
 		&self.historied_management
+	}
+
+	fn flat_from_state<O: std::io::Write>(
+		&self,
+		out: &mut O,
+		state_visit: impl sc_client_api::StateVisitor,
+	) -> sp_database::error::Result<()> {
+		out.write(&[SnapshotMode::Flat as u8, StateId::Top as u8])
+			.map_err(|e| DatabaseError(Box::new(e)))?;
+
+		let mut default_key_writer = KeyWriter {
+			previous: Default::default(),
+		};
+		let default_key_writer = &mut default_key_writer;
+		let mut default_child_key_writer = KeyWriter {
+			previous: Default::default(),
+		};
+		let default_child_key_writer = &mut default_child_key_writer;
+
+		let mut last_child: Option<Vec<u8>> = None;
+		let last_child = &mut last_child;
+		let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
+		let child_storage_key = &mut child_storage_key;
+		state_visit.state_visit(|child, key, value| {
+			if child != last_child.as_ref().map(Vec::as_slice) {
+				if let Some(child) = child.as_ref() {
+					*child_storage_key = PrefixedStorageKey::new(child.to_vec());
+					*last_child = Some(child.to_vec());
+					match ChildType::from_prefixed_key(&child_storage_key) {
+						Some((ChildType::ParentKeyId, storage_key)) => {
+							out.write(&[StateId::DefaultChild as u8])
+								.map_err(|e| DatabaseError(Box::new(e)))?;
+							default_child_key_writer.write_next(storage_key, out);
+						},
+						_ => {
+							let e = ClientError::StateDatabase("Unknown child trie type in state".into());
+							return Err(DatabaseError(Box::new(e)));
+						},
+					}
+				} else {
+					out.write(&[StateId::Top as u8])
+						.map_err(|e| DatabaseError(Box::new(e)))?;
+				}
+				*default_key_writer = KeyWriter {
+					previous: Default::default(),
+				};
+				default_key_writer.write_next(key.as_slice(), out);
+				value.encode_to(out);
+			}
+			Ok(())
+		})?;
+
+		Ok(())
+	}
+}
+
+/// First byte of snapshot define
+/// its mode.
+#[repr(u8)]
+enum SnapshotMode {
+	/// Flat variant, no compression, and obviously no diff.
+	Flat = 0,
+}
+
+/// First byte of snapshot define
+/// its mode.
+#[repr(u8)]
+enum StateId {
+	/// Top state
+	Top = 0,
+	/// Default child trie, followed by unprefixed path from default trie prefix.
+	/// Path is a KeyDelta from previous child trie.
+	DefaultChild = 1,
+}
+
+enum KeyDelta {
+	Augment(usize),
+	PopAugment(usize, usize),
+}
+
+impl Encode for KeyDelta {
+	fn size_hint(&self) -> usize {
+		2
+	}
+
+	fn encode_to<T: codec::Output + ?Sized>(&self, out: &mut T) {
+		match self {
+			KeyDelta::Augment(nb) => {
+				let augment_nb = nb * 2; // 0 as last bit
+				Compact((nb * 2) as u64).encode_to(out);
+			},
+			KeyDelta::PopAugment(nb, nb2) => {
+				let pop_nb = (nb * 2) + 1; // 0 as last bit
+				Compact(pop_nb as u64).encode_to(out);
+				Compact(*nb2 as u64).encode_to(out);
+			},
+		}
+	}
+}
+
+impl Decode for KeyDelta {
+	fn decode<I: codec::Input>(input: &mut I) -> Result<Self, codec::Error> {
+		let first = Compact::<u64>::decode(input)?.0;
+		if first % 2 == 0 {
+			Ok(KeyDelta::Augment((first / 2) as usize))
+		} else {
+			let second = Compact::<u64>::decode(input)?.0;
+			Ok(KeyDelta::PopAugment((first / 2) as usize, (second / 2) as usize))
+		}
+	}
+}
+
+/// Key are written in delta mode (since they are sorted it is a big size gain).
+/// TODO slice version might be ok for non state_visitor usecase
+struct KeyWriter {
+	previous: Vec<u8>,
+}
+
+fn common_depth(v1: &[u8], v2: &[u8]) -> usize {
+	let upper_bound = std::cmp::min(v1.len(), v2.len());
+	for a in 0 .. upper_bound {
+		if v1[a] != v2[a] {
+			return a;
+		}
+	}
+	upper_bound
+}
+
+impl KeyWriter {
+	fn write_next<O: codec::Output + ?Sized>(&mut self, next: &[u8], out: &mut O) {
+		let previous = self.previous.as_slice();
+		let common = common_depth(previous, next);
+		let keydelta = if common < previous.len() {
+			KeyDelta::PopAugment(previous.len() - common, next.len() - common);
+		} else {
+			KeyDelta::Augment(next.len() - common);
+		};
+		keydelta.encode_to(out);
+		out.write(&next[common..]);
+		self.previous.resize(next.len(), 0);
+		self.previous.copy_from_slice(next);
+	}
+}
+
+/// Key are read in delta mode (since they are sorted it is a big size gain).
+struct KeyReader {
+	previous: Vec<u8>,
+}
+
+impl KeyReader {
+	fn read_next<I: codec::Input>(&mut self, input: &mut I)  -> Result<&[u8], codec::Error> {
+		let nb = match KeyDelta::decode(input)? {
+			KeyDelta::Augment(nb) => nb,
+			KeyDelta::PopAugment(nb, nb2) => {
+				let old_len = self.previous.len();
+				if old_len < nb {
+					return Err("Invalid keydiff encoding".into());
+				}
+				self.previous.truncate(old_len - nb);
+				nb2
+			},
+		};
+		let old_len = self.previous.len();
+		self.previous.resize(old_len + nb, 0);
+		input.read(&mut self.previous[old_len..])?;
+		Ok(self.previous.as_slice())
 	}
 }
 
