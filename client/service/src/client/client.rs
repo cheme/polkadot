@@ -72,7 +72,7 @@ use sc_client_api::{
 		self, BlockImportOperation, PrunableStateChangesTrieStorage,
 		ClientImportOperation, Finalizer, ImportSummary, NewBlockState,
 		changes_tries_state_at_block, StorageProvider,
-		LockImportRun, apply_aux, SnapshotProvider,
+		LockImportRun, apply_aux,
 	},
 	client::{
 		ImportNotifications, FinalityNotification, FinalityNotifications, BlockImportNotification,
@@ -1496,19 +1496,6 @@ impl<B, E, Block, RA> StorageProvider<Block, B> for Client<B, E, Block, RA> wher
 	}
 }
 
-impl<B, E, Block, RA> SnapshotProvider<Block, B> for Client<B, E, Block, RA> where
-	B: backend::Backend<Block>,
-	E: CallExecutor<Block>,
-	Block: BlockT,
-{
-	type SnapshotDb = B::SnapshotDb;
-
-	/// Access inner snapshot db implementation if available.
-	fn snapshot_db(&self) -> Option<Self::SnapshotDb> {
-		self.backend.snapshot_db()
-	}
-}
-	
 impl<B, E, Block, RA> HeaderMetadata<Block> for Client<B, E, Block, RA> where
 	B: backend::Backend<Block>,
 	E: CallExecutor<Block>,

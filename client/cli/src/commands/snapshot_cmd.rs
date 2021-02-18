@@ -21,7 +21,7 @@ use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, 
 use crate::CliConfiguration;
 use log::info;
 use sc_service::{Role, PruningMode, config::DatabaseConfig};
-use sc_client_api::{SnapshotProvider, SnapshotDb, StateBackend, StateVisitor, DatabaseError};
+use sc_client_api::{SnapshotDb, StateBackend, StateVisitor, DatabaseError};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use sp_runtime::generic::BlockId;
@@ -259,15 +259,13 @@ pub struct SnapshotImportCmd {
 
 impl SnapshotManageCmd {
 	/// Run the export-snapshot command
-	pub async fn run<B, BA, C>(
+	pub async fn run<B, BA>(
 		&self,
-		client: Arc<C>,
 		backend: Arc<BA>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where
 		B: BlockT,
-		C: SnapshotProvider<B, BA>,
 		BA: sc_client_api::backend::Backend<B>,
 		B::Hash: FromStr,
 		<B::Hash as FromStr>::Err: Debug,
@@ -278,10 +276,10 @@ impl SnapshotManageCmd {
 		}
 
 		match (self.do_prune, self.do_clear, self.do_init, self.do_update_conf) {
-			(true, false, false, false) => self.do_prune(client),
-			(false, true, false, false) => self.do_clear(client),
-			(false, false, true, false) => self.do_init(client, backend),
-			(false, false, false, true) => self.do_update_conf(client),
+			(true, false, false, false) => self.do_prune(backend),
+			(false, true, false, false) => self.do_clear(backend),
+			(false, false, true, false) => self.do_init(backend),
+			(false, false, false, true) => self.do_update_conf(backend),
 			_ => {
 				let error = "Need one and only one of 'do_prune', 'do_clear', 'do_init' \
 										 or 'do_update_conf' argument";
@@ -295,13 +293,12 @@ impl SnapshotManageCmd {
 const UNSUPPORTED: &str = "Unsupported snapshot.";
 
 impl SnapshotManageCmd {
-	fn do_prune<B, BA, C>(
+	fn do_prune<B, BA>(
 		&self,
-		_client: Arc<C>,
+		_backend: Arc<BA>,
 	) -> error::Result<()>
 	where
 		B: BlockT,
-		C: SnapshotProvider<B, BA>,
 		BA: sc_client_api::backend::Backend<B>,
 		B::Hash: FromStr,
 		<B::Hash as FromStr>::Err: Debug,
@@ -310,38 +307,35 @@ impl SnapshotManageCmd {
 		unimplemented!()
 	}
 
-	fn do_clear<B, BA, C>(
+	fn do_clear<B, BA>(
 		&self,
-		client: Arc<C>,
+		backend: Arc<BA>,
 	) -> error::Result<()>
 	where
 		B: BlockT,
-		C: SnapshotProvider<B, BA>,
 		BA: sc_client_api::backend::Backend<B>,
 		B::Hash: FromStr,
 		<B::Hash as FromStr>::Err: Debug,
 		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
 	{
-		let db = client.snapshot_db().expect(UNSUPPORTED);
+		let db = backend.snapshot_db().expect(UNSUPPORTED);
 		// No specific parameters.
 		db.clear_snapshot_db()?;
 		Ok(())
 	}
 
-	fn do_init<B, BA, C>(
+	fn do_init<B, BA>(
 		&self,
-		client: Arc<C>,
 		backend: Arc<BA>,
 	) -> error::Result<()>
 	where
 		B: BlockT,
-		C: SnapshotProvider<B, BA>,
 		BA: sc_client_api::backend::Backend<B>,
 		B::Hash: FromStr,
 		<B::Hash as FromStr>::Err: Debug,
 		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
 	{
-		let db = client.snapshot_db().expect(UNSUPPORTED);
+		let db = backend.snapshot_db().expect(UNSUPPORTED);
 
 		let chain_info = backend.blockchain().info();
 
@@ -366,19 +360,18 @@ impl SnapshotManageCmd {
 		Ok(())
 	}
 
-	fn do_update_conf<B, BA, C>(
+	fn do_update_conf<B, BA>(
 		&self,
-		client: Arc<C>,
+		backend: Arc<BA>,
 	) -> error::Result<()>
 	where
 		B: BlockT,
-		C: SnapshotProvider<B, BA>,
 		BA: sc_client_api::backend::Backend<B>,
 		B::Hash: FromStr,
 		<B::Hash as FromStr>::Err: Debug,
 		<<B::Header as HeaderT>::Number as FromStr>::Err: Debug,
 	{
-		let db = client.snapshot_db().expect(UNSUPPORTED);
+		let db = backend.snapshot_db().expect(UNSUPPORTED);
 		db.update_running_conf(
 			self.snapshot_conf.use_as_primary,
 			self.snapshot_conf.debug_assert,
@@ -428,14 +421,13 @@ impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
 
 impl SnapshotImportCmd {
 	/// Run the import-snapshot command
-	pub async fn run<B, BA, C>(
+	pub async fn run<B, BA>(
 		&self,
-		_client: Arc<C>,
+		_backend: Arc<BA>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where
 		B: BlockT,
-		C: SnapshotProvider<B, BA>,
 		BA: sc_client_api::backend::Backend<B>,
 		B::Hash: FromStr,
 		<B::Hash as FromStr>::Err: Debug,
@@ -451,14 +443,13 @@ impl SnapshotImportCmd {
 
 impl SnapshotExportCmd {
 	/// Run the export-snapshot command
-	pub async fn run<B, BA, C>(
+	pub async fn run<B, BA>(
 		&self,
-		_client: Arc<C>,
+		_backend: Arc<BA>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where
 		B: BlockT,
-		C: SnapshotProvider<B, BA>,
 		BA: sc_client_api::backend::Backend<B>,
 		B::Hash: FromStr,
 		<B::Hash as FromStr>::Err: Debug,

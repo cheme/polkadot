@@ -385,16 +385,6 @@ pub trait StorageProvider<Block: BlockT, B: Backend<Block>> {
 	) -> sp_blockchain::Result<Vec<(NumberFor<Block>, u32)>>;
 }
 
-/// Provides acess to snapshot primitives.
-/// TODO check if we can use Backend trait instead
-pub trait SnapshotProvider<Block: BlockT, B: Backend<Block>> {
-	/// Associted snapshot db type, if no support '()' can be use.
-	type SnapshotDb: sp_database::SnapshotDb<Block::Hash>;
-
-	/// Access inner snapshot db implementation if available.
-	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
-}
-
 /// Client backend.
 ///
 /// Manages the data layer.

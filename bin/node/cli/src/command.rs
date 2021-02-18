@@ -152,25 +152,25 @@ pub fn run() -> Result<()> {
 		Some(Subcommand::SnapshotManage(cmd)) => {
 			let runner = cli.create_runner(cmd)?;
 			runner.async_run(|config| {
-				let PartialComponents { client, task_manager, backend, ..}
+				let PartialComponents { task_manager, backend, ..}
 					= new_partial(&config)?;
-				Ok((cmd.run(client, backend, config.database), task_manager))
+				Ok((cmd.run(backend, config.database), task_manager))
 			})
 		},
 		Some(Subcommand::SnapshotImport(cmd)) => {
 			let runner = cli.create_runner(cmd)?;
 			runner.async_run(|config| {
-				let PartialComponents { client, task_manager, ..}
+				let PartialComponents { backend, task_manager, ..}
 					= new_partial(&config)?;
-				Ok((cmd.run(client, config.database), task_manager))
+				Ok((cmd.run(backend, config.database), task_manager))
 			})
 		},
 		Some(Subcommand::SnapshotExport(cmd)) => {
 			let runner = cli.create_runner(cmd)?;
 			runner.async_run(|config| {
-				let PartialComponents { client, task_manager, ..}
+				let PartialComponents { backend, task_manager, ..}
 					= new_partial(&config)?;
-				Ok((cmd.run(client, config.database), task_manager))
+				Ok((cmd.run(backend, config.database), task_manager))
 			})
 		},
 	}
