@@ -471,11 +471,11 @@ impl SnapshotExportCmd {
 		let best_block = chain_info.best_number;
 		let (to, default_block) = if let Some(to) = self.to.as_ref() {
 			let to = to.parse()?;
-			let to_hash = self.backend.blockchain().hash(to)?.expect("Block number out of range.");
+			let to_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
 			(Some(to.parse()?), to_hash)
 		} else {
 			(None, best_hash)
-		}
+		};
 		let state_visitor = StateVisitorImpl(&backend, &default_block);
 		db.export_snapshot(
 			self.output.clone(),
