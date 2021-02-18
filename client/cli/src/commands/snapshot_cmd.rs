@@ -386,7 +386,7 @@ impl SnapshotManageCmd {
 		db.update_running_conf(
 			self.snapshot_conf.use_as_primary,
 			self.snapshot_conf.debug_assert,
-			pruning_conf(&self.snapshot_conf.pruning_params),
+			pruning_conf(&self.snapshot_conf.snapshot_pruning_params),
 			self.snapshot_conf.lazy_pruning_window,
 		)?;
 		Ok(())
