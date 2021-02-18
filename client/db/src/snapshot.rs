@@ -584,9 +584,9 @@ impl<Block: BlockT> SnapshotDb<Block> {
 				*default_key_writer = KeyWriter {
 					previous: Default::default(),
 				};
-				default_key_writer.write_next(key.as_slice(), out);
-				value.encode_to(out);
 			}
+			default_key_writer.write_next(key.as_slice(), out);
+			value.encode_to(out);
 			Ok(())
 		})?;
 
