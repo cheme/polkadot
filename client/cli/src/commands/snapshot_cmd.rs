@@ -501,6 +501,10 @@ impl CliConfiguration for SnapshotManageCmd {
 	fn database_params(&self) -> Option<&DatabaseParams> {
 		Some(&self.database_params)
 	}
+
+	fn pruning_params(&self) -> Option<&PruningParams> {
+		None
+	}
 }
 
 impl CliConfiguration for SnapshotExportCmd {
@@ -511,6 +515,10 @@ impl CliConfiguration for SnapshotExportCmd {
 	fn database_params(&self) -> Option<&DatabaseParams> {
 		Some(&self.database_params)
 	}
+
+	fn pruning_params(&self) -> Option<&PruningParams> {
+		None
+	}
 }
 
 impl CliConfiguration for SnapshotImportCmd {
@@ -520,5 +528,9 @@ impl CliConfiguration for SnapshotImportCmd {
 
 	fn database_params(&self) -> Option<&DatabaseParams> {
 		Some(&self.database_params)
+	}
+
+	fn pruning_params(&self) -> Option<&PruningParams> {
+		None
 	}
 }
