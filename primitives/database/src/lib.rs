@@ -21,6 +21,7 @@ pub mod error;
 mod mem;
 mod kvdb;
 
+use sp_runtime::traits::{Block, NumberFor};
 use codec::{Encode, Decode};
 pub use mem::MemDb;
 pub use crate::kvdb::{as_database, arc_as_database};
@@ -557,7 +558,8 @@ pub struct SnapshotDbConf {
 }
 
 /// Implement exposed acces method to the snapshot db.
-pub trait SnapshotDb<H> {
+/// TODO not in the right crate!!
+pub trait SnapshotDb<B: Block> {
 	/// Disable snapshot db and remove its content.
 	fn clear_snapshot_db(&self) -> error::Result<()>;
 
@@ -574,8 +576,18 @@ pub trait SnapshotDb<H> {
 	fn re_init(
 		&self,
 		config: SnapshotDbConf,
-		best_block: H,
+		best_block: B::Hash,
 		state_visit: impl StateVisitor,
+	) -> error::Result<()>;
+
+	/// Export a snapshot file.
+	fn export_snapshot(
+		&self,
+		output: Option<std::path::PathBuf>,
+		from: Option<NumberFor<B>>,
+		to: Option<NumberFor<B>>,
+		flat: bool,
+		db_mode: SnapshotDBMode,
 	) -> error::Result<()>;
 }
 
@@ -618,7 +630,7 @@ fn unsupported_error() -> error::Result<()> {
 }
 
 /// Use '()' when no snapshot implementation.
-impl<H> SnapshotDb<H> for () {
+impl<B: Block> SnapshotDb<B> for () {
 	fn clear_snapshot_db(&self) -> error::Result<()> {
 		unsupported_error()
 	}
@@ -636,9 +648,21 @@ impl<H> SnapshotDb<H> for () {
 	fn re_init(
 		&self,
 		_config: SnapshotDbConf,
-		_best_block: H,
+		_best_block: B::Hash,
 		_state_visit: impl StateVisitor,
 	) -> error::Result<()> {
 		unsupported_error()
 	}
+
+	fn export_snapshot(
+		&self,
+		_output: Option<std::path::PathBuf>,
+		_from: Option<NumberFor<B>>,
+		_to: Option<NumberFor<B>>,
+		_flat: bool,
+		_db_mode: SnapshotDBMode,
+	) -> error::Result<()> {
+		unsupported_error()
+	}
+
 }

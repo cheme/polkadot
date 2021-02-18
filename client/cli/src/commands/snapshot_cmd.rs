@@ -208,7 +208,6 @@ pub struct SnapshotExportCmd {
 	pub flat: bool,
 
 	/// Specify DB mode.
-	/// Only for initialization.
 	#[structopt(
 		long,
 		value_name = "MODE",
@@ -445,7 +444,7 @@ impl SnapshotExportCmd {
 	/// Run the export-snapshot command
 	pub async fn run<B, BA>(
 		&self,
-		_backend: Arc<BA>,
+		backend: Arc<BA>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where
@@ -459,23 +458,29 @@ impl SnapshotExportCmd {
 			info!("DB path: {}", path.display());
 		}
 
-		unimplemented!()
-/*
-		let from = self.from.as_ref().and_then(|f| f.parse().ok()).unwrap_or(1u32);
-		let to = self.to.as_ref().and_then(|t| t.parse().ok());
+		let db = backend.snapshot_db().expect(UNSUPPORTED);
 
-		let binary = self.binary;
-
-		let file: Box<dyn io::Write> = match &self.output {
-			Some(filename) => Box::new(fs::File::create(filename)?),
-			None => Box::new(io::stdout()),
+		let from = if let Some(from) = self.from.as_ref() {
+			Some(from.parse()?)
+		} else {
+			None
 		};
-
-		export_blocks(client, file, from.into(), to, binary)
-			.await
-			.map_err(Into::into)
-*/
-
+		let to = if let Some(to) = self.to.as_ref() {
+			Some(to.parse()?)
+		} else {
+			None
+		};
+		db.export_snapshot(
+			self.output.clone(),
+			from,
+			to,
+			self.flat,
+			match self.db_mode {
+				SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
+				SnapshotMode::Xdelta3 => sc_client_api::SnapshotDBMode::Xdelta3Diff,
+			},
+		)?;
+		Ok(())
 	}
 }
 

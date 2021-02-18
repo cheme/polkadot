@@ -31,7 +31,7 @@ use historied_db::{
 	historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 };
 use sp_runtime::traits::{
-	Block as BlockT, Header as HeaderT, Zero,
+	Block as BlockT, Header as HeaderT, Zero, NumberFor,
 };
 use sp_core::storage::{ChildInfo, ChildType, PrefixedStorageKey, well_known_keys};
 use std::sync::Arc;
@@ -183,7 +183,7 @@ fn child_prefixed_key_inner_default(prefix: &[u8], key: &[u8]) -> Vec<u8> {
 	prefixed_key
 }
 
-impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
+impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	fn clear_snapshot_db(&self) -> sp_database::error::Result<()> {
 		let mut management = self.historied_management.inner.write();
 		// get non transactional mappeddb.
@@ -315,6 +315,17 @@ impl<Block: BlockT> SnapshotDbT<Block::Hash> for SnapshotDb<Block> {
 		self.ordered_db.commit(to_commit)?;
 
 		Ok(())
+	}
+
+	fn export_snapshot(
+		&self,
+		output: Option<std::path::PathBuf>,
+		from: Option<NumberFor<Block>>,
+		to: Option<NumberFor<Block>>,
+		flat: bool,
+		db_mode: SnapshotDBMode,
+	) -> sp_database::error::Result<()> {
+		unimplemented!("TODO next");
 	}
 }
 

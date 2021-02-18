@@ -405,7 +405,7 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// Offchain workers local storage.
 	type OffchainStorage: OffchainStorage;
 	/// Associted snapshot db type, if no support '()' can be use.
-	type SnapshotDb: sp_database::SnapshotDb<Block::Hash>;
+	type SnapshotDb: sp_database::SnapshotDb<Block>;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	///
