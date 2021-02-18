@@ -76,7 +76,7 @@ pub struct SnapshotConf {
 
 	/// Pruning behavior to set or apply on the snapshot db.
 	#[structopt(flatten)]
-	pub pruning_params: PruningParams,
+	pub snapshot_pruning_params: PruningParams,
 
 	#[structopt(long)]
 	/// Db history is split in multiple nodes.
@@ -122,7 +122,7 @@ impl Into<sc_client_api::SnapshotDbConf> for SnapshotConf {
 			debug_assert: self.debug_assert.unwrap_or(false),
 			lazy_pruning: self.lazy_pruning_window,
 			no_node_backend: self.no_node_backend,
-			pruning: pruning_conf(&self.pruning_params),
+			pruning: pruning_conf(&self.snapshot_pruning_params),
 			journal_pruning: self.with_journals,
 			diff_mode: match self.db_mode {
 				SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
@@ -178,6 +178,10 @@ pub struct SnapshotManageCmd {
 
 	#[allow(missing_docs)]
 	#[structopt(flatten)]
+	pub pruning_params: PruningParams,
+
+	#[allow(missing_docs)]
+	#[structopt(flatten)]
 	pub snapshot_conf: SnapshotConf,
 }
 
@@ -224,6 +228,10 @@ pub struct SnapshotExportCmd {
 	#[allow(missing_docs)]
 	#[structopt(flatten)]
 	pub database_params: DatabaseParams,
+
+	#[allow(missing_docs)]
+	#[structopt(flatten)]
+	pub pruning_params: PruningParams,
 }
 
 /// The `snapshot` command used to import snapshot.
@@ -250,6 +258,10 @@ pub struct SnapshotImportCmd {
 	#[allow(missing_docs)]
 	#[structopt(flatten)]
 	pub database_params: DatabaseParams,
+
+	#[allow(missing_docs)]
+	#[structopt(flatten)]
+	pub pruning_params: PruningParams,
 
 	#[allow(missing_docs)]
 	#[structopt(flatten)]
@@ -503,7 +515,7 @@ impl CliConfiguration for SnapshotManageCmd {
 	}
 
 	fn pruning_params(&self) -> Option<&PruningParams> {
-		None
+		Some(&self.pruning_params)	
 	}
 }
 
@@ -517,7 +529,7 @@ impl CliConfiguration for SnapshotExportCmd {
 	}
 
 	fn pruning_params(&self) -> Option<&PruningParams> {
-		None
+		Some(&self.pruning_params)	
 	}
 }
 
@@ -531,6 +543,6 @@ impl CliConfiguration for SnapshotImportCmd {
 	}
 
 	fn pruning_params(&self) -> Option<&PruningParams> {
-		None
+		Some(&self.pruning_params)	
 	}
 }
