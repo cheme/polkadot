@@ -472,7 +472,7 @@ impl SnapshotExportCmd {
 		let (to, default_block) = if let Some(to) = self.to.as_ref() {
 			let to = to.parse()?;
 			let to_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
-			(Some(to.parse()?), to_hash)
+			(Some(to), to_hash)
 		} else {
 			(None, best_hash)
 		};
