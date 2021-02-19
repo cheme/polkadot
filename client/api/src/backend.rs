@@ -449,6 +449,27 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// Access inner snapshot db implementation if available.
 	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
 
+	/// Write sync non state related persisting data.
+	fn export_sync_meta(
+		&self,
+		out: &mut impl std::io::Write,
+		from: NumberFor<Block>,
+		to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		unimplemented!();
+	}
+
+	/// Import sync non state related persisting data.
+	/// This cleans existing state.
+	fn import_sync_meta(
+		&self,
+		encoded: impl std::io::Read,
+		from: NumberFor<Block>,
+		to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		unimplemented!();
+	}
+
 	/// Returns true if state for given block is available.
 	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
 		self.state_at(BlockId::Hash(hash.clone())).is_ok()
