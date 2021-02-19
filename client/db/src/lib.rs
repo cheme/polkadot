@@ -760,7 +760,6 @@ impl<Block: BlockT> BlockchainDb<Block> {
 				to,
 			)?;
 		}
-		unimplemented!();
 	}
 }
 
