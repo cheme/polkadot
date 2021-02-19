@@ -102,7 +102,7 @@ use sp_blockchain::{
 	Result as ClientResult, Error as ClientError,
 	well_known_cache_keys, HeaderBackend,
 };
-use codec::{Decode, Encode};
+use codec::{Decode, Encode, Compact};
 use hash_db::Prefix;
 use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
 use sp_database::{Transaction, SnapshotDbConf};
@@ -449,6 +449,7 @@ pub struct BlockchainDb<Block: BlockT> {
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
 	header_cache: Arc<Mutex<LinkedHashMap<Block::Hash, Option<Block::Header>>>>,
 	transaction_storage: TransactionStorageMode,
+	registered_snapshot_sync: Arc<RwLock<Vec<Box<dyn SnapshotSync<Block>>>>>,
 }
 
 impl<Block: BlockT> BlockchainDb<Block> {
@@ -465,6 +466,7 @@ impl<Block: BlockT> BlockchainDb<Block> {
 			header_metadata_cache: Arc::new(HeaderMetadataCache::default()),
 			header_cache: Default::default(),
 			transaction_storage,
+			registered_snapshot_sync: Default::default(),
 		})
 	}
 
@@ -721,28 +723,44 @@ impl<Block: BlockT> BlockchainDb<Block> {
 	// TODO or trait
 	pub fn export_sync_meta(
 		&self,
-		out: &mut dyn std::io::Write,
+		mut out_dyn: &mut dyn std::io::Write,
 		from: NumberFor<Block>,
 		to: NumberFor<Block>,
 	) -> sp_blockchain::Result<()> {
+		// dyn to impl
+		let out = &mut out_dyn;
+		// version
+		out.write(&[0u8]).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot export errror: {:?}", e)),
+		)?;
+		// info to init 'Meta' (need to allow read_meta and all pointing to to)
+		let to_hash = self.hash(to)?;
+		to.encode_to(out);
+		to_hash.encode_to(out);
+		// get range
+		let nb = to - from;
+		nb.encode_to(out);
+		// headers (TODO consider removing digest??)
+		// need to feed LeafSet::read_from_db (just insert in order)
+		// and headers/blockids mapping (same)
+		let mut i = to;
+		while i <= nb {
+			let header = self.header(BlockId::Number(i))?;
+			header.encode_to(out);
+			i += One::one();
+		}
+		// registered components
+		let registered_snapshot_sync = self.registered_snapshot_sync.read();
+		let nb = registered_snapshot_sync.len();
+		Compact(nb as u32).encode_to(out);
+		for i in 0..nb {
+			registered_snapshot_sync[i].export_sync_meta(
+				out_dyn,
+				from,
+				to,
+			)?;
+		}
 		unimplemented!();
-		// mapping for block to header & header
-		// also header... (consider header without digest)
-		// struct Meta
-/*pub struct Meta<N, H> {
-	/// Hash of the best known block.
-	pub best_hash: H,
-	/// Number of the best known block.
-	pub best_number: N,
-	/// Hash of the best finalized block.
-	pub finalized_hash: H,
-	/// Number of the best finalized block.
-	pub finalized_number: N,
-	/// Hash of the genesis block.
-	pub genesis_hash: H,
-}*/
-		// leafset with to only
-		// transaction storage mode
 	}
 }
 
@@ -1020,7 +1038,6 @@ pub struct Backend<Block: BlockT> {
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
 	state_usage: Arc<StateUsageStats>,
 	snapshot_db: snapshot::SnapshotDb<Block>,
-	registered_snapshot_sync: Arc<RwLock<Vec<Box<dyn SnapshotSync<Block>>>>>,
 }
 
 impl<Block: BlockT> Backend<Block> {
@@ -1135,7 +1152,6 @@ impl<Block: BlockT> Backend<Block> {
 			state_usage: Arc::new(StateUsageStats::new()),
 			keep_blocks: config.keep_blocks.clone(),
 			transaction_storage: config.transaction_storage.clone(),
-			registered_snapshot_sync: Default::default(),
 		})
 	}
 
@@ -2060,7 +2076,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	}
 
 	fn register_sync(&self, sync: Box<dyn SnapshotSync<Block>>) {
-		self.registered_snapshot_sync.write().push(sync);
+		self.blockchain.registered_snapshot_sync.write().push(sync);
 	}
 }
 
