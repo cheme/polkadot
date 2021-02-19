@@ -760,6 +760,7 @@ impl<Block: BlockT> BlockchainDb<Block> {
 				to,
 			)?;
 		}
+		Ok(())
 	}
 }
 
