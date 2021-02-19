@@ -583,6 +583,8 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			Ok(())
 		})?;
 
+		out.write(&[SnapshotMode::Flat as u8, StateId::EndOfState as u8])
+			.map_err(|e| DatabaseError(Box::new(e)))?;
 		Ok(())
 	}
 }
@@ -599,11 +601,14 @@ enum SnapshotMode {
 /// its mode.
 #[repr(u8)]
 enum StateId {
+	/// End of state.
+	/// This allow putting state payload in non final position.
+	EndOfState = 0,
 	/// Top state
-	Top = 0,
+	Top = 1,
 	/// Default child trie, followed by unprefixed path from default trie prefix.
 	/// Path is a KeyDelta from previous child trie.
-	DefaultChild = 1,
+	DefaultChild = 2,
 }
 
 enum KeyDelta {
