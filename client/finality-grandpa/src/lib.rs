@@ -1107,7 +1107,30 @@ fn local_authority_id(
 	}
 }
 
+struct SyncBackend<Block: BlockT>(SharedAuthoritySet<Block::Hash, NumberFor<Block>>);
+
 /// Strategy for snapshot syncing babe.
-pub fn sync_backend<Block: BlockT>() -> Box<dyn SnapshotSync<Block>> {
-	unimplemented!("TODO share with light export");
+pub fn sync_backend<Block: BlockT>(
+	authority_set: SharedAuthoritySet<Block::Hash, NumberFor<Block>>,
+) -> Box<dyn SnapshotSync<Block>> {
+	Box::new(SyncBackend(authority_set))
+}
+
+impl<Block: BlockT> SnapshotSync<Block> for SyncBackend<Block> {
+	fn export_sync_meta(
+		&self,
+		mut out: &mut dyn std::io::Write,
+		_from: NumberFor<Block>,
+		_to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		// version
+		out.write(&[0u8]).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot export errror: {:?}", e)),
+		)?;
+
+		// writing whole set (could limit to range in the future).
+		self.0.inner().read().encode_to(&mut out);
+		
+		Ok(())
+	}
 }

@@ -1562,7 +1562,30 @@ pub mod test_helpers {
 	}
 }
 
+struct SyncBackend<Block: BlockT>(SharedEpochChanges<Block, Epoch>);
+
 /// Strategy for snapshot syncing babe.
-pub fn sync_backend<Block: BlockT>() -> Box<dyn SnapshotSync<Block>> {
-	unimplemented!("TODO share with light export");
+pub fn sync_backend<Block: BlockT>(
+	epoch_changes: SharedEpochChanges<Block, Epoch>,
+) -> Box<dyn SnapshotSync<Block>> {
+	Box::new(SyncBackend(epoch_changes))
+}
+
+impl<Block: BlockT> SnapshotSync<Block> for SyncBackend<Block> {
+	fn export_sync_meta(
+		&self,
+		mut out: &mut dyn std::io::Write,
+		_from: NumberFor<Block>,
+		_to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		// version
+		out.write(&[0u8]).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot export errror: {:?}", e)),
+		)?;
+
+		// writing whole set (could limit to range in the future).
+		self.0.lock().encode_to(&mut out);
+		
+		Ok(())
+	}
 }
