@@ -500,6 +500,9 @@ impl SnapshotExportCmd {
 
 		if let Some(path) = &self.output {
 			let mut out = std::fs::File::create(path)?;
+			if !state_only {
+				unimplemented!("Aggregate exports from substrate modules");
+			}
 			db.export_snapshot(
 				&mut out,
 				finalized_number,
@@ -511,6 +514,9 @@ impl SnapshotExportCmd {
 			)?;
 		} else {
 			let mut out = std::io::stdout();
+			if !state_only {
+				unimplemented!("Aggregate exports from substrate modules");
+			}
 			db.export_snapshot(
 				&mut out,
 				finalized_number,
