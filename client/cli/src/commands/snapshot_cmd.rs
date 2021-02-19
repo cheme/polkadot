@@ -211,6 +211,10 @@ pub struct SnapshotExportCmd {
 	#[structopt(long)]
 	pub flat: bool,
 
+	/// Export only state.
+	#[structopt(long)]
+	pub state_only: bool,
+
 	/// Specify DB mode.
 	#[structopt(
 		long,
@@ -479,28 +483,45 @@ impl SnapshotExportCmd {
 		};
 
 		let chain_info = backend.blockchain().info();
-		let best_hash = chain_info.best_hash;
-		let best_block = chain_info.best_number;
+		let finalized_hash = chain_info.finalized_hash;
+		let finalized_number = chain_info.finalized_number;
 		let (to, default_block) = if let Some(to) = self.to.as_ref() {
 			let to = to.parse()?;
 			let to_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
 			(Some(to), to_hash)
 		} else {
-			(None, best_hash)
+			(None, finalized_hash)
 		};
 		let state_visitor = StateVisitorImpl(&backend, &default_block);
-		db.export_snapshot(
-			self.output.clone(),
-			best_block,
-			from,
-			to,
-			self.flat,
-			match self.db_mode {
-				SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
-				SnapshotMode::Xdelta3 => sc_client_api::SnapshotDBMode::Xdelta3Diff,
-			},
-			state_visitor,
-		)?;
+		let db_mode = match self.db_mode {
+			SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
+			SnapshotMode::Xdelta3 => sc_client_api::SnapshotDBMode::Xdelta3Diff,
+		};
+
+		if let Some(path) = &self.output {
+			let mut out = std::fs::File::create(path)?;
+			db.export_snapshot(
+				&mut out,
+				finalized_number,
+				from,
+				to,
+				self.flat,
+				db_mode,
+				state_visitor,
+			)?;
+		} else {
+			let mut out = std::io::stdout();
+			db.export_snapshot(
+				&mut out,
+				finalized_number,
+				from,
+				to,
+				self.flat,
+				db_mode,
+				state_visitor,
+			)?;
+		};
+
 		Ok(())
 	}
 }

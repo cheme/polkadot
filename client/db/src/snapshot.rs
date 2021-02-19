@@ -319,8 +319,8 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 	fn export_snapshot(
 		&self,
-		output: Option<std::path::PathBuf>,
-		best_block: NumberFor<Block>,
+		out: &mut impl std::io::Write,
+		last_finalized: NumberFor<Block>,
 		from: Option<NumberFor<Block>>,
 		to: Option<NumberFor<Block>>,
 		flat: bool,
@@ -332,14 +332,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 				let e = ClientError::StateDatabase("Disabled snapshot db need to be created first".into());
 				return Err(DatabaseError(Box::new(e)));
 			} else {
-				if let Some(path) = output {
-					let mut out = std::fs::File::create(path)
-						.map_err(|e| DatabaseError(Box::new(e)))?;
-					return self.flat_from_state(&mut out, default_flat);
-				} else {
-					let mut out = std::io::stdout();
-					return self.flat_from_state(&mut out, default_flat);
-				};
+				return self.flat_from_state(out, default_flat);
 			}
 		}
 	

@@ -583,8 +583,8 @@ pub trait SnapshotDb<B: Block> {
 	/// Export a snapshot file.
 	fn export_snapshot(
 		&self,
-		output: Option<std::path::PathBuf>,
-		best_block: NumberFor<B>,
+		output: &mut impl std::io::Write,
+		last_finalized: NumberFor<B>,
 		from: Option<NumberFor<B>>,
 		to: Option<NumberFor<B>>,
 		flat: bool,
@@ -658,8 +658,8 @@ impl<B: Block> SnapshotDb<B> for () {
 
 	fn export_snapshot(
 		&self,
-		_output: Option<std::path::PathBuf>,
-		_best_block: NumberFor<B>,
+		_output: &mut impl std::io::Write,
+		_last_finalized: NumberFor<B>,
 		_from: Option<NumberFor<B>>,
 		_to: Option<NumberFor<B>>,
 		_flat: bool,
