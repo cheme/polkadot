@@ -20,7 +20,7 @@ use crate::error;
 use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, BlockNumberOrHash};
 use crate::CliConfiguration;
 use log::info;
-use sc_service::{Role, PruningMode, config::DatabaseConfig};
+use sc_service::config::DatabaseConfig;
 use sc_client_api::{SnapshotDb, StateBackend, StateVisitor, DatabaseError};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
@@ -44,6 +44,19 @@ arg_enum! {
 		Xdelta3,
 	}
 }
+
+/// Parameters to define the snapshot db pruning mode
+#[derive(Debug, StructOpt, Clone)]
+pub struct SnapshotPruningParams {
+	/// Specify the state pruning mode, a number of blocks to keep or 'archive'.
+	///
+	/// Default is to keep all block states if the node is running as a
+	/// validator (i.e. 'archive'), otherwise state is only kept for the last
+	/// 256 blocks.
+	#[structopt(long = "snapshot_pruning", value_name = "PRUNING_MODE")]
+	pub snapshot_pruning: Option<String>,
+}
+
 
 /// Snapshot configuration.
 #[derive(Debug, Clone, StructOpt)]
@@ -76,7 +89,7 @@ pub struct SnapshotConf {
 
 	/// Pruning behavior to set or apply on the snapshot db.
 	#[structopt(flatten)]
-	pub snapshot_pruning_params: PruningParams,
+	pub snapshot_pruning_params: SnapshotPruningParams,
 
 	#[structopt(long)]
 	/// Db history is split in multiple nodes.
@@ -98,17 +111,14 @@ pub struct SnapshotConf {
 	pub db_mode: SnapshotMode,
 }
 
-fn pruning_conf(params: &PruningParams) -> Option<Option<u32>> {
-	if params.pruning.is_some() {
-		Some(match params.state_pruning(true, &Role::Full)
-			.expect("Using unsafe pruning.") {
-			PruningMode::ArchiveAll => None,
-			// TODO align pruning to allow this.
-			PruningMode::ArchiveCanonical => None,
-			PruningMode::Constrained(constraint) => constraint.max_blocks,
-		})
-	} else {
-		None
+fn pruning_conf(params: &SnapshotPruningParams) -> Option<Option<u32>> {
+	match &params.snapshot_pruning {
+		Some(ref s) if s == "archive" => Some(None),
+		None => None,
+		Some(s) => {
+			let s = s.parse().expect("Invalid snapshot pruning mode specified");
+			Some(Some(s))
+		}
 	}
 }
 
@@ -503,7 +513,7 @@ impl SnapshotExportCmd {
 			if !self.state_only {
 				let to = to.unwrap_or(finalized_number);
 				let from = from.unwrap_or(to);
-				backend.export_sync_meta(&mut out, from, to)?;
+				backend.snapshot_sync().export_sync_meta(&mut out, from, to)?;
 			}
 			db.export_snapshot(
 				&mut out,
@@ -519,7 +529,7 @@ impl SnapshotExportCmd {
 			if !self.state_only {
 				let to = to.unwrap_or(finalized_number);
 				let from = from.unwrap_or(to);
-				backend.export_sync_meta(&mut out, from, to)?;
+				backend.snapshot_sync().export_sync_meta(&mut out, from, to)?;
 			}
 			db.export_snapshot(
 				&mut out,

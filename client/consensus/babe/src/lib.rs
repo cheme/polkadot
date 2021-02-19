@@ -98,7 +98,7 @@ use sp_consensus::{
 use sp_consensus_babe::inherents::BabeInherentData;
 use sp_timestamp::{TimestampInherentData, InherentType as TimestampInherent};
 use sc_client_api::{
-	backend::AuxStore, BlockchainEvents, ProvideUncles,
+	backend::AuxStore, BlockchainEvents, ProvideUncles, SnapshotSync,
 };
 use sp_block_builder::BlockBuilder as BlockBuilderApi;
 use futures::channel::mpsc::{channel, Sender, Receiver};
@@ -1560,4 +1560,9 @@ pub mod test_helpers {
 			&keystore,
 		).map(|(digest, _)| digest)
 	}
+}
+
+/// Strategy for snapshot syncing babe.
+pub fn sync_backend<Block: BlockT>() -> Box<dyn SnapshotSync<Block>> {
+	unimplemented!("TODO share with light export");
 }

@@ -746,6 +746,12 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 	fn get_import_lock(&self) -> &RwLock<()> {
 		&self.import_lock
 	}
+
+	fn snapshot_sync(&self) -> Box<dyn backend::SnapshotSync<Block>> {
+		Box::new(())
+	}
+
+	fn register_sync(&self, sync: Box<dyn backend::SnapshotSync<Block>>) { }
 }
 
 impl<Block: BlockT> backend::LocalBackend<Block> for Backend<Block> where Block::Hash: Ord {}

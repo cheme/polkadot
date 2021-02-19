@@ -625,10 +625,10 @@ impl Encode for KeyDelta {
 		match self {
 			KeyDelta::Augment(nb) => {
 				let augment_nb = nb * 2; // 0 as last bit
-				Compact((nb * 2) as u64).encode_to(out);
+				Compact(augment_nb as u64).encode_to(out);
 			},
 			KeyDelta::PopAugment(nb, nb2) => {
-				let pop_nb = (nb * 2) + 1; // 0 as last bit
+				let pop_nb = (nb * 2) + 1; // 1 as last bit
 				Compact(pop_nb as u64).encode_to(out);
 				Compact(*nb2 as u64).encode_to(out);
 			},

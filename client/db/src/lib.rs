@@ -94,7 +94,8 @@ use log::{trace, debug, warn};
 
 use sc_client_api::{
 	UsageInfo, MemoryInfo, IoInfo, MemorySize,
-	backend::{NewBlockState, PrunableStateChangesTrieStorage, ProvideChtRoots},
+	backend::{NewBlockState, PrunableStateChangesTrieStorage, ProvideChtRoots,
+		SnapshotSync},
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
 };
 use sp_blockchain::{
@@ -439,13 +440,14 @@ fn cache_header<Hash: std::cmp::Eq + std::hash::Hash, Header>(
 	}
 }
 
+#[derive(Clone)]
 /// Block database
 pub struct BlockchainDb<Block: BlockT> {
 	db: Arc<dyn Database<DbHash>>,
 	meta: Arc<RwLock<Meta<NumberFor<Block>, Block::Hash>>>,
-	leaves: RwLock<LeafSet<Block::Hash, NumberFor<Block>>>,
+	leaves: Arc<RwLock<LeafSet<Block::Hash, NumberFor<Block>>>>,
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
-	header_cache: Mutex<LinkedHashMap<Block::Hash, Option<Block::Header>>>,
+	header_cache: Arc<Mutex<LinkedHashMap<Block::Hash, Option<Block::Header>>>>,
 	transaction_storage: TransactionStorageMode,
 }
 
@@ -458,7 +460,7 @@ impl<Block: BlockT> BlockchainDb<Block> {
 		let leaves = LeafSet::read_from_db(&*db, columns::META, meta_keys::LEAF_PREFIX)?;
 		Ok(BlockchainDb {
 			db,
-			leaves: RwLock::new(leaves),
+			leaves: Arc::new(RwLock::new(leaves)),
 			meta: Arc::new(RwLock::new(meta)),
 			header_metadata_cache: Arc::new(HeaderMetadataCache::default()),
 			header_cache: Default::default(),
@@ -711,6 +713,36 @@ impl<Block: BlockT> ProvideChtRoots<Block> for BlockchainDb<Block> {
 			cht_number,
 			cht_range.map(|num| self.changes_trie_root(BlockId::Number(num))),
 		).map(Some)
+	}
+}
+
+// TODO consider trait (see light)
+impl<Block: BlockT> BlockchainDb<Block> {
+	// TODO or trait
+	pub fn export_sync_meta(
+		&self,
+		out: &mut dyn std::io::Write,
+		from: NumberFor<Block>,
+		to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		unimplemented!();
+		// mapping for block to header & header
+		// also header... (consider header without digest)
+		// struct Meta
+/*pub struct Meta<N, H> {
+	/// Hash of the best known block.
+	pub best_hash: H,
+	/// Number of the best known block.
+	pub best_number: N,
+	/// Hash of the best finalized block.
+	pub finalized_hash: H,
+	/// Number of the best finalized block.
+	pub finalized_number: N,
+	/// Hash of the genesis block.
+	pub genesis_hash: H,
+}*/
+		// leafset with to only
+		// transaction storage mode
 	}
 }
 
@@ -988,6 +1020,7 @@ pub struct Backend<Block: BlockT> {
 	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
 	state_usage: Arc<StateUsageStats>,
 	snapshot_db: snapshot::SnapshotDb<Block>,
+	registered_snapshot_sync: Arc<RwLock<Vec<Box<dyn SnapshotSync<Block>>>>>,
 }
 
 impl<Block: BlockT> Backend<Block> {
@@ -1102,6 +1135,7 @@ impl<Block: BlockT> Backend<Block> {
 			state_usage: Arc::new(StateUsageStats::new()),
 			keep_blocks: config.keep_blocks.clone(),
 			transaction_storage: config.transaction_storage.clone(),
+			registered_snapshot_sync: Default::default(),
 		})
 	}
 
@@ -2019,6 +2053,26 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 
 	fn get_import_lock(&self) -> &RwLock<()> {
 		&*self.import_lock
+	}
+
+	fn snapshot_sync(&self) -> Box<dyn SnapshotSync<Block>> {
+		Box::new(self.blockchain.clone())
+	}
+
+	fn register_sync(&self, sync: Box<dyn SnapshotSync<Block>>) {
+		self.registered_snapshot_sync.write().push(sync);
+	}
+}
+
+impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
+	fn export_sync_meta(
+		&self,
+		out: &mut dyn std::io::Write,
+		from: NumberFor<Block>,
+		to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		self.export_sync_meta(out, from, to)?;
+		Ok(())
 	}
 }
 

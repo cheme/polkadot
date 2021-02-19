@@ -62,7 +62,7 @@ use futures::{
 };
 use log::{debug, error, info};
 use sc_client_api::{
-	backend::{AuxStore, Backend},
+	backend::{AuxStore, Backend, SnapshotSync},
 	LockImportRun, BlockchainEvents, CallExecutor,
 	ExecutionStrategy, Finalizer, TransactionFor, ExecutorProvider,
 };
@@ -1105,4 +1105,9 @@ fn local_authority_id(
 			.map(|(p, _)| p.clone()),
 		None => None,
 	}
+}
+
+/// Strategy for snapshot syncing babe.
+pub fn sync_backend<Block: BlockT>() -> Box<dyn SnapshotSync<Block>> {
+	unimplemented!("TODO share with light export");
 }

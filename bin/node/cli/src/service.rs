@@ -66,6 +66,10 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 
 	let select_chain = sc_consensus::LongestChain::new(backend.clone());
 
+	use sc_client_api::Backend;
+	backend.register_sync(sc_consensus_babe::sync_backend());
+	backend.register_sync(grandpa::sync_backend());
+
 	let transaction_pool = sc_transaction_pool::BasicPool::new_full(
 		config.transaction_pool.clone(),
 		config.role.is_authority().into(),

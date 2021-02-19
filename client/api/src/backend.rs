@@ -449,26 +449,12 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// Access inner snapshot db implementation if available.
 	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
 
-	/// Write sync non state related persisting data.
-	fn export_sync_meta(
-		&self,
-		out: &mut impl std::io::Write,
-		from: NumberFor<Block>,
-		to: NumberFor<Block>,
-	) -> sp_blockchain::Result<()> {
-		unimplemented!();
-	}
+	/// Snapshot synching for this backend.
+	fn snapshot_sync(&self) -> Box<dyn SnapshotSync<Block>>;
 
-	/// Import sync non state related persisting data.
-	/// This cleans existing state.
-	fn import_sync_meta(
-		&self,
-		encoded: impl std::io::Read,
-		from: NumberFor<Block>,
-		to: NumberFor<Block>,
-	) -> sp_blockchain::Result<()> {
-		unimplemented!();
-	}
+	/// Add a sync component to use with the snapshot synching
+	/// of his backend.
+	fn register_sync(&self, sync: Box<dyn SnapshotSync<Block>>);
 
 	/// Returns true if state for given block is available.
 	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
@@ -513,6 +499,51 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// something that the import of a block would interfere with, e.g. importing
 	/// a new block or calculating the best head.
 	fn get_import_lock(&self) -> &RwLock<()>;
+}
+
+/// Component that need to manage some export and import state
+/// when using snapshots.
+pub trait SnapshotSync<Block: BlockT>: Send + Sync {
+	/// Write sync non state related persisting data.
+	fn export_sync_meta(
+		&self,
+		out: &mut dyn std::io::Write,
+		from: NumberFor<Block>,
+		to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()>;
+
+	/// Import sync non state related persisting data.
+	/// This cleans existing state.
+	fn import_sync_meta(
+		&self,
+		encoded: &mut dyn std::io::Read,
+		from: NumberFor<Block>,
+		to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		unimplemented!();
+	}
+}
+
+impl<Block: BlockT> SnapshotSync<Block> for () {
+	fn export_sync_meta(
+		&self,
+		_out: &mut dyn std::io::Write,
+		_from: NumberFor<Block>,
+		_to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
+	}
+
+	/// Import sync non state related persisting data.
+	/// This cleans existing state.
+	fn import_sync_meta(
+		&self,
+		_encoded: &mut dyn std::io::Read,
+		_from: NumberFor<Block>,
+		_to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
+	}
 }
 
 /// Changes trie storage that supports pruning.
