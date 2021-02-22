@@ -47,6 +47,7 @@ use sp_database::{SnapshotDbConf, SnapshotDBMode};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use nodes_database::{BranchNodes, BlockNodes, Context};
+use std::borrow::Cow;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
@@ -143,7 +144,7 @@ pub struct SnapshotDb<Block: BlockT> {
 	config: SnapshotDbConf,
 	/// Historied value variant.
 	hvalue_type: HValueType,
-	/// Db for storing nodes. 
+	/// Db for storing nodes.
 	nodes_db: Arc<dyn Database<DbHash>>,
 }
 
@@ -335,7 +336,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 				return self.flat_from_state(out, default_flat);
 			}
 		}
-	
+
 		unimplemented!("TODO next");
 	}
 }
@@ -472,7 +473,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			None
 		};
 
-		// Do not journal genesis. 
+		// Do not journal genesis.
 		let mut management = (self.do_journals() && !is_genesis)
 			.then(|| self.historied_management.inner.write());
 		let journals = management.as_mut().map(|management| management.instance.ser());
@@ -542,7 +543,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 
 		let mut default_key_writer = KeyWriter {
-			previous: Default::default(),
+			previous: [][..].into(),
 		};
 		let default_key_writer = &mut default_key_writer;
 		let mut default_child_key_writer = KeyWriter {
@@ -563,7 +564,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 						Some((ChildType::ParentKeyId, storage_key)) => {
 							out.write(&[StateId::DefaultChild as u8])
 								.map_err(|e| DatabaseError(Box::new(e)))?;
-							default_child_key_writer.write_next(storage_key, out);
+							default_child_key_writer.write_next_owned(storage_key.to_vec(), out);
 						},
 						_ => {
 							let e = ClientError::StateDatabase("Unknown child trie type in state".into());
@@ -578,7 +579,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 					previous: Default::default(),
 				};
 			}
-			default_key_writer.write_next(key.as_slice(), out);
+			default_key_writer.write_next_owned(key, out);
 			value.encode_to(out);
 			Ok(())
 		})?;
@@ -650,8 +651,8 @@ impl Decode for KeyDelta {
 
 /// Key are written in delta mode (since they are sorted it is a big size gain).
 /// TODO slice version might be ok for non state_visitor usecase
-struct KeyWriter {
-	previous: Vec<u8>,
+struct KeyWriter<'a> {
+	previous: Cow<'a, [u8]>,
 }
 
 fn common_depth(v1: &[u8], v2: &[u8]) -> usize {
@@ -664,9 +665,22 @@ fn common_depth(v1: &[u8], v2: &[u8]) -> usize {
 	upper_bound
 }
 
-impl KeyWriter {
-	fn write_next<O: codec::Output + ?Sized>(&mut self, next: &[u8], out: &mut O) {
-		let previous = self.previous.as_slice();
+impl<'a> KeyWriter<'a> {
+	fn write_next_owned<O: codec::Output + ?Sized>(&mut self, next: Vec<u8>, out: &mut O) {
+		let previous = &self.previous[..];
+		let common = common_depth(previous, next.as_slice());
+		let keydelta = if common < previous.len() {
+			KeyDelta::PopAugment(previous.len() - common, next.len() - common);
+		} else {
+			KeyDelta::Augment(next.len() - common);
+		};
+		keydelta.encode_to(out);
+		out.write(&next[common..]);
+		self.previous = next.into();
+	}
+
+	fn write_next<O: codec::Output + ?Sized>(&mut self, next: &'a [u8], out: &mut O) {
+		let previous = &self.previous;
 		let common = common_depth(previous, next);
 		let keydelta = if common < previous.len() {
 			KeyDelta::PopAugment(previous.len() - common, next.len() - common);
@@ -675,8 +689,7 @@ impl KeyWriter {
 		};
 		keydelta.encode_to(out);
 		out.write(&next[common..]);
-		self.previous.resize(next.len(), 0);
-		self.previous.copy_from_slice(next);
+		self.previous = next.into();
 	}
 }
 
@@ -715,7 +728,7 @@ pub struct HistoriedDB {
 	pub config: SnapshotDbConf,
 	/// Historied value type for the given conf.
 	pub hvalue_type: HValueType,
-	/// Db for storing nodes. 
+	/// Db for storing nodes.
 	pub nodes_db: Arc<dyn Database<DbHash>>,
 }
 
@@ -849,7 +862,7 @@ mod nodes_backend {
 		DecodeWithContext,
 		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead, EstimateSize},
 	};
-	use codec::{Encode, Decode}; 
+	use codec::{Encode, Decode};
 
 	/// Multiple node splitting strategy based on content
 	/// size.
@@ -1264,9 +1277,9 @@ impl HValue {
 	/// Access existing value.
 	fn value(&self, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
 		Ok(match self {
-			HValue::NodesNoDiff(inner, _, _) => nodes_nodiff::value(inner, current_state)?, 
-			HValue::SingleNodeNoDiff(inner) => single_node_nodiff::value(inner, current_state)?, 
-			HValue::SingleNodeXDelta(inner) => single_node_xdelta::value(inner, current_state)?, 
+			HValue::NodesNoDiff(inner, _, _) => nodes_nodiff::value(inner, current_state)?,
+			HValue::SingleNodeNoDiff(inner) => single_node_nodiff::value(inner, current_state)?,
+			HValue::SingleNodeXDelta(inner) => single_node_xdelta::value(inner, current_state)?,
 		})
 	}
 
@@ -1411,7 +1424,7 @@ impl KVBackend for HistoriedDB {
 }
 
 impl HistoriedDB {
-	/// Iterator on key values. 
+	/// Iterator on key values.
 	pub fn iter<'a>(&'a self, column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter(column).filter_map(move |(k, v)| {
 			let v = HValue::decode_with_context(&k[..], &mut &v[..], self.hvalue_type, &self.nodes_db)
@@ -1456,7 +1469,7 @@ pub struct HistoriedDBMut<DB> {
 	pub config: SnapshotDbConf,
 	/// Historied value type for the given conf.
 	pub hvalue_type: HValueType,
-	/// Db for storing nodes. 
+	/// Db for storing nodes.
 	pub nodes_db: Arc<dyn Database<DbHash>>,
 }
 
@@ -1584,7 +1597,7 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 			let mut journals = historied_db::management::JournalForMigrationBasis
 				::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
 				::from_db(db);
-		
+
 			if let Some(pruning) = prune {
 				journals.remove_changes_before(db, &(pruning, Default::default()), &mut keys_to_migrate);
 			}
