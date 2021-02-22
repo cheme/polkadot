@@ -1143,15 +1143,16 @@ mod node_xdelta {
 		backend::nodes::ContextHead,
 		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 	};
+
 	// Values are stored in memory in Vec like structure
 	type LinearBackendInner = historied_db::backend::in_memory::MemoryOnly8<
-		Vec<u8>,
+		<BytesDiff as historied_db::historied::Value>::Storage,
 		u64,
 	>;
 
 	// A multiple nodes wraps multiple vec like structure
 	pub(super) type LinearBackend = historied_db::backend::nodes::Head<
-		Vec<u8>,
+		<BytesDiff as historied_db::historied::Value>::Storage,
 		u64,
 		LinearBackendInner,
 		MetaBlocks,
@@ -1161,7 +1162,7 @@ mod node_xdelta {
 
 	// Nodes storing these
 	type LinearNode = historied_db::backend::nodes::Node<
-		Vec<u8>,
+		<BytesDiff as historied_db::historied::Value>::Storage,
 		u64,
 		LinearBackendInner,
 		MetaBlocks,
@@ -1211,6 +1212,7 @@ mod node_xdelta {
 	}
 }
 
+
 mod single_node_nodiff {
 	use historied_db::{
 		historied::Data,
@@ -1246,7 +1248,7 @@ mod single_node_xdelta {
 	};
 
 	type LinearBackend = historied_db::backend::in_memory::MemoryOnly8<
-		Vec<u8>,
+		<BytesDiff as historied_db::historied::Value>::Storage,
 		u64,
 	>;
 
