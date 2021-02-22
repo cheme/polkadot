@@ -358,6 +358,13 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 	}
 }
 
+impl<V, S, D, M, B, NI> EstimateSize for Head<V, S, D, M, B, NI>
+{
+	fn estimate_size(&self) -> usize {
+		unimplemented!()
+	}
+}
+	
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
 		D: Clone + Trigger,
