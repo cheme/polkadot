@@ -718,10 +718,8 @@ impl<Block: BlockT> ProvideChtRoots<Block> for BlockchainDb<Block> {
 	}
 }
 
-// TODO consider trait (see light)
-impl<Block: BlockT> BlockchainDb<Block> {
-	// TODO or trait
-	pub fn export_sync_meta(
+impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
+	fn export_sync_meta(
 		&self,
 		mut out_dyn: &mut dyn std::io::Write,
 		from: NumberFor<Block>,
@@ -761,6 +759,15 @@ impl<Block: BlockT> BlockchainDb<Block> {
 			)?;
 		}
 		Ok(())
+	}
+
+	fn import_sync_meta(
+		&self,
+		_encoded: &mut dyn std::io::Read,
+		_from: NumberFor<Block>,
+		_to: NumberFor<Block>,
+	) -> sp_blockchain::Result<()> {
+		unimplemented!();
 	}
 }
 
@@ -2078,18 +2085,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 
 	fn register_sync(&self, sync: Box<dyn SnapshotSync<Block>>) {
 		self.blockchain.registered_snapshot_sync.write().push(sync);
-	}
-}
-
-impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
-	fn export_sync_meta(
-		&self,
-		out: &mut dyn std::io::Write,
-		from: NumberFor<Block>,
-		to: NumberFor<Block>,
-	) -> sp_blockchain::Result<()> {
-		self.export_sync_meta(out, from, to)?;
-		Ok(())
 	}
 }
 

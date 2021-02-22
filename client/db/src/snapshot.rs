@@ -514,8 +514,9 @@ impl<Block: BlockT> SnapshotDb<Block> {
 				ordered_db,
 				historied.current_state.latest().clone(),
 				journal_keys,
-				true, // New block, no need for fetch. TODO does this assertion stand?? (at least parameter
-				// when moving this code to snapshot_db.
+				// New block, no need for fetch
+				// (when executed twice we overwrite existing but journal should be the smae).
+				true,
 			)
 		}
 
@@ -668,7 +669,6 @@ impl Decode for KeyDelta {
 }
 
 /// Key are written in delta mode (since they are sorted it is a big size gain).
-/// TODO slice version might be ok for non state_visitor usecase
 struct KeyWriter<'a> {
 	previous: Cow<'a, [u8]>,
 }
@@ -739,15 +739,15 @@ impl KeyReader {
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
 	// TODO rem pub as upgrade is cleaned
-	pub current_state: ForkPlan<u32, u64>,
+	current_state: ForkPlan<u32, u64>,
 	// TODO rem pub as upgrade is cleaned
-	pub db: Arc<dyn OrderedDatabase<DbHash>>,
+	db: Arc<dyn OrderedDatabase<DbHash>>,
 	/// Configuration for this db. TODO is it of any use??
-	pub config: SnapshotDbConf,
+	config: SnapshotDbConf,
 	/// Historied value type for the given conf.
-	pub hvalue_type: HValueType,
+	hvalue_type: HValueType,
 	/// Db for storing nodes.
-	pub nodes_db: Arc<dyn Database<DbHash>>,
+	nodes_db: Arc<dyn Database<DbHash>>,
 }
 
 /*
