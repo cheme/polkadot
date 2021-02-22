@@ -46,7 +46,8 @@ use codec::{Decode, Encode, Compact};
 use sp_database::{SnapshotDbConf, SnapshotDBMode};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
-use nodes_database::{BranchNodes, BlockNodes, Context};
+use nodes_database::{BranchNodes, BlockNodes};
+use nodes_backend::Context;
 use std::borrow::Cow;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
@@ -774,7 +775,6 @@ mod nodes_database {
 	use crate::DbHash;
 	use sp_database::Database;
 	use sp_database::Transaction;
-	use historied_db::backend::nodes::ContextHead;
 
 	#[derive(Clone)]
 	pub(super) struct DatabasePending {
@@ -900,9 +900,6 @@ mod nodes_database {
 			self.0.apply_transaction(crate::columns::AUX, transaction)
 		}
 	}
-
-	/// Alias for tree context. TODO move to nodes_backend
-	pub type Context = (ContextHead<BranchNodes, ContextHead<BlockNodes, ()>>, ContextHead<BlockNodes, ()>);
 }
 
 mod nodes_backend {
@@ -913,6 +910,9 @@ mod nodes_backend {
 		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead, EstimateSize},
 	};
 	use codec::{Encode, Decode};
+
+	/// Alias for tree context.
+	pub type Context = (ContextHead<BranchNodes, ContextHead<BlockNodes, ()>>, ContextHead<BlockNodes, ()>);
 
 	/// Multiple node splitting strategy based on content
 	/// size.
