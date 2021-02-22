@@ -275,6 +275,20 @@ pub mod xdelta {
 			BytesDelta(sp_std::mem::replace(builder, None))
 		}
 	}
+
+	impl crate::backend::nodes::EstimateSize for BytesDiff {
+		fn estimate_size(&self) -> usize {
+			match self {
+				BytesDiff::None => 1,
+				BytesDiff::VcDiff(v) => 1 + v.estimate_size(),
+				BytesDiff::Value(v) => 1 + v.estimate_size(),
+			}
+		}
+	}
+
+	impl crate::Context for BytesDiff {
+		type Context = ();
+	}
 }
 
 /// Set delta.
