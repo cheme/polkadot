@@ -595,7 +595,6 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize + Trigger,
-		NI: ContextBuilder,
 {
 	// Fetched node index (end_node_index is head).
 	// If true the node needs to be inserted.
