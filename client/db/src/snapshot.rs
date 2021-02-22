@@ -1082,8 +1082,8 @@ mod nodes_backend {
 	>;
 
 	// Head of branches
-	pub(super) type TreeBackend<C> = historied_db::backend::nodes::Head<
-		BranchLinear<C>,
+	pub(super) type TreeBackend<C, C2 = C> = historied_db::backend::nodes::Head<
+		BranchLinear<C2>,
 		u32,
 		TreeBackendInner<C>,
 		MetaBranches,
@@ -1123,7 +1123,6 @@ mod nodes_nodiff {
 	}
 }
 
-/* TODO needs Context implemented to Bytes Diff, also probably EstimateSize
 mod node_xdelta {
 	use historied_db::{
 		DecodeWithContext,
@@ -1138,22 +1137,22 @@ mod node_xdelta {
 		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 	};
 
-
 	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
 	pub type HValue = Tree<
 		u32,
 		u64,
 		BytesDiff,
-		super::nodes_backend::TreeBackend<BytesDiff>,
+		super::nodes_backend::TreeBackend<BytesDiff, Vec<u8>>,
 		super::nodes_backend::LinearBackend<Vec<u8>>,
 	>;
 
 	/// Access current value.
 	pub fn value(v: &HValue, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
-		Ok(v.get(current_state).flatten())
+		let v = TreeSum::<_, _, BytesDelta, _, _>(&v);
+		let v = v.get_sum(current_state);
+		Ok(v.map(|v| v.into()).flatten())
 	}
 }
-*/
 
 mod single_node_nodiff {
 	use historied_db::{
