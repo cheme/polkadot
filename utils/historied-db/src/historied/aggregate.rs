@@ -289,6 +289,12 @@ pub mod xdelta {
 	impl crate::Context for BytesDiff {
 		type Context = ();
 	}
+
+	impl crate::Trigger for BytesDiff {
+		const TRIGGER: bool = false;
+
+		fn trigger_flush(&mut self) { }
+	}
 }
 
 /// Set delta.
