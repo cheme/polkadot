@@ -591,7 +591,6 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	where
 		D: Context<Context = NI> + LinearStorage<V, S>,
-		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize + Trigger,
