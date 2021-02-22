@@ -771,7 +771,6 @@ mod SingleNodeEncodedNoDiff {
 mod nodes_database {
 	use std::sync::Arc;
 	use parking_lot::RwLock;
-	use std::collections::HashMap;
 	use crate::DbHash;
 	use sp_database::Database;
 	use sp_database::Transaction;
@@ -779,16 +778,15 @@ mod nodes_database {
 
 	#[derive(Clone)]
 	pub(super) struct DatabasePending {
-		// TODO this is limited to changes of nodes of a single value and should be small -> switch
-		// from HashMap to Vec. TODO also try refcell inner mut (inner mut is needde cause branch
-		// changes are not reported back.
-		pending: Arc<RwLock<HashMap<Vec<u8>, Option<Vec<u8>>>>>,
+		// this is limited to changes of nodes of a single value and should be small,
+		// therefore we use a simple vec with full scan instead of a map.
+		pending: Arc<RwLock<Vec<(Vec<u8>, Option<Vec<u8>>)>>>,
 		database: Arc<dyn Database<DbHash>>,
 	}
 
 	impl DatabasePending {
-		pub(super) fn clear_and_extract_changes(&self) -> HashMap<Vec<u8>, Option<Vec<u8>>> {
-			std::mem::replace(&mut self.pending.write(), HashMap::new())
+		pub(super) fn clear_and_extract_changes(&self) -> Vec<(Vec<u8>, Option<Vec<u8>>)> {
+			std::mem::replace(&mut self.pending.write(), Vec::new())
 		}
 
 		pub(super) fn apply_transaction(
@@ -807,19 +805,53 @@ mod nodes_database {
 		}
 
 		pub(super) fn read(&self, col: sp_database::ColumnId, key: &[u8]) -> Option<Vec<u8>> {
-			if let Some(pending) = self.pending.read().get(key).cloned() {
-				pending
-			} else {
-				self.database.get(col, key)
+			let pending = self.pending.read();
+			for kv in pending.iter() {
+				match kv.0.as_slice().cmp(key) {
+					std::cmp::Ordering::Equal => return kv.1.clone(),
+					std::cmp::Ordering::Less => (),
+					std::cmp::Ordering::Greater => break,
+				}
 			}
+			self.database.get(col, key)
+		}
+
+		fn insert(&self, key: Vec<u8>, value: Option<Vec<u8>>) {
+			let mut pending = self.pending.write();
+			let mut pos = None;
+			let mut mat = None;
+			for (i, kv) in pending.iter().enumerate() {
+				match kv.0.cmp(&key) {
+					std::cmp::Ordering::Equal => {
+						mat = Some(i);
+						break;
+					},
+					std::cmp::Ordering::Less => (),
+					std::cmp::Ordering::Greater => {
+						pos = Some(i);
+						break;
+					},
+				}
+			}
+
+			let item = (key, value);
+			if let Some(pos) = pos {
+				pending.insert(pos, item);
+				return;
+			}
+			if let Some(pos) = mat {
+				pending[pos] = item;
+				return;
+			}
+			pending.push(item);
 		}
 
 		pub(super) fn write(&self, key: Vec<u8>, value: Vec<u8>) {
-			self.pending.write().insert(key, Some(value));
+			self.insert(key, Some(value))
 		}
 
 		pub(super) fn remove(&self, key: Vec<u8>) {
-			self.pending.write().insert(key, None);
+			self.insert(key, None)
 		}
 	}
 
@@ -843,7 +875,7 @@ mod nodes_database {
 		/// Initialize from clonable pointer to backend database.
 		pub fn new(database: Arc<dyn Database<DbHash>>) -> Self {
 			BlockNodes(DatabasePending {
-				pending: Arc::new(RwLock::new(HashMap::new())),
+				pending: Arc::new(RwLock::new(Vec::new())),
 				database,
 			})
 		}
@@ -858,7 +890,7 @@ mod nodes_database {
 		/// Initialize from clonable pointer to backend database.
 		pub fn new(database: Arc<dyn Database<DbHash>>) -> Self {
 			BranchNodes(DatabasePending {
-				pending: Arc::new(RwLock::new(HashMap::new())),
+				pending: Arc::new(RwLock::new(Vec::new())),
 				database,
 			})
 		}
