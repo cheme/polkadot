@@ -588,6 +588,24 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 		Ok(())
 	}
+
+	/// Handle new head, this only do minor assertions
+	/// as historied value do not care about head.
+	pub fn set_head_with_transaction(
+		&self,
+		_transaction: &mut Transaction<DbHash>,
+		_previous_head: &Block::Hash,
+		new_head: &(NumberFor<Block>, Block::Hash),
+	) -> ClientResult<()> {
+		if let Some(enc) = self.config.start_block.as_ref() {
+			let start = Decode::decode(&mut enc.as_slice())
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+			if new_head.0 < start {
+				return Err(ClientError::StateDatabase("Snapshot db cannot handle this reorg.".into()));
+			}
+		}
+		Ok(())
+	}
 }
 
 /// First byte of snapshot define

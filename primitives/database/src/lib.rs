@@ -544,8 +544,9 @@ pub struct SnapshotDbConf {
 	/// Should we debug value access in state machine against the trie values.
 	pub debug_assert: bool,
 	/// Lower block support, this should block reorg before it.
-	/// TODO use actual block nb type? TODO set reorg assertion
-	pub start_block: Option<u32>,
+	/// It contains encoded start block number.
+	/// TODO set reorg assertion
+	pub start_block: Option<Vec<u8>>,
 	/// Diff usage.
 	pub diff_mode: SnapshotDBMode,
 	/// If defined, pruning window size to apply, `None` for archive.

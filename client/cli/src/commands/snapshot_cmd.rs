@@ -371,11 +371,7 @@ impl SnapshotManageCmd {
 		let mut config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
 		// TODO consider using NumberFor<Block>
 		use std::convert::TryInto;
-		if let Ok(start) = chain_info.best_number.try_into() {
-			config.start_block = Some(start);
-		} else {
-			unimplemented!("Support for large block number");
-		}
+		config.start_block = Some(chain_info.best_number.encode());
 		let state_visitor = StateVisitorImpl(&backend, &chain_info.best_hash);
 		db.re_init(
 			config,

@@ -1171,6 +1171,7 @@ impl<Block: BlockT> Backend<Block> {
 		let mut enacted = Vec::default();
 		let mut retracted = Vec::default();
 
+		self.snapshot_db.set_head_with_transaction(transaction, &route_to, &best_to)?;
 		let meta = self.blockchain.meta.read();
 
 		// cannot find tree route with empty DB.
