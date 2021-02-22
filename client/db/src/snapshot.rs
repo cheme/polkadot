@@ -1082,8 +1082,8 @@ mod nodes_backend {
 	>;
 
 	// Head of branches
-	pub(super) type TreeBackend<C, C2 = C> = historied_db::backend::nodes::Head<
-		BranchLinear<C2>,
+	pub(super) type TreeBackend<C> = historied_db::backend::nodes::Head<
+		BranchLinear<C>,
 		u32,
 		TreeBackendInner<C>,
 		MetaBranches,
@@ -1124,6 +1124,13 @@ mod nodes_nodiff {
 }
 
 mod node_xdelta {
+	use super::SnapshotColumnPrefixes;
+	use super::nodes_database::{BranchNodes, BlockNodes};
+	use historied_db::{
+		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, EstimateSize},
+	};
+	use super::nodes_backend::{MetaBlocks, MetaBranches};
+	use codec::{Encode, Decode};
 	use historied_db::{
 		DecodeWithContext,
 		management::{ManagementMut, ForkableManagement, Management},
@@ -1136,14 +1143,64 @@ mod node_xdelta {
 		backend::nodes::ContextHead,
 		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 	};
+	// Values are stored in memory in Vec like structure
+	type LinearBackendInner = historied_db::backend::in_memory::MemoryOnly8<
+		Vec<u8>,
+		u64,
+	>;
+
+	// A multiple nodes wraps multiple vec like structure
+	pub(super) type LinearBackend = historied_db::backend::nodes::Head<
+		Vec<u8>,
+		u64,
+		LinearBackendInner,
+		MetaBlocks,
+		BlockNodes,
+		(),
+	>;
+
+	// Nodes storing these
+	type LinearNode = historied_db::backend::nodes::Node<
+		Vec<u8>,
+		u64,
+		LinearBackendInner,
+		MetaBlocks,
+	>;
+
+	// Branch
+	type BranchLinear = historied_db::historied::linear::Linear<BytesDiff, u64, LinearBackend>;
+
+	// Branch are stored in memory
+	type TreeBackendInner = historied_db::backend::in_memory::MemoryOnly4<
+		BranchLinear,
+		u32,
+	>;
+
+	// Head of branches
+	pub(super) type TreeBackend = historied_db::backend::nodes::Head<
+		BranchLinear,
+		u32,
+		TreeBackendInner,
+		MetaBranches,
+		BranchNodes,
+		ContextHead<BlockNodes, ()>
+	>;
+
+	// Node with branches
+	type TreeNode = historied_db::backend::nodes::Node<
+		BranchLinear,
+		u32,
+		TreeBackendInner,
+		MetaBranches,
+	>;
 
 	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
 	pub type HValue = Tree<
 		u32,
 		u64,
 		BytesDiff,
-		super::nodes_backend::TreeBackend<BytesDiff, Vec<u8>>,
-		super::nodes_backend::LinearBackend<Vec<u8>>,
+		TreeBackend,
+		LinearBackend,
 	>;
 
 	/// Access current value.
