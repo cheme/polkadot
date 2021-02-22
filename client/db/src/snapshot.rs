@@ -468,7 +468,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 
 		let mut ordered_historied_db = if let Some((hash, parent_hash)) = hashes {
 			// Ensure pending layer is clean
-			let _ = self.historied_management.extract_changes();
+			self.historied_management.clear_changes();
 			self.new_block_historied_db_mut(&parent_hash, &hash)?
 		} else {
 			None
@@ -1049,7 +1049,7 @@ mod nodes_backend {
 	}
 
 	// Values are stored in memory in Vec like structure
-	type LinearBackendInner<C> = historied_db::backend::in_memory::MemoryOnly< // TODO switch to MemoryOnly8 : require to implement EstimateSize upstream
+	type LinearBackendInner<C> = historied_db::backend::in_memory::MemoryOnly8<
 		C,
 		u64,
 	>;
@@ -1076,7 +1076,7 @@ mod nodes_backend {
 	type BranchLinear<C> = historied_db::historied::linear::Linear<C, u64, LinearBackend<C>>;
 
 	// Branch are stored in memory
-	type TreeBackendInner<C> = historied_db::backend::in_memory::MemoryOnly< // TODO switch to MemoryOnly8 : require to implement EstimateSize upstream
+	type TreeBackendInner<C> = historied_db::backend::in_memory::MemoryOnly4<
 		BranchLinear<C>,
 		u32,
 	>;

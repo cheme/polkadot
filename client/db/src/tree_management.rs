@@ -22,7 +22,6 @@
 //! and an internal indexing to store historic of value.
 
 use sp_core::Hasher;
-use std::collections::BTreeMap;
 use historied_db::{
 	management::{ManagementMut, ForkableManagement, Management},
 	mapped_db::{TransactionalMappedDB, MappedDBDyn},
@@ -83,8 +82,6 @@ pub mod historied_tree_bindings {
 	static_instance_variable!(CurrentGC, CST, b"tree_mgmt/current_gc", false);
 	// Last added block reference.
 	static_instance_variable!(LastIndex, CST, b"tree_mgmt/last_index", false);
-	// TODO seems unused upstream: remove upstream
-	static_instance_variable!(NeutralElt,CST, b"tree_mgmt/neutral_elt", false);
 	// Serialized tree metadata.
 	static_instance_variable!(TreeMeta, CST, b"tree_mgmt/tree_meta", true);
 }
@@ -106,7 +103,6 @@ impl TreeManagementStorage for TreeManagementPersistence {
 	type Mapping = historied_tree_bindings::Mapping;
 	type JournalDelete = historied_tree_bindings::JournalDelete;
 	type LastIndex = historied_tree_bindings::LastIndex;
-	type NeutralElt = historied_tree_bindings::NeutralElt;
 	type TreeMeta = historied_tree_bindings::TreeMeta;
 	type TreeState = historied_tree_bindings::TreeState;
 }
@@ -131,9 +127,6 @@ pub(crate) struct TreeManagementInner<Block: BlockT, S: TreeManagementStorage + 
 	/// Next block to apply migrate.
 	pub(crate) next_migrate: Option<NumberFor<Block>>,
 }
-
-// TODO move in dep
-type PendingChanges = BTreeMap<&'static [u8], (BTreeMap<Vec<u8>, Option<Vec<u8>>>, bool)>;
 
 impl<Block, S> TreeManagementSync<Block, S>
 	where
@@ -188,10 +181,13 @@ impl<Block, S> TreeManagementSync<Block, S>
 		}
 	}
 
-	pub fn extract_changes(&self) -> PendingChanges {
-		std::mem::replace(&mut self.inner.write().instance.ser().pending, Default::default())
+	/// Remove any pending changes.
+	pub fn clear_changes(&self) {
+		self.inner.write().instance.ser().pending.clear();
 	}
 
+	/// Register a new block in historied management, returns its
+	/// read and write query plans.
 	pub fn register_new_block(
 		&self,
 		parent_hash: &Block::Hash,
