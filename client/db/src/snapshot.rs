@@ -990,6 +990,7 @@ mod nodes_backend {
 		}
 	}
 
+	// TODO here V: Value and ValueFor
 	impl<C> NodeStorage<BranchLinear<C>, u32, TreeBackendInner<C>, MetaBranches> for BranchNodes
 		where C: DecodeWithContext<Context = ()> + EstimateSize,
 	{
@@ -1073,7 +1074,7 @@ mod nodes_backend {
 	>;
 
 	// Branch
-	type BranchLinear<C> = historied_db::historied::linear::Linear<C, u64, LinearBackend<C>>;
+	type BranchLinear<V> = historied_db::historied::linear::Linear<V, u64, LinearBackend<<V as Value>::Storage>>;
 
 	// Branch are stored in memory
 	type TreeBackendInner<C> = historied_db::backend::in_memory::MemoryOnly4<
