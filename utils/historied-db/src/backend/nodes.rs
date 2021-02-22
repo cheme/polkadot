@@ -601,377 +601,45 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	// If true the node needs to be inserted.
 	// Inner node linear storage index.
 	type Index = (u64, D::Index);
-	fn last(&self) -> Option<Self::Index> {
-		if self.len == 0 {
-			return None;
-		}
-		if let Some(inner_index) = self.inner.data.last() {
-			return Some((self.end_node_index, inner_index));
-		}
-
-		let mut i = self.end_node_index;
-		while i > self.start_node_index {
-			i -= 1;
-			let fetch_index = self.end_node_index - i - 1;
-			let inner_index = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
-				node.data.last()
-			} else {
-				if let Some(node) = self.backend.get_node(
-					self.reference_key.as_slice(),
-					self.parent_encoded_indexes.as_slice(),
-					i,
-				) {
-					let inner_index = node.data.last();
-					self.fetched.borrow_mut().push(node);
-					inner_index
-				} else {
-					None
-				}
-			};
-			if let Some(inner_index) = inner_index {
-				return Some((fetch_index, inner_index));
-			}
-		}
-		None
-	}
+	fn last(&self) -> Option<Self::Index> { unimplemented!() }
 	fn previous_index(&self, mut index: Self::Index) -> Option<Self::Index> {
-		let mut switched = false;
-		if index.0 >= self.end_node_index {
-			if let Some(inner_index) = self.inner.data.previous_index(index.1) {
-				index.1 = inner_index;
-				return Some(index);
-			} else {
-				switched = true;
-				index.0 = 0;
-			}
-		}
-
-		while index.0 + self.start_node_index < self.end_node_index {
-			let (try_fetch, inner_index) = if let Some(node) = self.fetched.borrow().get(index.0 as usize) {
-				let inner_index = if switched {
-					switched = false;
-					node.data.last()
-				} else {
-					node.data.previous_index(index.1)
-				};
-				(false, inner_index)
-			} else {
-				(true, None)
-			};
-			match (try_fetch, inner_index) {
-				(true, None) => {
-					// could memoize this access.
-					if let Some(node) = self.backend.get_node(
-						self.reference_key.as_slice(),
-						self.parent_encoded_indexes.as_slice(),
-						self.end_node_index - 1 - index.0,
-					) {
-						debug_assert!(switched);
-						self.fetched.borrow_mut().push(node);
-						continue;
-					} else {
-						return None;
-					}
-				},
-				(false, None) => {
-				},
-				(_, Some(inner_index)) => {
-					index.1 = inner_index;
-					return Some(index);
-				},
-			}
-
-			index.0 += 1;
-			switched = true;
-		}
-		None
+		unimplemented!()
 	}
 	fn lookup(&self, index: usize) -> Option<Self::Index> {
-		self.fetch_node(index).and_then(|(node_index, inner_node_index)| {
-			if node_index == self.end_node_index as usize {
-				self.inner.data.lookup(inner_node_index).map(|index| (node_index as u64, index))
-			} else {
-				self.fetched.borrow().get(node_index)
-					.and_then(|inner|
-					inner.data.lookup(inner_node_index).map(|index| (node_index as u64, index))
-				)
-			}
-		})
+		unimplemented!()
 	}
 	fn len(&self) -> usize {
-		self.len
+		unimplemented!()
 	}
 	fn get(&self, index: Self::Index) -> HistoriedValue<V, S> {
-		if index.0 == self.end_node_index {
-			return self.inner.data.get(index.1)
-		}
-		self.fetched.borrow()[index.0 as usize].data.get(index.1)
+		unimplemented!()
 	}
 	fn get_state(&self, index: Self::Index) -> S {
-		if index.0 == self.end_node_index {
-			return self.inner.data.get_state(index.1)
-		}
-		self.fetched.borrow()[index.0 as usize].data.get_state(index.1)
+		unimplemented!()
 	}
 	fn truncate_until(&mut self, split_off: usize) {
-		let i = {
-			let mut fetched_mut;
-			let (node, i, ix) = match self.fetch_node(split_off) {
-				Some((i, ix)) if i >= self.end_node_index as usize =>  {
-					(&mut self.inner, i, ix)
-				},
-				Some((i, ix)) => {
-					fetched_mut = self.fetched.borrow_mut();
-					if let Some(node) = fetched_mut.get_mut(i) {
-						(node, i, ix)
-					} else {
-						unreachable!("fetch node returns existing index");
-					}
-				},
-				None => {
-					return;
-				},
-			};
-
-
-			if ix > 0 {
-				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-					let mut add_size = 0;
-					for i in 0..ix {
-						node.data.lookup(i).map(|h| {
-							let h = node.data.get(h);
-							add_size += h.value.estimate_size() + h.state.estimate_size()
-						});
-					}
-					node.reference_len -= add_size;
-				}
-				node.changed = true;
-				node.data.truncate_until(ix);
-			}
-			self.start_node_index = if i as u64 == self.end_node_index {
-				self.end_node_index
-			} else {
-				self.end_node_index - i as u64 - 1
-			};
-			if self.len > split_off {
-				self.len -= split_off;
-			} else {
-				self.len = 0;
-			}
-			i
-		};
-		// reversed ordered.
-		self.fetched.borrow_mut().truncate(i + 1);
+		unimplemented!()
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
-		self.len += 1;
-		let mut additional_size: Option<usize> = None;
-		
-		if !M::APPLY_SIZE_LIMIT || !V::ACTIVE {
-			if self.inner.data.len() < M::MAX_NODE_ITEMS {
-				self.inner.data.push(value);
-				return;
-			}
-		} else {
-			let add_size = value.value.estimate_size() + value.state.estimate_size(); 
-			additional_size = Some(add_size);
-			// Allow one excess item (in case an item des not fit into the maximum length)
-			if self.inner.reference_len < M::MAX_NODE_LEN {
-				self.inner.reference_len += add_size;
-				self.inner.data.push(value);
-				return;
-			}
-		}
-
-		// New head
-		let add_size = additional_size.unwrap_or_else(|| 0);
-		self.end_node_index += 1;
-		let mut data = D::init_from(self.node_init_from.clone());
-		data.push(value);
-		let new_node = Node::<V, S, D, M> {
-			data,
-			changed: true,
-			reference_len: add_size,
-			_ph: PhantomData,
-		};
-		self.inner.changed = true;
-		let prev = sp_std::mem::replace(&mut self.inner, new_node);
-		self.fetched.borrow_mut().insert(0, prev);
+		unimplemented!()
 	}
 	fn insert(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
-		let mut fetched_mut;
-		let node = if index.0 == self.end_node_index {
-			&mut self.inner
-		} else {
-			fetched_mut = self.fetched.borrow_mut();
-			&mut fetched_mut[index.0 as usize]
-		};
-
-		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
-		}
-		node.changed = true;
-		self.len += 1;
-		node.data.insert(index.1, h);
+		unimplemented!()
 	}
 	fn remove(&mut self, index: Self::Index) {
-		let pop = {
-			let mut fetched_mut;
-			let (node, first) = if index.0 == self.end_node_index {
-				(&mut self.inner, false)
-			} else {
-				fetched_mut = self.fetched.borrow_mut();
-				let len = fetched_mut.len();
-				
-				(&mut fetched_mut[index.0 as usize], index.0 as usize == len - 1 &&
-					len as u64 == self.end_node_index - self.start_node_index)
-			};
-
-			node.changed = true;
-			self.len -= 1;
-
-			if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-				let h = node.data.get(index.1);
-				node.reference_len -= h.value.estimate_size() + h.state.estimate_size();
-			}
-			node.data.remove(index.1);
-			first && node.data.len() == 0
-		};
-		// we don't manage empty head as it will likely be written again.
-		// Similarily this could have been skip as we expect truncate until
-		// to happen.
-		if pop {
-			self.start_node_index += 1;
-			self.fetched.borrow_mut().pop();
-		}
+		unimplemented!()
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
-		if self.len == 0 {
-			return None;
-		}
-
-		if let Some(h) = self.inner.data.pop() {
-			self.len -= 1;
-			if self.inner.data.len() > 0 {
-				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-					self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
-				}
-				self.inner.changed = true;
-			} else {
-				if self.fetched.borrow().len() == 0 {
-					if self.len > self.inner.data.len() + 1 {
-						self.fetch_node(self.len - self.inner.data.len() - 1);
-					}
-				}
-				if self.fetched.borrow().len() > 0 {
-					let removed = self.fetched.borrow_mut().remove(0);
-					self.inner = removed;
-					self.end_node_index -= 1;
-				}
-			}
-
-			Some(h)
-		} else {
-			if self.fetched.borrow().len() == 0 {
-				if self.len > self.inner.data.len() + 1 {
-					self.fetch_node(self.len - self.inner.data.len() - 1);
-				}
-			}
-			if self.fetched.borrow().len() > 0 {
-				let removed = self.fetched.borrow_mut().remove(0);
-				self.inner = removed;
-				self.end_node_index -= 1;
-				self.pop()
-			} else {
-				None
-			}
-		}
+		unimplemented!()
 	}
 	fn clear(&mut self) {
-		self.start_node_index = 0;
-		self.end_node_index = 0;
-		self.len = 0;
-		self.fetched.borrow_mut().clear();
-		self.inner.reference_len = 0;
-		self.inner.changed = true;
-		self.inner.data.clear();
+		unimplemented!()
 	}
 	fn truncate(&mut self, at: usize) {
-		let (in_head, i) = {
-			let mut fetched_mut;
-			let (node, i, ix, in_head) = match self.fetch_node(at) {
-				Some((i, ix)) if i == self.end_node_index as usize =>  {
-					(&mut self.inner, i, ix, true)
-				},
-				Some((i, ix)) => {
-					fetched_mut = self.fetched.borrow_mut();
-					if let Some(node) = fetched_mut.get_mut(i) {
-						(node, i, ix, false)
-					} else {
-						unreachable!("fetch node returns existing index");
-					}
-				},
-				None => {
-					return;
-				},
-			};
-
-			if ix < node.data.len() {
-				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-					let mut add_size = 0;
-					for i in ix..node.data.len() {
-						node.data.lookup(i).map(|h| {
-							let h = node.data.get(h);
-							add_size += h.value.estimate_size() + h.state.estimate_size()
-						});
-					}
-					node.reference_len -= add_size;
-				}
-				node.changed = true;
-				node.data.truncate(ix)
-			}
-			(in_head, i)
-		};
-		if self.len > at {
-			self.len = at;
-		}
-		// indicates head is empty and all index up to i
-		if !in_head {
-			let fetch_index = i as u64;
-			self.end_node_index -= fetch_index + 1;	
-			let mut fetched_mut = self.fetched.borrow_mut();
-			// reversed ordered.
-			for i in 0..fetch_index + 1 {
-				let removed = fetched_mut.remove(0);
-				if i == fetch_index {
-					self.inner = removed;
-				}
-			}
-			self.inner.changed = true;
-		}
+		unimplemented!()
 	}
 	fn emplace(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
-		let mut fetched_mut;
-		let node = if index.0 == self.end_node_index {
-			&mut self.inner
-		} else {
-			fetched_mut = self.fetched.borrow_mut();
-			&mut fetched_mut[index.0 as usize]
-		};
-
-		node.changed = true;
-
-		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
-			let h_old = node.data.get(index.1);
-			if node.reference_len > h_old.value.estimate_size() + h_old.state.estimate_size() {
-				node.reference_len -= h_old.value.estimate_size() + h_old.state.estimate_size();
-			} else {
-				// we can have biggest estimatition for head (size can be overestimated).
-				node.reference_len = 0;
-			}
-			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
-		}
-		node.data.emplace(index.1, h);
+		unimplemented!()
 	}
 }
 
