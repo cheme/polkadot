@@ -154,7 +154,6 @@ impl<Block, S> TreeManagementSync<Block, S>
 	}
 
 	/// Register a consumer of this instance.
-	/// TODO remove meth (public)?
 	pub fn register_consumer(&mut self, consumer: Consumer<Block::Hash, S>) {
 		self.inner.write().consumer.register_consumer(consumer);
 	}

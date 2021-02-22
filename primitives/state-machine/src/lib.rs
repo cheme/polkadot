@@ -868,8 +868,6 @@ mod execution {
 }
 
 /// Simple key value backend support.
-/// TODO fn use_backend (sometime we do not use it).
-/// TODO fn next_key (returning option... and an error for incomplete proof).
 pub mod kv_backend {
 	use sp_core::storage::ChildInfo;
 	use sp_std::vec::Vec;

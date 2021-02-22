@@ -739,11 +739,9 @@ impl KeyReader {
 
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
-	// TODO rem pub as upgrade is cleaned
 	current_state: ForkPlan<u32, u64>,
-	// TODO rem pub as upgrade is cleaned
 	db: Arc<dyn OrderedDatabase<DbHash>>,
-	/// Configuration for this db. TODO is it of any use??
+	/// Configuration for this db.
 	config: SnapshotDbConf,
 	/// Historied value type for the given conf.
 	hvalue_type: HValueType,
@@ -1132,7 +1130,7 @@ mod node_xdelta {
 		management::{ManagementMut, ForkableManagement, Management},
 		historied::{DataMut, Data, DataRef, aggregate::Sum as _},
 		mapped_db::{TransactionalMappedDB, MappedDBDyn},
-		db_traits::{StateDB, StateDBRef, StateDBMut}, // TODO check it is use or remove the feature
+		db_traits::{StateDB, StateDBRef, StateDBMut},
 		Latest, UpdateResult,
 		historied::tree::{Tree, aggregate::Sum as TreeSum},
 		management::tree::{Tree as TreeMgmt, ForkPlan},
@@ -1221,7 +1219,6 @@ pub enum HValue {
 }
 
 /// Compact resolved type from snapshot config.
-/// TODO rem pub (after clean upgrade code).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HValueType {
 	NodesNoDiff,
@@ -1333,7 +1330,7 @@ impl HValue {
 		})
 	}
 
-	fn set_change(
+	fn set_first_change(
 		&mut self,
 		change: Option<Vec<u8>>,
 		current_state: &Latest<(u32, u64)>,
@@ -1352,7 +1349,9 @@ impl HValue {
 						// we should use previous state, but since we know this
 						// is a first write for this state (write only once per keys)
 						// current state will always return previous state
-						// TODO this assumption may not stand (see cumulus issue with storage cache).
+						// This assumption may not stand, but we replay something with same
+						// effect so it should overwrite existing with same values (idem for nodes
+						// as addressing is deterministic).
 						let h = TreeSum::<_, _, BytesDelta, _, _>(inner);
 						h.get_sum(current_state_read)
 					} {
@@ -1470,7 +1469,6 @@ impl KVBackend for HistoriedDB {
 		}
 		Ok(None)
 	}
-
 }
 
 impl HistoriedDB {
@@ -1489,7 +1487,7 @@ impl HistoriedDB {
 		})
 	}
 
-	/// Iterator on key values, starting at a given position. TODO is it use???
+	/// Iterator on key values, starting at a given position.
 	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter_from(column, start).filter_map(move |(k, v)| {
 			let v = HValue::decode_with_context(&k[..], &mut &v[..], self.hvalue_type, &self.nodes_db)
@@ -1506,16 +1504,14 @@ impl HistoriedDB {
 }
 
 /// Key value db change for at a given block of an historied DB.
-/// TODO should we remove DB for the pr?
 pub struct HistoriedDBMut<DB> {
 	/// Branch head indexes to change values of a latest block.
 	pub current_state: Latest<(u32, u64)>,
 	/// Branch head indexes to change values of a latest block.
-	/// TODO is it of any use?? (remove)
 	pub current_state_read: ForkPlan<u32, u64>,
 	/// Inner database to modify historied values.
 	pub db: DB,
-	/// Configuration for this db. TODO check if use
+	/// Configuration for this db.
 	pub config: SnapshotDbConf,
 	/// Historied value type for the given conf.
 	pub hvalue_type: HValueType,
@@ -1562,7 +1558,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			None
 		};
 		match if let Some(mut histo) = histo {
-			let update = histo.set_change(change, &self.current_state, &self.current_state_read)
+			let update = histo.set_first_change(change, &self.current_state, &self.current_state_read)
 				.expect("Could not write change in snapshot db, DB corrupted");
 			(histo, update)
 		} else {
@@ -1585,21 +1581,6 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			},
 			(_value, UpdateResult::Unchanged) => (),
 		}
-	}
-
-	/// write a single value, without checking current state,
-	/// please only use on new empty db.
-	/// TODO rather unused
-	pub fn unchecked_new_single(
-		&mut self,
-		child_info: Option<&ChildInfo>,
-		k: &[u8],
-		v: Vec<u8>,
-		change_set: &mut Transaction<DbHash>,
-		journal_changes: Option<&mut Vec<Vec<u8>>>,
-	) {
-		let key = child_prefixed_key(child_info, k);
-		self.unchecked_new_single_inner(key, v, change_set, crate::columns::STATE_SNAPSHOT, journal_changes);
 	}
 
 	fn unchecked_new_single_inner(
@@ -1636,7 +1617,6 @@ type TreeManagement<H> = crate::tree_management::TreeManagement<H, TreeManagemen
 impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::Hash>> for TransactionalConsumer<B>
 	where
 		B: BlockT,
-		B::Hash: Ord + Clone + Encode + Decode + Send + Sync + 'static, // TODO usefull bound??
 {
 	fn migrate(&self, migrate: &mut historied_db::management::Migrate<B::Hash, TreeManagement<B::Hash>>) {
 		let mut keys_to_migrate = std::collections::BTreeSet::<Vec<u8>>::new();
