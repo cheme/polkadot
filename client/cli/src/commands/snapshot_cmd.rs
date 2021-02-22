@@ -31,6 +31,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use structopt::StructOpt;
 use structopt::clap::arg_enum;
+use sp_runtime::codec::Encode;
 
 arg_enum! {
 	/// Mode for the snapshot
