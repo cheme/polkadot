@@ -904,10 +904,12 @@ mod nodes_backend {
 	use super::SnapshotColumnPrefixes;
 	use super::nodes_database::{BranchNodes, BlockNodes};
 	use historied_db::{
-		DecodeWithContext,
+		DecodeWithContext, historied::Value,
 		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead, EstimateSize},
 	};
 	use codec::{Encode, Decode};
+
+	type StorageFor<V> = <V as Value>::Storage;
 
 	/// Alias for tree context.
 	pub type Context = (ContextHead<BranchNodes, ContextHead<BlockNodes, ()>>, ContextHead<BlockNodes, ()>);
@@ -990,17 +992,18 @@ mod nodes_backend {
 		}
 	}
 
-	// TODO here V: Value and ValueFor
-	impl<C> NodeStorage<BranchLinear<C>, u32, TreeBackendInner<C>, MetaBranches> for BranchNodes
-		where C: DecodeWithContext<Context = ()> + EstimateSize,
+	impl<V> NodeStorage<BranchLinear<V>, u32, TreeBackendInner<V>, MetaBranches> for BranchNodes
+		where
+			V: Value,
+			StorageFor<V>: DecodeWithContext<Context = ()> + EstimateSize,
 	{
 		fn get_node(
 			&self,
 			reference_key: &[u8],
 			parent_encoded_indexes: &[u8],
 			relative_index: u64,
-		) -> Option<TreeNode<C>> {
-			let key = <Self as NodeStorage<BranchLinear<C>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+		) -> Option<TreeNode<V>> {
+			let key = <Self as NodeStorage<BranchLinear<V>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
 			self.0.read(NODES_COL, &key).and_then(|value| {
 				// use encoded len as size (this is bigger than the call to estimate size
 				// but not an issue, otherwhise could adjust).
@@ -1024,17 +1027,19 @@ mod nodes_backend {
 		}
 	}
 
-	impl<C> NodeStorageMut<BranchLinear<C>, u32, TreeBackendInner<C>, MetaBranches> for BranchNodes
-		where C: Encode + DecodeWithContext<Context = ()> + EstimateSize,
+	impl<V> NodeStorageMut<BranchLinear<V>, u32, TreeBackendInner<V>, MetaBranches> for BranchNodes
+		where
+			V: Value,
+			StorageFor<V>: Encode + DecodeWithContext<Context = ()> + EstimateSize,
 	{
 		fn set_node(
 			&mut self,
 			reference_key: &[u8],
 			parent_encoded_indexes: &[u8],
 			relative_index: u64,
-			node: &TreeNode<C>,
+			node: &TreeNode<V>,
 		) {
-			let key = <Self as NodeStorage<BranchLinear<C>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			let key = <Self as NodeStorage<BranchLinear<V>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
 			let encoded = node.inner().encode();
 			self.0.write(key, encoded);
 		}
@@ -1044,7 +1049,7 @@ mod nodes_backend {
 			parent_encoded_indexes: &[u8],
 			relative_index: u64,
 		) {
-			let key = <Self as NodeStorage<BranchLinear<C>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
+			let key = <Self as NodeStorage<BranchLinear<V>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
 			self.0.remove(key);
 		}
 	}
@@ -1074,29 +1079,29 @@ mod nodes_backend {
 	>;
 
 	// Branch
-	type BranchLinear<V> = historied_db::historied::linear::Linear<V, u64, LinearBackend<<V as Value>::Storage>>;
+	type BranchLinear<V> = historied_db::historied::linear::Linear<V, u64, LinearBackend<StorageFor<V>>>;
 
 	// Branch are stored in memory
-	type TreeBackendInner<C> = historied_db::backend::in_memory::MemoryOnly4<
-		BranchLinear<C>,
+	type TreeBackendInner<V> = historied_db::backend::in_memory::MemoryOnly4<
+		BranchLinear<V>,
 		u32,
 	>;
 
 	// Head of branches
-	pub(super) type TreeBackend<C> = historied_db::backend::nodes::Head<
-		BranchLinear<C>,
+	pub(super) type TreeBackend<V> = historied_db::backend::nodes::Head<
+		BranchLinear<V>,
 		u32,
-		TreeBackendInner<C>,
+		TreeBackendInner<V>,
 		MetaBranches,
 		BranchNodes,
 		ContextHead<BlockNodes, ()>
 	>;
 
 	// Node with branches
-	type TreeNode<C> = historied_db::backend::nodes::Node<
-		BranchLinear<C>,
+	type TreeNode<V> = historied_db::backend::nodes::Node<
+		BranchLinear<V>,
 		u32,
-		TreeBackendInner<C>,
+		TreeBackendInner<V>,
 		MetaBranches,
 	>;
 }
