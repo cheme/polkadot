@@ -1113,7 +1113,6 @@ mod nodes_nodiff {
 		management::tree::ForkPlan,
 	};
 
-
 	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
 	pub type HValue = Tree<
 		u32,
@@ -1129,7 +1128,7 @@ mod nodes_nodiff {
 	}
 }
 
-mod node_xdelta {
+mod nodes_xdelta {
 	use super::SnapshotColumnPrefixes;
 	use super::nodes_database::{BranchNodes, BlockNodes};
 	use historied_db::{
@@ -1150,64 +1149,15 @@ mod node_xdelta {
 		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 	};
 
-	// Values are stored in memory in Vec like structure
-	type LinearBackendInner = historied_db::backend::in_memory::MemoryOnly8<
-		<BytesDiff as historied_db::historied::Value>::Storage,
-		u64,
-	>;
-
-	// A multiple nodes wraps multiple vec like structure
-	pub(super) type LinearBackend = historied_db::backend::nodes::Head<
-		<BytesDiff as historied_db::historied::Value>::Storage,
-		u64,
-		LinearBackendInner,
-		MetaBlocks,
-		BlockNodes,
-		(),
-	>;
-
-	// Nodes storing these
-	type LinearNode = historied_db::backend::nodes::Node<
-		<BytesDiff as historied_db::historied::Value>::Storage,
-		u64,
-		LinearBackendInner,
-		MetaBlocks,
-	>;
-
-	// Branch
-	type BranchLinear = historied_db::historied::linear::Linear<BytesDiff, u64, LinearBackend>;
-
-	// Branch are stored in memory
-	type TreeBackendInner = historied_db::backend::in_memory::MemoryOnly4<
-		BranchLinear,
-		u32,
-	>;
-
-	// Head of branches
-	pub(super) type TreeBackend = historied_db::backend::nodes::Head<
-		BranchLinear,
-		u32,
-		TreeBackendInner,
-		MetaBranches,
-		BranchNodes,
-		ContextHead<BlockNodes, ()>
-	>;
-
-	// Node with branches
-	type TreeNode = historied_db::backend::nodes::Node<
-		BranchLinear,
-		u32,
-		TreeBackendInner,
-		MetaBranches,
-	>;
+	type BytesDiffStorage = <BytesDiff as historied_db::historied::Value>::Storage;
 
 	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
 	pub type HValue = Tree<
 		u32,
 		u64,
 		BytesDiff,
-		TreeBackend,
-		LinearBackend,
+		super::nodes_backend::TreeBackend<BytesDiff>,
+		super::nodes_backend::LinearBackend<BytesDiffStorage>,
 	>;
 
 	/// Access current value.
@@ -1217,7 +1167,6 @@ mod node_xdelta {
 		Ok(v.map(|v| v.into()).flatten())
 	}
 }
-
 
 mod single_node_nodiff {
 	use historied_db::{
@@ -1278,6 +1227,7 @@ mod single_node_xdelta {
 /// Support multiple implementation from config.
 pub enum HValue {
 	NodesNoDiff(nodes_nodiff::HValue, BranchNodes, BlockNodes),
+	NodesXDelta(nodes_xdelta::HValue, BranchNodes, BlockNodes),
 	SingleNodeNoDiff(single_node_nodiff::HValue),
 	SingleNodeXDelta(single_node_xdelta::HValue),
 }
@@ -1286,6 +1236,7 @@ pub enum HValue {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HValueType {
 	NodesNoDiff,
+	NodesXDelta,
 	SingleNodeNoDiff,
 	SingleNodeXDelta,
 }
@@ -1323,9 +1274,17 @@ impl HValue {
 	}
 
 	/// Apply local nodes backend change to transaction.
-	pub fn apply_nodes_backend_to_transaction(&self, transaction: &mut Transaction<DbHash>) {
+	pub fn apply_nodes_backend_to_transaction(&mut self, transaction: &mut Transaction<DbHash>) {
 		match self {
-			HValue::NodesNoDiff(_inner, branches, blocks) => {
+			HValue::NodesNoDiff(inner, branches, blocks) => {
+				use historied_db::Trigger;
+				inner.trigger_flush();
+				branches.apply_transaction(transaction);
+				blocks.apply_transaction(transaction);
+			},
+			HValue::NodesXDelta(inner, branches, blocks) => {
+				use historied_db::Trigger;
+				inner.trigger_flush();
 				branches.apply_transaction(transaction);
 				blocks.apply_transaction(transaction);
 			},
@@ -1347,6 +1306,14 @@ impl HValue {
 				let (context, branch_nodes, block_nodes) = Self::build_context(key, nodes_db);
 				HValue::NodesNoDiff(
 					nodes_nodiff::HValue::new(Some(value_at), state, context),
+					branch_nodes,
+					block_nodes,
+				)
+			},
+			HValueType::NodesXDelta => {
+				let (context, branch_nodes, block_nodes) = Self::build_context(key, nodes_db);
+				HValue::NodesXDelta(
+					nodes_xdelta::HValue::new(BytesDiff::Value(value_at), state, context),
 					branch_nodes,
 					block_nodes,
 				)
@@ -1376,6 +1343,14 @@ impl HValue {
 					block_nodes,
 				))
 			},
+			HValueType::NodesXDelta => {
+				let (context, branch_nodes, block_nodes) = Self::build_context(key, nodes_db);
+				Some(HValue::NodesXDelta(
+					nodes_xdelta::HValue::decode_with_context(&mut &encoded[..], &context)?,
+					branch_nodes,
+					block_nodes,
+				))
+			},
 			HValueType::SingleNodeNoDiff => Some(HValue::SingleNodeNoDiff(
 				single_node_nodiff::HValue::decode_with_context(&mut &encoded[..], &((), ()))?,
 			)),
@@ -1389,6 +1364,7 @@ impl HValue {
 	fn value(&self, current_state: &ForkPlan<u32, u64>) -> Result<Option<Vec<u8>>, String> {
 		Ok(match self {
 			HValue::NodesNoDiff(inner, _, _) => nodes_nodiff::value(inner, current_state)?,
+			HValue::NodesXDelta(inner, _, _) => nodes_xdelta::value(inner, current_state)?,
 			HValue::SingleNodeNoDiff(inner) => single_node_nodiff::value(inner, current_state)?,
 			HValue::SingleNodeXDelta(inner) => single_node_xdelta::value(inner, current_state)?,
 		})
@@ -1406,6 +1382,29 @@ impl HValue {
 			},
 			HValue::SingleNodeNoDiff(inner) => {
 				inner.set(change, current_state)
+			},
+			HValue::NodesXDelta(inner, ..) => {
+				// TODO facto code with other xdelta
+				if let Some(v) = change {
+					if let Some(previous) = {
+						// we should use previous state, but since we know this
+						// is a first write for this state (write only once per keys)
+						// current state will always return previous state
+						// This assumption may not stand, but we replay something with same
+						// effect so it should overwrite existing with same values (idem for nodes
+						// as addressing is deterministic).
+						let h = TreeSum::<_, _, BytesDelta, _, _>(inner);
+						h.get_sum(current_state_read)
+					} {
+						let target_value = Some(v).into();
+						let v_diff = historied_db::historied::aggregate::xdelta::substract(&previous, &target_value).into();
+						inner.set(v_diff, current_state)
+					} else {
+						inner.set(BytesDiff::Value(v), current_state)
+					}
+				} else {
+					inner.set(BytesDiff::None, current_state)
+				}
 			},
 			HValue::SingleNodeXDelta(inner) => {
 				if let Some(v) = change {
@@ -1435,6 +1434,7 @@ impl HValue {
 	fn encode(&self) -> Vec<u8> {
 		match self {
 			HValue::NodesNoDiff(inner, _, _) => inner.encode(),
+			HValue::NodesXDelta(inner, _, _) => inner.encode(),
 			HValue::SingleNodeNoDiff(inner) => inner.encode(),
 			HValue::SingleNodeXDelta(inner) => inner.encode(),
 		}
@@ -1446,6 +1446,14 @@ impl HValue {
 		migrate: &mut historied_db::management::Migrate<B::Hash, TreeManagement<B::Hash>>,
 	) -> UpdateResult<()> {
 		match self {
+			HValue::NodesXDelta(inner, _, _) => {
+				let res = inner.migrate(migrate.migrate());
+				if !matches!(&res, UpdateResult::Unchanged) {
+					use historied_db::Trigger;
+					inner.trigger_flush();
+				}
+				res
+			},
 			HValue::NodesNoDiff(inner, _, _) => {
 				let res = inner.migrate(migrate.migrate());
 				if !matches!(&res, UpdateResult::Unchanged) {
@@ -1633,12 +1641,12 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 				return;
 			}
 		} {
-			(value, UpdateResult::Changed(())) => {
+			(mut value, UpdateResult::Changed(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.set_from_vec(column, k, value.encode());
 				journal_changes.map(|keys| keys.push(key));
 			},
-			(value, UpdateResult::Cleared(())) => {
+			(mut value, UpdateResult::Cleared(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.remove(column, k);
 				journal_changes.map(|keys| keys.push(key));
@@ -1655,7 +1663,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		column: u32,
 		journal_changes: Option<&mut Vec<Vec<u8>>>,
 	) {
-		let value = HValue::new(k.as_slice(), v, &self.current_state, self.hvalue_type, &self.nodes_db);
+		let mut value = HValue::new(k.as_slice(), v, &self.current_state, self.hvalue_type, &self.nodes_db);
 		value.apply_nodes_backend_to_transaction(change_set); // should be no ops, but cost nothing to call
 		let value = value.encode();
 		change_set.set_from_vec(column, &k, value);
