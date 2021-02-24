@@ -737,18 +737,6 @@ impl KeyReader {
 	}
 }
 
-/// Key value db at a given block for an historied DB.
-pub struct HistoriedDB {
-	current_state: ForkPlan<u32, u64>,
-	db: Arc<dyn OrderedDatabase<DbHash>>,
-	/// Configuration for this db.
-	config: SnapshotDbConf,
-	/// Historied value type for the given conf.
-	hvalue_type: HValueType,
-	/// Db for storing nodes.
-	nodes_db: Arc<dyn Database<DbHash>>,
-}
-
 /*
 mod SingleNodeEncodedNoDiff {
 	type LinearBackend<'a> = historied_db::backend::encoded_array::EncodedArray<
@@ -1252,6 +1240,7 @@ impl HValueType {
 		})
 	}
 }
+
 impl HValue {
 	/// Get context for the nodes backend of this value.
 	pub fn build_context(key: &[u8], nodes_db: &Arc<dyn Database<DbHash>>) -> (Context, BranchNodes, BlockNodes) {
@@ -1468,6 +1457,19 @@ impl HValue {
 	}
 }
 
+
+/// Key value db at a given block for an historied DB.
+pub struct HistoriedDB {
+	current_state: ForkPlan<u32, u64>,
+	db: Arc<dyn OrderedDatabase<DbHash>>,
+	/// Configuration for this db.
+	config: SnapshotDbConf,
+	/// Historied value type for the given conf.
+	hvalue_type: HValueType,
+	/// Db for storing nodes.
+	nodes_db: Arc<dyn Database<DbHash>>,
+}
+
 impl HistoriedDB {
 	fn storage_inner(
 		&self,
@@ -1671,7 +1673,6 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		// no need for no value set
 	}
 }
-
 
 /// Consumer with transactional support.
 ///
