@@ -46,9 +46,10 @@ use codec::{Decode, Encode, Compact};
 use sp_database::{SnapshotDbConf, SnapshotDBMode};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
-use nodes_database::{BranchNodes, BlockNodes};
-use nodes_backend::Context;
+use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
+use crate::historied_nodes::nodes_backend::Context;
 use std::borrow::Cow;
+use nodes_backend::NODES_COL;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
@@ -755,152 +756,9 @@ mod SingleNodeEncodedNoDiff {
 }
 */
 
-mod nodes_database {
-	use std::sync::Arc;
-	use parking_lot::RwLock;
-	use crate::DbHash;
-	use sp_database::Database;
-	use sp_database::Transaction;
-
-	#[derive(Clone)]
-	pub(super) struct DatabasePending {
-		// this is limited to changes of nodes of a single value and should be small,
-		// therefore we use a simple vec with full scan instead of a map.
-		pending: Arc<RwLock<Vec<(Vec<u8>, Option<Vec<u8>>)>>>,
-		database: Arc<dyn Database<DbHash>>,
-	}
-
-	impl DatabasePending {
-		pub(super) fn clear_and_extract_changes(&self) -> Vec<(Vec<u8>, Option<Vec<u8>>)> {
-			std::mem::replace(&mut self.pending.write(), Vec::new())
-		}
-
-		pub(super) fn apply_transaction(
-			&self,
-			col: sp_database::ColumnId,
-			transaction: &mut Transaction<DbHash>,
-		) {
-			let pending = self.clear_and_extract_changes();
-			for (key, change) in pending {
-				if let Some(value) = change {
-					transaction.set_from_vec(col, &key, value);
-				} else {
-					transaction.remove(col, &key);
-				}
-			}
-		}
-
-		pub(super) fn read(&self, col: sp_database::ColumnId, key: &[u8]) -> Option<Vec<u8>> {
-			let pending = self.pending.read();
-			for kv in pending.iter() {
-				match kv.0.as_slice().cmp(key) {
-					std::cmp::Ordering::Equal => return kv.1.clone(),
-					std::cmp::Ordering::Less => (),
-					std::cmp::Ordering::Greater => break,
-				}
-			}
-			self.database.get(col, key)
-		}
-
-		fn insert(&self, key: Vec<u8>, value: Option<Vec<u8>>) {
-			let mut pending = self.pending.write();
-			let mut pos = None;
-			let mut mat = None;
-			for (i, kv) in pending.iter().enumerate() {
-				match kv.0.cmp(&key) {
-					std::cmp::Ordering::Equal => {
-						mat = Some(i);
-						break;
-					},
-					std::cmp::Ordering::Less => (),
-					std::cmp::Ordering::Greater => {
-						pos = Some(i);
-						break;
-					},
-				}
-			}
-
-			let item = (key, value);
-			if let Some(pos) = pos {
-				pending.insert(pos, item);
-				return;
-			}
-			if let Some(pos) = mat {
-				pending[pos] = item;
-				return;
-			}
-			pending.push(item);
-		}
-
-		pub(super) fn write(&self, key: Vec<u8>, value: Vec<u8>) {
-			self.insert(key, Some(value))
-		}
-
-		pub(super) fn remove(&self, key: Vec<u8>) {
-			self.insert(key, None)
-		}
-	}
-
-	/// Node backend for historied value that need to be
-	/// split in backend database.
-	///
-	/// This is transactional and `apply_transaction` need
-	/// to be call to extract changes into an actual db transaction.
-	#[derive(Clone)]
-	pub struct BlockNodes(pub(super) DatabasePending);
-
-	/// Branch backend for historied value that need to be
-	/// split in backend database.
-	///
-	/// This is transactional and `apply_transaction` need
-	/// to be call to extract changes into an actual db transaction.
-	#[derive(Clone)]
-	pub struct BranchNodes(pub(super) DatabasePending);
-
-	impl BlockNodes {
-		/// Initialize from clonable pointer to backend database.
-		pub fn new(database: Arc<dyn Database<DbHash>>) -> Self {
-			BlockNodes(DatabasePending {
-				pending: Arc::new(RwLock::new(Vec::new())),
-				database,
-			})
-		}
-
-		/// Flush pending changes into a database transaction.
-		pub fn apply_transaction(&self, transaction: &mut Transaction<DbHash>) {
-			self.0.apply_transaction(crate::columns::AUX, transaction)
-		}
-	}
-
-	impl BranchNodes {
-		/// Initialize from clonable pointer to backend database.
-		pub fn new(database: Arc<dyn Database<DbHash>>) -> Self {
-			BranchNodes(DatabasePending {
-				pending: Arc::new(RwLock::new(Vec::new())),
-				database,
-			})
-		}
-
-		/// Flush pending changes into a database transaction.
-		pub fn apply_transaction(&self, transaction: &mut Transaction<DbHash>) {
-			self.0.apply_transaction(crate::columns::AUX, transaction)
-		}
-	}
-}
-
 mod nodes_backend {
 	use super::SnapshotColumnPrefixes;
-	use super::nodes_database::{BranchNodes, BlockNodes};
-	use historied_db::{
-		DecodeWithContext, historied::Value,
-		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, ContextHead, EstimateSize},
-	};
-	use codec::{Encode, Decode};
-
-	type StorageFor<V> = <V as Value>::Storage;
-
-	/// Alias for tree context.
-	pub type Context = (ContextHead<BranchNodes, ContextHead<BlockNodes, ()>>, ContextHead<BlockNodes, ()>);
+	use historied_db::backend::nodes::NodesMeta;
 
 	/// Multiple node splitting strategy based on content
 	/// size.
@@ -912,7 +770,9 @@ mod nodes_backend {
 	#[derive(Clone, Copy)]
 	pub struct MetaBlocks;
 
-	const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
+	/// Nodes for snapshot db are stored in `STATE_SNAPSHOT`
+	/// column (as heads).
+	pub const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
 
 	impl NodesMeta for MetaBranches {
 		const APPLY_SIZE_LIMIT: bool = true;
@@ -930,168 +790,6 @@ mod nodes_backend {
 		const MAX_NODE_ITEMS: usize = 4;
 		const STORAGE_PREFIX: &'static [u8] = &[SnapshotColumnPrefixes::BlockNodes as u8];
 	}
-
-	impl<C> NodeStorage<C, u64, LinearBackendInner<C>, MetaBlocks> for BlockNodes
-		where C: Decode,
-	{
-		fn get_node(
-			&self,
-			reference_key: &[u8],
-			parent_encoded_indexes: &[u8],
-			relative_index: u64,
-		) -> Option<LinearNode<C>> {
-			let key = <Self as NodeStorage<C, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			self.0.read(NODES_COL, &key).and_then(|value| {
-				// use encoded len as size (this is bigger than the call to estimate size
-				// but not really an issue, otherwhise could adjust).
-				let reference_len = value.len();
-
-				let input = &mut value.as_slice();
-				LinearBackendInner::decode(input).ok().map(|data| Node::new(
-					data,
-					reference_len,
-				))
-			})
-		}
-	}
-
-	impl<C> NodeStorageMut<C, u64, LinearBackendInner<C>, MetaBlocks> for BlockNodes
-		where C: Encode + Decode,
-	{
-		fn set_node(
-			&mut self,
-			reference_key: &[u8],
-			parent_encoded_indexes: &[u8],
-			relative_index: u64,
-			node: &LinearNode<C>,
-		) {
-			let key = <Self as NodeStorage<C, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			let encoded = node.inner().encode();
-			self.0.write(key, encoded);
-		}
-		fn remove_node(
-			&mut self,
-			reference_key: &[u8],
-			parent_encoded_indexes: &[u8],
-			relative_index: u64,
-		) {
-			let key = <Self as NodeStorage<C, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			self.0.remove(key);
-		}
-	}
-
-	impl<V> NodeStorage<BranchLinear<V>, u32, TreeBackendInner<V>, MetaBranches> for BranchNodes
-		where
-			V: Value,
-			StorageFor<V>: DecodeWithContext<Context = ()> + EstimateSize,
-	{
-		fn get_node(
-			&self,
-			reference_key: &[u8],
-			parent_encoded_indexes: &[u8],
-			relative_index: u64,
-		) -> Option<TreeNode<V>> {
-			let key = <Self as NodeStorage<BranchLinear<V>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			self.0.read(NODES_COL, &key).and_then(|value| {
-				// use encoded len as size (this is bigger than the call to estimate size
-				// but not an issue, otherwhise could adjust).
-				let reference_len = value.len();
-
-				let block_nodes = BlockNodes(self.0.clone());
-				let input = &mut value.as_slice();
-				TreeBackendInner::decode_with_context(
-					input,
-					&ContextHead {
-						key: reference_key.to_vec(),
-						backend: block_nodes,
-						encoded_indexes: parent_encoded_indexes.to_vec(),
-						node_init_from: (),
-					},
-				).map(|data| Node::new (
-					data,
-					reference_len,
-				))
-			})
-		}
-	}
-
-	impl<V> NodeStorageMut<BranchLinear<V>, u32, TreeBackendInner<V>, MetaBranches> for BranchNodes
-		where
-			V: Value,
-			StorageFor<V>: Encode + DecodeWithContext<Context = ()> + EstimateSize,
-	{
-		fn set_node(
-			&mut self,
-			reference_key: &[u8],
-			parent_encoded_indexes: &[u8],
-			relative_index: u64,
-			node: &TreeNode<V>,
-		) {
-			let key = <Self as NodeStorage<BranchLinear<V>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			let encoded = node.inner().encode();
-			self.0.write(key, encoded);
-		}
-		fn remove_node(
-			&mut self,
-			reference_key: &[u8],
-			parent_encoded_indexes: &[u8],
-			relative_index: u64,
-		) {
-			let key = <Self as NodeStorage<BranchLinear<V>, _, _, _>>::vec_address(reference_key, parent_encoded_indexes, relative_index);
-			self.0.remove(key);
-		}
-	}
-
-	// Values are stored in memory in Vec like structure
-	type LinearBackendInner<C> = historied_db::backend::in_memory::MemoryOnly8<
-		C,
-		u64,
-	>;
-
-	// A multiple nodes wraps multiple vec like structure
-	pub(super) type LinearBackend<C> = historied_db::backend::nodes::Head<
-		C,
-		u64,
-		LinearBackendInner<C>,
-		MetaBlocks,
-		BlockNodes,
-		(),
-	>;
-
-	// Nodes storing these
-	type LinearNode<C> = historied_db::backend::nodes::Node<
-		C,
-		u64,
-		LinearBackendInner<C>,
-		MetaBlocks,
-	>;
-
-	// Branch
-	type BranchLinear<V> = historied_db::historied::linear::Linear<V, u64, LinearBackend<StorageFor<V>>>;
-
-	// Branch are stored in memory
-	type TreeBackendInner<V> = historied_db::backend::in_memory::MemoryOnly4<
-		BranchLinear<V>,
-		u32,
-	>;
-
-	// Head of branches
-	pub(super) type TreeBackend<V> = historied_db::backend::nodes::Head<
-		BranchLinear<V>,
-		u32,
-		TreeBackendInner<V>,
-		MetaBranches,
-		BranchNodes,
-		ContextHead<BlockNodes, ()>
-	>;
-
-	// Node with branches
-	type TreeNode<V> = historied_db::backend::nodes::Node<
-		BranchLinear<V>,
-		u32,
-		TreeBackendInner<V>,
-		MetaBranches,
-	>;
 }
 
 mod nodes_nodiff {
@@ -1100,14 +798,16 @@ mod nodes_nodiff {
 		historied::tree::Tree,
 		management::tree::ForkPlan,
 	};
+	use super::nodes_backend::{MetaBlocks, MetaBranches};
+	use crate::historied_nodes::nodes_backend::{TreeBackend, LinearBackend};
 
 	/// HValue variant alias for `HValueType::SingleNodeXDelta`.
 	pub type HValue = Tree<
 		u32,
 		u64,
 		Option<Vec<u8>>,
-		super::nodes_backend::TreeBackend<Option<Vec<u8>>>,
-		super::nodes_backend::LinearBackend<Option<Vec<u8>>>,
+		TreeBackend<Option<Vec<u8>>, MetaBranches, MetaBlocks>,
+		LinearBackend<Option<Vec<u8>>, MetaBlocks>,
 	>;
 
 	/// Access current value.
@@ -1117,25 +817,14 @@ mod nodes_nodiff {
 }
 
 mod nodes_xdelta {
-	use super::SnapshotColumnPrefixes;
-	use super::nodes_database::{BranchNodes, BlockNodes};
 	use historied_db::{
-		backend::nodes::{NodesMeta, NodeStorage, NodeStorageMut, Node, EstimateSize},
-	};
-	use super::nodes_backend::{MetaBlocks, MetaBranches};
-	use codec::{Encode, Decode};
-	use historied_db::{
-		DecodeWithContext,
-		management::{ManagementMut, ForkableManagement, Management},
-		historied::{DataMut, Data, DataRef, aggregate::Sum as _},
-		mapped_db::{TransactionalMappedDB, MappedDBDyn},
-		db_traits::{StateDB, StateDBRef, StateDBMut},
-		Latest, UpdateResult,
+		historied::aggregate::Sum as _,
 		historied::tree::{Tree, aggregate::Sum as TreeSum},
-		management::tree::{Tree as TreeMgmt, ForkPlan},
-		backend::nodes::ContextHead,
+		management::tree::ForkPlan,
 		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 	};
+	use super::nodes_backend::{MetaBlocks, MetaBranches};
+	use crate::historied_nodes::nodes_backend::{TreeBackend, LinearBackend};
 
 	type BytesDiffStorage = <BytesDiff as historied_db::historied::Value>::Storage;
 
@@ -1144,8 +833,8 @@ mod nodes_xdelta {
 		u32,
 		u64,
 		BytesDiff,
-		super::nodes_backend::TreeBackend<BytesDiff>,
-		super::nodes_backend::LinearBackend<BytesDiffStorage>,
+		TreeBackend<BytesDiff, MetaBranches, MetaBlocks>,
+		LinearBackend<BytesDiffStorage, MetaBlocks>,
 	>;
 
 	/// Access current value.
@@ -1244,8 +933,8 @@ impl HValueType {
 impl HValue {
 	/// Get context for the nodes backend of this value.
 	pub fn build_context(key: &[u8], nodes_db: &Arc<dyn Database<DbHash>>) -> (Context, BranchNodes, BlockNodes) {
-		let block_nodes = BlockNodes::new(nodes_db.clone());
-		let branch_nodes = BranchNodes::new(nodes_db.clone());
+		let block_nodes = BlockNodes::new(nodes_db.clone(), NODES_COL);
+		let branch_nodes = BranchNodes::new(nodes_db.clone(), NODES_COL);
 
 		let init_nodes = ContextHead {
 			key: key.to_vec(),
@@ -1456,7 +1145,6 @@ impl HValue {
 		}
 	}
 }
-
 
 /// Key value db at a given block for an historied DB.
 pub struct HistoriedDB {
@@ -1754,8 +1442,8 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 			}
 		}
 
-		let block_nodes = BlockNodes::new(self.storage.nodes_db.clone());
-		let branch_nodes = BranchNodes::new(self.storage.nodes_db.clone());
+		let block_nodes = BlockNodes::new(self.storage.nodes_db.clone(), NODES_COL);
+		let branch_nodes = BranchNodes::new(self.storage.nodes_db.clone(), NODES_COL);
 		block_nodes.apply_transaction(&mut pending);
 		branch_nodes.apply_transaction(&mut pending);
 	}

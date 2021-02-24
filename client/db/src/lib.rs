@@ -82,6 +82,7 @@ mod stats;
 #[cfg(feature = "with-parity-db")]
 mod parity_db;
 mod tree_management;
+mod historied_nodes;
 mod snapshot;
 
 use std::sync::Arc;

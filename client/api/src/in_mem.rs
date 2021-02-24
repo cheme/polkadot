@@ -747,7 +747,7 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 		Box::new(())
 	}
 
-	fn register_sync(&self, sync: Box<dyn backend::SnapshotSync<Block>>) { }
+	fn register_sync(&self, _sync: Box<dyn backend::SnapshotSync<Block>>) { }
 }
 
 impl<Block: BlockT> backend::LocalBackend<Block> for Backend<Block> where Block::Hash: Ord {}
