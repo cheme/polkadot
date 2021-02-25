@@ -524,9 +524,11 @@ impl<Block: BlockT> SnapshotDb<Block> {
 
 		// write management state changes (after changing values because change
 		// journal is using historied management db).
-		TreeManagementSync::<Block, _>::apply_historied_management_changes(
-			&mut self.historied_management.inner.write().instance,
-			transaction,
+		management.as_mut().map(|management|
+			TreeManagementSync::<Block, _>::apply_historied_management_changes(
+				&mut management.instance,
+				transaction,
+			)
 		);
 
 		Ok(())
