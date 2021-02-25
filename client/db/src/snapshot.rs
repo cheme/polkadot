@@ -509,12 +509,10 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		) = (journal_keys, journals, ordered_historied_db.as_ref()) {
 			// Note that this is safe because we import a new block.
 			// Otherwhise we would need to share cache with a single journal instance.
-			let mut journals = historied_db::management::JournalForMigrationBasis
-				::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
-				::from_db(ordered_db);
+			let mut journals = ChangesJournal::from_db(ordered_db);
 			journals.add_changes(
 				ordered_db,
-				historied.current_state.latest().clone(),
+				rev_index(historied.current_state.latest()),
 				journal_keys,
 				// New block, no need for fetch
 				// (when executed twice we overwrite existing but journal should be the smae).
@@ -757,6 +755,18 @@ mod SingleNodeEncodedNoDiff {
 	pub type HValue<'a> = Tree<u32, u64, Vec<u8>, TreeBackend<'a>, LinearBackend<'a>>;
 }
 */
+
+type ChangesJournal<Db> = historied_db::management::JournalForMigrationBasis<
+	// Note that it is reversed state, we use block number first for ordering consideration.
+	(u64, u32),
+	Vec<u8>,
+	Db,
+	snapshot_db_conf::JournalChanges,
+>;
+
+fn rev_index(index: &(u32, u64)) -> (u64, u32) {
+	(index.1, index.0)
+}
 
 mod nodes_backend {
 	use super::SnapshotColumnPrefixes;
@@ -1387,17 +1397,14 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 			let (prune, state_changes) = migrate.migrate().touched_state();
 			// this db is transactional.
 			let db = migrate.management().ser();
-			let mut journals = historied_db::management::JournalForMigrationBasis
-				::<_, _, _, crate::tree_management::historied_tree_bindings::SnapshotKeyChangeJournal>
-				::from_db(db);
+			let mut journals = ChangesJournal::from_db(db);
 
 			if let Some(pruning) = prune {
 				journals.remove_changes_before(db, &(pruning, Default::default()), &mut keys_to_migrate);
 			}
 
 			for state in state_changes {
-				let state = state.clone();
-				let state = (state.1, state.0);
+				let state = rev_index(&state);
 				if let Some(removed) = journals.remove_changes_at(db, &state) {
 					for key in removed {
 						keys_to_migrate.insert(key);
@@ -1421,9 +1428,11 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 				.expect("Bad encoded value in db, closing");
 			match histo.migrate::<B>(migrate) {
 				historied_db::UpdateResult::Changed(()) => {
+					histo.apply_nodes_backend_to_transaction(&mut pending);
 					pending.set_from_vec(column, k, histo.encode());
 				},
 				historied_db::UpdateResult::Cleared(()) => {
+					histo.apply_nodes_backend_to_transaction(&mut pending);
 					pending.remove(column, k);
 				},
 				historied_db::UpdateResult::Unchanged => (),
@@ -1435,7 +1444,7 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 				if let Some(histo) = self.storage.ordered_db.get(column, k.as_slice()) {
 					process_key(k.as_slice(), histo, &self.storage.nodes_db);
 				} else {
-					return;
+					continue;
 				};
 			}
 		} else {
@@ -1443,10 +1452,5 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 				process_key(k.as_slice(), histo, &self.storage.nodes_db);
 			}
 		}
-
-		let block_nodes = BlockNodes::new(self.storage.nodes_db.clone(), NODES_COL);
-		let branch_nodes = BranchNodes::new(self.storage.nodes_db.clone(), NODES_COL);
-		block_nodes.apply_transaction(&mut pending);
-		branch_nodes.apply_transaction(&mut pending);
 	}
 }
