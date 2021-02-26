@@ -224,6 +224,20 @@ impl<V, S, D> Linear<V, S, D>
 		self.0.push(HistoriedValue {value: value.into_storage(), state: at.clone()});
 		UpdateResult::Changed(None)
 	}
+
+	/// Iterate on history content, this expose internal type directly. 
+	/// TODO conditionally fetch value.
+	pub fn map_backward(
+		&self,
+		mut filter: impl FnMut(S, D::Index, &D) -> bool,
+	) {
+		for handle in self.0.rev_index_iter() {
+			let state = self.0.get_state(handle);
+			if filter(state, handle, &self.0) {
+				break
+			}
+		}
+	}
 }
 
 impl<V, S, D> DataBasis for Linear<V, S, D>

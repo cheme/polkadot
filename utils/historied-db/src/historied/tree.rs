@@ -428,7 +428,6 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 	}
 }
 
-
 impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 	where
 		I: Default + Ord + Clone,
@@ -608,6 +607,100 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		}
 		self.branches.truncate_until(end);
 	}
+
+	/// Iterate on history content, this expose external
+	/// types directly, see 'export_to_linear' implementation
+	/// for usage.
+	/// This is doing a backward iteration, and only enter branch
+	/// Iterate on history content, this expose internal type directly. 
+	pub fn map_backward(
+		&self,
+		mut filter: impl FnMut(I, D::Index, &D) -> bool,
+	) {
+		for handle in self.branches.rev_index_iter() {
+			let state = self.branches.get_state(handle);
+			if filter(state, handle, &self.branches) {
+				break
+			}
+		}
+	}
+
+	/// Export a given tree value to linear history, given a read query plan.
+	pub fn export_to_linear<BO>	(
+		&self,
+		filter: ForkPlan<I, BI>, // Self::S
+		include_all_treshold_value: bool,
+		include_treshold_value: bool,
+	) -> crate::historied::linear::Linear<V, BI, BO>
+		where
+			BO: LinearStorage<V::Storage, BI, Context = ()>,
+	{
+		let mut accu = Vec::new();
+		let accu = &mut accu;
+		let mut iter_forkplan = filter.iter();
+		let mut fork_plan_head = iter_forkplan.next();
+		let fork_plan_head = &mut fork_plan_head;
+		let composite_treshold = &filter.composite_treshold.1;
+		self.map_backward(
+			|index, handle, branches| {
+				while let Some((branch_range, branch_index)) = fork_plan_head.as_ref() {
+					if &index > branch_index {
+						return false;
+					} else if &index == branch_index {
+						let branch = branches.get(handle).value;
+						branch.map_backward(|index, handle, branch| {
+							if index < branch_range.end {
+								if index >= branch_range.start {
+									accu.push(branch.get(handle));
+								} else {
+									return true;
+								}
+							}
+							false
+						});
+						return false;
+					} else {
+						*fork_plan_head = iter_forkplan.next();
+					}
+				}
+
+				if !include_all_treshold_value {
+					if include_treshold_value {
+						let branch = branches.get(handle).value;
+						branch.map_backward(|index, handle, branch| {
+							if &index < composite_treshold {
+								accu.push(branch.get(handle));
+								return true;
+							}
+							false
+						});
+						return true;
+					} else {
+						return true;
+					}
+				}
+
+				let branch = branches.get(handle).value;
+				branch.map_backward(|index, handle, branch| {
+					if &index < composite_treshold {
+						accu.push(branch.get(handle));
+					}
+					false
+				});
+
+				false
+			}
+		);
+
+		let mut dest = crate::historied::linear::Linear::<V, BI, BO>::init_from(());
+		while let Some(value) = accu.pop() {
+			assert!(matches!(dest.set(V::from_storage(value.value), &Latest(value.state)), UpdateResult::Changed(..)));
+		}
+		dest
+	}
+
+// fn copy(from: Tree, start_inc_fork_treshold: option<linearstate>, treshold: linearstate, include_tresh: bool) -> tree
+// fn copy(from: Tree, origin_mgmt, dest_mgmt, mappings) -> tree
 }
 
 #[cfg(test)]
@@ -1000,7 +1093,6 @@ pub mod conditional {
 		}
 	}
 }
-
 
 #[cfg(test)]
 mod test {
