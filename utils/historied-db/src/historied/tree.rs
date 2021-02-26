@@ -626,14 +626,17 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 	}
 
 	/// Export a given tree value to linear history, given a read query plan.
-	pub fn export_to_linear<BO>	(
+	pub fn export_to_linear<V2, BO>	(
 		&self,
 		filter: ForkPlan<I, BI>, // Self::S
 		include_all_treshold_value: bool,
 		include_treshold_value: bool,
-		dest: &mut crate::historied::linear::Linear<V, BI, BO>,
+		dest: &mut crate::historied::linear::Linear<V2, BI, BO>,
+		need_prev: bool, 
+		map_value: impl Fn(Option<&V>, V) -> V2
 	)	where
-		BO: LinearStorage<V::Storage, BI>,
+		V2: Value + Clone + Eq,
+		BO: LinearStorage<V2::Storage, BI>,
 	{
 		let mut accu = Vec::new();
 		let accu = &mut accu;
@@ -690,19 +693,27 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 			false
 		});
 
+		let mut prev = None;
 		while let Some(value) = accu.pop() {
-			assert!(matches!(dest.set(V::from_storage(value.value), &Latest(value.state)), UpdateResult::Changed(..)));
+			let v = V::from_storage(value.value);
+			let prev2 = need_prev.then(|| v.clone());
+			let v2 = map_value(prev.as_ref(), v);
+			prev = prev2;
+			assert!(matches!(dest.set(v2, &Latest(value.state)), UpdateResult::Changed(..)));
 		}
 	}
 
 	/// Export a given tree value to another tree value, given a read query plan.
 	/// If needed to filter some content, one can use 'gc' on destination tree.
-	pub fn export_to_tree<DO, BO>	(
+	pub fn export_to_tree<V2, DO, BO>	(
 		&self,
-		dest: &mut Tree<I, BI, V, DO, BO>,
+		dest: &mut Tree<I, BI, V2, DO, BO>,
+		need_prev: bool, 
+		map_value: impl Fn(Option<&V>, V) -> V2
 	)	where
-		DO: LinearStorage<Linear<V, BI, BO>, I>,
-		BO: LinearStorage<V::Storage, BI>,
+		V2: Value + Clone + Eq,
+		DO: LinearStorage<Linear<V2, BI, BO>, I>,
+		BO: LinearStorage<V2::Storage, BI>,
 		BO: Trigger,
 		I: Encode,
 	{
@@ -716,8 +727,23 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 			});
 			false
 		});
+		let mut prev = None;
+		let mut prev_state: Option<(I, BI)> = None;
 		while let Some(value) = accu.pop() {
-			assert!(matches!(dest.set(value.2, &Latest((value.0, value.1))), UpdateResult::Changed(..)));
+			let state = (value.0, value.1);
+			let value = value.2;
+			let is_parent = prev_state.as_ref().map(|prev_state| {
+				// no check for between branch, would require
+				// management and backward query of dest to get previous
+				// value (forkplan recalc being anti efficient there).
+				prev_state.0 == state.0
+			}).unwrap_or(false);
+			let prev2 = need_prev.then(|| value.clone());
+			prev_state = need_prev.then(|| state.clone());
+			let v2 = map_value(is_parent.then(|| prev.as_ref()).flatten(), value);
+			prev = prev2;
+
+			assert!(matches!(dest.set(v2, &Latest(state)), UpdateResult::Changed(..)));
 		}
 	}
 }
