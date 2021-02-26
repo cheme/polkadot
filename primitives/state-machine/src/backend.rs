@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2017-2020 Parity Technologies (UK) Ltd.
+// Copyright (C) 2017-2021 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +20,6 @@
 use hash_db::Hasher;
 use codec::{Decode, Encode};
 use sp_core::{
-	traits::RuntimeCode,
 	storage::{ChildInfo, well_known_keys, TrackedStorageKey}
 };
 use crate::{
@@ -28,12 +27,15 @@ use crate::{
 	trie_backend_essence::TrieBackendStorage,
 	UsageInfo, StorageKey, StorageValue, StorageCollection, ChildStorageCollection,
 };
+use sp_std::vec::Vec;
+#[cfg(feature = "std")]
+use sp_core::traits::RuntimeCode;
 
 /// A state backend is used to read state data and can have changes committed
 /// to it.
 ///
 /// The clone operation (if implemented) should be cheap.
-pub trait Backend<H: Hasher>: std::fmt::Debug {
+pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	/// An error type when fetching data is not possible.
 	type Error: super::Error;
 
@@ -92,7 +94,8 @@ pub trait Backend<H: Hasher>: std::fmt::Debug {
 	) -> Result<Option<StorageKey>, Self::Error>;
 
 	/// Retrieve all entries keys of child storage and call `f` for each of those keys.
-	fn for_keys_in_child_storage<F: FnMut(&[u8])>(
+	/// Aborts as soon as `f` returns false.
+	fn apply_to_child_keys_while<F: FnMut(&[u8]) -> bool>(
 		&self,
 		child_info: &ChildInfo,
 		f: F,
@@ -261,12 +264,12 @@ impl<'a, T: Backend<H>, H: Hasher> Backend<H> for &'a T {
 		(*self).child_storage(child_info, key)
 	}
 
-	fn for_keys_in_child_storage<F: FnMut(&[u8])>(
+	fn apply_to_child_keys_while<F: FnMut(&[u8]) -> bool>(
 		&self,
 		child_info: &ChildInfo,
 		f: F,
 	) {
-		(*self).for_keys_in_child_storage(child_info, f)
+		(*self).apply_to_child_keys_while(child_info, f)
 	}
 
 	fn next_storage_key(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
@@ -375,11 +378,13 @@ pub(crate) fn insert_into_memory_db<H, I>(mdb: &mut sp_trie::MemoryDB<H>, input:
 }
 
 /// Wrapper to create a [`RuntimeCode`] from a type that implements [`Backend`].
+#[cfg(feature = "std")]
 pub struct BackendRuntimeCode<'a, B, H> {
 	backend: &'a B,
 	_marker: std::marker::PhantomData<H>,
 }
 
+#[cfg(feature = "std")]
 impl<'a, B: Backend<H>, H: Hasher> sp_core::traits::FetchRuntimeCode for
 	BackendRuntimeCode<'a, B, H>
 {
@@ -388,6 +393,7 @@ impl<'a, B: Backend<H>, H: Hasher> sp_core::traits::FetchRuntimeCode for
 	}
 }
 
+#[cfg(feature = "std")]
 impl<'a, B: Backend<H>, H: Hasher> BackendRuntimeCode<'a, B, H> where H::Out: Encode {
 	/// Create a new instance.
 	pub fn new(backend: &'a B) -> Self {

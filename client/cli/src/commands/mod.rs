@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2018-2020 Parity Technologies (UK) Ltd.
+// Copyright (C) 2018-2021 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 // This program is free software: you can redistribute it and/or modify
@@ -28,9 +28,9 @@ mod revert_cmd;
 mod run_cmd;
 mod generate_node_key;
 mod generate;
-mod insert;
+mod insert_key;
 mod inspect_node_key;
-mod inspect;
+mod inspect_key;
 mod key;
 pub mod utils;
 
@@ -43,8 +43,8 @@ pub use self::{
 	purge_chain_cmd::PurgeChainCmd,
 	sign::SignCmd,
 	generate::GenerateCmd,
-	insert::InsertCmd,
-	inspect::InspectKeyCmd,
+	insert_key::InsertKeyCmd,
+	inspect_key::InspectKeyCmd,
 	generate_node_key::GenerateNodeKeyCmd,
 	inspect_node_key::InspectNodeKeyCmd,
 	key::KeySubcommand,
