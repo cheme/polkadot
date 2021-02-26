@@ -32,11 +32,36 @@ pub trait NodeIndex: Clone + Copy + Debug + PartialEq + PartialOrd {
 	fn from_usize(position: usize) -> Self;
 }
 
-// TODO macro index with limit stored in u8
-/// Radix 4 node index.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Index4(u8);
+macro_rules! u8_index {
+	($struct_name: ident, $size: expr) => {
+		/// Radix $size node index.
+		#[repr(transparent)]
+		#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+		pub struct $struct_name(u8);
+
+		impl NodeIndex for $struct_name {
+			fn zero() -> Self {
+				$struct_name(0)
+			}
+			fn next(&self) -> Option<Self> {
+				if self.0 == $size - 1 {
+					None
+				} else {
+					Some($struct_name(self.0 + 1))
+				}
+			}
+			fn to_usize(self) -> usize {
+				self.0 as usize
+			}
+			fn from_usize(position: usize) -> Self {
+				$struct_name(position as u8)
+			}
+		}
+	}
+}
+
+u8_index!(Index4, 4);
+u8_index!(Index16, 16);
 
 mod node_indexes_impls {
 	use super::*;
@@ -76,25 +101,6 @@ mod node_indexes_impls {
 		}
 		fn from_usize(position: usize) -> Self {
 			position as u8
-		}
-	}
-
-	impl NodeIndex for Index4 {
-		fn zero() -> Self {
-			Index4(0)
-		}
-		fn next(&self) -> Option<Self> {
-			if self.0 == 3 {
-				None
-			} else {
-				Some(Index4(self.0 + 1))
-			}
-		}
-		fn to_usize(self) -> usize {
-			self.0 as usize
-		}
-		fn from_usize(position: usize) -> Self {
-			Index4(position as u8)
 		}
 	}
 }
@@ -253,14 +259,6 @@ pub struct Children256<N> (
 	u8,
 );
 
-#[derive(Derivative)]
-#[derivative(Clone)]
-pub struct Children4<N> (
-	[Option<Box<N>>; 4],
-	u8,
-);
-
-
 /// 48 children for art tree.
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -295,9 +293,18 @@ pub enum ART48_256<N> {
 	ART256(Children256<N>),
 }
 
+
+macro_rules! exp2_array {
+	(@6, [$($inpp:expr),*]) => { exp2_array!(@5, [$($inpp,)* $($inpp),*]) };
+	(@5, [$($inpp:expr),*]) => { exp2_array!(@4, [$($inpp,)* $($inpp),*]) };
+	(@4, [$($inpp:expr),*]) => { exp2_array!(@3, [$($inpp,)* $($inpp),*]) };
+	(@3, [$($inpp:expr),*]) => { exp2_array!(@2, [$($inpp,)* $($inpp),*]) };
+	(@2, [$($inpp:expr),*]) => { exp2_array!(@1, [$($inpp,)* $($inpp),*]) };
+	(@1, [$($inpp:expr),*]) => { [$($inpp,)* $($inpp),*] };
+}
+
 #[inline]
 const fn empty_4_children<N>() -> [Option<N>; 4] {
-	// TODO copy tree crate macro
 	[
 		None, None, None, None,
 	]
@@ -305,63 +312,17 @@ const fn empty_4_children<N>() -> [Option<N>; 4] {
 
 #[inline]
 const fn empty_16_children<N>() -> [Option<N>; 16] {
-	// TODO copy tree crate macro
-	[
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-	]
+	exp2_array!(@3, [None, None])
 }
 
 #[inline]
 const fn empty_48_children<N>() -> [Option<N>; 48] {
-	// TODO copy tree crate macro
-	[
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-	]
+	exp2_array!(@4, [None, None, None])
 }
 
 #[inline]
 const fn empty_256_children<N>() -> [Option<N>; 256] {
-	// TODO copy tree crate macro
-	[
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-		None, None, None, None, None, None, None, None,
-	]
+	exp2_array!(@6, [None, None, None, None])
 }
 
 impl<N: Debug> Debug for Children256<N> {
@@ -372,12 +333,6 @@ impl<N: Debug> Debug for Children256<N> {
 			let empty: &[N] = &[]; 
 			empty.fmt(f)
 		}
-	}
-}
-
-impl<N: Debug> Debug for Children4<N> {
-	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
-		self.0[..].fmt(f)
 	}
 }
 
@@ -469,14 +424,29 @@ impl<N: Debug + Clone> Children for Children256<N> {
 	}
 }
 
-// TODO macroed children4 and children256
-impl<N: Debug + Clone> Children for Children4<N> {
-	type Radix = crate::radix::impls::Radix4Conf;
+macro_rules! impl_children {
+	($struct_name: ident, $radix_conf: ident, $empty: ident, $size: expr) => {
+
+#[derive(Derivative)]
+#[derivative(Clone)]
+pub struct $struct_name<N> (
+	[Option<Box<N>>; $size],
+	u8,
+);
+
+impl<N: Debug> Debug for $struct_name<N> {
+	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
+		self.0[..].fmt(f)
+	}
+}
+
+impl<N: Debug + Clone> Children for $struct_name<N> {
+	type Radix = crate::radix::impls::$radix_conf;
 
 	type Node = N;
 
 	fn empty() -> Self {
-		Children4(empty_4_children(), 0)
+		$struct_name($empty(), 0)
 	}
 
 	fn set_child(
@@ -524,6 +494,11 @@ impl<N: Debug + Clone> Children for Children4<N> {
 		self.0[index.to_usize()].as_mut().map(AsMut::as_mut)
 	}
 }
+
+}}
+
+impl_children!(Children4, Radix4Conf, empty_4_children, 4);
+impl_children!(Children16, Radix16Conf, empty_16_children, 16);
 
 impl<N: Debug + Clone> Children256<N> {
 	fn need_reduce(

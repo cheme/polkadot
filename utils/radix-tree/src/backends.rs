@@ -419,13 +419,11 @@ impl<B: ReadBackend> BackendInner for TransactionBackend<B> {
 #[derive(Derivative)]
 #[derivative(Clone)]
 /// Resolve child nodes from backend lazilly.
-/// This way the whole tree do not need to be loaded.
-/// `resolve` and `resolve_mut` calls are use for this.
-/// Note that a tree using this cannot use `get` but
+/// This way the whole tree do not need to be loaded on `fetch_node`,
+/// but only when `resolve` or `resolve_mut` are called.
+/// Please note that a tree using this cannot use `get` but
 /// have to use `get_mut` for accessing its content
 /// unless the node were already fetched.
-/// TODO can consider a `get` variant that return None
-/// on unfetched node (instead of panicking).
 pub enum LazyBackend<B> {
 	Unresolved {
 		/// Key for that node (including partial key).
@@ -539,14 +537,14 @@ impl<N, B: Backend> TreeBackend<N> for LazyBackend<B>
 	fn resolve(node: &Node<N>) {
 		match node.backend() {
 			LazyBackend::Resolved(..) => (),
-			_ => unimplemented!("Backend must be use as mutable due to lazy nature"),
+			_ => unimplemented!("Lazy backend must only use mutable api."),
 		}
 	}
 
 	fn resolve_mut(node: &mut Node<N>) {
 		if let Some(new_node) = match node.backend_mut() {
 			LazyBackend::Resolved(..) => None,
-			LazyBackend::Unresolved{ key, start_index, start_mask, inner} => {
+			LazyBackend::Unresolved{key, start_index, start_mask, inner} => {
 				let mask = <N::Radix as RadixConf>::Alignment::decode_mask(*start_mask); 
 				let position = PositionFor::<N> {
 					index: *start_index,
