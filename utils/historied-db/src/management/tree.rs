@@ -1270,7 +1270,8 @@ impl<H, I, BI, S> Management<H> for TreeManagement<H, I, BI, S>
 	}
 
 	fn get_db_state(&mut self, tag: &H) -> Option<Self::S> {
-		self.ext_states.mapping(self.state.ser()).get(tag).cloned().map(|i| self.state.query_plan_at(i))
+		self.ext_states.mapping(self.state.ser()).get(tag).cloned()
+			.map(|i| self.state.query_plan_at(i))
 	}
 
 	fn get_db_state_from_index(&mut self, index: &Self::Index) -> Option<Self::S> {

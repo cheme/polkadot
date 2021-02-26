@@ -709,7 +709,7 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		&self,
 		dest: &mut Tree<I, BI, V2, DO, BO>,
 		need_prev: bool, 
-		map_value: impl Fn(Option<&V>, V) -> V2
+		mut map_value: impl FnMut(Option<&V>, &(I, BI), V) -> V2
 	)	where
 		V2: Value + Clone + Eq,
 		DO: LinearStorage<Linear<V2, BI, BO>, I>,
@@ -740,12 +740,46 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 			}).unwrap_or(false);
 			let prev2 = need_prev.then(|| value.clone());
 			prev_state = need_prev.then(|| state.clone());
-			let v2 = map_value(is_parent.then(|| prev.as_ref()).flatten(), value);
+			let v2 = map_value(is_parent.then(|| prev.as_ref()).flatten(), &state, value);
 			prev = prev2;
 
 			assert!(matches!(dest.set(v2, &Latest(state)), UpdateResult::Changed(..)));
 		}
 	}
+
+	/// Temporary export with management backed parent resolution.
+	/// Note that management usage is done in an antipattern way
+	/// so resolution of query plan is involving redundant accesses,
+	/// and access to previous value also involve redundant backward
+	/// iteration.
+	pub fn export_to_tree_mgmt<V2, DO, BO, H, M>	(
+		&self,
+		dest: &mut Tree<I, BI, V2, DO, BO>,
+		mgmt: &mut M,
+		map_value: impl Fn(Option<&V>, &(I, BI), V) -> V2
+	)	where
+		V2: Value + Clone + Eq,
+		DO: LinearStorage<Linear<V2, BI, BO>, I>,
+		BO: LinearStorage<V2::Storage, BI>,
+		BO: Trigger,
+		I: Encode,
+		M: crate::management::Management<H, Index = (I, BI), S = ForkPlan<I, BI>>,
+	{
+		self.export_to_tree(
+			dest,
+			false,
+			|_, index, value| {
+				let prev = if let Some(query_plan) = mgmt.get_db_state_from_index(index) {
+					self.get(&query_plan)
+				} else {
+					None
+				};
+				map_value(prev.as_ref(), index, value)
+			},
+
+		)
+	}
+	
 }
 
 #[cfg(test)]
