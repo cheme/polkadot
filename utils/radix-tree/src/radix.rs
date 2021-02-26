@@ -202,9 +202,9 @@ mod prefix_key_confs_impls {
 
 	// This is equivalent to Mask2
 	impl MaskKeyByte for bool {
-		const FIRST: Self = true;
+		const FIRST: Self = false;
 
-		const LAST: Self = false;
+		const LAST: Self = true;
 
 		fn mask_start(&self, byte: u8) -> u8 {
 			if *self {
@@ -216,54 +216,54 @@ mod prefix_key_confs_impls {
 
 		fn mask_end_incl(&self, byte: u8) -> u8 {
 			if *self {
-				byte & 0xf0
-			} else {
 				byte
+			} else {
+				byte & 0xf0
 			}
 		}
 
 		fn mask_end_excl(&self, byte: u8) -> u8 {
 			if *self {
-				0	
-			} else {
 				byte & 0xf0
+			} else {
+				0
 			}
 		}
 
 		fn index(&self, byte: u8) -> u8 {
 			if *self {
-				(byte & 0xf0) >> 4
-			} else {
 				byte & 0x0f
+			} else {
+				(byte & 0xf0) >> 4
 			}
 		}
 
 		fn set_index(&self, byte: u8, index: u8) -> u8 {
 			if *self {
-				(byte & 0x0f) | (index << 4)
-			} else {
 				(byte & 0xf0) | index
+			} else {
+				(byte & 0x0F) | (index << 4)
 			}
 		}
 
 		fn cmp(&self, other: Self) -> Ordering {
 			match (*self, other) {
-				(true, false) => Ordering::Less,
-				(false, true) => Ordering::Greater,
+				(false, true) => Ordering::Less,
+				(true, false) => Ordering::Greater,
 				(true, true)
 					| (false, false) => Ordering::Equal,
 			}
 		}
 
 		fn from_index(index: u8) -> Self {
-			index == 0
+			index != 0
 		}
 
 		fn to_index(&self) -> u8 {
 			if *self {
-				0
-			} else {
 				1
+			} else {
+				0
 			}
 		}
 	}
@@ -408,7 +408,7 @@ pub mod impls {
 	impl RadixConf for Radix16Conf {
 		type Alignment = bool;
 
-		type KeyIndex = u8;
+		type KeyIndex = crate::children::Index16;
 
 		const CHILDREN_CAPACITY: usize = 16;
 
@@ -420,8 +420,17 @@ pub mod impls {
 			}
 		}
 
-		fn advance_by(_previous_mask: MaskFor<Self>, _nb: usize) -> (MaskFor<Self>, usize) {
-			unimplemented!("TODO or default one")
+		fn advance_by(previous_mask: MaskFor<Self>, nb: usize) -> (MaskFor<Self>, usize) {
+			let inc = nb / 2;
+			if (nb % 2) > 0 {
+				if previous_mask {
+					(!previous_mask, inc + 1)
+				} else {
+					(!previous_mask, inc)
+				}
+			} else {
+				(previous_mask, inc)
+			}
 		}
 
 		fn common_until_delta(delta: u8) -> MaskFor<Self> {
@@ -430,7 +439,7 @@ pub mod impls {
 
 		fn index(key: &[u8], at: Position<Self::Alignment>) -> Option<Self::KeyIndex> {
 			key.get(at.index).map(|byte| {
-				at.mask.index(*byte)
+				Self::KeyIndex::from_usize(at.mask.index(*byte) as usize)
 			})
 		}
 
@@ -439,7 +448,7 @@ pub mod impls {
 				key.resize(at.index + 1, 0);
 			}
 			key.get_mut(at.index).map(|byte| {
-				*byte = at.mask.set_index(*byte, index)
+				*byte = at.mask.set_index(*byte, index.to_usize() as u8)
 			});
 		}
 	}

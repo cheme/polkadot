@@ -19,7 +19,7 @@
 
 #[cfg(any(test, feature = "fuzzer"))]
 use crate::{Node256NoBackend, Node256NoBackendART, Node256HashBackend,
-	Node256TxBackend, Node256LazyHashBackend, Node4NoBackend};
+	Node256TxBackend, Node256LazyHashBackend, Node16NoBackend, Node4NoBackend};
 
 macro_rules! test_for {
 	($module_name: ident, $backend_conf: ident, $check_backend_ser: expr) => {
@@ -400,6 +400,7 @@ pub mod $module_name {
 
 test_for!(test_256, Node256NoBackend, false);
 test_for!(test_4, Node4NoBackend, false);
+test_for!(test_16, Node16NoBackend, false);
 test_for!(test_256_art, Node256NoBackendART, false);
 test_for!(test_256_hash, Node256HashBackend, true);
 test_for!(test_256_hash_tx, Node256TxBackend, true);
