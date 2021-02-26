@@ -151,20 +151,25 @@ impl<K: Eq + Hash, V> Management<StateInput> for Db<K, V> {
 
 	fn get_db_state(&mut self, tag: &StateInput) -> Option<Self::S> {
 		if let Some(mut ix) = self.get_state(tag) {
-			let mut query = vec![ix];
-			loop {
-				let next = self.db[ix as usize].as_ref().map(|elt| elt.previous).unwrap_or(ix);
-				if next == ix {
-					break;
-				} else {
-					query.push(next);
-					ix = next;
-				}
-			}
-			Some(query)
+			self.get_db_state_from_index(ix)
 		} else {
 			None
 		}
+	}
+
+	fn get_db_state_from_index(&mut self, index: &Self::Index) -> Option<Self::S> {
+		let mut ix = index;
+		let mut query = vec![ix];
+		loop {
+			let next = self.db[ix as usize].as_ref().map(|elt| elt.previous).unwrap_or(ix);
+			if next == ix {
+				break;
+			} else {
+				query.push(next);
+				ix = next;
+			}
+		}
+		Some(query)
 	}
 
 	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<StateInput> {

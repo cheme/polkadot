@@ -1273,6 +1273,10 @@ impl<H, I, BI, S> Management<H> for TreeManagement<H, I, BI, S>
 		self.ext_states.mapping(self.state.ser()).get(tag).cloned().map(|i| self.state.query_plan_at(i))
 	}
 
+	fn get_db_state_from_index(&mut self, index: &Self::Index) -> Option<Self::S> {
+		Some(self.state.query_plan_at(index.clone()))
+	}
+
 	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<H> {
 		// TODO Note, from a forkplan we need to use 'latest' to get same
 		// behavior as previous implementation.

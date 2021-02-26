@@ -55,6 +55,10 @@ impl<H: Ord + Clone, S: Clone + Ord + StateIndex<S>> Management<H> for LinearInM
 		self.mapping.get(tag).cloned()
 	}
 
+	fn get_db_state_from_index(&mut self, index: &Self::Index) -> Option<Self::S> {
+		self.reverse_lookup(index).and_then(|tag| self.get_db_state(&tag))
+	}
+
 	fn reverse_lookup(&mut self, index: &Self::Index) -> Option<H> {
 		self.mapping.iter()
 			.find(|(_k, v)| v == &index)

@@ -57,6 +57,11 @@ pub trait Management<H> {
 	/// Mutable access is for caching only.
 	fn get_db_state(&mut self, tag: &H) -> Option<Self::S>;
 
+	/// Returns the historical read state representation for a given known index.
+	///
+	/// Mutable access is for caching only.
+	fn get_db_state_from_index(&mut self, index: &Self::Index) -> Option<Self::S>;
+
 	/// Reverse lookup fo a tag given an internal index.
 	/// This can be a slow implementation, and should not be
 	/// use for common operations.
