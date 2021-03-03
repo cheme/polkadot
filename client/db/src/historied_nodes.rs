@@ -26,6 +26,10 @@ pub(crate) mod nodes_database {
 	use sp_database::Database;
 	use sp_database::Transaction;
 
+	/// Nodes for snapshot db are stored in `STATE_SNAPSHOT`
+	/// column (as heads).
+	pub(crate) const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
+
 	#[derive(Clone)]
 	pub(crate) struct DatabasePending {
 		// this is limited to changes of nodes of a single value and should be small,
@@ -138,7 +142,7 @@ pub(crate) mod nodes_database {
 
 		/// Flush pending changes into a database transaction.
 		pub fn apply_transaction(&self, transaction: &mut Transaction<DbHash>) {
-			self.0.apply_transaction(crate::columns::AUX, transaction)
+			self.0.apply_transaction(NODES_COL, transaction)
 		}
 	}
 
@@ -154,7 +158,7 @@ pub(crate) mod nodes_database {
 
 		/// Flush pending changes into a database transaction.
 		pub fn apply_transaction(&self, transaction: &mut Transaction<DbHash>) {
-			self.0.apply_transaction(crate::columns::AUX, transaction)
+			self.0.apply_transaction(NODES_COL, transaction)
 		}
 	}
 }

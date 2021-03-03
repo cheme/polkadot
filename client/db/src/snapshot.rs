@@ -46,10 +46,9 @@ use codec::{Decode, Encode, Compact};
 use sp_database::{SnapshotDbConf, SnapshotDBMode};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
-use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
+use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes, NODES_COL};
 use crate::historied_nodes::nodes_backend::Context;
 use std::borrow::Cow;
-use nodes_backend::NODES_COL;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
@@ -782,10 +781,6 @@ mod nodes_backend {
 	/// size.
 	#[derive(Clone, Copy)]
 	pub struct MetaBlocks;
-
-	/// Nodes for snapshot db are stored in `STATE_SNAPSHOT`
-	/// column (as heads).
-	pub const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
 
 	impl NodesMeta for MetaBranches {
 		const APPLY_SIZE_LIMIT: bool = true;
