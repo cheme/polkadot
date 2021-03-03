@@ -160,9 +160,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 		transaction: &mut Transaction<DbHash>,
 	) {
 		let pending = std::mem::replace(&mut historied_management.ser().pending, Default::default());
-		let mut count = 0;
 		for (col, (mut changes, dropped)) in pending {
-			count += 1;
 			if dropped {
 				use historied_db::mapped_db::MappedDB;
 				for (key, _v) in historied_management.ser_ref().iter(col) {
@@ -181,7 +179,6 @@ impl<Block, S> TreeManagementSync<Block, S>
 				warn!("Unknown collection for tree management pending transaction {:?}", col);
 			}
 		}
-		println!("flushed {:?} pending mgmt", count);
 	}
 
 	/// Remove any pending changes.
@@ -197,14 +194,12 @@ impl<Block, S> TreeManagementSync<Block, S>
 		hash: &Block::Hash,
 	) -> ClientResult<(ForkPlan<u32, u64>, Latest<(u32, u64)>)> {
 
-	println!("registering new block : {:?}", hash);
 		// lock does notinclude update of value as we do not have concurrent block creation
 		let mut lock = self.inner.write();
 		let management = &mut lock.instance;
 
 		// We check if exists first.
 		if let Some(query_plan) = management.get_db_state(hash) {
-			println!("already got block");
 			let update_plan = management.get_db_state_mut(&hash)
 				.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
 			return Ok((query_plan, update_plan));
@@ -212,7 +207,6 @@ impl<Block, S> TreeManagementSync<Block, S>
 
 		if let Some(state) = Some(management.get_db_state_for_fork(parent_hash)
 			.unwrap_or_else(|| {
-				println!("parent not found");
 				// allow this to start from existing state TODO add a stored boolean to only allow
 				// that once in genesis or in tests
 				warn!("state not found for parent hash, appending to latest");
@@ -220,7 +214,6 @@ impl<Block, S> TreeManagementSync<Block, S>
 			}))
 		{
 			// TODO could use result as update plan (need to check if true)
-			println!("an actual append");
 			let _ = management.append_external_state(hash.clone(), &state)
 				.ok_or(ClientError::StateDatabase("correct state resolution".into()))?;
 			let query_plan = management.get_db_state(&hash)

@@ -520,16 +520,14 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			)
 		}
 
-			println!("bef management applied to tx");
 		// write management state changes (after changing values because change
 		// journal is using historied management db).
-		management.as_mut().map(|management| {
-			println!("management applied to tx");
+		management.as_mut().map(|management|
 			TreeManagementSync::<Block, _>::apply_historied_management_changes(
 				&mut management.instance,
 				transaction,
 			)
-		});
+		);
 
 		Ok(())
 	}
