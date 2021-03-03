@@ -70,12 +70,13 @@ pub(crate) mod nodes_database {
 					std::cmp::Ordering::Greater => break,
 				}
 			}
-			println!("reading out of pending");
-			self.database.get(col, key)
+			let result = self.database.get(col, key);
+			println!("reading out of pending {:?}", result);
+			result
 		}
 
 		fn insert(&self, key: Vec<u8>, value: Option<Vec<u8>>) {
-			println!("writing in node backend {:?}", key);
+			println!("writing in node backend {:?}, v {:?}", key, value);
 			let mut pending = self.pending.write();
 			let mut pos = None;
 			let mut mat = None;
