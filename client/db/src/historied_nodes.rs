@@ -51,6 +51,7 @@ pub(crate) mod nodes_database {
 		) {
 			let pending = self.clear_and_extract_changes();
 			for (key, change) in pending {
+				println!("flushing in node backend {:?}", key);
 				if let Some(value) = change {
 					transaction.set_from_vec(col, &key, value);
 				} else {
@@ -60,6 +61,7 @@ pub(crate) mod nodes_database {
 		}
 
 		pub(super) fn read(&self, col: sp_database::ColumnId, key: &[u8]) -> Option<Vec<u8>> {
+			println!("reading in node backend {:?}", key);
 			let pending = self.pending.read();
 			for kv in pending.iter() {
 				match kv.0.as_slice().cmp(key) {
@@ -68,10 +70,12 @@ pub(crate) mod nodes_database {
 					std::cmp::Ordering::Greater => break,
 				}
 			}
+			println!("reading out of pending");
 			self.database.get(col, key)
 		}
 
 		fn insert(&self, key: Vec<u8>, value: Option<Vec<u8>>) {
+			println!("writing in node backend {:?}", key);
 			let mut pending = self.pending.write();
 			let mut pos = None;
 			let mut mat = None;
@@ -91,13 +95,16 @@ pub(crate) mod nodes_database {
 
 			let item = (key, value);
 			if let Some(pos) = pos {
+				println!("insert");
 				pending.insert(pos, item);
 				return;
 			}
 			if let Some(pos) = mat {
+				println!("replacing");
 				pending[pos] = item;
 				return;
 			}
+			println!("appending");
 			pending.push(item);
 		}
 
