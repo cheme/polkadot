@@ -49,17 +49,13 @@ pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
 use crate::historied_nodes::nodes_backend::Context;
 use std::borrow::Cow;
-use snapshot_db_conf::NODES_COL;
+use nodes_backend::NODES_COL;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
 	use sp_database::{SnapshotDbConf, SnapshotDBMode};
 	use sp_blockchain::Result as ClientResult;
 	use historied_db::mapped_db::MappedDBDyn;
-
-	/// Nodes for snapshot db are stored in `STATE_SNAPSHOT`
-	/// column (as heads).
-	pub(crate) const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
 
 	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
 
@@ -776,6 +772,10 @@ fn rev_index(index: &(u32, u64)) -> (u64, u32) {
 mod nodes_backend {
 	use super::SnapshotColumnPrefixes;
 	use historied_db::backend::nodes::NodesMeta;
+
+	/// Nodes for snapshot db are stored in `STATE_SNAPSHOT`
+	/// column (as heads).
+	pub(crate) const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
 
 	/// Multiple node splitting strategy based on content
 	/// size.
