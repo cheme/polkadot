@@ -62,23 +62,22 @@ pub struct SnapshotPruningParams {
 /// Snapshot configuration.
 #[derive(Debug, Clone, StructOpt)]
 pub struct SnapshotConf {
-	#[structopt(long)]
 	/// Snapshot db is used as primary key value backend.
+	#[structopt(long)]
 	pub use_as_primary: Option<bool>,
 
-	#[structopt(long)]
 	/// Snapshot db checked against trie state for debugging.
+	#[structopt(long)]
 	pub debug_assert: Option<bool>,
 
-	#[structopt(long)]
 	/// Db pruning uses key change journals.
 	/// Can be use on archive state db to prune manually.
 	///
 	/// Default is true for non archive mode and false if archive pruning.
 	/// Note that it fails on existing configuration.
+	#[structopt(long)]
 	pub with_journals: bool,
 
-	#[structopt(long, value_name = "COUNT")]
 	/// Experimental, apply pruning lazilly on update.
 	/// This uses a window so we do only prune at pruning
 	/// keep_blocks - lazy_pruning_window for this window
@@ -86,18 +85,19 @@ pub struct SnapshotConf {
 	/// Require to change keep_blocks value accordingly.
 	/// TODO unimplemented for now, just to keep in mind
 	/// it is doable.
+	#[structopt(long, value_name = "COUNT")]
 	pub lazy_pruning_window: Option<u32>,
 
 	/// Pruning behavior to set or apply on the snapshot db.
 	#[structopt(flatten)]
 	pub snapshot_pruning_params: SnapshotPruningParams,
 
-	#[structopt(long)]
 	/// Db history is split in multiple nodes.
 	/// This allows using a single node for the whole history,
 	/// for setup with aggressive pruning.
 	///
 	/// Default is false.
+	#[structopt(long)]
 	pub no_node_backend: bool,
 
 	/// Specify DB mode.
@@ -151,25 +151,25 @@ pub struct SnapshotManageCmd {
 	///
 	/// Default is non flat.
 	#[structopt(long)]
-	pub do_prune: bool,
+	pub do_prune: bool, // TODO replace by level 2 subcommand
 
 	/// Do clear the snapshot db.
 	#[structopt(long)]
-	pub do_clear: bool,
+	pub do_clear: bool, // TODO replace by level 2 subcommand
 
 	/// Do init a fresh snapshot db at the current head
 	/// with no history with given pruning configuration params.
 	///
 	/// Existing db is cleared.
 	#[structopt(long)]
-	pub do_init: bool,
+	pub do_init: bool, // TODO replace by level 2 subcommand
 
 	/// Update configuration in parameter, some parameter do not
 	/// support update.
 	///
 	/// Only support 'use_as_primary', 'debug_assert' and 'lazy_pruning_window'.
 	#[structopt(long)]
-	pub do_update_conf: bool,
+	pub do_update_conf: bool, // TODO replace by level 2 subcommand
 
 	/// Experimental, same as do init, but also revert state at the given
 	/// block number.
