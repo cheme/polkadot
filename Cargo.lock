@@ -81,12 +81,6 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8fd72866655d1904d6b0997d0b07ba561047d070fbe29de039031c641b61217"
-
-[[package]]
-name = "ahash"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "739f4a8db6605981345c5654f3a85b056ce52f37a39d34da03f25bf2151ea16e"
@@ -1706,12 +1700,13 @@ dependencies = [
 
 [[package]]
 name = "frame-benchmarking"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "frame-support",
  "frame-system",
  "hex-literal",
  "linregress",
+ "log",
  "parity-scale-codec",
  "paste 1.0.4",
  "serde",
@@ -1792,7 +1787,6 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "smallvec 1.6.1",
- "sp-api",
  "sp-arithmetic",
  "sp-core",
  "sp-inherents",
@@ -1802,7 +1796,6 @@ dependencies = [
  "sp-state-machine",
  "sp-std 3.0.0",
  "sp-tracing",
- "substrate-test-runtime-client",
 ]
 
 [[package]]
@@ -1863,6 +1856,7 @@ dependencies = [
  "criterion",
  "frame-support",
  "impl-trait-for-tuples",
+ "log",
  "parity-scale-codec",
  "serde",
  "sp-core",
@@ -2313,21 +2307,11 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91b62f79061a0bc2e046024cb7ba44b08419ed238ecbd9adbd787434b9e8c25"
-dependencies = [
- "ahash 0.3.8",
- "autocfg 1.0.1",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7afe4a420e3fe79967a00898cc1f4db7c8a49a9333a29f8a4bd76a253d5cd04"
 dependencies = [
- "ahash 0.4.7",
+ "ahash",
 ]
 
 [[package]]
@@ -2369,14 +2353,14 @@ checksum = "b07f60793ff0a4d9cef0f18e63b5357e06209987153a64648c972c1e5aff336f"
 [[package]]
 name = "historied-db"
 version = "0.8.0"
-source = "git+https://github.com/cheme/substrate.git?branch=historied-db#351e171b55066f50e9899e78a8fde8bedd626725"
+source = "git+https://github.com/cheme/substrate.git?branch=historied-db#cd4c4706f43a83c548244b249862866b7db728c4"
 dependencies = [
  "derivative",
  "hash-db",
  "num-traits",
  "parity-scale-codec",
  "smallvec 1.6.1",
- "sp-std 2.0.1",
+ "sp-std 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xdelta3",
 ]
 
@@ -2660,7 +2644,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fb1fa934250de4de8aef298d81c729a7d33d8c239daa3a7575e6b92bfc7313b"
 dependencies = [
  "autocfg 1.0.1",
- "hashbrown 0.9.1",
+ "hashbrown",
  "serde",
 ]
 
@@ -2941,7 +2925,7 @@ dependencies = [
 [[package]]
 name = "kvdb-rocksdb"
 version = "0.11.0"
-source = "git+https://github.com/cheme/parity-common?branch=historied-db-cache#a10f5a1a3303134932fd2d7ed582b4c925ed5b10"
+source = "git+https://github.com/cheme/parity-common?branch=historied-db-cache#894a95aed215b30efa04ad04d1f5e764848b66ee"
 dependencies = [
  "fs-swap",
  "kvdb",
@@ -3532,11 +3516,11 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.6.3"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3aae342b73d57ad0b8b364bd12584819f2c1fe9114285dfcf8b0722607671635"
+checksum = "1f374d42cdfc1d7dbf3d3dec28afab2eb97ffbf43a3234d795b5986dbf4b90ba"
 dependencies = [
- "hashbrown 0.9.1",
+ "hashbrown",
 ]
 
 [[package]]
@@ -3634,7 +3618,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "814bbecfc0451fc314eeea34f05bbcd5b98a7ad7af37faee088b86a1e633f1d4"
 dependencies = [
  "hash-db",
- "hashbrown 0.9.1",
+ "hashbrown",
  "parity-util-mem",
 ]
 
@@ -4145,6 +4129,7 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
  "hex-literal",
+ "log",
  "node-primitives",
  "pallet-assets",
  "pallet-authority-discovery",
@@ -4157,7 +4142,9 @@ dependencies = [
  "pallet-contracts-primitives",
  "pallet-contracts-rpc-runtime-api",
  "pallet-democracy",
+ "pallet-election-provider-multi-phase",
  "pallet-elections-phragmen",
+ "pallet-gilt",
  "pallet-grandpa",
  "pallet-identity",
  "pallet-im-online",
@@ -4569,6 +4556,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "log",
  "pallet-authorship",
  "pallet-balances",
  "pallet-offences",
@@ -4582,6 +4570,7 @@ dependencies = [
  "sp-consensus-babe",
  "sp-consensus-vrf",
  "sp-core",
+ "sp-election-providers",
  "sp-io",
  "sp-runtime",
  "sp-session",
@@ -4597,6 +4586,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "log",
  "pallet-transaction-payment",
  "parity-scale-codec",
  "serde",
@@ -4632,6 +4622,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "hex-literal",
+ "log",
  "pallet-balances",
  "parity-scale-codec",
  "serde",
@@ -4643,13 +4634,14 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts"
-version = "2.0.1"
+version = "3.0.0"
 dependencies = [
  "assert_matches",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
  "hex-literal",
+ "log",
  "pallet-balances",
  "pallet-contracts-primitives",
  "pallet-contracts-proc-macro",
@@ -4674,7 +4666,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-primitives"
-version = "2.0.1"
+version = "3.0.0"
 dependencies = [
  "bitflags",
  "parity-scale-codec",
@@ -4684,7 +4676,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-proc-macro"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4693,7 +4685,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-rpc"
-version = "0.8.1"
+version = "3.0.0"
 dependencies = [
  "jsonrpc-core",
  "jsonrpc-core-client",
@@ -4712,7 +4704,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-rpc-runtime-api"
-version = "0.8.1"
+version = "3.0.0"
 dependencies = [
  "pallet-contracts-primitives",
  "parity-scale-codec",
@@ -4742,6 +4734,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-election-provider-multi-phase"
+version = "3.0.0"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "hex-literal",
+ "log",
+ "pallet-balances",
+ "parity-scale-codec",
+ "parking_lot 0.11.1",
+ "paste 1.0.4",
+ "rand 0.7.3",
+ "serde",
+ "sp-arithmetic",
+ "sp-core",
+ "sp-election-providers",
+ "sp-io",
+ "sp-npos-elections",
+ "sp-runtime",
+ "sp-std 3.0.0",
+ "sp-tracing",
+ "static_assertions",
+ "substrate-test-utils",
+]
+
+[[package]]
 name = "pallet-elections"
 version = "3.0.0"
 dependencies = [
@@ -4765,6 +4784,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "hex-literal",
+ "log",
  "pallet-balances",
  "parity-scale-codec",
  "serde",
@@ -4799,6 +4819,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "lite-json",
+ "log",
  "parity-scale-codec",
  "serde",
  "sp-core",
@@ -4824,6 +4845,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-gilt"
+version = "3.0.0"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "pallet-balances",
+ "parity-scale-codec",
+ "serde",
+ "sp-arithmetic",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std 3.0.0",
+]
+
+[[package]]
 name = "pallet-grandpa"
 version = "3.0.0"
 dependencies = [
@@ -4831,6 +4869,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "log",
  "pallet-authorship",
  "pallet-balances",
  "pallet-offences",
@@ -4842,6 +4881,7 @@ dependencies = [
  "serde",
  "sp-application-crypto",
  "sp-core",
+ "sp-election-providers",
  "sp-finality-grandpa",
  "sp-io",
  "sp-keyring",
@@ -4875,6 +4915,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "log",
  "pallet-authorship",
  "pallet-session",
  "parity-scale-codec",
@@ -4960,6 +5001,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "hex-literal",
+ "log",
  "parity-scale-codec",
  "serde",
  "sp-api",
@@ -5005,6 +5047,7 @@ version = "2.0.0"
 dependencies = [
  "frame-support",
  "frame-system",
+ "log",
  "parity-scale-codec",
  "serde",
  "sp-core",
@@ -5019,6 +5062,7 @@ version = "3.0.0"
 dependencies = [
  "frame-support",
  "frame-system",
+ "log",
  "pallet-balances",
  "parity-scale-codec",
  "serde",
@@ -5048,6 +5092,7 @@ dependencies = [
  "parity-scale-codec",
  "serde",
  "sp-core",
+ "sp-election-providers",
  "sp-io",
  "sp-runtime",
  "sp-staking",
@@ -5109,6 +5154,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "log",
  "parity-scale-codec",
  "serde",
  "sp-core",
@@ -5170,6 +5216,7 @@ dependencies = [
  "rand 0.7.3",
  "serde",
  "sp-core",
+ "sp-election-providers",
  "sp-io",
  "sp-runtime",
  "sp-session",
@@ -5200,6 +5247,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "hex",
+ "log",
  "pallet-authorship",
  "pallet-balances",
  "pallet-session",
@@ -5211,6 +5259,7 @@ dependencies = [
  "serde",
  "sp-application-crypto",
  "sp-core",
+ "sp-election-providers",
  "sp-io",
  "sp-npos-elections",
  "sp-runtime",
@@ -5238,6 +5287,7 @@ dependencies = [
  "parity-scale-codec",
  "serde",
  "sp-core",
+ "sp-election-providers",
  "sp-io",
  "sp-npos-elections",
  "sp-runtime",
@@ -5273,6 +5323,7 @@ dependencies = [
 name = "pallet-template"
 version = "2.0.0"
 dependencies = [
+ "frame-benchmarking",
  "frame-support",
  "frame-system",
  "parity-scale-codec",
@@ -5290,6 +5341,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "impl-trait-for-tuples",
+ "log",
  "parity-scale-codec",
  "serde",
  "sp-core",
@@ -5506,7 +5558,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "664a8c6b8e62d8f9f2f937e391982eb433ab285b4cd9545b342441e04a906e42"
 dependencies = [
  "cfg-if 1.0.0",
- "hashbrown 0.9.1",
+ "hashbrown",
  "impl-trait-for-tuples",
  "parity-util-mem-derive",
  "parking_lot 0.11.1",
@@ -6151,10 +6203,10 @@ checksum = "643f8f41a8ebc4c5dc4515c82bb8abd397b527fc20fd681b7c011c2aee5d44fb"
 [[package]]
 name = "radix-tree"
 version = "0.8.0"
-source = "git+https://github.com/cheme/substrate.git?branch=historied-db#351e171b55066f50e9899e78a8fde8bedd626725"
+source = "git+https://github.com/cheme/substrate.git?branch=historied-db#cd4c4706f43a83c548244b249862866b7db728c4"
 dependencies = [
  "derivative",
- "hashbrown 0.8.2",
+ "hashbrown",
  "parity-scale-codec",
  "parking_lot 0.10.2",
  "smallvec 1.6.1",
@@ -6552,12 +6604,12 @@ name = "remote-externalities"
 version = "0.9.0"
 dependencies = [
  "async-std",
- "bincode",
  "env_logger 0.8.2",
- "futures 0.1.30",
+ "futures 0.3.12",
  "hex-literal",
  "jsonrpc-core-client",
  "log",
+ "parity-scale-codec",
  "sc-rpc",
  "sc-rpc-api",
  "sp-core",
@@ -6807,7 +6859,6 @@ dependencies = [
  "sp-api",
  "sp-block-builder",
  "sp-blockchain",
- "sp-consensus",
  "sp-core",
  "sp-inherents",
  "sp-runtime",
@@ -7373,18 +7424,25 @@ name = "sc-finality-grandpa-warp-sync"
 version = "0.9.0"
 dependencies = [
  "derive_more",
+ "finality-grandpa",
  "futures 0.3.12",
  "log",
  "num-traits",
  "parity-scale-codec",
  "parking_lot 0.11.1",
  "prost",
+ "rand 0.8.3",
+ "sc-block-builder",
  "sc-client-api",
  "sc-finality-grandpa",
  "sc-network",
  "sc-service",
  "sp-blockchain",
+ "sp-consensus",
+ "sp-finality-grandpa",
+ "sp-keyring",
  "sp-runtime",
+ "substrate-test-runtime-client",
 ]
 
 [[package]]
@@ -8350,6 +8408,7 @@ name = "sp-api"
 version = "3.0.0"
 dependencies = [
  "hash-db",
+ "log",
  "parity-scale-codec",
  "sp-api-proc-macro",
  "sp-core",
@@ -8377,6 +8436,7 @@ name = "sp-api-test"
 version = "2.0.1"
 dependencies = [
  "criterion",
+ "log",
  "parity-scale-codec",
  "rustversion",
  "sc-block-builder",
@@ -8386,6 +8446,7 @@ dependencies = [
  "sp-core",
  "sp-runtime",
  "sp-state-machine",
+ "sp-tracing",
  "sp-version",
  "substrate-test-runtime-client",
  "trybuild",
@@ -8835,12 +8896,15 @@ dependencies = [
  "rand 0.7.3",
  "serde",
  "serde_json",
+ "sp-api",
  "sp-application-crypto",
  "sp-arithmetic",
  "sp-core",
  "sp-io",
  "sp-state-machine",
  "sp-std 3.0.0",
+ "sp-tracing",
+ "substrate-test-runtime-client",
 ]
 
 [[package]]
@@ -8983,13 +9047,13 @@ dependencies = [
 
 [[package]]
 name = "sp-std"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2585fb8f5f4fde53c2f9ccebac4517da4dc435373a8fcaf5db7f54b798da66c2"
+version = "3.0.0"
 
 [[package]]
 name = "sp-std"
 version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35391ea974fa5ee869cb094d5b437688fbf3d8127d64d1b9fed5822a1ed39b12"
 
 [[package]]
 name = "sp-storage"
@@ -9365,7 +9429,6 @@ name = "substrate-test-runtime"
 version = "2.0.0"
 dependencies = [
  "cfg-if 1.0.0",
- "frame-executive",
  "frame-support",
  "frame-system",
  "frame-system-rpc-runtime-api",
@@ -10073,7 +10136,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec051edf7f0fc9499a2cb0947652cab2148b9d7f61cee7605e312e9f970dacaf"
 dependencies = [
  "hash-db",
- "hashbrown 0.9.1",
+ "hashbrown",
  "log",
  "rustc-hex",
  "smallvec 1.6.1",
