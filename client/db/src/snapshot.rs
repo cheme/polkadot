@@ -46,15 +46,20 @@ use codec::{Decode, Encode, Compact};
 use sp_database::{SnapshotDbConf, SnapshotDBMode};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
-use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes, NODES_COL};
+use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
 use crate::historied_nodes::nodes_backend::Context;
 use std::borrow::Cow;
+use snapshot_db_conf::NODES_COL;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
 	use sp_database::{SnapshotDbConf, SnapshotDBMode};
 	use sp_blockchain::Result as ClientResult;
 	use historied_db::mapped_db::MappedDBDyn;
+
+	/// Nodes for snapshot db are stored in `STATE_SNAPSHOT`
+	/// column (as heads).
+	pub(crate) const NODES_COL: u32 = crate::columns::STATE_SNAPSHOT;
 
 	const CST: &'static[u8] = &[8u8, 0, 0, 0]; // AUX collection
 
