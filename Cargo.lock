@@ -6984,6 +6984,7 @@ dependencies = [
  "kvdb-rocksdb",
  "linked-hash-map",
  "log",
+ "lru",
  "parity-db",
  "parity-scale-codec",
  "parity-util-mem",

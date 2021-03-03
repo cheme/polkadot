@@ -35,10 +35,10 @@ use sp_runtime::traits::{
 };
 use sp_core::storage::{ChildInfo, ChildType, PrefixedStorageKey, well_known_keys};
 use std::sync::Arc;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, Mutex};
 use sp_database::Transaction;
 use crate::DbHash;
-use log::warn;
+use log::{info, warn};
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
@@ -148,6 +148,8 @@ pub struct SnapshotDb<Block: BlockT> {
 	hvalue_type: HValueType,
 	/// Db for storing nodes.
 	nodes_db: Arc<dyn Database<DbHash>>,
+	/// Cache of historied vaules.
+	cache: Option<HValueCacheSync>,
 }
 
 /// First level partition of 'STATE_SNAPSHOT' column.
@@ -345,6 +347,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 impl<Block: BlockT> SnapshotDb<Block> {
 	/// Instantiate new db.
+	/// TODO paremeterize cache with size!!
 	pub fn new(
 		mut historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
@@ -361,12 +364,14 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			.ok_or_else(|| ClientError::StateDatabase(
 				format!("Invalid snapshot config {:?}", config)
 			))?;
+		let cache = Some(Arc::new(Mutex::new(HValueCache::new())));
 		let mut snapshot_db = SnapshotDb {
 			historied_management,
 			ordered_db,
 			config,
 			hvalue_type,
 			nodes_db,
+			cache,
 		};
 
 		let storage = snapshot_db.clone();
@@ -431,6 +436,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			hvalue_type: self.hvalue_type,
 			config: self.config.clone(),
 			nodes_db: self.nodes_db.clone(),
+			cache: self.cache.clone(),
 		}))
 	}
 
@@ -482,10 +488,21 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		let mut journal_keys = journals.is_some().then(|| Vec::new());
 		// state change uses ordered db
 		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
+			let mut cache = self.cache.as_ref().map(|cache| cache.lock());
 			let historied_update = operation.storage_updates.clone();
 			let mut nb = 0;
 			for (k, change) in historied_update {
-				ordered_historied_db.update_single(None, k.as_slice(), change, transaction, journal_keys.as_mut());
+				ordered_historied_db.update_single(
+					None,
+					k.as_slice(),
+					change,
+					transaction,
+					journal_keys.as_mut(),
+					cache.as_mut().map(|c| {
+						use std::ops::DerefMut;
+						c.deref_mut()
+					}),
+				);
 				nb += 1;
 			}
 
@@ -495,11 +512,21 @@ impl<Block: BlockT> SnapshotDb<Block> {
 
 				let child_info = ChildInfo::new_default_from_vec(storage_key);
 				for (k, change) in historied_update {
-					ordered_historied_db.update_single(Some(&child_info), k.as_slice(), change, transaction, journal_keys.as_mut());
+					ordered_historied_db.update_single(
+						Some(&child_info),
+						k.as_slice(),
+						change,
+						transaction,
+						journal_keys.as_mut(),
+						cache.as_mut().map(|c| {
+							use std::ops::DerefMut;
+							c.deref_mut()
+						}),
+					);
 					nb += 1;
 				}
 			}
-			warn!("committed {:?} change in historied db", nb);
+			info!("committed {:?} change in historied db", nb);
 		}
 
 		if let (
@@ -1169,6 +1196,9 @@ pub struct HistoriedDB {
 	hvalue_type: HValueType,
 	/// Db for storing nodes.
 	nodes_db: Arc<dyn Database<DbHash>>,
+	/// Cache TODO call it in `storage_inner` and in `next_storage`
+	/// (to skip decode and update)
+	cache: Option<HValueCacheSync>,
 }
 
 impl HistoriedDB {
@@ -1308,9 +1338,10 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		change: Option<Vec<u8>>,
 		change_set: &mut Transaction<DbHash>,
 		journal_changes: Option<&mut Vec<Vec<u8>>>,
+		cache: Option<&mut HValueCache>
 	) {
 		let key = child_prefixed_key(child_info, k);
-		self.update_single_inner(key, change, change_set, crate::columns::STATE_SNAPSHOT, journal_changes);
+		self.update_single_inner(key, change, change_set, crate::columns::STATE_SNAPSHOT, journal_changes, cache);
 	}
 
 	/// write a single value in change set.
@@ -1321,8 +1352,10 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		change_set: &mut Transaction<DbHash>,
 		column: u32,
 		journal_changes: Option<&mut Vec<Vec<u8>>>,
+		cache: Option<&mut HValueCache>
 	) {
 		let k = key.as_slice();
+		// TODO plug cache here!!!
 		let histo = if let Some(histo) = self.db.get(column, k) {
 			Some(HValue::decode_with_context(k, &mut &histo[..], self.hvalue_type, &self.nodes_db)
 				.expect("Bad encoded value in db, closing"))
@@ -1453,5 +1486,21 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 				process_key(k.as_slice(), histo, &self.storage.nodes_db);
 			}
 		}
+	}
+}
+
+/// `HValueCache` send and sync wrapper.
+type HValueCacheSync = Arc<Mutex<HValueCache>>;
+
+// TODO parameterize cache size.
+const CACHE_SIZE: usize = 1000;
+
+/// Simple Lru cache for hvalue.
+/// It needs to be synch with snapshot writes.
+pub struct HValueCache(lru::LruCache<Vec<u8>, HValue>);
+
+impl HValueCache {
+	fn new() -> Self {
+		HValueCache(lru::LruCache::new(CACHE_SIZE))
 	}
 }
