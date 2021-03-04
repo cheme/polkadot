@@ -1779,6 +1779,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
 				self.storage.state_db.apply_pending();
+				self.snapshot_db.on_transaction_committed();
 
 				// call historied pruning
 				if let Some(latest_final) = last_final {
@@ -1793,6 +1794,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			},
 			e @ Err(_) => {
 				self.storage.state_db.revert_pending();
+				self.snapshot_db.on_transaction_dropped();
 				e
 			}
 		}

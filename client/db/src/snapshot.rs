@@ -560,6 +560,16 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		Ok(())
 	}
 
+	/// Transaction containing previous change got committed.
+	pub fn on_transaction_committed(&self) {
+		self.cache.as_ref().map(|cache| cache.lock().commit());
+	}
+
+	/// Transaction containing previous change got dropped.
+	pub fn on_transaction_dropped(&self) {
+		self.cache.as_ref().map(|cache| cache.lock().rollback());
+	}
+
 	/// Access underlying historied management
 	pub fn historied_management(&self) -> &TreeManagementSync<Block, TreeManagementPersistence> {
 		&self.historied_management
@@ -1209,11 +1219,20 @@ impl HistoriedDB {
 		column: u32,
 	) -> Result<Option<Vec<u8>>, String> {
 		let key = child_prefixed_key(child_info, key);
-		if let Some(v) = self.db.get(column, key.as_slice()) {
-			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type, &self.nodes_db)
-		} else {
-			Ok(None)
+		if let Some(cache) = self.cache.as_ref() {
+			match cache.lock().get_mut(key.as_slice()) {
+				Some(Some(h_value)) => return Ok(h_value.value(&self.current_state)?),
+				Some(None) => return Ok(None),
+				None => (),
+			}
 		}
+		let result = if let Some(v) = self.db.get(column, key.as_slice()) {
+			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type, &self.nodes_db, &self.cache)?
+		} else {
+			self.cache.as_ref().map(|cache| cache.lock().set_and_commit(key.as_slice(), None)); 
+			None
+		};
+		Ok(result)
 	}
 
 	fn decode_inner(
@@ -1222,10 +1241,13 @@ impl HistoriedDB {
 		current_state: &ForkPlan<u32, u64>,
 		hvalue_type: HValueType,
 		nodes_db: &Arc<dyn Database<DbHash>>,
+		cache: &Option<HValueCacheSync>,
 	) -> Result<Option<Vec<u8>>, String> {
 		let h_value = HValue::decode_with_context(key, &mut &encoded[..], hvalue_type, nodes_db)
 			.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, encoded))?;
-		Ok(h_value.value(current_state)?)
+		let result = h_value.value(current_state)?;
+		cache.as_ref().map(|cache| cache.lock().set_and_commit(key, Some(h_value))); 
+		Ok(result)
 	}
 }
 
@@ -1262,12 +1284,20 @@ impl KVBackend for HistoriedDB {
 			if key == start {
 				continue;
 			}
+			if let Some(cache) = self.cache.as_ref() {
+				match cache.lock().get_mut(key.as_slice()) {
+					Some(Some(h_value)) => return Ok(h_value.value(&self.current_state)?.map(|v| (key, v))),
+					Some(None) => unreachable!("Cache not in sync"),
+					None => (),
+				}
+			}
 			if let Some(value) = HistoriedDB::decode_inner(
 				key.as_slice(),
 				value.as_slice(),
 				&self.current_state,
 				self.hvalue_type,
 				&self.nodes_db,
+				&self.cache,
 			)? {
 				return Ok(Some((key, value)));
 			}
@@ -1352,18 +1382,25 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		change_set: &mut Transaction<DbHash>,
 		column: u32,
 		journal_changes: Option<&mut Vec<Vec<u8>>>,
-		cache: Option<&mut HValueCache>
+		mut cache: Option<&mut HValueCache>
 	) {
 		let k = key.as_slice();
-		// TODO plug cache here!!!
-		let histo = if let Some(histo) = self.db.get(column, k) {
-			Some(HValue::decode_with_context(k, &mut &histo[..], self.hvalue_type, &self.nodes_db)
-				.expect("Bad encoded value in db, closing"))
-		} else {
-			if change.is_none() {
-				return;
-			}
-			None
+		let mut do_journal = false;
+		let mut hvalue = None;
+		let histo = match cache.as_mut().map(|cache| cache.get_mut(k)).flatten() {
+			Some(cached) => cached,
+			None => {
+				if let Some(encoded) = self.db.get(column, k) {
+					hvalue = Some(HValue::decode_with_context(k, &mut &encoded[..], self.hvalue_type, &self.nodes_db)
+						.expect("Bad encoded value in db, closing"));
+					hvalue.as_mut()
+				} else {
+					if change.is_none() {
+						cache.as_mut().map(|cache| cache.set(k, None));
+					}
+					return;
+				}
+			},
 		};
 		match if let Some(mut histo) = histo {
 			let update = histo.set_first_change(change, &self.current_state, &self.current_state_read)
@@ -1371,23 +1408,33 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			(histo, update)
 		} else {
 			if let Some(v) = change {
-				let value = HValue::new(k, v, &self.current_state, self.hvalue_type, &self.nodes_db);
-				(value, UpdateResult::Changed(()))
+				hvalue = Some(HValue::new(k, v, &self.current_state, self.hvalue_type, &self.nodes_db));
+				(hvalue.as_mut().expect("Initialized above"), UpdateResult::Changed(()))
 			} else {
+				// actually unreachable.
 				return;
 			}
 		} {
 			(mut value, UpdateResult::Changed(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.set_from_vec(column, k, value.encode());
-				journal_changes.map(|keys| keys.push(key));
+				do_journal = true;
 			},
 			(mut value, UpdateResult::Cleared(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.remove(column, k);
-				journal_changes.map(|keys| keys.push(key));
+				do_journal = true;
 			},
 			(_value, UpdateResult::Unchanged) => (),
+		}
+
+		if let Some(hvalue) = hvalue {
+			// we cache the changed value only, with different use case
+			// it could make sense to also cache the unmodified one with `set_and_commit`.
+			cache.as_mut().map(|cache| cache.set(k, Some(hvalue)));
+		}
+		if do_journal {
+			journal_changes.map(|keys| keys.push(key));
 		}
 	}
 
@@ -1497,10 +1544,43 @@ const CACHE_SIZE: usize = 1000;
 
 /// Simple Lru cache for hvalue.
 /// It needs to be synch with snapshot writes.
-pub struct HValueCache(lru::LruCache<Vec<u8>, HValue>);
+pub struct HValueCache {
+	cache: lru::LruCache<Vec<u8>, Option<HValue>>,
+	// we do not query pending as current use case do not go twice over a same hvalue,
+	// but this assertion may differs with different use case and this could be change
+	// a queried map.
+	pending: Vec<(Vec<u8>, Option<HValue>)>,
+}
 
 impl HValueCache {
 	fn new() -> Self {
-		HValueCache(lru::LruCache::new(CACHE_SIZE))
+		HValueCache {
+			cache: lru::LruCache::new(CACHE_SIZE),
+			pending: Vec::new(),
+		}
+	}
+
+	fn get_no_lru_applied(&self, key: &[u8]) -> Option<Option<&HValue>> {
+		unimplemented!()
+	}
+
+	fn get_mut(&mut self, key: &[u8]) -> Option<Option<&mut HValue>> {
+		unimplemented!()
+	}
+
+	fn set(&mut self, key: &[u8], value: Option<HValue>) {
+		self.pending.push((key.to_vec(), value));
+	}
+
+	fn set_and_commit(&mut self, key: &[u8], value: Option<HValue>) {
+		unimplemented!()
+	}
+
+	fn commit(&mut self) {
+		unimplemented!()
+	}
+
+	fn rollback(&mut self) {
+		self.pending.clear();
 	}
 }
