@@ -35,7 +35,7 @@ use sp_runtime::traits::{
 };
 use sp_core::storage::{ChildInfo, ChildType, PrefixedStorageKey, well_known_keys};
 use std::sync::Arc;
-use parking_lot::{RwLock, Mutex};
+use parking_lot::RwLock;
 use sp_database::Transaction;
 use crate::DbHash;
 use log::{debug, info, warn};
@@ -371,7 +371,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 				format!("Invalid snapshot config {:?}", config)
 			))?;
 		let cache = (config.cache_size != 0 && config.enabled)
-			.then(|| Arc::new(Mutex::new(HValueCache::new(config.cache_size))));
+			.then(|| Arc::new(RwLock::new(HValueCache::new(config.cache_size))));
 		let mut snapshot_db = SnapshotDb {
 			historied_management,
 			ordered_db,
@@ -495,7 +495,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		let mut journal_keys = journals.is_some().then(|| Vec::new());
 		// state change uses ordered db
 		if let Some(ordered_historied_db) = ordered_historied_db.as_mut() {
-			let mut cache = self.cache.as_ref().map(|cache| cache.lock());
+			let mut cache = self.cache.as_ref().map(|cache| cache.write());
 			let historied_update = operation.storage_updates.clone();
 			let mut nb = 0;
 			for (k, change) in historied_update {
@@ -569,12 +569,12 @@ impl<Block: BlockT> SnapshotDb<Block> {
 
 	/// Transaction containing previous change got committed.
 	pub fn on_transaction_committed(&self) {
-		self.cache.as_ref().map(|cache| cache.lock().commit());
+		self.cache.as_ref().map(|cache| cache.write().commit());
 	}
 
 	/// Transaction containing previous change got dropped.
 	pub fn on_transaction_dropped(&self) {
-		self.cache.as_ref().map(|cache| cache.lock().rollback());
+		self.cache.as_ref().map(|cache| cache.write().rollback());
 	}
 
 	/// Access underlying historied management
@@ -1227,7 +1227,7 @@ impl HistoriedDB {
 	) -> Result<Option<Vec<u8>>, String> {
 		let key = child_prefixed_key(child_info, key);
 		if let Some(cache) = self.cache.as_ref() {
-			match cache.lock().get_mut(&key) {
+			match cache.write().get_mut(&key) {
 				Some(Some(h_value)) => return Ok(h_value.value(&self.current_state)?),
 				Some(None) => return Ok(None),
 				None => (),
@@ -1236,7 +1236,7 @@ impl HistoriedDB {
 		let result = if let Some(v) = self.db.get(column, key.as_slice()) {
 			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type, &self.nodes_db, &self.cache)?
 		} else {
-			self.cache.as_ref().map(|cache| cache.lock().set_and_commit(key.as_slice(), None)); 
+			self.cache.as_ref().map(|cache| cache.write().set_and_commit(key.as_slice(), None)); 
 			None
 		};
 		Ok(result)
@@ -1253,7 +1253,7 @@ impl HistoriedDB {
 		let h_value = HValue::decode_with_context(key, &mut &encoded[..], hvalue_type, nodes_db)
 			.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, encoded))?;
 		let result = h_value.value(current_state)?;
-		cache.as_ref().map(|cache| cache.lock().set_and_commit(key, Some(h_value))); 
+		cache.as_ref().map(|cache| cache.write().set_and_commit(key, Some(h_value))); 
 		Ok(result)
 	}
 }
@@ -1292,7 +1292,7 @@ impl KVBackend for HistoriedDB {
 				continue;
 			}
 			if let Some(cache) = self.cache.as_ref() {
-				match cache.lock().get_mut(&key) {
+				match cache.write().get_mut(&key) {
 					Some(Some(h_value)) => return Ok(h_value.value(&self.current_state)?.map(|v| (key, v))),
 					Some(None) => unreachable!("Cache not in sync"),
 					None => (),
@@ -1544,7 +1544,11 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 }
 
 /// `HValueCache` send and sync wrapper.
-type HValueCacheSync = Arc<Mutex<HValueCache>>;
+type HValueCacheSync = Arc<RwLock<HValueCache>>;
+
+// only to check perf on import (slower with cache
+// so checking if former use of mutex could be culprit).
+unsafe impl Sync for HValueCache {}
 
 /// Simple Lru cache for hvalue.
 /// It needs to be synch with snapshot writes.
