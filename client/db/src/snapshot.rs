@@ -1549,7 +1549,7 @@ type HValueCacheSync = Arc<Mutex<HValueCache>>;
 /// Simple Lru cache for hvalue.
 /// It needs to be synch with snapshot writes.
 pub struct HValueCache {
-	cache: lru::LruCache<Vec<u8>, Option<HValue>>,
+	cache: std::collections::HashMap<Vec<u8>, Option<HValue>>,
 	// we do not query pending as current use case do not go twice over a same hvalue,
 	// but this assertion may differs with different use case and this could be change
 	// a queried map.
@@ -1559,7 +1559,7 @@ pub struct HValueCache {
 impl HValueCache {
 	fn new(size: u32) -> Self {
 		HValueCache {
-			cache: lru::LruCache::new(size as usize),
+			cache: Default::default(),
 			pending: Vec::new(),
 		}
 	}
@@ -1573,12 +1573,12 @@ impl HValueCache {
 	}
 
 	fn set_and_commit(&mut self, key: &[u8], value: Option<HValue>) {
-		self.cache.put(key.to_vec(), value);
+		self.cache.insert(key.to_vec(), value);
 	}
 
 	fn commit(&mut self) {
 		for (key, value) in self.pending.drain(..) {
-			self.cache.put(key, value);
+			self.cache.insert(key, value);
 		}
 	}
 
