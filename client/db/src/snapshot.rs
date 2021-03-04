@@ -1569,8 +1569,7 @@ impl HValueCache {
 	}
 
 	fn set(&mut self, key: &[u8], value: Option<HValue>) {
-		self.cache.put(key.to_vec(), value);
-		//self.pending.push((key.to_vec(), value));
+		self.pending.push((key.to_vec(), value));
 	}
 
 	fn set_and_commit(&mut self, key: &[u8], value: Option<HValue>) {
@@ -1578,12 +1577,12 @@ impl HValueCache {
 	}
 
 	fn commit(&mut self) {
-		/*for (key, value) in self.pending.drain(..) {
+		for (key, value) in self.pending.drain(..) {
 			self.cache.put(key, value);
-		}*/
+		}
 	}
 
 	fn rollback(&mut self) {
-		//self.pending.clear();
+		self.pending.clear();
 	}
 }
