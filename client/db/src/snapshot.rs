@@ -189,6 +189,23 @@ fn child_prefixed_key_inner_default(prefix: &[u8], key: &[u8]) -> Vec<u8> {
 }
 
 impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
+	type StateIter = core::iter::Empty<(
+		Option<Vec<u8>>,
+		Self::ChildStateIter,
+	)>; // TODO an actual iterator
+
+	// TODO an actual iterator
+	type ChildStateIter = core::iter::Empty<(Vec<u8>, Vec<u8>)>;
+
+	// TODO an actual iterator
+	type StateIterDiff = core::iter::Empty<(
+		Option<Vec<u8>>,
+		Self::ChildStateIterDiff,
+	)>;
+
+	// TODO an actual iterator
+	type ChildStateIterDiff = core::iter::Empty<(Vec<u8>, Option<Vec<u8>>)>;
+	
 	fn clear_snapshot_db(&self) -> sp_database::error::Result<()> {
 		let mut management = self.historied_management.inner.write();
 		// get non transactional mappeddb.

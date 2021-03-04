@@ -545,7 +545,6 @@ pub struct SnapshotDbConf {
 	pub debug_assert: bool,
 	/// Lower block support, this should block reorg before it.
 	/// It contains encoded start block number.
-	/// TODO set reorg assertion
 	pub start_block: Option<Vec<u8>>,
 	/// Diff usage.
 	pub diff_mode: SnapshotDBMode,
@@ -561,6 +560,25 @@ pub struct SnapshotDbConf {
 /// Implement exposed acces method to the snapshot db.
 /// TODO not in the right crate!!
 pub trait SnapshotDb<B: Block> {
+	/// Full key value state iteraotr at a given state.
+	type StateIter: Iterator<Item = (
+		Option<Vec<u8>>,
+		Self::ChildStateIter,
+	)>;
+
+	/// Child state specific iteration on full key value.
+	type ChildStateIter: Iterator<Item=(Vec<u8>, Vec<u8>)>;
+
+	/// Diff key value state iteraotr at a given state,
+	/// from a given parent state.
+	type StateIterDiff: Iterator<Item = (
+		Option<Vec<u8>>,
+		Self::ChildStateIterDiff,
+	)>;
+
+	/// Child state specific iteration on diff key value.
+	type ChildStateIterDiff: Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>;
+
 	/// Disable snapshot db and remove its content.
 	fn clear_snapshot_db(&self) -> error::Result<()>;
 
@@ -592,6 +610,43 @@ pub trait SnapshotDb<B: Block> {
 		db_mode: SnapshotDBMode,
 		default_flat: impl StateVisitor,
 	) -> error::Result<()>;
+
+	/// Iterate on all values at a given block.
+	fn state_iter_at(&self, at: &B::Hash) -> Self::StateIter {
+		unimplemented!("TODO");
+	}
+	
+	/// Iterate on all values that differs from parent block at a given block.
+	fn state_iter_diff_at(&self, at: &B::Hash, parent: &B::Hash) -> Self::StateIterDiff {
+		unimplemented!("TODO");
+	}
+
+	/// Read import snapshot config. snapshot
+	fn read_import_def(&self, from: &mut impl std::io::Read, config: &SnapshotDbConf) -> error::Result<SnapshotImportDef> {
+		unimplemented!("TODO ret struct with db type from associated trait");
+	}
+
+	/// Import snapshot db content.
+	fn import_snapshot_db(
+		&self,
+		from: &mut impl std::io::Read,
+		config: &SnapshotDbConf,
+		def: &SnapshotImportDef,
+	) -> error::Result<SnapshotImportDef> {
+		unimplemented!("TODO");
+	}
+}
+
+/// Initial definition for a snapshot import.
+pub struct SnapshotImportDef {
+	is_flat: bool,
+}
+
+impl SnapshotImportDef {
+	/// Is it a single block flat import.
+	pub fn is_flat(&self) -> bool {
+		self.is_flat
+	}
 }
 
 /// Visitor trait use to initiate a snapshot db.
@@ -634,6 +689,20 @@ fn unsupported_error() -> error::Result<()> {
 
 /// Use '()' when no snapshot implementation.
 impl<B: Block> SnapshotDb<B> for () {
+	type StateIter = core::iter::Empty<(
+		Option<Vec<u8>>,
+		Self::ChildStateIter,
+	)>;
+
+	type ChildStateIter = core::iter::Empty<(Vec<u8>, Vec<u8>)>;
+
+	type StateIterDiff = core::iter::Empty<(
+		Option<Vec<u8>>,
+		Self::ChildStateIterDiff,
+	)>;
+
+	type ChildStateIterDiff = core::iter::Empty<(Vec<u8>, Option<Vec<u8>>)>;
+	
 	fn clear_snapshot_db(&self) -> error::Result<()> {
 		unsupported_error()
 	}

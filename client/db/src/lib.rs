@@ -765,8 +765,6 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 	fn import_sync_meta(
 		&self,
 		_encoded: &mut dyn std::io::Read,
-		_from: NumberFor<Block>,
-		_to: NumberFor<Block>,
 	) -> sp_blockchain::Result<()> {
 		unimplemented!();
 	}

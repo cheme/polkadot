@@ -517,8 +517,6 @@ pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
-		from: NumberFor<Block>,
-		to: NumberFor<Block>,
 	) -> sp_blockchain::Result<()> {
 		unimplemented!();
 	}
@@ -539,8 +537,6 @@ impl<Block: BlockT> SnapshotSync<Block> for () {
 	fn import_sync_meta(
 		&self,
 		_encoded: &mut dyn std::io::Read,
-		_from: NumberFor<Block>,
-		_to: NumberFor<Block>,
 	) -> sp_blockchain::Result<()> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}
