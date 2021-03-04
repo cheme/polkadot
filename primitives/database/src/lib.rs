@@ -537,6 +537,8 @@ pub struct SnapshotDbConf {
 	/// Should we use this db value instead of trie value in state machine
 	/// when possible.
 	pub primary_source: bool,
+	/// Snapshot lru cache and size.
+	pub cache_size: u32,
 	/// Do we use node backend.
 	pub no_node_backend: bool,
 	/// Do we maintain key modification journaling for pruning?
@@ -571,6 +573,7 @@ pub trait SnapshotDb<B: Block> {
 		debug_assert: Option<bool>,
 		pruning_window: Option<Option<u32>>,
 		lazy_pruning_window: Option<u32>,
+		cache_size: Option<u32>,
 	) -> error::Result<()>;
 
 	/// Reset db at a given block.
@@ -644,6 +647,7 @@ impl<B: Block> SnapshotDb<B> for () {
 		_debug_assert: Option<bool>,
 		_pruning_window: Option<Option<u32>>,
 		_lazy_pruning_window: Option<u32>,
+		_cache_size: Option<u32>,
 	) -> error::Result<()> {
 		unsupported_error()
 	}

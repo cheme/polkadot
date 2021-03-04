@@ -38,7 +38,7 @@ use std::sync::Arc;
 use parking_lot::{RwLock, Mutex};
 use sp_database::Transaction;
 use crate::DbHash;
-use log::{info, warn};
+use log::{debug, info, warn};
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
@@ -212,6 +212,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		debug_assert: Option<bool>,
 		pruning_window: Option<Option<u32>>,
 		lazy_pruning_window: Option<u32>,
+		cache_size: Option<u32>,
 	) -> sp_database::error::Result<()> {
 		let mut management = self.historied_management.inner.write();
 		let db = &mut management.instance.ser().db;
@@ -232,6 +233,9 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 			}
 			if let Some(window) = lazy_pruning_window {
 				genesis_conf.lazy_pruning = Some(window);
+			}
+			if let Some(cache_size) = cache_size {
+				genesis_conf.cache_size = cache_size;
 			}
 			Ok(())
 		}).map_err(|e| DatabaseError(Box::new(e)))
@@ -347,7 +351,6 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 impl<Block: BlockT> SnapshotDb<Block> {
 	/// Instantiate new db.
-	/// TODO paremeterize cache with size!!
 	pub fn new(
 		mut historied_management: TreeManagementSync<Block, TreeManagementPersistence>,
 		ordered_db: Arc<dyn OrderedDatabase<DbHash>>,
@@ -358,13 +361,17 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			let db = &management.instance.ser_ref().db;
 			snapshot_db_conf::fetch_config(db)?
 		};
+		if config.enabled {
+			info!("Runing snapshot db with {:?}", config);
+		}
 		historied_management.pruning_window = config.pruning.clone()
 			.flatten().map(|nb| nb.into());
 		let hvalue_type = HValueType::resolve(&config)
 			.ok_or_else(|| ClientError::StateDatabase(
 				format!("Invalid snapshot config {:?}", config)
 			))?;
-		let cache = Some(Arc::new(Mutex::new(HValueCache::new())));
+		let cache = (config.cache_size != 0 && config.enabled)
+			.then(|| Arc::new(Mutex::new(HValueCache::new(config.cache_size))));
 		let mut snapshot_db = SnapshotDb {
 			historied_management,
 			ordered_db,
@@ -526,7 +533,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 					nb += 1;
 				}
 			}
-			info!("committed {:?} change in historied db", nb);
+			debug!("committed {:?} change in historied db", nb);
 		}
 
 		if let (
@@ -1539,9 +1546,6 @@ impl<B> historied_db::management::ManagementConsumer<B::Hash, TreeManagement<B::
 /// `HValueCache` send and sync wrapper.
 type HValueCacheSync = Arc<Mutex<HValueCache>>;
 
-// TODO parameterize cache size.
-const CACHE_SIZE: usize = 1000;
-
 /// Simple Lru cache for hvalue.
 /// It needs to be synch with snapshot writes.
 pub struct HValueCache {
@@ -1553,9 +1557,9 @@ pub struct HValueCache {
 }
 
 impl HValueCache {
-	fn new() -> Self {
+	fn new(size: u32) -> Self {
 		HValueCache {
-			cache: lru::LruCache::new(CACHE_SIZE),
+			cache: lru::LruCache::new(size as usize),
 			pending: Vec::new(),
 		}
 	}

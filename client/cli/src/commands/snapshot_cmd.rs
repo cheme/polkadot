@@ -33,6 +33,8 @@ use structopt::StructOpt;
 use structopt::clap::arg_enum;
 use sp_runtime::codec::Encode;
 
+const DEFAULT_CACHE_SIZE: u32 = 1000;
+
 arg_enum! {
 	/// Mode for the snapshot
 	/// storage.
@@ -62,13 +64,19 @@ pub struct SnapshotPruningParams {
 /// Snapshot configuration.
 #[derive(Debug, Clone, StructOpt)]
 pub struct SnapshotConf {
-	#[structopt(long)]
 	/// Snapshot db is used as primary key value backend.
+	#[structopt(long)]
 	pub use_as_primary: Option<bool>,
 
-	#[structopt(long)]
 	/// Snapshot db checked against trie state for debugging.
+	#[structopt(long)]
 	pub debug_assert: Option<bool>,
+
+	/// Snapshot lru cache and size.
+	///
+	/// Defaults to a 1000 elements cache.
+	#[structopt(long)]
+	pub snapshot_cache: Option<u32>,
 
 	#[structopt(long)]
 	/// Db pruning uses key change journals.
@@ -139,6 +147,7 @@ impl Into<sc_client_api::SnapshotDbConf> for SnapshotConf {
 				SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
 				SnapshotMode::Xdelta3 => sc_client_api::SnapshotDBMode::Xdelta3Diff,
 			},
+			cache_size: self.snapshot_cache.unwrap_or(DEFAULT_CACHE_SIZE),
 		}
 	}
 }
@@ -148,8 +157,6 @@ impl Into<sc_client_api::SnapshotDbConf> for SnapshotConf {
 pub struct SnapshotManageCmd {
 	/// Apply pruning on the snapshot.
 	/// Can be use on archive state db to prune manually.
-	///
-	/// Default is non flat.
 	#[structopt(long)]
 	pub do_prune: bool,
 
@@ -397,6 +404,7 @@ impl SnapshotManageCmd {
 			self.snapshot_conf.debug_assert,
 			pruning_conf(&self.snapshot_conf.snapshot_pruning_params),
 			self.snapshot_conf.lazy_pruning_window,
+			self.snapshot_conf.snapshot_cache,
 		)?;
 		Ok(())
 	}
