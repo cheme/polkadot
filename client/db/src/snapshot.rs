@@ -443,7 +443,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			hvalue_type: self.hvalue_type,
 			config: self.config.clone(),
 			nodes_db: self.nodes_db.clone(),
-			cache: self.cache.clone(),
+			cache: None,
 		}))
 	}
 
