@@ -1220,7 +1220,7 @@ impl HistoriedDB {
 	) -> Result<Option<Vec<u8>>, String> {
 		let key = child_prefixed_key(child_info, key);
 		if let Some(cache) = self.cache.as_ref() {
-			match cache.lock().get_mut(key.as_slice()) {
+			match cache.lock().get_mut(&key) {
 				Some(Some(h_value)) => return Ok(h_value.value(&self.current_state)?),
 				Some(None) => return Ok(None),
 				None => (),
@@ -1285,7 +1285,7 @@ impl KVBackend for HistoriedDB {
 				continue;
 			}
 			if let Some(cache) = self.cache.as_ref() {
-				match cache.lock().get_mut(key.as_slice()) {
+				match cache.lock().get_mut(&key) {
 					Some(Some(h_value)) => return Ok(h_value.value(&self.current_state)?.map(|v| (key, v))),
 					Some(None) => unreachable!("Cache not in sync"),
 					None => (),
@@ -1387,7 +1387,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		let k = key.as_slice();
 		let mut do_journal = false;
 		let mut hvalue = None;
-		let histo = match cache.as_mut().map(|cache| cache.get_mut(k)).flatten() {
+		let histo = match cache.as_mut().map(|cache| cache.get_mut(&key)).flatten() {
 			Some(cached) => cached,
 			None => {
 				if let Some(encoded) = self.db.get(column, k) {
@@ -1560,12 +1560,8 @@ impl HValueCache {
 		}
 	}
 
-	fn get_no_lru_applied(&self, key: &[u8]) -> Option<Option<&HValue>> {
-		unimplemented!()
-	}
-
-	fn get_mut(&mut self, key: &[u8]) -> Option<Option<&mut HValue>> {
-		unimplemented!()
+	fn get_mut(&mut self, key: &Vec<u8>) -> Option<Option<&mut HValue>> {
+		self.cache.get_mut(key).map(|res| res.as_mut())
 	}
 
 	fn set(&mut self, key: &[u8], value: Option<HValue>) {
@@ -1573,11 +1569,13 @@ impl HValueCache {
 	}
 
 	fn set_and_commit(&mut self, key: &[u8], value: Option<HValue>) {
-		unimplemented!()
+		self.cache.put(key.to_vec(), value);
 	}
 
 	fn commit(&mut self) {
-		unimplemented!()
+		for (key, value) in self.pending.drain(..) {
+			self.cache.put(key, value);
+		}
 	}
 
 	fn rollback(&mut self) {
