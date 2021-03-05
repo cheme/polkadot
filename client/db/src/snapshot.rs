@@ -43,7 +43,7 @@ use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
 use codec::{Decode, Encode, Compact};
-use sp_database::{SnapshotDbConf, SnapshotDBMode, SnapshotImportDef};
+use sp_database::{SnapshotDbConf, SnapshotDBMode, SnapshotImportDef, StateIter};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
@@ -189,23 +189,6 @@ fn child_prefixed_key_inner_default(prefix: &[u8], key: &[u8]) -> Vec<u8> {
 }
 
 impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
-	type StateIter = core::iter::Empty<(
-		Option<Vec<u8>>,
-		Self::ChildStateIter,
-	)>; // TODO an actual iterator
-
-	// TODO an actual iterator
-	type ChildStateIter = core::iter::Empty<(Vec<u8>, Vec<u8>)>;
-
-	// TODO an actual iterator
-	type StateIterDiff = core::iter::Empty<(
-		Option<Vec<u8>>,
-		Self::ChildStateIterDiff,
-	)>;
-
-	// TODO an actual iterator
-	type ChildStateIterDiff = core::iter::Empty<(Vec<u8>, Option<Vec<u8>>)>;
-	
 	fn clear_snapshot_db(&self) -> sp_database::error::Result<()> {
 		let mut management = self.historied_management.inner.write();
 		// get non transactional mappeddb.
@@ -365,7 +348,10 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		unimplemented!("TODO next");
 	}
 
-	fn state_iter_at(&self, at: &Block::Hash) -> sp_database::error::Result<Self::StateIter> {
+	fn state_iter_at<'a>(
+		&'a self,
+		at: &Block::Hash,
+	) -> sp_database::error::Result<StateIter<'a>> {
 		let historied_db = self.get_historied_db(Some(at))
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 

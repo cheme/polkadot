@@ -559,28 +559,30 @@ pub struct SnapshotDbConf {
 	pub lazy_set: bool,
 }
 
+/// Full key value state iterator at a given state.
+pub type StateIter<'a> = Box<
+	dyn Iterator<Item = (Option<Vec<u8>>, ChildStateIter<'a>)> + 'a,
+>;
+
+/// Full key value state iterator at a given state,
+/// from a given parent state.
+pub type ChildStateIter<'a> = Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
+
+/// Delta key value state iterator at a given state.
+pub type StateIterDelta<'a> = Box<
+	dyn Iterator<Item = (Option<Vec<u8>>, ChildStateIterDelta<'a>)> + 'a,
+>;
+
+/// Delta key value state iterator at a given state,
+/// from a given parent state.
+pub type ChildStateIterDelta<'a> = Box<
+	dyn Iterator<Item = (Vec<u8>, Option<Vec<u8>>)> + 'a,
+>;
+
+
 /// Implement exposed acces method to the snapshot db.
 /// TODO not in the right crate!!
 pub trait SnapshotDb<B: Block> {
-	/// Full key value state iteraotr at a given state.
-	type StateIter: Iterator<Item = (
-		Option<Vec<u8>>,
-		Self::ChildStateIter,
-	)>;
-
-	/// Child state specific iteration on full key value.
-	type ChildStateIter: Iterator<Item=(Vec<u8>, Vec<u8>)>;
-
-	/// Diff key value state iteraotr at a given state,
-	/// from a given parent state.
-	type StateIterDiff: Iterator<Item = (
-		Option<Vec<u8>>,
-		Self::ChildStateIterDiff,
-	)>;
-
-	/// Child state specific iteration on diff key value.
-	type ChildStateIterDiff: Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>;
-
 	/// Disable snapshot db and remove its content.
 	fn clear_snapshot_db(&self) -> error::Result<()>;
 
@@ -621,15 +623,23 @@ pub trait SnapshotDb<B: Block> {
 	/// memory into the state machine transaction, but doesn't
 	/// sound like a reason to put more in memory).
 	/// So we do not use `reset_storage` but similar code at client level.
-	fn state_iter_at(&self, at: &B::Hash) -> error::Result<Self::StateIter>;
+	fn state_iter_at<'a>(&'a self, at: &B::Hash) -> error::Result<StateIter<'a>>;
 
 	/// Iterate on all values that differs from parent block at a given block.
-	fn state_iter_diff_at(&self, at: &B::Hash, parent: &B::Hash) -> Self::StateIterDiff {
+	fn state_iter_diff_at<'a>(
+		&'a self,
+		at: &B::Hash,
+		parent: &B::Hash,
+	) -> error::Result<StateIterDelta<'a>> {
 		unimplemented!("TODO");
 	}
 
 	/// Read import snapshot config. snapshot
-	fn read_import_def(&self, from: &mut impl std::io::Read, config: &SnapshotDbConf) -> error::Result<SnapshotImportDef>;
+	fn read_import_def(
+		&self,
+		from: &mut impl std::io::Read,
+		config: &SnapshotDbConf,
+	) -> error::Result<SnapshotImportDef>;
 
 	/// Import snapshot db content.
 	fn import_snapshot_db(
@@ -692,20 +702,6 @@ fn unsupported_error<R>() -> error::Result<R> {
 
 /// Use '()' when no snapshot implementation.
 impl<B: Block> SnapshotDb<B> for () {
-	type StateIter = core::iter::Empty<(
-		Option<Vec<u8>>,
-		Self::ChildStateIter,
-	)>;
-
-	type ChildStateIter = core::iter::Empty<(Vec<u8>, Vec<u8>)>;
-
-	type StateIterDiff = core::iter::Empty<(
-		Option<Vec<u8>>,
-		Self::ChildStateIterDiff,
-	)>;
-
-	type ChildStateIterDiff = core::iter::Empty<(Vec<u8>, Option<Vec<u8>>)>;
-	
 	fn clear_snapshot_db(&self) -> error::Result<()> {
 		unsupported_error()
 	}
@@ -743,7 +739,10 @@ impl<B: Block> SnapshotDb<B> for () {
 		unsupported_error()
 	}
 
-	fn state_iter_at(&self, _at: &B::Hash) -> error::Result<Self::StateIter> {
+	fn state_iter_at<'a>(
+		&'a self,
+		_at: &B::Hash,
+	) -> error::Result<StateIter<'a>> {
 		unsupported_error()
 	}
 
