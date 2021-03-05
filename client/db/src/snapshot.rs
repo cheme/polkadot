@@ -1548,6 +1548,10 @@ type HValueCacheSync = Arc<Mutex<HValueCache>>;
 
 /// Simple Lru cache for hvalue.
 /// It needs to be synch with snapshot writes.
+/// TODO at this point historied db does too many clone operation
+/// on its backend and using cache makes bigger node history in 
+/// hvalue leading to worse performance: changes should be done
+/// upstream (rc refcell backend and pure mut access api probably).
 pub struct HValueCache {
 	cache: lru::LruCache<Vec<u8>, Option<HValue>>,
 	// we do not query pending as current use case do not go twice over a same hvalue,

@@ -33,7 +33,10 @@ use structopt::StructOpt;
 use structopt::clap::arg_enum;
 use sp_runtime::codec::Encode;
 
-const DEFAULT_CACHE_SIZE: u32 = 1000;
+// TODO current cache does worsen perf,
+// when fix restore a non null default value
+// const DEFAULT_CACHE_SIZE: u32 = 1000;
+const DEFAULT_CACHE_SIZE: u32 = 0;
 
 arg_enum! {
 	/// Mode for the snapshot
