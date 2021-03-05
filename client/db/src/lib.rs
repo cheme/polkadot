@@ -1550,7 +1550,6 @@ impl<Block: BlockT> Backend<Block> {
 		};
 
 		self.storage.db.commit(transaction)?;
-		println!("tx commited");
 
 		// Apply all in-memory state shanges.
 		// Code beyond this point can't fail.
@@ -1778,9 +1777,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		match self.try_commit_operation(operation) {
 			Ok(_) => {
 				self.storage.state_db.apply_pending();
-				println!("apply state");
 				self.snapshot_db.on_transaction_committed();
-				println!("apply snap");
 
 				// call historied pruning
 				if let Some(latest_final) = last_final {
@@ -1794,7 +1791,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				Ok(())
 			},
 			e @ Err(_) => {
-				println!("revert!!!");
 				self.storage.state_db.revert_pending();
 				self.snapshot_db.on_transaction_dropped();
 				e
