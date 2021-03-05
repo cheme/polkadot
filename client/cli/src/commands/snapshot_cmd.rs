@@ -491,7 +491,6 @@ impl<'a, B, BA> StateDest<'a, B, BA>
 }
 
 
-
 impl SnapshotImportCmd {
 	/// Run the import-snapshot command
 	pub async fn run<B, BA>(
@@ -549,7 +548,7 @@ impl SnapshotImportCmd {
 			};
 
 			let trie_state = StateDest(&backend, PhantomData);
-			trie_state.inject_full_state(&finalized_hash, db.state_iter_at(&finalized_hash))?;
+			trie_state.inject_full_state(&finalized_hash, db.state_iter_at(&finalized_hash)?)?;
 
 			if !dest_config.enabled {
 				// clear snapshot db

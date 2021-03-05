@@ -615,19 +615,21 @@ pub trait SnapshotDb<B: Block> {
 	) -> error::Result<()>;
 
 	/// Iterate on all values at a given block.
-	fn state_iter_at(&self, at: &B::Hash) -> Self::StateIter {
-		unimplemented!("TODO");
-	}
-	
+	/// Note that we could also use `BuildStorage` trait
+	/// but don't as it would put the whole storage in memory.
+	/// (actually when importing we put the whole storage in
+	/// memory into the state machine transaction, but doesn't
+	/// sound like a reason to put more in memory).
+	/// So we do not use `reset_storage` but similar code at client level.
+	fn state_iter_at(&self, at: &B::Hash) -> error::Result<Self::StateIter>;
+
 	/// Iterate on all values that differs from parent block at a given block.
 	fn state_iter_diff_at(&self, at: &B::Hash, parent: &B::Hash) -> Self::StateIterDiff {
 		unimplemented!("TODO");
 	}
 
 	/// Read import snapshot config. snapshot
-	fn read_import_def(&self, from: &mut impl std::io::Read, config: &SnapshotDbConf) -> error::Result<SnapshotImportDef> {
-		unimplemented!("TODO ret struct with db type from associated trait");
-	}
+	fn read_import_def(&self, from: &mut impl std::io::Read, config: &SnapshotDbConf) -> error::Result<SnapshotImportDef>;
 
 	/// Import snapshot db content.
 	fn import_snapshot_db(
@@ -635,9 +637,7 @@ pub trait SnapshotDb<B: Block> {
 		from: &mut impl std::io::Read,
 		config: &SnapshotDbConf,
 		def: &SnapshotImportDef,
-	) -> error::Result<SnapshotImportDef> {
-		unimplemented!("TODO");
-	}
+	) -> error::Result<SnapshotImportDef>;
 }
 
 /// Initial definition for a snapshot import.
@@ -686,7 +686,7 @@ impl std::error::Error for SnapshotDbError {
 	}
 }
 
-fn unsupported_error() -> error::Result<()> {
+fn unsupported_error<R>() -> error::Result<R> {
 	Err(error::DatabaseError(Box::new(SnapshotDbError::Unsupported)))
 }
 
@@ -743,4 +743,24 @@ impl<B: Block> SnapshotDb<B> for () {
 		unsupported_error()
 	}
 
+	fn state_iter_at(&self, _at: &B::Hash) -> error::Result<Self::StateIter> {
+		unsupported_error()
+	}
+
+	fn read_import_def(
+		&self,
+		_from: &mut impl std::io::Read,
+		_config: &SnapshotDbConf,
+	) -> error::Result<SnapshotImportDef> {
+		unsupported_error()
+	}
+
+	fn import_snapshot_db(
+		&self,
+		_from: &mut impl std::io::Read,
+		_config: &SnapshotDbConf,
+		_def: &SnapshotImportDef,
+	) -> error::Result<SnapshotImportDef> {
+		unsupported_error()
+	}
 }

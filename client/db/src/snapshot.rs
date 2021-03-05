@@ -43,7 +43,7 @@ use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
 use codec::{Decode, Encode, Compact};
-use sp_database::{SnapshotDbConf, SnapshotDBMode};
+use sp_database::{SnapshotDbConf, SnapshotDBMode, SnapshotImportDef};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
@@ -362,6 +362,30 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 			}
 		}
 
+		unimplemented!("TODO next");
+	}
+
+	fn state_iter_at(&self, at: &Block::Hash) -> sp_database::error::Result<Self::StateIter> {
+		let historied_db = self.get_historied_db(Some(at))
+			.map_err(|e| DatabaseError(Box::new(e)))?;
+
+			unimplemented!("TODO");
+	}
+
+	fn read_import_def(
+		&self,
+		_from: &mut impl std::io::Read,
+		_config: &SnapshotDbConf,
+	) -> sp_database::error::Result<SnapshotImportDef> {
+		unimplemented!("TODO next");
+	}
+
+	fn import_snapshot_db(
+		&self,
+		_from: &mut impl std::io::Read,
+		_config: &SnapshotDbConf,
+		_def: &SnapshotImportDef,
+	) -> sp_database::error::Result<SnapshotImportDef> {
 		unimplemented!("TODO next");
 	}
 }
@@ -1272,6 +1296,33 @@ impl HistoriedDB {
 		let result = h_value.value(current_state)?;
 		cache.as_ref().map(|cache| cache.lock().set_and_commit(key, Some(h_value))); 
 		Ok(result)
+	}
+
+	fn iter_kv_state(self) -> HistoriedDbBKVIter {
+		HistoriedDbBKVIter {
+		}
+	}
+}
+
+struct HistoriedDbBKVIter {
+}
+
+impl Iterator for HistoriedDbBKVIter {
+	type Item = (Option<Vec<u8>>, HistoriedDbBKVStateIter);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		unimplemented!("TODO");
+	}
+}
+
+struct HistoriedDbBKVStateIter {
+}
+
+impl Iterator for HistoriedDbBKVStateIter {
+	type Item = (Vec<u8>, Vec<u8>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		unimplemented!("TODO");
 	}
 }
 
