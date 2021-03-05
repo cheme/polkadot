@@ -1536,6 +1536,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 			},
 			(mut value, UpdateResult::Cleared(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
+				println!("A remove for {:?}", k);
 				change_set.remove(column, k);
 				do_journal = true;
 			},
