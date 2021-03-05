@@ -43,7 +43,7 @@ use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
 use codec::{Decode, Encode, Compact};
-use sp_database::{SnapshotDbConf, SnapshotDBMode, SnapshotImportDef, StateIter};
+use sp_database::{SnapshotDbConf, SnapshotDBMode, SnapshotImportDef, StateIter, ChildStateIter};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
@@ -157,8 +157,8 @@ pub struct SnapshotDb<Block: BlockT> {
 enum SnapshotColumnPrefixes {
 	/// Historied value from top trie.
 	Top = 0,
-	/// Historied value from children trie.
-	Children = 1,
+	/// Historied value from default children trie.
+	ChildrenDefault = 1,
 	/// Block nodes backend.
 	BlockNodes = 3,
 	/// Branch nodes backend.
@@ -182,7 +182,7 @@ fn child_prefixed_key_inner_top(key: &[u8]) -> Vec<u8> {
 
 fn child_prefixed_key_inner_default(prefix: &[u8], key: &[u8]) -> Vec<u8> {
 	let mut prefixed_key = Vec::with_capacity(1 + prefix.size_hint() + key.len());
-	prefixed_key.push(SnapshotColumnPrefixes::Children as u8);
+	prefixed_key.push(SnapshotColumnPrefixes::ChildrenDefault as u8);
 	prefix.encode_to(&mut prefixed_key);
 	prefixed_key.extend_from_slice(key);
 	prefixed_key
@@ -352,10 +352,17 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		&'a self,
 		at: &Block::Hash,
 	) -> sp_database::error::Result<StateIter<'a>> {
+
 		let historied_db = self.get_historied_db(Some(at))
 			.map_err(|e| DatabaseError(Box::new(e)))?;
+		let iter = HistoriedDbBKVIter {
+			inner: self,
+			next_child: None,
+			last_child_root_key: None,
+			historied_db,
+		};
 
-			unimplemented!("TODO");
+		Ok(Box::new(iter))
 	}
 
 	fn read_import_def(
@@ -1283,32 +1290,74 @@ impl HistoriedDB {
 		cache.as_ref().map(|cache| cache.lock().set_and_commit(key, Some(h_value))); 
 		Ok(result)
 	}
+}
 
-	fn iter_kv_state(self) -> HistoriedDbBKVIter {
-		HistoriedDbBKVIter {
+struct HistoriedDbBKVIter<'a, B: BlockT> {
+	// we could only build on historied_db,
+	// but due to lifetime awkwardness we
+	// creat iter directly from snapshotdb
+	// and don't reuse the on from historied_db.
+	inner: &'a SnapshotDb<B>,
+	historied_db: Option<HistoriedDB>,
+	next_child: Option<ChildInfo>,
+	last_child_root_key: Option<PrefixedStorageKey>,
+}
+
+impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
+	type Item = (Option<Vec<u8>>, ChildStateIter<'a>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let historied_db = match self.historied_db.as_ref() {
+			Some(historied_db) => historied_db,
+			None => return None,
+		};
+		let child_info = self.next_child.take();
+		let prefix = child_prefixed_key(child_info.as_ref(), &[]);
+		let hvalue_type = historied_db.hvalue_type;
+		let nodes_db = self.inner.nodes_db.clone();
+		let current_state = historied_db.current_state.clone();
+		let iter = self.inner.ordered_db.iter_from(NODES_COL, prefix.as_slice())
+			.take_while(move |(k, v)| k.starts_with(prefix.as_slice()))
+			.filter_map(move |(k, v)| {
+			let v = HValue::decode_with_context(
+				&k[..],
+				&mut &v[..],
+				hvalue_type,
+				&nodes_db,
+			).or_else(|| {
+					warn!("decoding fail for k {:?}, v {:?}", k, v);
+					None
+				})
+				.expect("Invalid encoded historied value, DB corrupted");
+			let v = v.value(&current_state)
+				.expect("Invalid encoded historied value, DB corrupted");
+			v.map(|v| (k, v))
+		});
+
+		let (previous, iter_child_key) = self.last_child_root_key.take()
+			.map(|prev| (prev.clone().into_inner(), Some(prev.into_inner())))
+			.unwrap_or_else(|| (Vec::new(), None));
+
+		if let Ok(Some((key, _root))) = historied_db.next_storage(None, &previous) {
+			if key.starts_with(well_known_keys::CHILD_STORAGE_KEY_PREFIX) {
+				let prefixed_key = PrefixedStorageKey::new(key);
+				match ChildType::from_prefixed_key(&prefixed_key) {
+					Some((ChildType::ParentKeyId, storage_key)) => {
+						self.next_child = Some(ChildInfo::new_default(storage_key));
+						self.last_child_root_key = Some(prefixed_key);
+					},
+					None => unreachable!("Only known child under prefix"),
+				}
+			} else {
+				// indicates end.
+				self.historied_db = None;
+			}
+		} else {
+			// Note that we ignore error.
+			self.historied_db = None;
 		}
-	}
-}
 
-struct HistoriedDbBKVIter {
-}
-
-impl Iterator for HistoriedDbBKVIter {
-	type Item = (Option<Vec<u8>>, HistoriedDbBKVStateIter);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		unimplemented!("TODO");
-	}
-}
-
-struct HistoriedDbBKVStateIter {
-}
-
-impl Iterator for HistoriedDbBKVStateIter {
-	type Item = (Vec<u8>, Vec<u8>);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		unimplemented!("TODO");
+		Some((iter_child_key, Box::new(iter)))
 	}
 }
 
@@ -1384,7 +1433,11 @@ impl HistoriedDB {
 	}
 
 	/// Iterator on key values, starting at a given position.
-	pub fn iter_from<'a>(&'a self, start: &[u8], column: u32) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
+	pub fn iter_from<'a>(
+		&'a self,
+		start: &[u8],
+		column: u32,
+	) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a {
 		self.db.iter_from(column, start).filter_map(move |(k, v)| {
 			let v = HValue::decode_with_context(&k[..], &mut &v[..], self.hvalue_type, &self.nodes_db)
 				.or_else(|| {
@@ -1602,6 +1655,8 @@ type HValueCacheSync = Arc<Mutex<HValueCache>>;
 
 /// Simple Lru cache for hvalue.
 /// It needs to be synch with snapshot writes.
+///
+/// Note that the key are child info prefixed.
 /// TODO at this point historied db does too many clone operation
 /// on its backend and using cache makes bigger node history in 
 /// hvalue leading to worse performance: changes should be done
