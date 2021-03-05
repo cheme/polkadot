@@ -560,6 +560,7 @@ impl SnapshotImportCmd {
 					Some(dest_config.debug_assert),
 					dest_config.pruning,
 					dest_config.lazy_pruning,
+					Some(dest_config.cache_size),
 				)?;
 				if dest_config.pruning.is_some() {
 					// run pruning now
