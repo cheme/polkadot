@@ -517,7 +517,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 	type TrieBackendStorage = S::TrieBackendStorage;
 
 	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-		let local_cache = self.cache.local_cache.upgradable_read();
+	/*	let local_cache = self.cache.local_cache.upgradable_read();
 		// Note that local cache makes that lru is not refreshed
 		if let Some(entry) = local_cache.storage.get(key).cloned() {
 			trace!("Found in local cache: {:?}", HexDisplay::from(&key));
@@ -533,9 +533,9 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 				return Ok(entry)
 			}
 		}
-		trace!("Cache miss: {:?}", HexDisplay::from(&key));
+		trace!("Cache miss: {:?}", HexDisplay::from(&key));*/
 		let value = self.state.storage(key)?;
-		RwLockUpgradableReadGuard::upgrade(local_cache).storage.insert(key.to_vec(), value.clone());
+		//RwLockUpgradableReadGuard::upgrade(local_cache).storage.insert(key.to_vec(), value.clone());
 		self.usage.tally_key_read(key, value.as_ref(), false);
 		Ok(value)
 	}
@@ -565,7 +565,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		key: &[u8],
 	) -> Result<Option<Vec<u8>>, Self::Error> {
 		let key = (child_info.storage_key().to_vec(), key.to_vec());
-		let local_cache = self.cache.local_cache.upgradable_read();
+/*		let local_cache = self.cache.local_cache.upgradable_read();
 		if let Some(entry) = local_cache.child_storage.get(&key).cloned() {
 			trace!("Found in local cache: {:?}", key);
 			return Ok(
@@ -580,14 +580,14 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 					self.usage.tally_child_key_read(&key, entry, true)
 				)
 			}
-		}
+		}*/
 		trace!("Cache miss: {:?}", key);
 		let value = self.state.child_storage(child_info, &key.1[..])?;
 
 		// just pass it through the usage counter
 		let value =	self.usage.tally_child_key_read(&key, value, false);
 
-		RwLockUpgradableReadGuard::upgrade(local_cache).child_storage.insert(key, value.clone());
+		//RwLockUpgradableReadGuard::upgrade(local_cache).child_storage.insert(key, value.clone());
 		Ok(value)
 	}
 
