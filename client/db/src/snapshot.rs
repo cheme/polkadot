@@ -1608,10 +1608,12 @@ type HValueCacheSync = Arc<Mutex<HValueCache>>;
 /// upstream (rc refcell backend and pure mut access api probably).
 pub struct HValueCache {
 	cache: lru::LruCache<Vec<u8>, Option<HValue>>,
-	// we do not query pending as current use case do not go twice over a same hvalue,
-	// but this assertion may differs with different use case and this could be change
-	// a queried map.
-	pending: Vec<(Vec<u8>, Option<HValue>)>,
+	// We store all touched value, currently we just invalidate cache on
+	// revert, but reverting change would be a bit better (would need to store
+	// previous value if on same state which never happen in current use case,
+	// but changed node would need to be set to modified again: since their
+	// content was actually not commited).
+	pending: Vec<Vec<u8>>,
 }
 
 impl HValueCache {
@@ -1627,7 +1629,8 @@ impl HValueCache {
 	}
 
 	fn set(&mut self, key: &[u8], value: Option<HValue>) {
-		self.pending.push((key.to_vec(), value));
+		self.cache.put(key.to_vec(), value);
+		self.pending.push(key.to_vec());
 	}
 
 	fn set_and_commit(&mut self, key: &[u8], value: Option<HValue>) {
@@ -1635,12 +1638,11 @@ impl HValueCache {
 	}
 
 	fn commit(&mut self) {
-		for (key, value) in self.pending.drain(..) {
-			self.cache.put(key, value);
-		}
 	}
 
 	fn rollback(&mut self) {
-		self.pending.clear();
+		for key in self.pending.drain(..) {
+			let _ = self.cache.pop(&key);
+		}
 	}
 }
