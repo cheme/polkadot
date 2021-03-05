@@ -1791,7 +1791,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				Ok(())
 			},
 			e @ Err(_) => {
-				println!("REVERT TX");
 				self.storage.state_db.revert_pending();
 				self.snapshot_db.on_transaction_dropped();
 				e
