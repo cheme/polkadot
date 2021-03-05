@@ -1484,7 +1484,6 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		journal_changes: Option<&mut Vec<Vec<u8>>>,
 		cache: Option<&mut HValueCache>
 	) {
-		println!("update single: {:?} {:?}", k, change.is_some());
 		let key = child_prefixed_key(child_info, k);
 		self.update_single_inner(key, change, change_set, crate::columns::STATE_SNAPSHOT, journal_changes, cache);
 	}
@@ -1512,8 +1511,10 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 				} else {
 					if change.is_none() {
 						cache.as_mut().map(|cache| cache.set(k, None));
+						// no delete non existing
+						return;
 					}
-					return;
+					None
 				}
 			},
 		};
