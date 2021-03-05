@@ -264,6 +264,8 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 			&best_block,
 			&self.ordered_db,
 		).map_err(|e| DatabaseError(Box::new(e)))?;
+
+		println!("mut plans {:?} {:?}", query_plan, update_plan);
 		let hvalue_type = HValueType::resolve(&config).ok_or_else(|| {
 			let e = ClientError::StateDatabase(format!("Invalid snapshot config {:?}", config));
 			DatabaseError(Box::new(e))
