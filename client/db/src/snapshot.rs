@@ -434,6 +434,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			return Ok(None);
 		}
 		let (query_plan, update_plan) = self.historied_management.register_new_block(&parent, &at)?;
+		println!("mut plans {:?} {:?}", query_plan, update_plan);
 		Ok(Some(HistoriedDBMut {
 			current_state: update_plan,
 			current_state_read: query_plan,
