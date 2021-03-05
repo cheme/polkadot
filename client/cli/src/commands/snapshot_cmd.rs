@@ -26,6 +26,7 @@ use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use sp_runtime::generic::BlockId;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -263,9 +264,13 @@ pub struct SnapshotExportCmd {
 /// TODO shared param with manage cmd
 #[derive(Debug, StructOpt)]
 pub struct SnapshotImportCmd {
+	/// Input file or stdin if unspecified.
+	#[structopt(parse(from_os_str))]
+	pub input: Option<PathBuf>,
+
 	#[structopt(long, value_name = "COUNT")]
 	/// Limit the number of trie states that get build
-	/// from thiss snapshot, starting from  latest state.
+	/// from this snapshot, starting from  latest state.
 	pub limit_state_building: Option<u32>,
 
 	/// Experimental, this do revert state to snapshot latest block
@@ -450,11 +455,48 @@ impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
 	}
 }
 
+struct StateDest<'a, B: BlockT, BA>(&'a Arc<BA>, PhantomData<B>);
+
+impl<'a, B, BA> StateDest<'a, B, BA>
+	where
+		B: BlockT,
+		BA: sc_client_api::backend::Backend<B>,
+{
+	fn inject_full_state(
+		&self,
+		at: &B::Hash,
+		data: impl Iterator<Item = (
+			Option<Vec<u8>>,
+			impl Iterator<Item=(Vec<u8>, Vec<u8>)>,
+		)>,
+	) -> std::result::Result<(), DatabaseError> {
+		// TODO state machine full_storage_root on empty backend
+		unimplemented!();
+		Ok(())
+	}
+
+	fn inject_diff_state(
+		&self,
+		at: &B::Hash,
+		parent: &B::Hash,
+		data: impl Iterator<Item = (
+			Option<Vec<u8>>,
+			impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
+		)>,
+	) -> std::result::Result<(), DatabaseError> {
+		// TODO state machine full_storage_root on non empty backend
+		unimplemented!();
+		Ok(())
+	}
+}
+
+
+
 impl SnapshotImportCmd {
 	/// Run the import-snapshot command
 	pub async fn run<B, BA>(
 		&self,
-		_backend: Arc<BA>,
+		backend: Arc<BA>,
 		database_config: DatabaseConfig,
 	) -> error::Result<()>
 	where
@@ -468,7 +510,66 @@ impl SnapshotImportCmd {
 			info!("DB path: {}", path.display());
 		}
 
-		unimplemented!()
+		// TODO no real need for dyn here.
+		let mut file: Box<dyn crate::commands::import_blocks_cmd::ReadPlusSeek + Send> = match &self.input {
+			Some(filename) => Box::new(std::fs::File::open(filename)?),
+			None => {
+				use std::io::Read;
+				let mut buffer = Vec::new();
+				// TODO use an actual read
+				std::io::stdin().read_to_end(&mut buffer)?;
+				Box::new(std::io::Cursor::new(buffer))
+			}
+		};
+
+		let db = backend.snapshot_db().expect(UNSUPPORTED);
+		let dest_config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
+		let mut config = dest_config.clone();
+		// import default values will be reverted
+		config.enabled = true;
+		config.pruning = None;
+		config.lazy_pruning = None;
+		config.primary_source = false; // not really useful
+		config.debug_assert = false; // not really useful
+
+		let reader = &mut file;
+		let snapshot_def = db.read_import_def(reader, &config)?;
+
+		backend.snapshot_sync().import_sync_meta(reader)?;
+
+		// init a snapshot db
+		db.import_snapshot_db(reader, &config, &snapshot_def)?;
+	
+		if snapshot_def.is_flat() {
+			let (finalized_hash, finalized_number) = if let Some(start_block) = dest_config.start_block.as_ref() {
+				unimplemented!("TODO fetch");
+			} else {
+				let chain_info = backend.blockchain().info();
+				(chain_info.finalized_hash, chain_info.finalized_number)
+			};
+
+			let trie_state = StateDest(&backend, PhantomData);
+			trie_state.inject_full_state(&finalized_hash, db.state_iter_at(&finalized_hash))?;
+
+			if !dest_config.enabled {
+				// clear snapshot db
+				db.clear_snapshot_db()?;
+			} else {
+				db.update_running_conf(
+					Some(dest_config.primary_source),
+					Some(dest_config.debug_assert),
+					dest_config.pruning,
+					dest_config.lazy_pruning,
+				)?;
+				if dest_config.pruning.is_some() {
+					// run pruning now
+					unimplemented!();
+				}
+			}
+		} else {
+			unimplemented!();
+		}
+		Ok(())
 	}
 }
 
