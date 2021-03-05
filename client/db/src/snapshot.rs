@@ -1265,7 +1265,6 @@ impl HistoriedDB {
 	) -> Result<Option<Vec<u8>>, String> {
 		let key = child_prefixed_key(child_info, key);
 		if let Some(cache) = self.cache.as_ref() {
-			println!("using cache");
 			match cache.lock().get_mut(&key) {
 				Some(Some(h_value)) => return Ok(h_value.value(&self.current_state)?),
 				Some(None) => return Ok(None),
@@ -1275,7 +1274,6 @@ impl HistoriedDB {
 		let result = if let Some(v) = self.db.get(column, key.as_slice()) {
 			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type, &self.nodes_db, &self.cache)?
 		} else {
-			println!("missing k: {:?}", key.as_slice());
 			self.cache.as_ref().map(|cache| cache.lock().set_and_commit(key.as_slice(), None)); 
 			None
 		};
@@ -1537,13 +1535,11 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 		} {
 			(mut value, UpdateResult::Changed(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
-				println!("add k: {:?}", k);
 				change_set.set_from_vec(column, k, value.encode());
 				do_journal = true;
 			},
 			(mut value, UpdateResult::Cleared(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
-				println!("rem k: {:?}", k);
 				change_set.remove(column, k);
 				do_journal = true;
 			},
