@@ -471,6 +471,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 				).ok_or_else(|| ClientError::StateDatabase("Historied management error".into()))?
 		};
 
+		println!("current state: {:?}", current_state);
 		Ok(Some(HistoriedDB {
 			current_state,
 			db: self.ordered_db.clone(),
