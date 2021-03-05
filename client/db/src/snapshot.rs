@@ -382,6 +382,17 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		unimplemented!("TODO next");
 	}
 }
+struct Dummy;
+
+impl historied_db::mapped_db::MappedDB for Dummy {
+	fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) { }
+	fn remove(&mut self, c: &'static [u8], k: &[u8]) { }
+	fn read(&self, c: &'static [u8], k: &[u8]) -> Option<Vec<u8>> { None }
+	fn clear(&mut self, c: &'static [u8]) { }
+	fn iter<'a>(&'a self, c: &'static [u8]) -> historied_db::mapped_db::MappedDBIter<'a> { unimplemented!() }
+
+	fn contains_collection(&self, collection: &'static [u8]) -> bool { false }
+}
 
 impl<Block: BlockT> SnapshotDb<Block> {
 	/// Instantiate new db.
@@ -604,6 +615,25 @@ impl<Block: BlockT> SnapshotDb<Block> {
 	/// Transaction containing previous change got committed.
 	pub fn on_transaction_committed(&self) {
 		self.cache.as_ref().map(|cache| cache.lock().commit());
+		let db: historied_db::mapped_db::MappedDBDyn = Box::new(Dummy);
+		let historied_persistence_dummy = historied_db::mapped_db::TransactionalMappedDB {
+			db,
+			pending: Default::default(),
+		};
+		let db = {
+			let mut management = self.historied_management.inner.write();
+			std::mem::replace(management.instance.ser(), historied_persistence_dummy)
+		};
+		let historied_persistence = historied_db::mapped_db::TransactionalMappedDB {
+			db: db.db,
+			pending: Default::default(),
+		};
+		let historied_management: TreeManagementSync<Block, TreeManagementPersistence> = TreeManagementSync::from_persistence(historied_persistence);
+		let new_db = if let Ok(v) = Arc::try_unwrap(historied_management.inner) {
+			v.into_inner()
+		} else { unreachable!("uniqu arc"); };
+	
+		*self.historied_management.inner.write() = new_db;
 	}
 
 	/// Transaction containing previous change got dropped.
