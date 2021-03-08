@@ -22,7 +22,7 @@ use sp_std::collections::btree_map::BTreeMap;
 use sp_std::cell::RefCell;
 use sp_std::vec::Vec;
 use sp_std::borrow::Cow;
-use super::LinearStorage;
+use super::{LinearStorage, LinearStorageMem};
 use crate::historied::HistoriedValue;
 use derivative::Derivative;
 use crate::{Context, ContextBuilder, InitFrom, DecodeWithContext, Trigger};
@@ -990,17 +990,30 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	}
 }
 
-/*impl<V, S, D, M, B, NI> LinearStorageMem<V, S> for Head<V, S, D, M, B, NI>
+impl<V, S, D, M, B, NI> LinearStorageMem<V, S> for Head<V, S, D, M, B, NI>
 	where
-		D: Context<Context = NI> + LinearStorage<V, S>,
+		D: Context<Context = NI> + LinearStorageMem<V, S>,
 		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
 		S: EstimateSize,
 		V: EstimateSize + Trigger,
 		NI: ContextBuilder,
 {
+	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S> {
+		if index.0 == self.end_node_index {
+			return self.inner.data.get_ref(index.1)
+		}
+		self.fetched.borrow()[index.0 as usize].data.get_ref(index.1)
+	}
+
+	fn get_ref_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut V, S> {
+		if index.0 == self.end_node_index {
+			return self.inner.data.get_ref_mut(index.1)
+		}
+		self.fetched.borrow_mut()[index.0 as usize].data.get_ref_mut(index.1)
+	}
 }
-*/
+
 impl EstimateSize for Vec<u8> {
 	fn estimate_size(&self) -> usize {
 		self.len()
