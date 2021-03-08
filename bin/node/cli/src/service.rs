@@ -79,7 +79,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 	let (grandpa_block_import, grandpa_link) = grandpa::block_import(
 		client.clone(), &(client.clone() as Arc<_>), select_chain.clone(),
 	)?;
-	backend.register_sync(grandpa::sync_backend(grandpa_link.shared_authority_set().clone()));
+	backend.register_sync(grandpa::sync_backend(grandpa_link.shared_authority_set().clone(), client.clone()));
 	let justification_import = grandpa_block_import.clone();
 
 	let (block_import, babe_link) = sc_consensus_babe::block_import(
@@ -119,7 +119,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 
 		let babe_config = babe_link.config().clone();
 		let shared_epoch_changes = babe_link.epoch_changes().clone();
-		backend.register_sync(sc_consensus_babe::sync_backend(shared_epoch_changes.clone()));
+		backend.register_sync(sc_consensus_babe::sync_backend(shared_epoch_changes.clone(), client.clone()));
 
 		let client = client.clone();
 		let pool = transaction_pool.clone();

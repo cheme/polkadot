@@ -279,6 +279,39 @@ pub trait AuxStore {
 	fn get_aux(&self, key: &[u8]) -> sp_blockchain::Result<Option<Vec<u8>>>;
 }
 
+impl<Aux: AuxStore> AuxStore for &Aux {
+	fn insert_aux<
+		'a,
+		'b: 'a,
+		'c: 'a,
+		I: IntoIterator<Item=&'a(&'c [u8], &'c [u8])>,
+		D: IntoIterator<Item=&'a &'b [u8]>,
+	>(&self, insert: I, delete: D) -> sp_blockchain::Result<()> {
+		(**self).insert_aux(insert, delete)
+	}
+
+	fn get_aux(&self, key: &[u8]) -> sp_blockchain::Result<Option<Vec<u8>>> {
+		(**self).get_aux(key)
+	}
+}
+
+impl<Aux: AuxStore> AuxStore for std::sync::Arc<Aux> {
+	fn insert_aux<
+		'a,
+		'b: 'a,
+		'c: 'a,
+		I: IntoIterator<Item=&'a(&'c [u8], &'c [u8])>,
+		D: IntoIterator<Item=&'a &'b [u8]>,
+	>(&self, insert: I, delete: D) -> sp_blockchain::Result<()> {
+		(**self).insert_aux(insert, delete)
+	}
+
+	fn get_aux(&self, key: &[u8]) -> sp_blockchain::Result<Option<Vec<u8>>> {
+		(**self).get_aux(key)
+	}
+}
+
+
 /// An `Iterator` that iterates keys in a given block under a prefix.
 pub struct KeyIterator<'a, State, Block> {
 	state: State,
@@ -526,9 +559,7 @@ pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
-	) -> sp_blockchain::Result<()> {
-		unimplemented!();
-	}
+	) -> sp_blockchain::Result<()>;
 }
 
 impl<Block: BlockT> SnapshotSync<Block> for () {

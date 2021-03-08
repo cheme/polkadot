@@ -66,7 +66,7 @@ use sc_client_api::{
 	LockImportRun, BlockchainEvents, CallExecutor,
 	ExecutionStrategy, Finalizer, TransactionFor, ExecutorProvider,
 };
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::{Decode, Encode, IoReader};
 use prometheus_endpoint::{PrometheusError, Registry};
 use sp_api::ProvideRuntimeApi;
 use sp_blockchain::{HeaderBackend, Error as ClientError, HeaderMetadata};
@@ -1106,16 +1106,17 @@ fn local_authority_id(
 	}
 }
 
-struct SyncBackend<Block: BlockT>(SharedAuthoritySet<Block::Hash, NumberFor<Block>>);
+struct SyncBackend<Block: BlockT, Aux>(SharedAuthoritySet<Block::Hash, NumberFor<Block>>, Aux);
 
 /// Strategy for snapshot syncing babe.
-pub fn sync_backend<Block: BlockT>(
+pub fn sync_backend<Block: BlockT, Aux: AuxStore + Send + Sync + 'static>(
 	authority_set: SharedAuthoritySet<Block::Hash, NumberFor<Block>>,
+	aux: Aux,
 ) -> Box<dyn SnapshotSync<Block>> {
-	Box::new(SyncBackend(authority_set))
+	Box::new(SyncBackend(authority_set, aux))
 }
 
-impl<Block: BlockT> SnapshotSync<Block> for SyncBackend<Block> {
+impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> for SyncBackend<Block, Aux> {
 	fn export_sync_meta(
 		&self,
 		mut out: &mut dyn std::io::Write,
@@ -1132,4 +1133,35 @@ impl<Block: BlockT> SnapshotSync<Block> for SyncBackend<Block> {
 		
 		Ok(())
 	}
+
+	fn import_sync_meta(
+		&self,
+		encoded: &mut dyn std::io::Read,
+	) -> sp_blockchain::Result<()> {
+		let mut buf = [0];
+		// version
+		encoded.read_exact(&mut buf[..1]).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+		match buf[0] {
+			b if b == 0 => (),
+			_ => return Err(sp_blockchain::Error::Backend("Invalid snapshot version.".into())),
+		}
+		let mut reader = IoReader(encoded);
+		*self.0.inner().write() = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+
+		// persist set.
+		crate::aux_schema::update_authority_set::<Block, _, _>(
+			&*self.0.inner().write(),
+			None,
+			|values| (
+				self.1.insert_aux(values, &[]).unwrap()
+			)
+		);
+
+		Ok(())
+	}
+	
 }

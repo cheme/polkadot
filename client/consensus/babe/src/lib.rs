@@ -119,7 +119,7 @@ use sp_blockchain::{
 	HeaderBackend, ProvideCache, HeaderMetadata
 };
 use schnorrkel::SignatureError;
-use codec::{Encode, Decode};
+use codec::{Encode, Decode, IoReader};
 use sp_api::ApiExt;
 use sp_consensus_slots::Slot;
 
@@ -1565,16 +1565,17 @@ pub mod test_helpers {
 	}
 }
 
-struct SyncBackend<Block: BlockT>(SharedEpochChanges<Block, Epoch>);
+struct SyncBackend<Block: BlockT, Aux>(SharedEpochChanges<Block, Epoch>, Aux);
 
 /// Strategy for snapshot syncing babe.
-pub fn sync_backend<Block: BlockT>(
+pub fn sync_backend<Block: BlockT, Aux: AuxStore + Send + Sync + 'static>(
 	epoch_changes: SharedEpochChanges<Block, Epoch>,
+	aux: Aux,
 ) -> Box<dyn SnapshotSync<Block>> {
-	Box::new(SyncBackend(epoch_changes))
+	Box::new(SyncBackend(epoch_changes, aux))
 }
 
-impl<Block: BlockT> SnapshotSync<Block> for SyncBackend<Block> {
+impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> for SyncBackend<Block, Aux> {
 	fn export_sync_meta(
 		&self,
 		mut out: &mut dyn std::io::Write,
@@ -1589,6 +1590,35 @@ impl<Block: BlockT> SnapshotSync<Block> for SyncBackend<Block> {
 		// writing whole set (could limit to range in the future).
 		self.0.lock().encode_to(&mut out);
 		
+		Ok(())
+	}
+
+	fn import_sync_meta(
+		&self,
+		encoded: &mut dyn std::io::Read,
+	) -> sp_blockchain::Result<()> {
+		let mut buf = [0];
+		// version
+		encoded.read_exact(&mut buf[..1]).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+		match buf[0] {
+			b if b == 0 => (),
+			_ => return Err(sp_blockchain::Error::Backend("Invalid snapshot version.".into())),
+		}
+		let mut reader = IoReader(encoded);
+		*self.0.lock() = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+
+		// persist set (maybe also need weight here).
+		crate::aux_schema::write_epoch_changes::<Block, _, _>(
+			&*self.0.lock(),
+			|values| (
+				self.1.insert_aux(values, &[]).unwrap()
+			)
+		);
+
 		Ok(())
 	}
 }

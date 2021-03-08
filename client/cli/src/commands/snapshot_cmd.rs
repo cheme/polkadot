@@ -33,6 +33,7 @@ use std::sync::Arc;
 use structopt::StructOpt;
 use structopt::clap::arg_enum;
 use sp_runtime::codec::Encode;
+use std::io::Write;
 
 // TODO current cache does worsen perf,
 // when fix restore a non null default value
@@ -455,6 +456,12 @@ impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
 	}
 }
 
+#[repr(u8)]
+enum StateOnly {
+	Yes = 0,
+	No = 1,
+}
+
 impl SnapshotImportCmd {
 	/// Run the import-snapshot command
 	pub async fn run<B, BA>(
@@ -496,11 +503,17 @@ impl SnapshotImportCmd {
 		config.debug_assert = false; // not really useful
 
 		let reader = &mut file;
+		let mut buf = [0];
+		reader.read_exact(&mut buf[..1])?;
+		match buf[0] {
+			b if b == StateOnly::No as u8 => backend.snapshot_sync().import_sync_meta(reader)?,
+			b if b == StateOnly::Yes as u8 => (),
+			_ => panic!("Invalid first byte for snapshot"),
+		}
+
+		// TODO read_import def seems rather useless, and all logic afterwards should be move to
+		// snapshot.rs
 		let snapshot_def = db.read_import_def(reader, &config)?;
-
-		backend.snapshot_sync().import_sync_meta(reader)?;
-
-
 		if snapshot_def.is_flat {
 			let (finalized_hash, finalized_number) = if let Some(start_block) = dest_config.start_block.as_ref() {
 				unimplemented!("TODO fetch");
@@ -607,7 +620,10 @@ impl SnapshotExportCmd {
 
 		if let Some(path) = &self.output {
 			let mut out = std::fs::File::create(path)?;
-			if !self.state_only {
+			if self.state_only {
+				out.write(&[StateOnly::Yes as u8])?;
+			} else{
+				out.write(&[StateOnly::No as u8])?;
 				let to = to.unwrap_or(finalized_number);
 				let from = from.unwrap_or(to);
 				backend.snapshot_sync().export_sync_meta(&mut out, from, to)?;
@@ -623,7 +639,10 @@ impl SnapshotExportCmd {
 			)?;
 		} else {
 			let mut out = std::io::stdout();
-			if !self.state_only {
+			if self.state_only {
+				out.write(&[StateOnly::Yes as u8])?;
+			} else{
+				out.write(&[StateOnly::No as u8])?;
 				let to = to.unwrap_or(finalized_number);
 				let from = from.unwrap_or(to);
 				backend.snapshot_sync().export_sync_meta(&mut out, from, to)?;

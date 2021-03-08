@@ -103,7 +103,7 @@ use sp_blockchain::{
 	Result as ClientResult, Error as ClientError,
 	well_known_cache_keys, HeaderBackend,
 };
-use codec::{Decode, Encode, Compact};
+use codec::{Decode, Encode, Compact, IoReader};
 use hash_db::Prefix;
 use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
 use sp_database::{Transaction, SnapshotDbConf};
@@ -730,19 +730,19 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		let out = &mut out_dyn;
 		// version
 		out.write(&[0u8]).map_err(|e|
-			sp_blockchain::Error::Backend(format!("Snapshot export errror: {:?}", e)),
+			sp_blockchain::Error::Backend(format!("Snapshot export error: {:?}", e)),
 		)?;
 		// info to init 'Meta' (need to allow read_meta and all pointing to to)
-		let to_hash = self.hash(to)?;
+		//let to_hash = self.hash(to)?;
 		to.encode_to(out);
-		to_hash.encode_to(out);
+		//to_hash.encode_to(out);
 		// get range
 		let nb = to - from;
 		nb.encode_to(out);
 		// headers (TODO consider removing digest??)
 		// need to feed LeafSet::read_from_db (just insert in order)
 		// and headers/blockids mapping (same)
-		let mut i = to;
+		let mut i = from;
 		while i <= nb {
 			let header = self.header(BlockId::Number(i))?;
 			header.encode_to(out);
@@ -764,9 +764,73 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 
 	fn import_sync_meta(
 		&self,
-		_encoded: &mut dyn std::io::Read,
+		encoded: &mut dyn std::io::Read,
 	) -> sp_blockchain::Result<()> {
-		unimplemented!();
+		let mut buf = [0];
+		// version
+		encoded.read_exact(&mut buf[..1]).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+		match buf[0] {
+			b if b == 0 => (),
+			_ => return Err(sp_blockchain::Error::Backend("Invalid snapshot version.".into())),
+		}
+		let mut reader = IoReader(encoded);
+		let to: NumberFor<Block> = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+		/*let to_hash: Block::Hash = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;*/
+		let nb: NumberFor<Block> = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+		let mut i = to - nb;
+		while i <= nb {
+			let mut transaction = Default::default();
+			let header: Block::Header = Decode::decode(&mut reader).map_err(|e|
+				sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+			)?;
+			let hash = header.hash();
+			let parent_hash = header.parent_hash().clone();
+			let number = header.number().clone();
+			// blocks are keyed by number + hash.
+			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
+
+			utils::insert_hash_to_key_mapping(
+				&mut transaction,
+				columns::KEY_LOOKUP,
+				number,
+				hash,
+			)?;
+
+			transaction.set_from_vec(columns::HEADER, &lookup_key, header.encode());
+			i += One::one();
+			transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key.clone());
+			transaction.set_from_vec(columns::META, meta_keys::FINALIZED_BLOCK, lookup_key);
+			let mut leaves = self.leaves.write();
+			let _displaced_leaf = leaves.import(hash, number, parent_hash);
+			leaves.prepare_transaction(&mut transaction, columns::META, meta_keys::LEAF_PREFIX);
+
+			self.db.commit(transaction)?;
+		}
+
+		// registered components
+		let registered_snapshot_sync = self.registered_snapshot_sync.read();
+		let expected = registered_snapshot_sync.len();
+		let nb: Compact<u32> = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+
+		if nb.0 as usize != expected {
+			return Err(sp_blockchain::Error::Backend("Invalid registerd component count.".into()));
+		}
+		for i in 0..expected {
+			registered_snapshot_sync[i].import_sync_meta(
+				reader.0,
+			)?;
+		}
+		Ok(())
 	}
 }
 
