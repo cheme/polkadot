@@ -33,6 +33,7 @@ use sp_state_machine::{
 	ChildStorageCollection,
 };
 use sp_blockchain::{CachedHeaderMetadata, HeaderMetadata};
+use sp_storage::{ChildType, ChildInfo, PrefixedStorageKey};
 
 use crate::{
 	backend::{self, NewBlockState, ProvideChtRoots},
@@ -536,6 +537,27 @@ impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperatio
 		Ok(())
 	}
 
+	fn inject_finalized_state(
+		&mut self,
+		_at: &Block::Hash,
+		data: sp_database::StateIter,
+	) -> sp_blockchain::Result<Block::Hash> {
+		let (root, transaction) = self.old_state.full_storage_root(
+			data.0.map(|(k, v)| (k, Some(v))),
+			data.1.map(|(storage_key, child_content)| {
+				let prefixed_key = PrefixedStorageKey::new_ref(&storage_key);
+				let child_info = match ChildType::from_prefixed_key(prefixed_key) {
+					Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
+					None => panic!("Invalid child storage key for injected state"),
+				};
+				(child_info, child_content.map(|(k, v)| (k, Some(v))))
+			}),
+		);
+
+		self.new_state = Some(transaction);
+		Ok(root)
+	}
+
 	fn reset_storage(&mut self, storage: Storage) -> sp_blockchain::Result<Block::Hash> {
 		check_genesis_storage(&storage)?;
 
@@ -543,12 +565,12 @@ impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperatio
 			.map(|(_storage_key, child_content)|
 				 (
 					 &child_content.child_info,
-					 child_content.data.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref())))
+					 child_content.data.iter().map(|(k, v)| (k, Some(v))),
 				 )
 			);
 
 		let (root, transaction) = self.old_state.full_storage_root(
-			storage.top.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref()))),
+			storage.top.iter().map(|(k, v)| (k, Some(v))),
 			child_delta,
 		);
 

@@ -41,6 +41,7 @@ use sp_consensus::BlockOrigin;
 use parking_lot::RwLock;
 
 pub use sp_state_machine::Backend as StateBackend;
+pub use sp_database::StateIter;
 use std::marker::PhantomData;
 
 /// Extracts the state backend type for the given backend.
@@ -160,6 +161,14 @@ pub trait BlockImportOperation<Block: BlockT> {
 		&mut self,
 		update: TransactionForSB<Self::State, Block>,
 	) -> sp_blockchain::Result<()>;
+
+	/// Inject storage data into the database for a given state.
+	/// Should only be use on a cleaned state.
+	fn inject_finalized_state(
+		&mut self,
+		at: &Block::Hash,
+		data: StateIter,
+	) -> sp_blockchain::Result<Block::Hash>;
 
 	/// Inject storage data into the database replacing any existing data.
 	fn reset_storage(&mut self, storage: Storage) -> sp_blockchain::Result<Block::Hash>;

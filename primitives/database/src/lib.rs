@@ -560,9 +560,12 @@ pub struct SnapshotDbConf {
 }
 
 /// Full key value state iterator at a given state.
-pub type StateIter<'a> = Box<
-	dyn Iterator<Item = (Option<Vec<u8>>, ChildStateIter<'a>)> + 'a,
->;
+/// First element is top state iterator, second element
+/// is children states iterator.
+pub type StateIter<'a> = (
+	ChildStateIter<'a>,
+	Box<dyn Iterator<Item = (Vec<u8>, ChildStateIter<'a>)> + 'a>,
+);
 
 /// Full key value state iterator at a given state,
 /// from a given parent state.
@@ -578,7 +581,6 @@ pub type StateIterDelta<'a> = Box<
 pub type ChildStateIterDelta<'a> = Box<
 	dyn Iterator<Item = (Vec<u8>, Option<Vec<u8>>)> + 'a,
 >;
-
 
 /// Implement exposed acces method to the snapshot db.
 /// TODO not in the right crate!!
@@ -628,8 +630,8 @@ pub trait SnapshotDb<B: Block> {
 	/// Iterate on all values that differs from parent block at a given block.
 	fn state_iter_diff_at<'a>(
 		&'a self,
-		at: &B::Hash,
-		parent: &B::Hash,
+		_at: &B::Hash,
+		_parent: &B::Hash,
 	) -> error::Result<StateIterDelta<'a>> {
 		unimplemented!("TODO");
 	}

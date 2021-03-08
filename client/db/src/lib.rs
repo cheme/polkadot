@@ -109,7 +109,7 @@ use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
 use sp_database::{Transaction, SnapshotDbConf};
 use sp_core::{Hasher, ChangesTrieConfiguration};
 use sp_core::offchain::OffchainOverlayedChange;
-use sp_core::storage::{well_known_keys, ChildInfo};
+use sp_core::storage::{well_known_keys, ChildInfo, ChildType, PrefixedStorageKey};
 use sp_arithmetic::traits::Saturating;
 use sp_runtime::{generic::{DigestItem, BlockId}, Justification, Storage};
 use sp_runtime::traits::{
@@ -257,17 +257,17 @@ impl<B: BlockT> StateBackend<HashFor<B>> for RefTrackingState<B> {
 		self.state.for_child_keys_with_prefix(child_info, prefix, f)
 	}
 
-	fn storage_root<'a>(
+	fn storage_root(
 		&self,
-		delta: impl Iterator<Item=(&'a [u8], Option<&'a [u8]>)>,
+		delta: impl Iterator<Item=(impl AsRef<[u8]>, Option<impl AsRef<[u8]>>)>,
 	) -> (B::Hash, Self::Transaction) where B::Hash: Ord {
 		self.state.storage_root(delta)
 	}
 
-	fn child_storage_root<'a>(
+	fn child_storage_root(
 		&self,
 		child_info: &ChildInfo,
-		delta: impl Iterator<Item=(&'a [u8], Option<&'a [u8]>)>,
+		delta: impl Iterator<Item=(impl AsRef<[u8]>, Option<impl AsRef<[u8]>>)>,
 	) -> (B::Hash, bool, Self::Transaction) where B::Hash: Ord {
 		self.state.child_storage_root(child_info, delta)
 	}
@@ -844,6 +844,39 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 	fn update_db_storage(&mut self, update: PrefixedMemoryDB<HashFor<Block>>) -> ClientResult<()> {
 		self.db_updates = update;
 		Ok(())
+	}
+
+	fn inject_finalized_state(
+		&mut self,
+		at: &Block::Hash,
+		data: sp_database::StateIter,
+	) -> ClientResult<Block::Hash> {
+		let mut changes_trie_config: Option<ChangesTrieConfiguration> = None;
+		let (root, transaction) = self.old_state.full_storage_root(
+			data.0.map(|(k, v)| {
+				if &k[..] == well_known_keys::CHANGES_TRIE_CONFIG {
+					changes_trie_config = Some(
+						Decode::decode(&mut &v[..])
+							.expect("changes trie configuration is encoded properly at genesis")
+					);
+				}
+				(k, Some(v))
+			}),
+			data.1.map(|(storage_key, child_content)| {
+				let prefixed_key = PrefixedStorageKey::new_ref(&storage_key);
+				let child_info = match ChildType::from_prefixed_key(prefixed_key) {
+					Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
+					None => panic!("Invalid child storage key for injected state"),
+				};
+				(child_info, child_content.map(|(k, v)| (k, Some(v))))
+			}),
+		);
+
+		self.db_updates = transaction;
+		self.changes_trie_config_update = Some(changes_trie_config);
+
+		self.commit_state = true;
+		Ok(root)
 	}
 
 	fn reset_storage(

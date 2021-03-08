@@ -923,6 +923,9 @@ mod tests {
 	};
 	use crate::execution::CallResult;
 
+	pub(crate) fn empty_storage_iter() -> std::iter::Empty<(Vec<u8>, Option<Vec<u8>>)> {
+		std::iter::empty()
+	}
 
 	#[derive(Clone)]
 	struct DummyCodeExecutor {
@@ -1103,7 +1106,7 @@ mod tests {
 
 		// fetch execution proof from 'remote' full node
 		let remote_backend = trie_backend::tests::test_trie();
-		let remote_root = remote_backend.storage_root(std::iter::empty()).0;
+		let remote_root = remote_backend.storage_root(empty_storage_iter()).0;
 		let (remote_result, remote_proof) = prove_execution::<_, _, u64, _, _>(
 			remote_backend,
 			&mut Default::default(),
@@ -1455,7 +1458,7 @@ mod tests {
 		let child_info = &child_info;
 		// fetch read proof from 'remote' full node
 		let remote_backend = trie_backend::tests::test_trie();
-		let remote_root = remote_backend.storage_root(::std::iter::empty()).0;
+		let remote_root = remote_backend.storage_root(empty_storage_iter()).0;
 		let remote_proof = prove_read(remote_backend, &[b"value2"]).unwrap();
  		// check proof locally
 		let local_result1 = read_proof_check::<BlakeTwo256, _>(
@@ -1476,7 +1479,7 @@ mod tests {
 		assert_eq!(local_result2, false);
 		// on child trie
 		let remote_backend = trie_backend::tests::test_trie();
-		let remote_root = remote_backend.storage_root(::std::iter::empty()).0;
+		let remote_root = remote_backend.storage_root(empty_storage_iter()).0;
 		let remote_proof = prove_child_read(
 			remote_backend,
 			child_info,

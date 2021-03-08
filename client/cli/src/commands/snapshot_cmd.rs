@@ -455,42 +455,6 @@ impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
 	}
 }
 
-struct StateDest<'a, B: BlockT, BA>(&'a Arc<BA>, PhantomData<B>);
-
-impl<'a, B, BA> StateDest<'a, B, BA>
-	where
-		B: BlockT,
-		BA: sc_client_api::backend::Backend<B>,
-{
-	fn inject_full_state(
-		&self,
-		at: &B::Hash,
-		data: impl Iterator<Item = (
-			Option<Vec<u8>>,
-			impl Iterator<Item=(Vec<u8>, Vec<u8>)>,
-		)>,
-	) -> std::result::Result<(), DatabaseError> {
-		// TODO state machine full_storage_root on empty backend
-		unimplemented!();
-		Ok(())
-	}
-
-	fn inject_diff_state(
-		&self,
-		at: &B::Hash,
-		parent: &B::Hash,
-		data: impl Iterator<Item = (
-			Option<Vec<u8>>,
-			impl Iterator<Item=(Vec<u8>, Option<Vec<u8>>)>,
-		)>,
-	) -> std::result::Result<(), DatabaseError> {
-		// TODO state machine full_storage_root on non empty backend
-		unimplemented!();
-		Ok(())
-	}
-}
-
-
 impl SnapshotImportCmd {
 	/// Run the import-snapshot command
 	pub async fn run<B, BA>(
@@ -543,13 +507,38 @@ impl SnapshotImportCmd {
 			let (finalized_hash, finalized_number) = if let Some(start_block) = dest_config.start_block.as_ref() {
 				unimplemented!("TODO fetch");
 			} else {
+				// injected with 'import_sync_meta'.
 				let chain_info = backend.blockchain().info();
 				(chain_info.finalized_hash, chain_info.finalized_number)
 			};
 
-			let trie_state = StateDest(&backend, PhantomData);
-			trie_state.inject_full_state(&finalized_hash, db.state_iter_at(&finalized_hash)?)?;
-
+			let mut op = backend.begin_operation()
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+			backend.begin_state_operation(&mut op, BlockId::Hash(Default::default()))
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+			info!("Initializing import block/state (header-hash: {})",
+				finalized_hash,
+			);
+			let data = db.state_iter_at(&finalized_hash)?;
+			use sc_client_api::BlockImportOperation;
+			let state_root = op.inject_finalized_state(&finalized_hash, data)
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+			// TODO get state root from header and pass as param
+/*			let expected_root = None;
+			if expected_root.map(|expected| expected != state_root).unwrap_or(false) {
+				panic!("Unexpected root.");
+			}*/
+			/* only state import, headers are already written.
+				operation.op.set_block_data(
+				import_headers.post().clone(),
+				body,
+				justification,
+				leaf_state,
+			)?;
+			*/
+			backend.commit_operation(op)
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+	
 			if !dest_config.enabled {
 				// clear snapshot db
 				db.clear_snapshot_db()?;

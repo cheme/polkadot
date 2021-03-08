@@ -352,17 +352,23 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		&'a self,
 		at: &Block::Hash,
 	) -> sp_database::error::Result<StateIter<'a>> {
-
 		let historied_db = self.get_historied_db(Some(at))
 			.map_err(|e| DatabaseError(Box::new(e)))?;
-		let iter = HistoriedDbBKVIter {
+		let mut iter = HistoriedDbBKVIter {
 			inner: self,
 			next_child: None,
 			last_child_root_key: None,
 			historied_db,
 		};
-
-		Ok(Box::new(iter))
+		if let Some(top) = iter.next() {
+			Ok((
+				top.1,
+				Box::new(iter.map(|(child, iter)| (child.expect("Only first is top."), iter))),
+			))
+		} else {
+			let e = ClientError::StateDatabase("Empty state".into());
+			return Err(DatabaseError(Box::new(e)));
+		}
 	}
 
 	fn read_import_def(
