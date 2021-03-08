@@ -444,28 +444,35 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	
 			let mut buf = [0];
 			loop {
-				let journal_change = None; // no change journaling for initial state.
+				let journal_change = || None; // no change journaling for initial state.
 				from.read_exact(&mut buf[..1])
 					.map_err(|e| DatabaseError(Box::new(e)))?;
 				match buf[0] {
 					u if u == StateId::Top as u8 => {
-						let key = key_reader.read_next(&mut IoReader(&mut from))
-							.map_err(|e| DatabaseError(Box::new(e)))?;
-						let value = Decode::decode(&mut IoReader(&mut from))
-							.map_err(|e| DatabaseError(Box::new(e)))?;
-						let key = child_prefixed_key_inner_top(key);
-						historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change);
+						while let Some(key) = key_reader.read_next(&mut IoReader(&mut from))
+								.map_err(|e| DatabaseError(Box::new(e)))? {
+							let value = Decode::decode(&mut IoReader(&mut from))
+								.map_err(|e| DatabaseError(Box::new(e)))?;
+							let key = child_prefixed_key_inner_top(key);
+							historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change());
+						}
 					},
 					u if u == StateId::DefaultChild as u8 => {
-						let child_key = default_child_key_reader.read_next(&mut IoReader(&mut from))
-							.map_err(|e| DatabaseError(Box::new(e)))?;
+						let child_key = if let Some(child_key) = default_child_key_reader.read_next(&mut IoReader(&mut from))
+							.map_err(|e| DatabaseError(Box::new(e)))? {
+								child_key
+						} else {
+							let e = ClientError::StateDatabase("Unexpected child key encoding.".into());
+							return Err(DatabaseError(Box::new(e)));
+						};
 						//let child_info = ChildInfo::new_default(child_key);
-						let key = key_reader.read_next(&mut IoReader(&mut from))
-							.map_err(|e| DatabaseError(Box::new(e)))?;
-						let key = child_prefixed_key_inner_default(child_key, key);
-						let value = Decode::decode(&mut IoReader(&mut from))
-							.map_err(|e| DatabaseError(Box::new(e)))?;
-						historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change);
+						while let Some(key) = key_reader.read_next(&mut IoReader(&mut from))
+							.map_err(|e| DatabaseError(Box::new(e)))? {
+							let key = child_prefixed_key_inner_default(child_key, key);
+							let value = Decode::decode(&mut IoReader(&mut from))
+								.map_err(|e| DatabaseError(Box::new(e)))?;
+							historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change());
+						}
 					},
 					u if u == StateId::EndOfState as u8 => {
 						break;
@@ -741,6 +748,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		let child_storage_key = &mut child_storage_key;
 		state_visit.state_visit(|child, key, value| {
 			if child != last_child.as_ref().map(Vec::as_slice) {
+				default_key_writer.write_last(out);
 				if let Some(child) = child.as_ref() {
 					*child_storage_key = PrefixedStorageKey::new(child.to_vec());
 					*last_child = Some(child.to_vec());
@@ -768,7 +776,8 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			Ok(())
 		})?;
 
-		out.write(&[SnapshotMode::Flat as u8, StateId::EndOfState as u8])
+		default_key_writer.write_last(out);
+		out.write(&[StateId::EndOfState as u8])
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 		Ok(())
 	}
@@ -817,6 +826,9 @@ enum StateId {
 enum KeyDelta {
 	Augment(usize),
 	PopAugment(usize, usize),
+	// last is a pop augment with a 0 size pop
+	// So 1
+	Last,
 }
 
 impl Encode for KeyDelta {
@@ -835,6 +847,10 @@ impl Encode for KeyDelta {
 				Compact(pop_nb as u64).encode_to(out);
 				Compact(*nb2 as u64).encode_to(out);
 			},
+			KeyDelta::Last => {
+				let pop_nb = (0 * 2) + 1; // 1 as last bit
+				Compact(pop_nb as u64).encode_to(out);
+			},
 		}
 	}
 }
@@ -845,8 +861,12 @@ impl Decode for KeyDelta {
 		if first % 2 == 0 {
 			Ok(KeyDelta::Augment((first / 2) as usize))
 		} else {
+			let pop_size = first / 2;
+			if pop_size == 0 {
+				return Ok(KeyDelta::Last);
+			}
 			let second = Compact::<u64>::decode(input)?.0;
-			Ok(KeyDelta::PopAugment((first / 2) as usize, (second / 2) as usize))
+			Ok(KeyDelta::PopAugment(pop_size as usize, second as usize))
 		}
 	}
 }
@@ -892,6 +912,11 @@ impl<'a> KeyWriter<'a> {
 		out.write(&next[common..]);
 		self.previous = next.into();
 	}
+
+	fn write_last<O: codec::Output + ?Sized>(&mut self, out: &mut O) {
+		KeyDelta::Last.encode_to(out);
+		self.previous = [][..].into();
+	}
 }
 
 /// Key are read in delta mode (since they are sorted it is a big size gain).
@@ -900,8 +925,12 @@ struct KeyReader {
 }
 
 impl KeyReader {
-	fn read_next<I: codec::Input>(&mut self, input: &mut I)  -> Result<&[u8], codec::Error> {
+	fn read_next<I: codec::Input>(&mut self, input: &mut I)  -> Result<Option<&[u8]>, codec::Error> {
 		let nb = match KeyDelta::decode(input)? {
+			KeyDelta::Last => {
+				self.previous.clear();
+				return Ok(None);
+			},
 			KeyDelta::Augment(nb) => nb,
 			KeyDelta::PopAugment(nb, nb2) => {
 				let old_len = self.previous.len();
@@ -915,7 +944,7 @@ impl KeyReader {
 		let old_len = self.previous.len();
 		self.previous.resize(old_len + nb, 0);
 		input.read(&mut self.previous[old_len..])?;
-		Ok(self.previous.as_slice())
+		Ok(Some(self.previous.as_slice()))
 	}
 }
 

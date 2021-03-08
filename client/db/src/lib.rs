@@ -743,7 +743,7 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		// need to feed LeafSet::read_from_db (just insert in order)
 		// and headers/blockids mapping (same)
 		let mut i = from;
-		while i <= nb {
+		while i <= to {
 			let header = self.header(BlockId::Number(i))?;
 			header.encode_to(out);
 			i += One::one();
@@ -786,7 +786,7 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 		)?;
 		let mut i = to - nb;
-		while i <= nb {
+		while i <= to {
 			let mut transaction = Default::default();
 			let header: Block::Header = Decode::decode(&mut reader).map_err(|e|
 				sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),

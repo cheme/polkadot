@@ -136,6 +136,79 @@ impl<'a> ExportImportRevertExecutor<'a> {
 		let _ = fs::remove_dir_all(&self.db_path);
 	}
 
+	/// TODO
+	fn run_snapshot_export(&mut self) {
+		// hardcoded
+		let arguments: Vec<&str> = vec![
+			"snapshot-export",
+			"--dev",
+			"-d",
+			self.base_path.path().to_str().unwrap(),
+			"--pruning=archive",
+//			"--wasm_execution=Compiled",
+			"--log=info",
+			"--flat",
+// "--state-only",
+			self.exported_blocks_file.to_str().unwrap(),
+		];
+		let output = Command::new(cargo_bin("substrate"))
+			.args(&arguments)
+			.output()
+			.unwrap();
+
+		println!("{:?}", output);
+	
+/*		// Using regex to find out how many block we exported.
+		let re = Regex::new(r"Exporting blocks from #\d* to #(?P<exported_blocks>\d*)").unwrap();
+		let caps = re.captures(&log).unwrap();
+		// Saving the number of blocks we've exported for further use.
+		self.num_exported_blocks = Some(caps["exported_blocks"].parse::<u64>().unwrap());
+*/
+		let metadata = fs::metadata(&self.exported_blocks_file).unwrap();
+		assert!(metadata.len() > 0, "file exported_blocks should not be empty");
+
+		let _ = fs::remove_dir_all(&self.db_path);
+
+		let logged_output = String::from_utf8_lossy(&output.stderr).to_string();
+
+		println!("{:?}", logged_output);
+		// Making sure no error were logged.
+		assert!(!contains_error(&logged_output), "expected not to error but error'd!");
+		assert!(output.status.success());
+	}
+
+	/// Runs the `import-blocks` command, asserting that an error was found or
+	/// not depending on `expected_to_fail`.
+	fn run_snapshot_import(&mut self) {
+		// hardcoded
+		let arguments: Vec<&str> = vec![
+			"snapshot-import",
+			"--dev",
+			"-d",
+			self.base_path.path().to_str().unwrap(),
+			"--pruning=archive",
+//			"--wasm_execution=Compiled",
+			"--log=info",
+// "--state-only",
+			self.exported_blocks_file.to_str().unwrap(),
+		];
+		let output = Command::new(cargo_bin("substrate"))
+			.args(&arguments)
+			.output()
+			.unwrap();
+
+		println!("{:?}", output);
+
+		let logged_output = String::from_utf8_lossy(&output.stderr).to_string();
+
+		println!("{:?}", logged_output);
+		let _ = fs::remove_dir_all(&self.db_path);
+
+		// Making sure no error were logged.
+		assert!(!contains_error(&logged_output), "expected not to error but error'd!");
+		assert!(output.status.success());
+	}
+
 	/// Runs the `import-blocks` command, asserting that an error was found or
 	/// not depending on `expected_to_fail`.
 	fn run_import(&mut self, fmt_opt: FormatOpt, expected_to_fail: bool) {
@@ -185,6 +258,13 @@ impl<'a> ExportImportRevertExecutor<'a> {
 		self.run_import(import_fmt, expected_to_fail);
 		self.run_revert();
 	}
+
+	/// Helper function that runs the snapshot scenario.
+	fn run_snapshot(&mut self) {
+		self.run_snapshot_export();
+		self.run_snapshot_import();
+	}
+
 }
 
 #[test]
@@ -209,4 +289,22 @@ fn export_import_revert() {
 	executor.run(FormatOpt::Json, FormatOpt::Json, false);
 	// JSON and binary should fail.
 	executor.run(FormatOpt::Json, FormatOpt::Binary, true);
+}
+
+#[test]
+fn export_import_snapshot() {
+	let base_path = tempdir().expect("could not create a temp dir");
+	let exported_blocks_file = base_path.path().join("exported_snapshot");
+	let db_path = base_path.path().join("db");
+
+	common::run_dev_node_for_a_while(base_path.path());
+
+	let mut executor = ExportImportRevertExecutor::new(
+		&base_path,
+		&exported_blocks_file,
+		&db_path,
+	);
+
+	// Binary and binary should work.
+	executor.run_snapshot();
 }

@@ -58,7 +58,8 @@ pub fn run_dev_node_for_a_while(base_path: &Path) {
 		.unwrap();
 
 	// Let it produce some blocks.
-	thread::sleep(Duration::from_secs(30));
+	thread::sleep(Duration::from_secs(20));
+	// TODO restore 30 s thread::sleep(Duration::from_secs(30));
 	assert!(cmd.try_wait().unwrap().is_none(), "the process should still be running");
 
 	// Stop the process
