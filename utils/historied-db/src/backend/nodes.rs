@@ -254,6 +254,17 @@ impl<V, S, D, M> Node<V, S, D, M> {
 	}
 }
 
+impl<V, S, D, M> Node<V, S, D, M>
+	where
+		D: LinearStorage<V, S>,
+{
+	fn clear(&mut self) {
+		self.reference_len = 0;
+		self.changed = true;
+		self.data.clear();
+	}
+}
+
 #[derive(Derivative)]
 #[derivative(Clone(bound="D: Clone, B: Clone, NI: Clone, V: Clone"))]
 /// Head is the entry node, it contains fetched nodes and additional
@@ -360,7 +371,7 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
-		D: Clone + Trigger,
+		D: Clone + Trigger + LinearStorage<V, S>,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
@@ -461,7 +472,7 @@ impl<B: Clone, NI: ContextBuilder> ContextBuilder for ContextHead<B, NI> {
 
 impl<V, S, D, M, B, NI> Trigger for Head<V, S, D, M, B, NI>
 	where
-		D: Clone + Trigger,
+		D: Clone + Trigger + LinearStorage<V, S>,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
@@ -580,7 +591,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 #[cfg(test)]
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
-		D: Clone + Trigger,
+		D: Clone + Trigger + LinearStorage<V, S>,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
 {
@@ -898,9 +909,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		self.end_node_index = 0;
 		self.len = 0;
 		self.fetched.borrow_mut().clear();
-		self.inner.reference_len = 0;
-		self.inner.changed = true;
-		self.inner.data.clear();
+		self.inner.clear();
 	}
 	fn truncate(&mut self, at: usize) {
 		let (in_head, i) = {
@@ -981,6 +990,17 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	}
 }
 
+/*impl<V, S, D, M, B, NI> LinearStorageMem<V, S> for Head<V, S, D, M, B, NI>
+	where
+		D: Context<Context = NI> + LinearStorage<V, S>,
+		B: NodeStorage<V, S, D, M>,
+		M: NodesMeta,
+		S: EstimateSize,
+		V: EstimateSize + Trigger,
+		NI: ContextBuilder,
+{
+}
+*/
 impl EstimateSize for Vec<u8> {
 	fn estimate_size(&self) -> usize {
 		self.len()
