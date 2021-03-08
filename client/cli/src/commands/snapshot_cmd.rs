@@ -500,10 +500,8 @@ impl SnapshotImportCmd {
 
 		backend.snapshot_sync().import_sync_meta(reader)?;
 
-		// init a snapshot db
-		db.import_snapshot_db(reader, &config, &snapshot_def)?;
-	
-		if snapshot_def.is_flat() {
+
+		if snapshot_def.is_flat {
 			let (finalized_hash, finalized_number) = if let Some(start_block) = dest_config.start_block.as_ref() {
 				unimplemented!("TODO fetch");
 			} else {
@@ -511,6 +509,9 @@ impl SnapshotImportCmd {
 				let chain_info = backend.blockchain().info();
 				(chain_info.finalized_hash, chain_info.finalized_number)
 			};
+
+			// init snapshot db
+			db.import_snapshot_db(reader, &config, &snapshot_def, &finalized_hash)?;
 
 			let mut op = backend.begin_operation()
 				.map_err(|e| DatabaseError(Box::new(e)))?;

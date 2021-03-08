@@ -2368,7 +2368,9 @@ pub(crate) mod tests {
 				extrinsics_root: Default::default(),
 			};
 
-			header.state_root = op.old_state.storage_root(std::iter::empty()).0.into();
+			let storage: Vec<(Vec<u8>, Option<Vec<u8>>)> = vec![];
+
+			header.state_root = op.old_state.storage_root(storage.into_iter()).0.into();
 			let hash = header.hash();
 
 			op.reset_storage(Storage {
@@ -2403,7 +2405,7 @@ pub(crate) mod tests {
 				extrinsics_root: Default::default(),
 			};
 
-			let storage: Vec<(_, _)> = vec![];
+			let storage: Vec<(Vec<u8>, Vec<u8>)> = vec![];
 
 			header.state_root = op.old_state.storage_root(storage
 				.iter()
@@ -2440,7 +2442,7 @@ pub(crate) mod tests {
 				extrinsics_root: Default::default(),
 			};
 
-			let storage: Vec<(_, _)> = vec![];
+			let storage: Vec<(Vec<u8>, Vec<u8>)> = vec![];
 
 			header.state_root = op.old_state.storage_root(storage
 				.iter()
@@ -2477,7 +2479,7 @@ pub(crate) mod tests {
 				extrinsics_root: Default::default(),
 			};
 
-			let storage: Vec<(_, _)> = vec![];
+			let storage: Vec<(Vec<u8>, Vec<u8>)> = vec![];
 
 			header.state_root = op.old_state.storage_root(storage
 				.iter()

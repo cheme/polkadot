@@ -42,7 +42,7 @@ use log::{debug, info, warn};
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
-use codec::{Decode, Encode, Compact};
+use codec::{Decode, Encode, Compact, IoReader};
 use sp_database::{SnapshotDbConf, SnapshotDBMode, SnapshotImportDef, StateIter, ChildStateIter};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
@@ -373,19 +373,115 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 	fn read_import_def(
 		&self,
-		_from: &mut impl std::io::Read,
-		_config: &SnapshotDbConf,
+		from: &mut impl std::io::Read,
+		config: &SnapshotDbConf,
 	) -> sp_database::error::Result<SnapshotImportDef> {
-		unimplemented!("TODO next");
+		let mut buf = [0];
+		from.read_exact(&mut buf[..1])
+			.map_err(|e| DatabaseError(Box::new(e)))?;
+		Ok(match buf[0] {
+			u if u == SnapshotMode::Flat as u8 => SnapshotImportDef {
+				is_flat: true,
+			},
+			_ => {
+				let e = ClientError::StateDatabase("Unknown snapshot mode.".into());
+				return Err(DatabaseError(Box::new(e)));
+			},
+		})
 	}
 
 	fn import_snapshot_db(
 		&self,
-		_from: &mut impl std::io::Read,
-		_config: &SnapshotDbConf,
-		_def: &SnapshotImportDef,
-	) -> sp_database::error::Result<SnapshotImportDef> {
-		unimplemented!("TODO next");
+		mut from: &mut impl std::io::Read,
+		config: &SnapshotDbConf,
+		def: &SnapshotImportDef,
+		at: &Block::Hash,
+	) -> sp_database::error::Result<()> {
+		self.clear_snapshot_db()?;
+
+		{
+			let mut management = self.historied_management.inner.write();
+			let db = &mut management.instance.ser().db;
+			snapshot_db_conf::update_db_conf(db, |genesis_conf| {
+				*genesis_conf = config.clone();
+				Ok(())
+			}).map_err(|e| DatabaseError(Box::new(e)))?;
+		}
+
+		if def.is_flat {
+			let (query_plan, update_plan) = self.historied_management.init_new_management(
+				at,
+				&self.ordered_db,
+			).map_err(|e| DatabaseError(Box::new(e)))?;
+			let hvalue_type = HValueType::resolve(&config).ok_or_else(|| {
+				let e = ClientError::StateDatabase(format!("Invalid snapshot config {:?}", config));
+				DatabaseError(Box::new(e))
+			})?;
+			let mut historied_db = HistoriedDBMut {
+				current_state: update_plan,
+				current_state_read: query_plan,
+				db: self.ordered_db.clone(),
+				config: config.clone(),
+				hvalue_type,
+				nodes_db: self.nodes_db.clone(),
+			};
+
+			let mut owned_tx = Default::default();
+			let mut tx = &mut owned_tx;
+			let mut count_tx = 0;
+			let count_tx = &mut count_tx;
+			let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
+			let child_storage_key = &mut child_storage_key;
+			let mut last_child: Option<Vec<u8>> = None;
+			let last_child = &mut last_child;
+			let mut key_reader = KeyReader {
+				previous: Vec::new(),
+			};
+	
+			let mut default_child_key_reader = KeyReader {
+				previous: Vec::new(),
+			};
+	
+			let mut buf = [0];
+			loop {
+				let journal_change = None; // no change journaling for initial state.
+				from.read_exact(&mut buf[..1])
+					.map_err(|e| DatabaseError(Box::new(e)))?;
+				match buf[0] {
+					u if u == StateId::Top as u8 => {
+						let key = key_reader.read_next(&mut IoReader(&mut from))
+							.map_err(|e| DatabaseError(Box::new(e)))?;
+						let value = Decode::decode(&mut IoReader(&mut from))
+							.map_err(|e| DatabaseError(Box::new(e)))?;
+						let key = child_prefixed_key_inner_top(key);
+						historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change);
+					},
+					u if u == StateId::DefaultChild as u8 => {
+						let child_key = default_child_key_reader.read_next(&mut IoReader(&mut from))
+							.map_err(|e| DatabaseError(Box::new(e)))?;
+						//let child_info = ChildInfo::new_default(child_key);
+						let key = key_reader.read_next(&mut IoReader(&mut from))
+							.map_err(|e| DatabaseError(Box::new(e)))?;
+						let key = child_prefixed_key_inner_default(child_key, key);
+						let value = Decode::decode(&mut IoReader(&mut from))
+							.map_err(|e| DatabaseError(Box::new(e)))?;
+						historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change);
+					},
+					u if u == StateId::EndOfState as u8 => {
+						break;
+					},
+					_ => {
+						let e = ClientError::StateDatabase("Unknown state type.".into());
+						return Err(DatabaseError(Box::new(e)));
+					},
+				}
+			}
+
+			self.ordered_db.commit(owned_tx)?;
+		} else {
+			unimplemented!()
+		}
+		Ok(())
 	}
 }
 

@@ -649,19 +649,14 @@ pub trait SnapshotDb<B: Block> {
 		from: &mut impl std::io::Read,
 		config: &SnapshotDbConf,
 		def: &SnapshotImportDef,
-	) -> error::Result<SnapshotImportDef>;
+		at: &B::Hash,
+	) -> error::Result<()>;
 }
 
 /// Initial definition for a snapshot import.
 pub struct SnapshotImportDef {
-	is_flat: bool,
-}
-
-impl SnapshotImportDef {
 	/// Is it a single block flat import.
-	pub fn is_flat(&self) -> bool {
-		self.is_flat
-	}
+	pub is_flat: bool,
 }
 
 /// Visitor trait use to initiate a snapshot db.
@@ -761,7 +756,8 @@ impl<B: Block> SnapshotDb<B> for () {
 		_from: &mut impl std::io::Read,
 		_config: &SnapshotDbConf,
 		_def: &SnapshotImportDef,
-	) -> error::Result<SnapshotImportDef> {
+		_at: &B::Hash,
+	) -> error::Result<()> {
 		unsupported_error()
 	}
 }
