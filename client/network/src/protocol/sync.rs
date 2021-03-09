@@ -560,11 +560,19 @@ impl<B: BlockT> ChainSync<B> {
 					});
 					return Ok(None)
 				}
+					debug!(
+						target:"sync",
+						"cond {} ({}). {}",
+						self.best_queued_number,
+						self.last_finalized,
+						best_number,
+					);
+
 
 				// If we are at genesis, just start downloading, same for initial finalized block TODO not
 				// sure if correct, should be possible for any finalized block (upadte finalized block
 				// refreshing).
-				let (state, req) = if self.best_queued_number.is_zero() || self.best_queued_number <= self.last_finalized {
+				let (state, req) = if self.best_queued_number.is_zero() || self.best_queued_number <= best_number {
 					debug!(
 						target:"sync",
 						"New peer with best hash {} ({}).",
