@@ -640,11 +640,6 @@ impl SnapshotExportCmd {
 				let from = from.unwrap_or(to);
 				let from_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
 				backend.snapshot_sync().export_sync_meta(&mut out, from, from_hash, to, to_hash)?;
-				println!("finalized: {:?} {:?}", finalized_number, to_hash);
-				let header = backend.blockchain().header(BlockId::Hash(to_hash.clone()))?
-					.expect("Missing header");
-				let expected_root = header.state_root().clone();
-				println!("finalized root: {:?}", expected_root);
 			}
 			db.export_snapshot(
 				&mut out,
@@ -655,7 +650,6 @@ impl SnapshotExportCmd {
 				db_mode,
 				state_visitor,
 			)?;
-			println!("finalized ex: {:?} {:?}", finalized_number, to);
 		} else {
 			let mut out = std::io::stdout();
 			if self.state_only {
@@ -672,6 +666,7 @@ impl SnapshotExportCmd {
 					.expect("Missing header");
 				let expected_root = header.state_root().clone();
 				println!("finalized root: {:?}", expected_root);
+	
 			}
 			db.export_snapshot(
 				&mut out,
