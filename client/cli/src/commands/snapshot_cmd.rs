@@ -495,11 +495,12 @@ impl SnapshotImportCmd {
 		let db = backend.snapshot_db().expect(UNSUPPORTED);
 		let dest_config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
 		let mut config = dest_config.clone();
-		// import default values will be reverted
+		// import default values will be reverted: tod can move to import_snapshot_db function
+		// (revert too)
 		config.enabled = true;
 		config.pruning = None;
 		config.lazy_pruning = None;
-		config.primary_source = false; // not really useful
+		config.primary_source = true; // needed to access historied-db
 		config.debug_assert = false; // not really useful
 
 		let reader = &mut file;
@@ -526,6 +527,9 @@ impl SnapshotImportCmd {
 			// init snapshot db
 			db.import_snapshot_db(reader, &config, &snapshot_def, &finalized_hash)?;
 
+			let header = backend.blockchain().header(BlockId::Hash(finalized_hash.clone()))?
+				.expect("Missing header");
+			let expected_root = header.state_root().clone();
 			let mut op = backend.begin_operation()
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 			backend.begin_state_operation(&mut op, BlockId::Hash(Default::default()))
@@ -533,15 +537,14 @@ impl SnapshotImportCmd {
 			info!("Initializing import block/state (header-hash: {})",
 				finalized_hash,
 			);
-			let data = db.state_iter_at(&finalized_hash)?;
+			let data = db.state_iter_at(&finalized_hash, Some(&config))?;
 			use sc_client_api::BlockImportOperation;
 			let state_root = op.inject_finalized_state(&finalized_hash, data)
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 			// TODO get state root from header and pass as param
-/*			let expected_root = None;
-			if expected_root.map(|expected| expected != state_root).unwrap_or(false) {
-				panic!("Unexpected root.");
-			}*/
+			if expected_root != state_root {
+				panic!("Unexpected root {:?}, in header {:?}.", state_root, expected_root);
+			}
 			/* only state import, headers are already written.
 				operation.op.set_block_data(
 				import_headers.post().clone(),

@@ -625,7 +625,11 @@ pub trait SnapshotDb<B: Block> {
 	/// memory into the state machine transaction, but doesn't
 	/// sound like a reason to put more in memory).
 	/// So we do not use `reset_storage` but similar code at client level.
-	fn state_iter_at<'a>(&'a self, at: &B::Hash) -> error::Result<StateIter<'a>>;
+	fn state_iter_at<'a>(
+		&'a self,
+		at: &B::Hash,
+		config: Option<&SnapshotDbConf>,
+	) -> error::Result<StateIter<'a>>;
 
 	/// Iterate on all values that differs from parent block at a given block.
 	fn state_iter_diff_at<'a>(
@@ -739,6 +743,7 @@ impl<B: Block> SnapshotDb<B> for () {
 	fn state_iter_at<'a>(
 		&'a self,
 		_at: &B::Hash,
+		_config: Option<&SnapshotDbConf>,
 	) -> error::Result<StateIter<'a>> {
 		unsupported_error()
 	}

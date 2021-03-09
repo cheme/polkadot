@@ -249,7 +249,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	) -> sp_database::error::Result<()> {
 		self.clear_snapshot_db()?;
 
-		config.lazy_set = true;
+		config.lazy_set = true; // ??
 
 		{
 			let mut management = self.historied_management.inner.write();
@@ -351,8 +351,9 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	fn state_iter_at<'a>(
 		&'a self,
 		at: &Block::Hash,
+		config: Option<&SnapshotDbConf>,
 	) -> sp_database::error::Result<StateIter<'a>> {
-		let historied_db = self.get_historied_db(Some(at))
+		let historied_db = self.get_historied_db(Some(at), config)
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 		let mut iter = HistoriedDbBKVIter {
 			inner: self,
@@ -451,7 +452,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 					u if u == StateId::Top as u8 => {
 						while let Some(key) = key_reader.read_next(&mut IoReader(&mut from))
 								.map_err(|e| DatabaseError(Box::new(e)))? {
-							let value = Decode::decode(&mut IoReader(&mut from))
+							let value: Vec<u8> = Decode::decode(&mut IoReader(&mut from))
 								.map_err(|e| DatabaseError(Box::new(e)))?;
 							let key = child_prefixed_key_inner_top(key);
 							historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change());
@@ -556,8 +557,10 @@ impl<Block: BlockT> SnapshotDb<Block> {
 	pub fn get_historied_db(
 		&self,
 		at: Option<&Block::Hash>,
+		config: Option<&SnapshotDbConf>,
 	) -> ClientResult<Option<HistoriedDB>> {
-		if !self.config.enabled || !(self.config.primary_source || self.config.debug_assert) {
+		let config = config.unwrap_or(&self.config);
+		if !config.enabled || !(config.primary_source || config.debug_assert) {
 			return Ok(None);
 		}
 
@@ -584,7 +587,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			current_state,
 			db: self.ordered_db.clone(),
 			hvalue_type: self.hvalue_type,
-			config: self.config.clone(),
+			config: config.clone(),
 			nodes_db: self.nodes_db.clone(),
 			cache: self.cache.clone(),
 		}))
@@ -594,7 +597,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		&self,
 		at: Option<&Block::Hash>,
 	) -> ClientResult<Option<Arc<dyn KVBackend>>> {
-		if let Some(db) = self.get_historied_db(at)? {
+		if let Some(db) = self.get_historied_db(at, None)? {
 			let db = Arc::new(db);
 			Ok(Some(db))
 		} else {
@@ -891,9 +894,9 @@ impl<'a> KeyWriter<'a> {
 		let previous = &self.previous[..];
 		let common = common_depth(previous, next.as_slice());
 		let keydelta = if common < previous.len() {
-			KeyDelta::PopAugment(previous.len() - common, next.len() - common);
+			KeyDelta::PopAugment(previous.len() - common, next.len() - common)
 		} else {
-			KeyDelta::Augment(next.len() - common);
+			KeyDelta::Augment(next.len() - common)
 		};
 		keydelta.encode_to(out);
 		out.write(&next[common..]);
@@ -904,9 +907,9 @@ impl<'a> KeyWriter<'a> {
 		let previous = &self.previous;
 		let common = common_depth(previous, next);
 		let keydelta = if common < previous.len() {
-			KeyDelta::PopAugment(previous.len() - common, next.len() - common);
+			KeyDelta::PopAugment(previous.len() - common, next.len() - common)
 		} else {
-			KeyDelta::Augment(next.len() - common);
+			KeyDelta::Augment(next.len() - common)
 		};
 		keydelta.encode_to(out);
 		out.write(&next[common..]);
@@ -1444,12 +1447,15 @@ impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
 		};
 		let child_info = self.next_child.take();
 		let prefix = child_prefixed_key(child_info.as_ref(), &[]);
+		let prefix_len = prefix.len();
 		let hvalue_type = historied_db.hvalue_type;
 		let nodes_db = self.inner.nodes_db.clone();
 		let current_state = historied_db.current_state.clone();
 		let iter = self.inner.ordered_db.iter_from(NODES_COL, prefix.as_slice())
-			.take_while(move |(k, v)| k.starts_with(prefix.as_slice()))
-			.filter_map(move |(k, v)| {
+			.take_while(move |(k, v)| {
+				k.starts_with(prefix.as_slice())
+			})
+			.filter_map(move |(mut k, v)| {
 			let v = HValue::decode_with_context(
 				&k[..],
 				&mut &v[..],
@@ -1462,7 +1468,7 @@ impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
 				.expect("Invalid encoded historied value, DB corrupted");
 			let v = v.value(&current_state)
 				.expect("Invalid encoded historied value, DB corrupted");
-			v.map(|v| (k, v))
+			v.map(|v| (k.split_off(prefix_len), v))
 		});
 
 		let (previous, iter_child_key) = self.last_child_root_key.take()
@@ -1833,4 +1839,52 @@ impl HValueCache {
 			let _ = self.cache.pop(&key);
 		}
 	}
+}
+
+
+#[test]
+fn key_writer_reader_encode_decode() {
+	let keys = [
+		vec![17u8, 243, 186, 46, 28, 221, 109, 98, 242, 255, 155, 85, 137, 231, 255,
+			129, 186, 127, 184, 116, 87, 53, 220, 59, 226, 162, 198, 26, 114, 195,
+			158, 120],
+		vec![24, 9, 215, 131, 70, 114, 122, 14, 245, 140, 15, 160, 59, 175, 163, 35,
+			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
+		vec![26, 115, 109, 55, 80, 76, 46, 63, 183, 61, 173, 22, 12, 85, 178, 145,
+			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
+		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
+			6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237],
+		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
+			94, 6, 33, 196, 134, 154, 166, 12, 2, 190, 154, 220, 201, 138, 13, 29],
+		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
+			102, 232, 240, 53, 200, 173, 190, 127, 21, 71, 180, 60, 81, 230, 248, 164],
+		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
+			103, 135, 17, 209, 94, 187, 206, 186, 92, 208, 206, 161, 88, 230, 103, 90],
+		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
+			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
+		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
+			170, 207, 0, 185, 180, 31, 218, 122, 146, 104, 130, 28, 42, 43, 62, 76],
+		vec![32, 153, 215, 241, 9, 214, 229, 53, 251, 0, 11, 186, 98, 63, 212, 64,
+			76, 1, 78, 107, 248, 184, 194, 192, 17, 231, 41, 11, 133, 105, 107, 179],
+		vec![32, 153, 215, 241, 9, 214, 229, 53, 251, 0, 11, 186, 98, 63, 212, 64,
+			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
+	];
+	let mut dest = Vec::new();
+	let mut writer = KeyWriter {
+		previous: [][..].into(),
+	};
+	for key in keys.iter() {
+		writer.write_next(key.as_slice(), &mut dest)
+	}
+	writer.write_last(&mut dest);
+	let mut decoded = Vec::new();
+	let mut key_reader = KeyReader {
+		previous: Vec::new(),
+	};
+	let input = &mut dest.as_slice();
+	while let Some(key) = key_reader.read_next(input).unwrap() {
+		decoded.push(key.to_vec());
+	}
+	assert_eq!(&keys[..], &decoded[..]);
+	assert!(input.len() == 0);
 }

@@ -744,7 +744,10 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		// and headers/blockids mapping (same)
 		let mut i = from;
 		while i <= to {
-			let header = self.header(BlockId::Number(i))?;
+			let header: Block::Header = self.header(BlockId::Number(i))?
+				.ok_or_else(|| sp_blockchain::Error::Backend(
+					format!("Header missing at {:?}", i),
+				))?;
 			header.encode_to(out);
 			i += One::one();
 		}
@@ -916,7 +919,8 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 		data: sp_database::StateIter,
 	) -> ClientResult<Block::Hash> {
 		let mut changes_trie_config: Option<ChangesTrieConfiguration> = None;
-		let (root, transaction) = self.old_state.full_storage_root(
+		let empty_backend = sp_state_machine::prefixed_new_in_mem::<HashFor<Block>>();
+		let (root, transaction) = empty_backend.full_storage_root(
 			data.0.map(|(k, v)| {
 				if &k[..] == well_known_keys::CHANGES_TRIE_CONFIG {
 					changes_trie_config = Some(

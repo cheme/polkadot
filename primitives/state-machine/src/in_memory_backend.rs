@@ -24,12 +24,13 @@ use sp_std::collections::btree_map::BTreeMap;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 use hash_db::Hasher;
-use sp_trie::{MemoryDB, empty_trie_root, Layout};
+use sp_trie::{MemoryDB, PrefixedMemoryDB, empty_trie_root, Layout};
 use codec::Codec;
 use sp_core::storage::ChildInfo;
 #[cfg(feature = "std")]
 use sp_core::storage::Storage;
 use sp_std::vec::Vec;
+use crate::{TrieBackendStorage, backend::Consolidate};
 
 /// Base collection for key values backend.
 ///
@@ -164,9 +165,26 @@ where
 	backend
 }
 
-impl<H: Hasher> TrieBackend<MemoryDB<H>, H>
+/// Create a new empty instance of in-memory backend, with prefixes.
+pub fn prefixed_new_in_mem<H: Hasher>() -> TrieBackend<PrefixedMemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
+{
+	let db = PrefixedMemoryDB::default();
+	let mut backend = TrieBackend::new(
+		db,
+		empty_trie_root::<Layout<H>>(),
+		None,
+	);
+	backend.insert(sp_std::iter::empty());
+	backend
+}
+
+impl<H, S> TrieBackend<S, H>
+where
+	H: Hasher,
+	H::Out: Codec + Ord,
+	S: Consolidate + TrieBackendStorage<H, Overlay = S> + Clone, 
 {
 	/// Copy the state, with applied updates
 	pub fn update<
@@ -200,7 +218,7 @@ where
 	}
 
 	/// Merge trie nodes into this backend.
-	pub fn update_backend(&self, root: H::Out, changes: MemoryDB<H>) -> Self {
+	pub fn update_backend(&self, root: H::Out, changes: S) -> Self {
 		let mut clone = self.backend_storage().clone();
 		clone.consolidate(changes);
 		Self::new(
@@ -211,7 +229,7 @@ where
 	}
 
 	/// Apply the given transaction to this backend and set the root to the given value.
-	pub fn apply_transaction(&mut self, root: H::Out, transaction: MemoryDB<H>) {
+	pub fn apply_transaction(&mut self, root: H::Out, transaction: S::Overlay) {
 		self.backend_storage_mut().consolidate(transaction);
 		self.essence.set_root(root);
 	}
@@ -222,9 +240,11 @@ where
 	}
 }
 
-impl<H: Hasher> Clone for TrieBackend<MemoryDB<H>, H>
+impl<H, S> Clone for TrieBackend<S, H>
 where
+	H: Hasher,
 	H::Out: Codec + Ord,
+	S: TrieBackendStorage<H> + Clone,
 {
 	fn clone(&self) -> Self {
 		TrieBackend::new(
