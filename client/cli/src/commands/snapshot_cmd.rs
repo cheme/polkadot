@@ -444,11 +444,9 @@ impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
 		let prefixed_storage_key = &mut prefixed_storage_key;
 		trie_state.for_key_values(|child, key, value| {
 			if child != prev_child.as_ref() {
-				println!("TOUCHED CHILD");
 				*prefixed_storage_key = child.map(|ci| ci.prefixed_storage_key().into_inner());
 				*prev_child = child.cloned();
 			}
-			println!("kr: {:?}", key);
 			visitor(
 				prefixed_storage_key.as_ref().map(Vec::as_slice),
 				key,

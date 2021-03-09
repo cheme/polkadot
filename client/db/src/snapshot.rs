@@ -1404,7 +1404,7 @@ impl HistoriedDB {
 		let result = if let Some(v) = self.db.get(column, key.as_slice()) {
 			HistoriedDB::decode_inner(key.as_slice(), v.as_slice(), &self.current_state, self.hvalue_type, &self.nodes_db, &self.cache)?
 		} else {
-			self.cache.as_ref().map(|cache| cache.lock().set_and_commit(key.as_slice(), None));
+			self.cache.as_ref().map(|cache| cache.lock().set_and_commit(key.as_slice(), None)); 
 			None
 		};
 		Ok(result)
@@ -1421,7 +1421,7 @@ impl HistoriedDB {
 		let h_value = HValue::decode_with_context(key, &mut &encoded[..], hvalue_type, nodes_db)
 			.ok_or_else(|| format!("KVDatabase decode error for k {:?}, v {:?}", key, encoded))?;
 		let result = h_value.value(current_state)?;
-		cache.as_ref().map(|cache| cache.lock().set_and_commit(key, Some(h_value)));
+		cache.as_ref().map(|cache| cache.lock().set_and_commit(key, Some(h_value))); 
 		Ok(result)
 	}
 }
@@ -1462,19 +1462,13 @@ impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
 				hvalue_type,
 				&nodes_db,
 			).or_else(|| {
-					println!("decoding fail for k {:?}, v {:?}", k, v);
 					warn!("decoding fail for k {:?}, v {:?}", k, v);
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
 			let v = v.value(&current_state)
 				.expect("Invalid encoded historied value, DB corrupted");
-			let k = k.split_off(prefix_len);
-			println!("kw: {:?}", k);
-			if v.is_none() {
-				println!("EMPTY HVALUE");
-			}
-			v.map(|v| (k, v))
+			v.map(|v| (k.split_off(prefix_len), v))
 		});
 
 		let (previous, iter_child_key) = self.last_child_root_key.take()
