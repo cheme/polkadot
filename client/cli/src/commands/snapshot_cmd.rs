@@ -448,7 +448,7 @@ impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
 				*prefixed_storage_key = child.map(|ci| ci.prefixed_storage_key().into_inner());
 				*prev_child = child.cloned();
 			}
-			println!("kr: {:?} {:?}", key, value);
+			println!("kr: {:?}", key);
 			visitor(
 				prefixed_storage_key.as_ref().map(Vec::as_slice),
 				key,
