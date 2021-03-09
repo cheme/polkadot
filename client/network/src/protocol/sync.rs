@@ -181,6 +181,8 @@ pub struct ChainSync<B: BlockT> {
 	blocks: BlockCollection<B>,
 	/// The best block number in our queue of blocks to import
 	best_queued_number: NumberFor<B>,
+	/// The initial finalized block (do not search common ancestor before it.
+	last_finalized: NumberFor<B>,
 	/// The best block hash in our queue of blocks to import
 	best_queued_hash: B::Hash,
 	/// The role of this node, e.g. light or full
@@ -454,12 +456,15 @@ impl<B: BlockT> ChainSync<B> {
 			required_block_attributes |= BlockAttributes::BODY
 		}
 
+		let last_finalized = client.info().finalized_number;
+
 		ChainSync {
 			client,
 			peers: HashMap::new(),
 			blocks: BlockCollection::new(),
 			best_queued_hash: info.best_hash,
 			best_queued_number: info.best_number,
+			last_finalized,
 			extra_justifications: ExtraRequests::new("justification"),
 			role,
 			required_block_attributes,
@@ -556,8 +561,10 @@ impl<B: BlockT> ChainSync<B> {
 					return Ok(None)
 				}
 
-				// If we are at genesis, just start downloading.
-				let (state, req) = if self.best_queued_number.is_zero() {
+				// If we are at genesis, just start downloading, same for initial finalized block TODO not
+				// sure if correct, should be possible for any finalized block (upadte finalized block
+				// refreshing).
+				let (state, req) = if self.best_queued_number.is_zero() || self.best_queued_number <= self.last_finalized {
 					debug!(
 						target:"sync",
 						"New peer with best hash {} ({}).",
