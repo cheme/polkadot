@@ -269,6 +269,10 @@ pub struct SnapshotImportCmd {
 	#[structopt(parse(from_os_str))]
 	pub input: Option<PathBuf>,
 
+	/// Do we keep snapshot db after import.
+	#[structopt(long)]
+	pub without_snapshot: bool,
+
 	#[structopt(long, value_name = "COUNT")]
 	/// Limit the number of trie states that get build
 	/// from this snapshot, starting from  latest state.
@@ -556,7 +560,7 @@ impl SnapshotImportCmd {
 			backend.commit_operation(op)
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 	
-			if !dest_config.enabled {
+			if self.without_snapshot {
 				// clear snapshot db
 				db.clear_snapshot_db()?;
 			} else {
@@ -625,11 +629,13 @@ impl SnapshotExportCmd {
 			let mut out = std::fs::File::create(path)?;
 			if self.state_only {
 				out.write(&[StateOnly::Yes as u8])?;
-			} else{
+			} else {
 				out.write(&[StateOnly::No as u8])?;
 				let to = to.unwrap_or(finalized_number);
+				let to_hash = default_block; 
 				let from = from.unwrap_or(to);
-				backend.snapshot_sync().export_sync_meta(&mut out, from, to)?;
+				let from_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
+				backend.snapshot_sync().export_sync_meta(&mut out, from, from_hash, to, to_hash)?;
 			}
 			db.export_snapshot(
 				&mut out,
@@ -647,8 +653,10 @@ impl SnapshotExportCmd {
 			} else{
 				out.write(&[StateOnly::No as u8])?;
 				let to = to.unwrap_or(finalized_number);
+				let to_hash = default_block; 
 				let from = from.unwrap_or(to);
-				backend.snapshot_sync().export_sync_meta(&mut out, from, to)?;
+				let from_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
+				backend.snapshot_sync().export_sync_meta(&mut out, from, from_hash, to, to_hash)?;
 			}
 			db.export_snapshot(
 				&mut out,

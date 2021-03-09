@@ -1580,16 +1580,24 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 		&self,
 		mut out: &mut dyn std::io::Write,
 		_from: NumberFor<Block>,
-		_to: NumberFor<Block>,
+		_from_hash: Block::Hash,
+		to: NumberFor<Block>,
+		to_hash: Block::Hash,
 	) -> sp_blockchain::Result<()> {
 		// version
 		out.write(&[0u8]).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot export errror: {:?}", e)),
 		)?;
 
-		// writing whole set (could limit to range in the future).
-		self.0.lock().encode_to(&mut out);
-		
+		let mut epoch = self.0.lock().clone();
+		epoch.prune_unfinalized(to);
+
+		epoch.encode_to(&mut out);
+		let weight: sp_consensus_babe::BabeBlockWeight = crate::aux_schema::load_block_weight(&self.1, to_hash)?
+			.expect("No babe weight");
+		weight.encode_to(&mut out);
+		to_hash.encode_to(&mut out);
+
 		Ok(())
 	}
 
@@ -1617,6 +1625,21 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 			|values| (
 				self.1.insert_aux(values, &[]).unwrap()
 			)
+		);
+		let total_weight: sp_consensus_babe::BabeBlockWeight = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+		let last_hash: Block::Hash = Decode::decode(&mut reader).map_err(|e|
+			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
+		)?;
+		crate::aux_schema::write_block_weight::<Block::Hash, _, _>(
+			last_hash,
+			total_weight,
+			|values| {
+				let values: Vec<(&[u8], &[u8])> = values.iter()
+					.map(|(k, v)| (k.as_slice(), *v)).collect();
+				self.1.insert_aux(values.as_slice(), &[]).unwrap()
+			},
 		);
 
 		Ok(())

@@ -1121,7 +1121,9 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 		&self,
 		mut out: &mut dyn std::io::Write,
 		_from: NumberFor<Block>,
+		_from_hash: Block::Hash,
 		_to: NumberFor<Block>,
+		_to_hash: Block::Hash,
 	) -> sp_blockchain::Result<()> {
 		// version
 		out.write(&[0u8]).map_err(|e|

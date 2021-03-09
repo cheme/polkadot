@@ -187,6 +187,7 @@ impl<'a> ExportImportRevertExecutor<'a> {
 			"-d",
 			self.base_path.path().to_str().unwrap(),
 			"--pruning=archive",
+			"--without-snapshot",
 //			"--wasm_execution=Compiled",
 			"--log=info",
 // "--state-only",
@@ -307,4 +308,8 @@ fn export_import_snapshot() {
 
 	// Binary and binary should work.
 	executor.run_snapshot();
+
+	common::run_dev_node_for_a_while(base_path.path());
+
+	// TODO regex for new block produce so ok import.
 }

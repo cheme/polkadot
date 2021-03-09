@@ -551,7 +551,9 @@ pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 		&self,
 		out: &mut dyn std::io::Write,
 		from: NumberFor<Block>,
+		from_hash: Block::Hash,
 		to: NumberFor<Block>,
+		to_hash: Block::Hash,
 	) -> sp_blockchain::Result<()>;
 
 	/// Import sync non state related persisting data.
@@ -567,7 +569,9 @@ impl<Block: BlockT> SnapshotSync<Block> for () {
 		&self,
 		_out: &mut dyn std::io::Write,
 		_from: NumberFor<Block>,
+		_from_hash: Block::Hash,
 		_to: NumberFor<Block>,
+		_to_hash: Block::Hash,
 	) -> sp_blockchain::Result<()> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}

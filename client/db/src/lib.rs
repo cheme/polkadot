@@ -724,7 +724,9 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		&self,
 		mut out_dyn: &mut dyn std::io::Write,
 		from: NumberFor<Block>,
+		from_hash: Block::Hash,
 		to: NumberFor<Block>,
+		to_hash: Block::Hash,
 	) -> sp_blockchain::Result<()> {
 		// dyn to impl
 		let out = &mut out_dyn;
@@ -759,7 +761,9 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			registered_snapshot_sync[i].export_sync_meta(
 				out_dyn,
 				from,
+				from_hash.clone(),
 				to,
+				to_hash.clone(),
 			)?;
 		}
 		Ok(())
