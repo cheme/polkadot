@@ -802,6 +802,7 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			let parent_hash = header.parent_hash().clone();
 			let number = header.number().clone();
 			println!("finalized from import: {:?} {:?}", number, hash);
+			self.update_meta(hash.clone(), number.clone(), true, true);
 			// blocks are keyed by number + hash.
 			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
 	
@@ -814,6 +815,7 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 
 			transaction.set_from_vec(columns::HEADER, &lookup_key, header.encode());
 			i += One::one();
+
 			transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key.clone());
 			transaction.set_from_vec(columns::META, meta_keys::FINALIZED_BLOCK, lookup_key);
 
