@@ -1470,7 +1470,7 @@ impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
 			let v = v.value(&current_state)
 				.expect("Invalid encoded historied value, DB corrupted");
 			let k = k.split_off(prefix_len);
-			println!("kw: {:?}", k);
+			println!("kw: {:?} {:?}", k, v.as_ref().unwrap());
 			if v.is_none() {
 				println!("EMPTY HVALUE");
 			}
