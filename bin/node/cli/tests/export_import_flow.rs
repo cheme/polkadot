@@ -138,13 +138,12 @@ impl<'a> ExportImportRevertExecutor<'a> {
 
 	/// TODO
 	fn run_snapshot_export(&mut self) {
-		let dir = TempDir::new_in(self.base_path.clone()).unwrap();
 		// hardcoded
 		let arguments: Vec<&str> = vec![
 			"snapshot-export",
 			"--dev",
 			"-d",
-			dir.path().to_str().unwrap(),
+			self.base_path.path().to_str().unwrap(),
 			"--pruning=archive",
 //			"--wasm_execution=Compiled",
 			"--log=info",
@@ -180,13 +179,13 @@ impl<'a> ExportImportRevertExecutor<'a> {
 
 	/// Runs the `import-blocks` command, asserting that an error was found or
 	/// not depending on `expected_to_fail`.
-	fn run_snapshot_import(&mut self) {
+	fn run_snapshot_import(&mut self, dir: &TempDir) {
 		// hardcoded
 		let arguments: Vec<&str> = vec![
 			"snapshot-import",
 			"--dev",
 			"-d",
-			self.base_path.path().to_str().unwrap(),
+			dir.path().to_str().unwrap(),
 			"--pruning=archive",
 			"--without-snapshot",
 //			"--wasm_execution=Compiled",
@@ -262,9 +261,11 @@ impl<'a> ExportImportRevertExecutor<'a> {
 	}
 
 	/// Helper function that runs the snapshot scenario.
-	fn run_snapshot(&mut self) {
+	fn run_snapshot(&mut self) -> TempDir {
 		self.run_snapshot_export();
-		self.run_snapshot_import();
+		let dir = TempDir::new_in(self.base_path.clone()).unwrap();
+		self.run_snapshot_import(&dir);
+		dir
 	}
 
 }
@@ -308,9 +309,9 @@ fn export_import_snapshot() {
 	);
 
 	// Binary and binary should work.
-	executor.run_snapshot();
+	let import_dir = executor.run_snapshot();
 
-	common::run_dev_node_for_a_while(base_path.path());
+	common::run_dev_node_for_a_while(import_dir.path());
 
 	// TODO regex for new block produce so ok import.
 }
