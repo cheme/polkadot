@@ -1431,11 +1431,12 @@ fn prune_finalized<Block, Client>(
 			.slot()
 	};
 
-	epoch_changes.prune_finalized(
+	epoch_changes.prune_finalized_ignore(
 		descendent_query(&*client),
 		&info.finalized_hash,
 		info.finalized_number,
 		finalized_slot,
+		true, // TODO true only after a import_sync
 	).map_err(|e| ConsensusError::ClientImport(format!("{:?}", e)))?;
 
 	Ok(())

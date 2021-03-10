@@ -396,6 +396,25 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 		number: Number,
 		slot: E::Slot,
 	) -> Result<(), fork_tree::Error<D::Error>> {
+		self.prune_finalized_ignore(
+			descendent_of_builder,
+			hash,
+			number,
+			slot,
+			false,
+		)
+	}
+
+	/// `prune_finalized`, allows to ignore missing parents.
+	pub fn prune_finalized_ignore<D: IsDescendentOfBuilder<Hash>>(
+		&mut self,
+		descendent_of_builder: D,
+		hash: &Hash,
+		number: Number,
+		slot: E::Slot,
+		ignore_not_found: bool,
+	) -> Result<(), fork_tree::Error<D::Error>> {
+	
 		let is_descendent_of = descendent_of_builder
 			.build_is_descendent_of(None);
 
@@ -409,11 +428,12 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 		// prune any epochs which could not be _live_ as of the children of the
 		// finalized block, i.e. re-root the fork tree to the oldest ancestor of
 		// (hash, number) where epoch.end_slot() >= finalized_slot
-		let removed = self.inner.prune(
+		let removed = self.inner.prune_ignore(
 			hash,
 			&number,
 			&is_descendent_of,
 			&predicate,
+			ignore_not_found,
 		)?;
 
 		for (hash, number, _) in removed {
