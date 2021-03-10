@@ -138,12 +138,13 @@ impl<'a> ExportImportRevertExecutor<'a> {
 
 	/// TODO
 	fn run_snapshot_export(&mut self) {
+		let dir = TempDir::new_in(self.base_path.clone()).unwrap();
 		// hardcoded
 		let arguments: Vec<&str> = vec![
 			"snapshot-export",
 			"--dev",
 			"-d",
-			self.base_path.path().to_str().unwrap(),
+			dir.path().to_str().unwrap(),
 			"--pruning=archive",
 //			"--wasm_execution=Compiled",
 			"--log=info",
