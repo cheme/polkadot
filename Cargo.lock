@@ -8971,7 +8971,6 @@ dependencies = [
  "sp-std",
  "sp-trie",
  "thiserror",
- "trie-db",
  "trie-root",
 ]
 

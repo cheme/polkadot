@@ -248,9 +248,11 @@ impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackendEssence<S, H> where H::Out:
 		let mut iter = move |db| -> sp_std::result::Result<(), Box<TrieError<H::Out>>> {
 			let trie = TrieDB::<H>::new(db, root)?;
 
-			for x in TrieDBIterator::new_prefixed(&trie, prefix)? {
+			// TODO variant with no value iterator
+			for x in sp_trie::new_prefixed_trie_db_iterator(&trie, prefix)? {
 				let (key, value) = x?;
 
+				unimplemented!("fetch values whene needed: use util from sp_trie");
 				debug_assert!(key.starts_with(prefix));
 
 				f(&key, &value);

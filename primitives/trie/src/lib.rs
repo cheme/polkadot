@@ -63,6 +63,7 @@ impl<H: Hasher> TrieConfiguration for Layout<H> {
 		A: AsRef<[u8]> + Ord,
 		B: AsRef<[u8]>,
 	{
+		unimplemented!("TODO map value hash on inter");
 		trie_root::trie_root_no_extension::<H, TrieStream, _, _, _>(input)
 	}
 
@@ -71,6 +72,7 @@ impl<H: Hasher> TrieConfiguration for Layout<H> {
 		A: AsRef<[u8]> + Ord,
 		B: AsRef<[u8]>,
 	{
+		unimplemented!("TODO map value hash on inter");
 		trie_root::unhashed_trie_no_extension::<H, TrieStream, _, _, _>(input)
 	}
 
@@ -109,9 +111,9 @@ pub type GenericMemoryDB<H, KF> = memory_db::MemoryDB<
 >;
 
 /// Persistent trie database read-access interface for the a given hasher.
-pub type TrieDB<'a, L> = trie_db::TrieDB<'a, L>;
+pub struct TrieDB<'a, L: TrieLayout> (trie_db::TrieDB<'a, L>);
 /// Persistent trie database write-access interface for the a given hasher.
-pub type TrieDBMut<'a, L> = trie_db::TrieDBMut<'a, L>;
+pub struct TrieDBMut<'a, L: TrieLayout> (trie_db::TrieDBMut<'a, L>);
 /// Querying interface, as in `trie_db` but less generic.
 pub type Lookup<'a, L, Q> = trie_db::Lookup<'a, L, Q>;
 /// Hash type for a trie layout.
@@ -467,6 +469,142 @@ mod trie_constants {
 	pub const LEAF_PREFIX_MASK: u8 = 0b_01 << 6;
 	pub const BRANCH_WITHOUT_MASK: u8 = 0b_10 << 6;
 	pub const BRANCH_WITH_MASK: u8 = 0b_11 << 6;
+}
+
+impl<'a, L: TrieLayout> TrieDB<'a, L> {
+	pub fn new(
+		db: &'a dyn hash_db::HashDBRef<L::Hash, DBValue>,
+		root: &'a TrieHash<L>
+	) -> trie_db::Result<Self, TrieHash<L>, CError<L>> {
+		Ok(TrieDB(trie_db::TrieDB::new(db, root)?))
+	}
+}
+
+impl<'db, L: TrieLayout> Trie<L> for TrieDB<'db, L> {
+	fn root(&self) -> &TrieHash<L> {
+		self.0.root()
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	fn contains(&self, key: &[u8]) -> trie_db::Result<bool, TrieHash<L>, CError<L>> {
+		self.0.contains(key)
+	}
+
+	fn get<'a, 'key>(
+		&'a self,
+		key: &'key [u8],
+	) -> trie_db::Result<Option<DBValue>, TrieHash<L>, CError<L>> where 'a: 'key {
+		let result = self.0.get(key)?;
+		if let Some(value) = result.as_ref() {
+			if value.len() >= L::Hash::LENGTH {
+				unimplemented!("fetch value");
+			}
+		}
+		Ok(result)
+	}
+
+	fn get_with<'a, 'key, Q: Query<L::Hash>>(
+		&'a self,
+		key: &'key [u8],
+		query: Q
+	) -> trie_db::Result<Option<Q::Item>, TrieHash<L>, CError<L>> where 'a: 'key {
+		self.0.get_with(key, query)
+	}
+
+	/// Returns a depth-first iterator over the elements of trie.
+	fn iter<'a>(&'a self) -> trie_db::Result<
+		Box<dyn trie_db::TrieIterator<L, Item = trie_db::TrieItem<TrieHash<L>, CError<L> >> + 'a>,
+		TrieHash<L>,
+		CError<L>
+	> {
+		unimplemented!("TODO map fetch value and create a key_iter only variant that don't fetch");
+	}
+}
+
+impl<'a, L: TrieLayout> TrieDBMut<'a, L> {
+	/// TODO
+	pub fn new(
+		db: &'a mut dyn hash_db::HashDB<L::Hash, DBValue>,
+		root: &'a mut TrieHash<L>,
+	) -> Self {
+		TrieDBMut(trie_db::TrieDBMut::new(db, root))
+	}
+
+	/// TODO
+	pub fn from_existing(
+		db: &'a mut dyn hash_db::HashDB<L::Hash, DBValue>,
+		root: &'a mut TrieHash<L>,
+	) -> trie_db::Result<Self, TrieHash<L>, CError<L>> {
+		Ok(TrieDBMut(trie_db::TrieDBMut::from_existing(db, root)?))
+	}
+
+	/// TODO
+	pub fn commit(&mut self) {
+		// TODO also commit in mem values.
+		self.0.commit()
+	}
+}
+
+impl<'db, L: TrieLayout> TrieMut<L> for TrieDBMut<'db, L> {
+	fn root(&mut self) -> &TrieHash<L> {
+		self.0.root()
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	fn contains(&self, key: &[u8]) -> trie_db::Result<bool, TrieHash<L>, CError<L>> {
+		self.0.contains(key)
+	}
+
+	fn get<'a, 'key>(
+		&'a self,
+		key: &'key [u8],
+	) -> trie_db::Result<Option<DBValue>, TrieHash<L>, CError<L>> where 'a: 'key {
+		let result = self.0.get(key)?;
+		if let Some(value) = result.as_ref() {
+			if value.len() >= L::Hash::LENGTH {
+				unimplemented!("fetch value");
+			}
+		}
+		Ok(result)
+	}
+
+	fn insert(
+		&mut self,
+		key: &[u8],
+		value: &[u8],
+	) -> trie_db::Result<Option<DBValue>, TrieHash<L>, CError<L>> {
+		let value = if value.len() >= L::Hash::LENGTH {
+			unimplemented!("insert and hash");
+		} else {
+			value
+		};
+		self.0.insert(key, value)
+	}
+
+	fn remove(&mut self, key: &[u8]) -> trie_db::Result<Option<DBValue>, TrieHash<L>, CError<L>> {
+		let result = self.0.remove(key)?;
+		if let Some(value) = result.as_ref() {
+			if value.len() >= L::Hash::LENGTH {
+				unimplemented!("fetch value"); // Or use a remove with no result
+			}
+		}
+		Ok(result)
+	}
+}
+
+/// TODO
+pub fn new_prefixed_trie_db_iterator<'a, L: TrieLayout>(
+	trie: &'a TrieDB<L>,
+	prefix: &[u8],
+) -> trie_db::Result<TrieDBIterator<'a, L>, TrieHash<L>, CError<L>> {
+	let iter = TrieDBIterator::new_prefixed(&trie.0, prefix)?;
+	unimplemented!("TODO map fetch value and return different result")
 }
 
 #[cfg(test)]
