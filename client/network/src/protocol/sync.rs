@@ -553,7 +553,7 @@ impl<B: BlockT> ChainSync<B> {
 					);
 					self.peers.insert(who.clone(), PeerSync {
 						peer_id: who,
-						common_number: self.best_queued_number,
+						common_number: std::cmp::max(self.best_queued_number, self.last_finalized),
 						best_hash,
 						best_number,
 						state: PeerSyncState::Available,
@@ -604,7 +604,7 @@ impl<B: BlockT> ChainSync<B> {
 				self.pending_requests.add(&who);
 				self.peers.insert(who.clone(), PeerSync {
 					peer_id: who,
-					common_number: Zero::zero(),
+					common_number: self.last_finalized,
 					best_hash,
 					best_number,
 					state,
@@ -902,10 +902,10 @@ impl<B: BlockT> ChainSync<B> {
 									// We've made progress on this chain since the search was started.
 									// Opportunistically set common number to updated number
 									// instead of the one that started the search.
-									peer.common_number = self.best_queued_number;
+									peer.common_number = std::cmp::max(self.best_queued_number, self.last_finalized);
 								}
 								else if peer.common_number < *current {
-									peer.common_number = *current;
+									peer.common_number = std::cmp::max(*current, self.last_finalized);
 								}
 							}
 							if matching_hash.is_none() && current.is_zero() {
@@ -1093,8 +1093,9 @@ impl<B: BlockT> ChainSync<B> {
 
 			match result {
 				Ok(BlockImportResult::ImportedKnown(number, who)) => {
+					let last_finalized = self.last_finalized.clone();
 					if let Some(peer) = who.and_then(|p| self.peers.get_mut(&p)) {
-						peer.update_common_number(number);
+						peer.update_common_number(std::cmp::max(number, last_finalized));
 					}
 				}
 				Ok(BlockImportResult::ImportedUnknown(number, aux, who)) => {
@@ -1125,8 +1126,9 @@ impl<B: BlockT> ChainSync<B> {
 						}
 					}
 
+					let last_finalized = self.last_finalized.clone();
 					if let Some(peer) = who.and_then(|p| self.peers.get_mut(&p)) {
-						peer.update_common_number(number);
+						peer.update_common_number(std::cmp::max(number, last_finalized));
 					}
 				},
 				Err(BlockImportError::IncompleteHeader(who)) => {
@@ -1237,7 +1239,7 @@ impl<B: BlockT> ChainSync<B> {
 					new_common_number,
 					peer.best_number,
 				);
-				peer.common_number = new_common_number;
+				peer.common_number = std::cmp::max(new_common_number, self.last_finalized);
 			}
 		}
 		self.pending_requests.set_all();
@@ -1477,11 +1479,11 @@ impl<B: BlockT> ChainSync<B> {
 		// is either one further ahead or it's the one they just announced, if we know about it.
 		if is_best {
 			if known && self.best_queued_number >= number {
-				peer.update_common_number(number);
+				peer.update_common_number(std::cmp::max(number, self.last_finalized));
 			} else if announce.header.parent_hash() == &self.best_queued_hash
 				|| known_parent && self.best_queued_number >= number
 			{
-				peer.update_common_number(number - One::one());
+				peer.update_common_number(std::cmp::max(number - One::one(), self.last_finalized));
 			}
 		}
 		self.pending_requests.add(&who);
