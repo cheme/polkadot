@@ -163,13 +163,14 @@ impl<Block: BlockT, T: CacheItemT, S: Storage<Block, T>> ListCache<Block, T, S> 
 		let head = if at.number <= self.best_finalized_block.number {
 			// if the block is older than the best known finalized block
 			// => we're should search for the finalized value
-
+/* TODO initialized the storage with best initialize block at launch??
+ * or write a proper import_sync for change_trie
 			// BUT since we're not guaranteeing to provide correct values for forks
 			// behind the finalized block, check if the block is finalized first
 			if !chain::is_finalized_block(&self.storage, &at, Bounded::max_value())? {
 				return Err(ClientError::NotInFinalizedChain);
 			}
-
+*/
 			self.best_finalized_entry.as_ref()
 		} else if self.unfinalized.is_empty() {
 			// there are no unfinalized entries
@@ -579,6 +580,14 @@ impl<Block: BlockT, T: CacheItemT, S: Storage<Block, T>> ListCache<Block, T, S> 
 		}
 
 		Ok(None)
+	}
+
+	pub(crate) fn force_last_finalize(
+		&mut self,
+		parent_block: &ComplexBlockId<Block>,
+	) {
+		println!("set best inner {:?}", parent_block);
+		self.best_finalized_block = parent_block.clone();
 	}
 }
 

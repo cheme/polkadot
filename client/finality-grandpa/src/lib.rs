@@ -62,7 +62,7 @@ use futures::{
 };
 use log::{debug, error, info};
 use sc_client_api::{
-	backend::{AuxStore, Backend, SnapshotSync},
+	backend::{AuxStore, Backend, SnapshotSync, RangeSnapshot},
 	LockImportRun, BlockchainEvents, CallExecutor,
 	ExecutionStrategy, Finalizer, TransactionFor, ExecutorProvider,
 };
@@ -1120,10 +1120,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 	fn export_sync_meta(
 		&self,
 		mut out: &mut dyn std::io::Write,
-		_from: NumberFor<Block>,
-		_from_hash: Block::Hash,
-		_to: NumberFor<Block>,
-		_to_hash: Block::Hash,
+		_range: RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()> {
 		// version
 		out.write(&[0u8]).map_err(|e|
@@ -1136,9 +1133,17 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 		Ok(())
 	}
 
+	fn import_sync_head(
+		&self,
+		_encoded: &mut dyn std::io::Read,
+	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>> {
+		Ok(None)
+	}
+
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
+		_range: &RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()> {
 		let mut buf = [0];
 		// version
@@ -1165,5 +1170,4 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 
 		Ok(())
 	}
-	
 }

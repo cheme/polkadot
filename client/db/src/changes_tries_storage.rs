@@ -208,6 +208,16 @@ impl<Block: BlockT> DbChangesTrieStorage<Block> {
 		}).with_new_config(Some(new_configuration)))
 	}
 
+	/// Force last finalize to a certain header without further checks.
+	/// This allows importing from a trusted source without checking
+	/// history.
+	pub fn force_last_finalize(
+		&self,
+		parent_block: &ComplexBlockId<Block>,
+	) {
+		self.cache.0.write().force_last_finalize(parent_block);
+	}
+
 	/// Called when block is finalized.
 	pub fn finalize(
 		&self,

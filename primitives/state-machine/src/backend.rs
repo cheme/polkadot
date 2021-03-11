@@ -406,6 +406,8 @@ impl<'a, B: Backend<H>, H: Hasher> BackendRuntimeCode<'a, B, H> where H::Out: En
 			.flatten()
 			.ok_or("`:code` hash not found")?
 			.encode();
+			#[cfg(feature = "std")]
+		println!("HAS a RUNTIME COD");
 		let heap_pages = self.backend.storage(well_known_keys::HEAP_PAGES)
 			.ok()
 			.flatten()

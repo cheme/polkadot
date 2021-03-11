@@ -543,6 +543,15 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	fn get_import_lock(&self) -> &RwLock<()>;
 }
 
+/// Range covered by snapshot.
+#[derive(Clone)]
+pub struct RangeSnapshot<Block: BlockT> {
+	pub from: NumberFor<Block>,
+	pub from_hash: Block::Hash,
+	pub to: NumberFor<Block>,
+	pub to_hash: Block::Hash,
+}
+
 /// Component that need to manage some export and import state
 /// when using snapshots.
 pub trait SnapshotSync<Block: BlockT>: Send + Sync {
@@ -550,17 +559,21 @@ pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 	fn export_sync_meta(
 		&self,
 		out: &mut dyn std::io::Write,
-		from: NumberFor<Block>,
-		from_hash: Block::Hash,
-		to: NumberFor<Block>,
-		to_hash: Block::Hash,
+		range: RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()>;
+
+	/// Read head, this could be in a separate trait.
+	fn import_sync_head(
+		&self,
+		encoded: &mut dyn std::io::Read,
+	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>>;
 
 	/// Import sync non state related persisting data.
 	/// This cleans existing state.
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
+		range: &RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()>;
 }
 
@@ -568,19 +581,22 @@ impl<Block: BlockT> SnapshotSync<Block> for () {
 	fn export_sync_meta(
 		&self,
 		_out: &mut dyn std::io::Write,
-		_from: NumberFor<Block>,
-		_from_hash: Block::Hash,
-		_to: NumberFor<Block>,
-		_to_hash: Block::Hash,
+		_range: RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}
 
-	/// Import sync non state related persisting data.
-	/// This cleans existing state.
+	fn import_sync_head(
+		&self,
+		_encoded: &mut dyn std::io::Read,
+	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>> {
+		Ok(None)
+	}
+
 	fn import_sync_meta(
 		&self,
 		_encoded: &mut dyn std::io::Read,
+		_range: &RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}

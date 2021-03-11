@@ -21,7 +21,7 @@ use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, 
 use crate::CliConfiguration;
 use log::info;
 use sc_service::config::DatabaseConfig;
-use sc_client_api::{SnapshotDb, StateBackend, StateVisitor, DatabaseError};
+use sc_client_api::{SnapshotDb, StateBackend, StateVisitor, DatabaseError, RangeSnapshot};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use sp_runtime::generic::BlockId;
@@ -510,56 +510,64 @@ impl SnapshotImportCmd {
 		let reader = &mut file;
 		let mut buf = [0];
 		reader.read_exact(&mut buf[..1])?;
-		match buf[0] {
-			b if b == StateOnly::No as u8 => backend.snapshot_sync().import_sync_meta(reader)?,
-			b if b == StateOnly::Yes as u8 => (),
+		let range = match buf[0] {
+			b if b == StateOnly::No as u8 => {
+				let range = backend.snapshot_sync().import_sync_head(reader)?.expect("head defined in client");
+				backend.snapshot_sync().import_sync_meta(reader, &range)?;
+				range
+			},
+			b if b == StateOnly::Yes as u8 => unimplemented!("TODO param?? or remove param: removing this byte seems good"),
 			_ => panic!("Invalid first byte for snapshot"),
-		}
+		};
 
 		// TODO read_import def seems rather useless, and all logic afterwards should be move to
 		// snapshot.rs
 		let snapshot_def = db.read_import_def(reader, &config)?;
+
 		if snapshot_def.is_flat {
-			let (finalized_hash, finalized_number) = if let Some(start_block) = dest_config.start_block.as_ref() {
-				unimplemented!("TODO fetch");
+			let (state_hash) = if let Some(start_block) = dest_config.start_block.as_ref() {
+				unimplemented!("TODO fetch or better remove param");
 			} else {
-				// injected with 'import_sync_meta'.
-				let chain_info = backend.blockchain().info();
-				(chain_info.finalized_hash, chain_info.finalized_number)
+				debug_assert!(range.from_hash == range.to_hash);
+				range.to_hash.clone()
 			};
 
 			// init snapshot db
-			db.import_snapshot_db(reader, &config, &snapshot_def, &finalized_hash)?;
+			db.import_snapshot_db(reader, &config, &snapshot_def, &state_hash)?;
 
-			let header = backend.blockchain().header(BlockId::Hash(finalized_hash.clone()))?
+			// header is imported by 'import_sync_meta'.
+			let header = backend.blockchain().header(BlockId::Hash(state_hash.clone()))?
 				.expect("Missing header");
 			let expected_root = header.state_root().clone();
+			println!("expected_rot {:?}", expected_root);
 			let mut op = backend.begin_operation()
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 			backend.begin_state_operation(&mut op, BlockId::Hash(Default::default()))
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 			info!("Initializing import block/state (header-hash: {})",
-				finalized_hash,
+				state_hash,
 			);
-			let data = db.state_iter_at(&finalized_hash, Some(&config))?;
+			let data = db.state_iter_at(&state_hash, Some(&config))?;
 			use sc_client_api::BlockImportOperation;
-			let state_root = op.inject_finalized_state(&finalized_hash, data)
+			let state_root = op.inject_finalized_state(&state_hash, data)
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 			// TODO get state root from header and pass as param
 			if expected_root != state_root {
 				panic!("Unexpected root {:?}, in header {:?}.", state_root, expected_root);
 			}
-			/* only state import, headers are already written.
-				operation.op.set_block_data(
-				import_headers.post().clone(),
-				body,
-				justification,
-				leaf_state,
-			)?;
-			*/
+			println!("bef_setblo");
+			// only state import, but need to have pending block to commit actual data.
+			op.set_block_data(
+				header,
+				None,
+				None,
+				sc_client_api::NewBlockState::Final,
+			).map_err(|e| DatabaseError(Box::new(e)))?;
+			println!("setted!!");
 			backend.commit_operation(op)
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 	
+			println!("ocmmited!!");
 			if self.without_snapshot {
 				// clear snapshot db
 				db.clear_snapshot_db()?;
@@ -632,10 +640,14 @@ impl SnapshotExportCmd {
 			} else {
 				out.write(&[StateOnly::No as u8])?;
 				let to = to.unwrap_or(finalized_number);
-				let to_hash = default_block; 
-				let from = from.unwrap_or(to);
-				let from_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
-				backend.snapshot_sync().export_sync_meta(&mut out, from, from_hash, to, to_hash)?;
+				let range = RangeSnapshot {
+					to,
+					to_hash: default_block,
+					from: from.unwrap_or(to),
+					from_hash: backend.blockchain().hash(to)?
+						.expect("Block number out of range."),
+				};
+				backend.snapshot_sync().export_sync_meta(&mut out, range)?;
 			}
 			db.export_snapshot(
 				&mut out,
@@ -653,10 +665,14 @@ impl SnapshotExportCmd {
 			} else{
 				out.write(&[StateOnly::No as u8])?;
 				let to = to.unwrap_or(finalized_number);
-				let to_hash = default_block; 
-				let from = from.unwrap_or(to);
-				let from_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
-				backend.snapshot_sync().export_sync_meta(&mut out, from, from_hash, to, to_hash)?;
+				let range = RangeSnapshot {
+					to,
+					to_hash: default_block,
+					from: from.unwrap_or(to),
+					from_hash: backend.blockchain().hash(to)?
+						.expect("Block number out of range."),
+				};
+				backend.snapshot_sync().export_sync_meta(&mut out, range)?;
 			}
 			db.export_snapshot(
 				&mut out,

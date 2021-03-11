@@ -167,6 +167,17 @@ impl<Block: BlockT> DbCache<Block> {
 			&self.best_finalized_block
 		)
 	}
+
+	pub(crate) fn force_last_finalize(
+		&mut self,
+		parent_block: &ComplexBlockId<Block>,
+	) {
+		println!("set best {:?}", parent_block);
+		self.best_finalized_block = parent_block.clone();
+		self.cache_at.iter_mut().for_each(|(_k, cache)|
+			cache.force_last_finalize(parent_block)
+		);
+	}
 }
 
 // This helper is needed because otherwise the borrow checker will require to

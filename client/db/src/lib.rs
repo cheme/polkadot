@@ -96,7 +96,7 @@ use log::{trace, debug, warn};
 use sc_client_api::{
 	UsageInfo, MemoryInfo, IoInfo, MemorySize,
 	backend::{NewBlockState, PrunableStateChangesTrieStorage, ProvideChtRoots,
-		SnapshotSync},
+		SnapshotSync, RangeSnapshot},
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
 };
 use sp_blockchain::{
@@ -723,10 +723,7 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 	fn export_sync_meta(
 		&self,
 		mut out_dyn: &mut dyn std::io::Write,
-		from: NumberFor<Block>,
-		from_hash: Block::Hash,
-		to: NumberFor<Block>,
-		to_hash: Block::Hash,
+		range: RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()> {
 		// dyn to impl
 		let out = &mut out_dyn;
@@ -736,16 +733,16 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		)?;
 		// info to init 'Meta' (need to allow read_meta and all pointing to to)
 		//let to_hash = self.hash(to)?;
-		to.encode_to(out);
+		range.to.encode_to(out);
 		//to_hash.encode_to(out);
 		// get range
-		let nb = to - from;
+		let nb = range.to - range.from;
 		nb.encode_to(out);
 		// headers (TODO consider removing digest??)
 		// need to feed LeafSet::read_from_db (just insert in order)
 		// and headers/blockids mapping (same)
-		let mut i = from;
-		while i <= to {
+		let mut i = range.from;
+		while i <= range.to {
 			let header: Block::Header = self.header(BlockId::Number(i))?
 				.ok_or_else(|| sp_blockchain::Error::Backend(
 					format!("Header missing at {:?}", i),
@@ -760,19 +757,16 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		for i in 0..nb {
 			registered_snapshot_sync[i].export_sync_meta(
 				out_dyn,
-				from,
-				from_hash.clone(),
-				to,
-				to_hash.clone(),
+				range.clone(),
 			)?;
 		}
 		Ok(())
 	}
 
-	fn import_sync_meta(
+	fn import_sync_head(
 		&self,
 		encoded: &mut dyn std::io::Read,
-	) -> sp_blockchain::Result<()> {
+	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>> {
 		let mut buf = [0];
 		// version
 		encoded.read_exact(&mut buf[..1]).map_err(|e|
@@ -782,27 +776,40 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			b if b == 0 => (),
 			_ => return Err(sp_blockchain::Error::Backend("Invalid snapshot version.".into())),
 		}
+		println!("get ovarsion");
 		let mut reader = IoReader(encoded);
 		let to: NumberFor<Block> = Decode::decode(&mut reader).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 		)?;
+		println!("to {:?}", to);
 		/*let to_hash: Block::Hash = Decode::decode(&mut reader).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 		)?;*/
 		let nb: NumberFor<Block> = Decode::decode(&mut reader).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 		)?;
-		let mut i = to - nb;
+		let from = to - nb;
+
+		let mut i = from.clone();
+		let mut range = RangeSnapshot {
+			from,
+			from_hash: Default::default(),
+			to,
+			to_hash: Default::default(),
+		};
+
+
+		let mut first = true;
+
 		while i <= to {
 			let mut transaction = Default::default();
 			let header: Block::Header = Decode::decode(&mut reader).map_err(|e|
 				sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 			)?;
+			range.to_hash = header.hash().clone();
 			let hash = header.hash();
 			let parent_hash = header.parent_hash().clone();
 			let number = header.number().clone();
-			self.update_meta(hash.clone(), number.clone(), true, true);
-			// blocks are keyed by number + hash.
 			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
 
 			utils::insert_hash_to_key_mapping(
@@ -813,10 +820,26 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			)?;
 
 			transaction.set_from_vec(columns::HEADER, &lookup_key, header.encode());
-			i += One::one();
 
-			transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key.clone());
-			transaction.set_from_vec(columns::META, meta_keys::FINALIZED_BLOCK, lookup_key);
+			if first {
+				// add parent of i as best and finalize (next steps would be to import this block.
+				let number = i - One::one();
+				range.from_hash = header.hash().clone();
+				let hash = header.parent_hash().clone();
+				let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
+				utils::insert_hash_to_key_mapping(
+					&mut transaction,
+					columns::KEY_LOOKUP,
+					number,
+					hash,
+				)?;
+
+				self.update_meta(hash.clone(), number.clone(), true, true);
+				transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key.clone());
+				transaction.set_from_vec(columns::META, meta_keys::FINALIZED_BLOCK, lookup_key);
+				first = false;
+			}
+			i += One::one();
 			let mut leaves = self.leaves.write();
 			let _displaced_leaf = leaves.import(hash, number, parent_hash);
 			leaves.prepare_transaction(&mut transaction, columns::META, meta_keys::LEAF_PREFIX);
@@ -824,6 +847,17 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			self.db.commit(transaction)?;
 		}
 
+
+		Ok(Some(range))
+	}
+
+	fn import_sync_meta(
+		&self,
+		encoded: &mut dyn std::io::Read,
+		range: &RangeSnapshot<Block>,
+	) -> sp_blockchain::Result<()> {
+
+		let mut reader = IoReader(encoded);
 		// registered components
 		let registered_snapshot_sync = self.registered_snapshot_sync.read();
 		let expected = registered_snapshot_sync.len();
@@ -837,6 +871,7 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		for i in 0..expected {
 			registered_snapshot_sync[i].import_sync_meta(
 				reader.0,
+				range,
 			)?;
 		}
 		Ok(())
@@ -858,6 +893,7 @@ pub struct BlockImportOperation<Block: BlockT> {
 	finalized_blocks: Vec<(BlockId<Block>, Option<Justification>)>,
 	set_head: Option<BlockId<Block>>,
 	commit_state: bool,
+	forced_import_finalized: bool,
 }
 
 impl<Block: BlockT> BlockImportOperation<Block> {
@@ -949,6 +985,7 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 		self.db_updates = transaction;
 		self.changes_trie_config_update = Some(changes_trie_config);
 
+		self.forced_import_finalized = true;
 		self.commit_state = true;
 		Ok(root)
 	}
@@ -1280,6 +1317,7 @@ impl<Block: BlockT> Backend<Block> {
 		transaction: &mut Transaction<DbHash>,
 		route_to: Block::Hash,
 		best_to: (NumberFor<Block>, Block::Hash),
+		forced_import_finalized: bool,
 	) -> ClientResult<(Vec<Block::Hash>, Vec<Block::Hash>)> {
 		let mut enacted = Vec::default();
 		let mut retracted = Vec::default();
@@ -1288,7 +1326,7 @@ impl<Block: BlockT> Backend<Block> {
 		let meta = self.blockchain.meta.read();
 
 		// cannot find tree route with empty DB.
-		if meta.best_hash != Default::default() {
+		if !forced_import_finalized && meta.best_hash != Default::default() {
 			let tree_route = sp_blockchain::tree_route(
 				&self.blockchain,
 				meta.best_hash,
@@ -1460,11 +1498,18 @@ impl<Block: BlockT> Backend<Block> {
 			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
 
 			let (enacted, retracted) = if pending_block.leaf_state.is_best() {
-				self.set_head_with_transaction(&mut transaction, parent_hash, (number, hash))?
+				println!("bef set_head");
+				self.set_head_with_transaction(
+					&mut transaction,
+					parent_hash,
+					(number, hash),
+					operation.forced_import_finalized,
+				)?
 			} else {
 				(Default::default(), Default::default())
 			};
 
+				println!("aft set_head");
 			utils::insert_hash_to_key_mapping(
 				&mut transaction,
 				columns::KEY_LOOKUP,
@@ -1472,7 +1517,9 @@ impl<Block: BlockT> Backend<Block> {
 				hash,
 			)?;
 
+				println!("b set_head2");
 			transaction.set_from_vec(columns::HEADER, &lookup_key, pending_block.header.encode());
+				println!("a set_head2");
 			if let Some(body) = &pending_block.body {
 				match self.transaction_storage {
 					TransactionStorageMode::BlockBody => {
@@ -1510,6 +1557,8 @@ impl<Block: BlockT> Backend<Block> {
 				let mut bytes: u64 = 0;
 				let mut removal: u64 = 0;
 				let mut bytes_removal: u64 = 0;
+
+				println!("be dbup");
 				for (mut key, (val, rc)) in operation.db_updates.drain() {
 					if !self.storage.prefix_keys {
 						// Strip prefix
@@ -1538,6 +1587,7 @@ impl<Block: BlockT> Backend<Block> {
 						}
 					}
 				}
+				println!("ae dbup");
 				self.state_usage.tally_writes_nodes(ops, bytes);
 				self.state_usage.tally_removed_nodes(removal, bytes_removal);
 
@@ -1553,13 +1603,17 @@ impl<Block: BlockT> Backend<Block> {
 				}
 				self.state_usage.tally_writes(ops, bytes);
 				let number_u64 = number.saturated_into::<u64>();
+
+				println!("eieaeae dbup");
 				let commit = self.storage.state_db.insert_block(
 					&hash,
 					number_u64,
 					&pending_block.header.parent_hash(),
 					changeset,
 				).map_err(|e: sc_state_db::Error<io::Error>| sp_blockchain::Error::from_state_db(e))?;
+				println!("tatatat");
 				apply_state_commit(&mut transaction, commit);
+				println!("aftert stat commit");
 
 				// Check if need to finalize. Genesis is always finalized instantly.
 				let finalized = number_u64 == 0 || pending_block.leaf_state.is_final();
@@ -1572,26 +1626,35 @@ impl<Block: BlockT> Backend<Block> {
 			let is_best = pending_block.leaf_state.is_best();
 			let changes_trie_updates = operation.changes_trie_updates;
 			let changes_trie_config_update = operation.changes_trie_config_update;
+				println!("b ctup {}", finalized); // TODO if false, forcing it to true through new field
+			let parent_id = cache::ComplexBlockId::new(
+				*header.parent_hash(),
+				if number.is_zero() { Zero::zero() } else { number - One::one() },
+			);
+
+			if operation.forced_import_finalized {
+				self.changes_tries_storage.force_last_finalize(&parent_id);
+			}
 			changes_trie_cache_ops = Some(self.changes_tries_storage.commit(
 				&mut transaction,
 				changes_trie_updates,
-				cache::ComplexBlockId::new(
-					*header.parent_hash(),
-					if number.is_zero() { Zero::zero() } else { number - One::one() },
-				),
+				parent_id,
 				cache::ComplexBlockId::new(hash, number),
 				header,
 				finalized,
 				changes_trie_config_update,
 				changes_trie_cache_ops,
 			)?);
+				println!("a ctup");
 			self.state_usage.merge_sm(operation.old_state.usage_info());
 			// release state reference so that it can be finalized
 			let cache = operation.old_state.into_cache_changes();
 
 			if finalized {
+				println!("be ens");
 				// TODO: ensure best chain contains this block.
 				self.ensure_sequential_finalization(header, Some(last_finalized_hash))?;
+				println!("af ens");
 				self.note_finalized(
 					&mut transaction,
 					true,
@@ -1600,6 +1663,7 @@ impl<Block: BlockT> Backend<Block> {
 					&mut changes_trie_cache_ops,
 					&mut finalization_displaced_leaves,
 				)?;
+				println!("af not");
 			} else {
 				// canonicalize blocks which are old enough, regardless of finality.
 				self.force_delayed_canonicalize(&mut transaction, hash, *header.number())?
@@ -1609,8 +1673,11 @@ impl<Block: BlockT> Backend<Block> {
 
 			let displaced_leaf = {
 				let mut leaves = self.blockchain.leaves.write();
+				println!("wut");
 				let displaced_leaf = leaves.import(hash, number, parent_hash);
+				println!("wat");
 				leaves.prepare_transaction(&mut transaction, columns::META, meta_keys::LEAF_PREFIX);
+				println!("wbt");
 
 				displaced_leaf
 			};
@@ -1645,7 +1712,8 @@ impl<Block: BlockT> Backend<Block> {
 				let (enacted, retracted) = self.set_head_with_transaction(
 					&mut transaction,
 					hash.clone(),
-					(number.clone(), hash.clone())
+					(number.clone(), hash.clone()),
+					operation.forced_import_finalized,
 				)?;
 				meta_updates.push((hash, *number, true, false));
 				Some((enacted, retracted))
@@ -1656,6 +1724,7 @@ impl<Block: BlockT> Backend<Block> {
 			None
 		};
 
+				println!("dddddddd");
 		self.storage.db.commit(transaction)?;
 
 		// Apply all in-memory state shanges.
@@ -1858,6 +1927,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			finalized_blocks: Vec::new(),
 			set_head: None,
 			commit_state: false,
+			forced_import_finalized: false,
 		})
 	}
 
@@ -2123,16 +2193,19 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 
 		match self.blockchain.header_metadata(hash) {
 			Ok(ref hdr) => {
-				if !self.have_state_at(&hash, hdr.number) {
+/* TODO init tho have last finalized as dummy state.
+ * if !self.have_state_at(&hash, hdr.number) {
 					return Err(
 						sp_blockchain::Error::UnknownBlock(
 							format!("State already discarded for {:?}", block)
 						)
 					)
 				}
+*/
 				if let Ok(()) = self.storage.state_db.pin(&hash) {
 					let root = hdr.state_root;
 					let alternative = self.snapshot_db.get_kvbackend(Some(&hash))?;
+					println!("root: {:?}", root);
 					let db_state = DbState::<Block>::new(
 						self.storage.clone(),
 						root,
