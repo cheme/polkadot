@@ -20,14 +20,13 @@
 
 use log::info;
 use sc_client_api::{
-	backend::{SnapshotSyncRoot, RangeSnapshot},
 	utils::StateVisitorImpl, DatabaseError,
+	SnapshotSyncRoot, SnapshotDbConf, RangeSnapshot, SnapshotDBMode,
 };
 use sp_blockchain::{
 	Error as ClientError,
 };
 use codec::{Decode, Encode, Compact, IoReader};
-use sp_database::{SnapshotDbConf};
 use sp_runtime::generic::BlockId;
 use sp_runtime::traits::{
 	Block as BlockT, Header as HeaderT, NumberFor, One
@@ -160,11 +159,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 		// TOOD use plain range as param
 		self.backend.snapshot_db.export_snapshot(
 			out_dyn,
-			finalized_number,
-			range.from,
-			range.to,
-			range.flat,
-			range.mode,
+			&range,
 			state_visitor,
 		)?;
 
@@ -203,7 +198,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 			to,
 			to_hash: Default::default(),
 			flat: false,
-			mode: sp_database::SnapshotDBMode::NoDiff,
+			mode: SnapshotDBMode::NoDiff,
 		};
 
 		// registered components
@@ -307,8 +302,8 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 			let state_hash = range.to_hash.clone();
 
 			// init snapshot db
-			use sp_database::SnapshotDb; // TODO does this trait function still makes sense.
-			self.backend.snapshot_db.import_snapshot_db(&mut reader.0, &config, range.flat, &state_hash)?;
+			use sc_client_api::SnapshotDb; // TODO does this trait function still makes sense.
+			self.backend.snapshot_db.import_snapshot_db(&mut reader.0, &config, &range)?;
 
 			// header is imported by 'import_sync_meta'.
 			let header = self.backend.blockchain.header(BlockId::Hash(state_hash.clone()))?

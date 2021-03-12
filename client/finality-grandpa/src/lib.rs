@@ -62,8 +62,8 @@ use futures::{
 };
 use log::{debug, error, info};
 use sc_client_api::{
-	backend::{AuxStore, Backend, SnapshotSync, SnapshotSyncCommon, RangeSnapshot},
-	LockImportRun, BlockchainEvents, CallExecutor,
+	backend::{AuxStore, Backend, SnapshotSync, SnapshotSyncCommon},
+	LockImportRun, BlockchainEvents, CallExecutor, RangeSnapshot,
 	ExecutionStrategy, Finalizer, TransactionFor, ExecutorProvider,
 };
 use parity_scale_codec::{Decode, Encode, IoReader};

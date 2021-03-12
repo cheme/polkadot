@@ -34,7 +34,7 @@ use crate::{
 		Backend as BlockchainBackend, well_known_cache_keys
 	},
 	light::RemoteBlockchain,
-	UsageInfo,
+	UsageInfo, RangeSnapshot, SnapshotDb, SnapshotDbConf,
 };
 use sp_blockchain;
 use sp_consensus::BlockOrigin;
@@ -447,7 +447,7 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	/// Offchain workers local storage.
 	type OffchainStorage: OffchainStorage;
 	/// Associted snapshot db type, if no support '()' can be use.
-	type SnapshotDb: sp_database::SnapshotDb<Block>;
+	type SnapshotDb: SnapshotDb<Block>;
 
 	/// Begin a new block insertion transaction with given parent block id.
 	///
@@ -543,28 +543,6 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	fn get_import_lock(&self) -> &RwLock<()>;
 }
 
-/// Range covered by snapshot.
-#[derive(Clone)]
-pub struct RangeSnapshot<Block: BlockT> {
-	/// Number to start from.
-	pub from: NumberFor<Block>,
-
-	/// Hash to start from.
-	pub from_hash: Block::Hash,
-
-	/// Number of max block.
-	pub to: NumberFor<Block>,
-
-	/// Hash of max block.
-	pub to_hash: Block::Hash,
-
-	/// Kind of snapshot db to use.
-	pub mode: sp_database::SnapshotDBMode,
-
-	/// Is the snapshot flat (only write last state).
-	pub flat: bool,
-}
-
 /// Common requirement for a `SnapshotSyncConsumer`.
 #[derive(Clone)]
 pub struct SnapshotSyncCommon<Block: BlockT> {
@@ -586,7 +564,7 @@ pub trait SnapshotSyncRoot<Block: BlockT>: Send + Sync {
 	fn import_sync(
 		&self,
 		encoded: &mut dyn std::io::Read,
-		dest_config: sp_database::SnapshotDbConf,
+		dest_config: SnapshotDbConf,
 	) -> sp_blockchain::Result<RangeSnapshot<Block>>;
 }
 
@@ -624,7 +602,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for () {
 	fn import_sync(
 		&self,
 		_encoded: &mut dyn std::io::Read,
-		_dest_config: sp_database::SnapshotDbConf,
+		_dest_config: SnapshotDbConf,
 	) -> sp_blockchain::Result<RangeSnapshot<Block>> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}

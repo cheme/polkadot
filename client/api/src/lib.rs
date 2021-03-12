@@ -29,6 +29,7 @@ pub mod light;
 pub mod leaves;
 pub mod notifications;
 pub mod proof_provider;
+pub mod export_import;
 
 pub use sp_blockchain as blockchain;
 pub use backend::*;
@@ -38,10 +39,10 @@ pub use client::*;
 pub use light::*;
 pub use notifications::*;
 pub use proof_provider::*;
+pub use export_import::*;
 
 pub use sp_state_machine::{StorageProof, ExecutionStrategy};
-pub use sp_database::{SnapshotDb, StateVisitor, SnapshotDbConf, SnapshotDBMode,
-	error::DatabaseError};
+pub use sp_database::error::DatabaseError;
 
 /// Usage Information Provider interface
 ///
@@ -95,7 +96,7 @@ pub mod utils {
 	/// A state visitor implementation for a given backend at a given block.
 	pub struct StateVisitorImpl<'a, B: BlockT, BA>(pub &'a BA, pub &'a B::Hash);
 
-	impl<'a, B, BA> sp_database::StateVisitor for StateVisitorImpl<'a, B, BA>
+	impl<'a, B, BA> crate::StateVisitor for StateVisitorImpl<'a, B, BA>
 		where
 			B: BlockT,
 			BA: crate::backend::Backend<B>,

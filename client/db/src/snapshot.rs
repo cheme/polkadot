@@ -18,7 +18,8 @@
 
 //! Key value snapshot db with history.
 
-use sp_database::{SnapshotDb as SnapshotDbT};
+use sc_client_api::{SnapshotDbConf, SnapshotDBMode, SnapshotDb as SnapshotDbT,
+	RangeSnapshot};
 use crate::tree_management::{TreeManagementSync, TreeManagementPersistence};
 use historied_db::{
 	DecodeWithContext,
@@ -43,7 +44,7 @@ use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
 use codec::{Decode, Encode, Compact, IoReader};
-use sp_database::{SnapshotDbConf, SnapshotDBMode, StateIter, ChildStateIter};
+use sp_database::{StateIter, ChildStateIter};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
@@ -53,7 +54,7 @@ use nodes_backend::NODES_COL;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
 pub mod snapshot_db_conf {
-	use sp_database::{SnapshotDbConf, SnapshotDBMode};
+	use sc_client_api::{SnapshotDbConf, SnapshotDBMode};
 	use sp_blockchain::Result as ClientResult;
 	use historied_db::mapped_db::MappedDBDyn;
 
@@ -329,15 +330,11 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	fn export_snapshot(
 		&self,
 		out: &mut dyn std::io::Write,
-		last_finalized: NumberFor<Block>,
-		from: NumberFor<Block>,
-		to: NumberFor<Block>,
-		flat: bool,
-		db_mode: SnapshotDBMode,
+		range: &RangeSnapshot<Block>,
 		default_flat: impl sc_client_api::StateVisitor,
 	) -> sp_database::error::Result<()> {
 		if !self.config.enabled {
-			if !flat {
+			if !range.flat {
 				let e = ClientError::StateDatabase("Disabled snapshot db need to be created first".into());
 				return Err(DatabaseError(Box::new(e)));
 			} else {
@@ -376,11 +373,9 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		&self,
 		mut from: &mut dyn std::io::Read,
 		config: &SnapshotDbConf,
-		is_flat: bool,
-		at: &Block::Hash,
+		range: &RangeSnapshot<Block>,
 	) -> sp_database::error::Result<()> {
 		self.clear_snapshot_db()?;
-
 		{
 			let mut management = self.historied_management.inner.write();
 			let db = &mut management.instance.ser().db;
@@ -390,9 +385,9 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 			}).map_err(|e| DatabaseError(Box::new(e)))?;
 		}
 
-		if is_flat {
+		if range.flat {
 			let (query_plan, update_plan) = self.historied_management.init_new_management(
-				at,
+				&range.to_hash,
 				&self.ordered_db,
 			).map_err(|e| DatabaseError(Box::new(e)))?;
 			let hvalue_type = HValueType::resolve(&config).ok_or_else(|| {
@@ -715,6 +710,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		&self.historied_management
 	}
 
+	/// Create flat snapshot from state.
 	fn flat_from_state(
 		&self,
 		mut out: &mut dyn std::io::Write,

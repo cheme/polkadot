@@ -98,6 +98,7 @@ use sc_client_api::{
 	UsageInfo, MemoryInfo, IoInfo, MemorySize,
 	backend::{NewBlockState, PrunableStateChangesTrieStorage, ProvideChtRoots,
 		SnapshotSync, SnapshotSyncRoot},
+	SnapshotDbConf,
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
 	StateVisitor, utils::StateVisitorImpl, DatabaseError,
 };
@@ -108,7 +109,7 @@ use sp_blockchain::{
 use codec::{Decode, Encode};
 use hash_db::Prefix;
 use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
-use sp_database::{Transaction, SnapshotDbConf};
+use sp_database::Transaction;
 use sp_core::{Hasher, ChangesTrieConfiguration};
 use sp_core::offchain::OffchainOverlayedChange;
 use sp_core::storage::{well_known_keys, ChildInfo, ChildType, PrefixedStorageKey};

@@ -479,7 +479,7 @@ mod ordered {
 	}
 
 	impl<H: Clone + PartialEq + Debug + Default + 'static> OrderedDatabase<H> for RadixTreeDatabase<H> {
-		fn iter<'a>(&'a self, col: ColumnId) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
+		fn iter<'a>(&'a self, col: ColumnId) -> ChildStateIter<'a> {
 			self.lazy_column_init(col);
 			let tree = self.trees.read()[col as usize].clone();
 			Box::new(tree.owned_iter())
@@ -489,7 +489,7 @@ mod ordered {
 			col: ColumnId,
 			prefix: &'a [u8],
 			trim_prefix: bool,
-		) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
+		) -> ChildStateIter<'a> {
 			self.lazy_column_init(col);
 			let tree = self.trees.read()[col as usize].clone();
 			if trim_prefix {
@@ -506,57 +506,12 @@ mod ordered {
 			&'a self,
 			col: ColumnId,
 			start: &[u8],
-		) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
+		) -> ChildStateIter<'a> {
 			self.lazy_column_init(col);
 			let tree = self.trees.read()[col as usize].clone();
 			Box::new(tree.owned_iter_from(start))
 		}
 	}
-}
-
-#[derive(Clone, Debug, Encode, Decode)]
-/// Different storage mode.
-pub enum SnapshotDBMode {
-	/// Do not apply binary diff between consecutive values.
-	NoDiff,
-	/// Use xdelta3 VcDiff.
-	Xdelta3Diff,
-}
-
-impl Default for SnapshotDBMode {
-	fn default() -> Self {
-		SnapshotDBMode::NoDiff
-	}
-}
-
-#[derive(Clone, Debug, Default, Encode, Decode)]
-/// Configuration of snapshot db conf.
-pub struct SnapshotDbConf {
-	/// Is snapshot db active.
-	pub enabled: bool,
-	/// Should we use this db value instead of trie value in state machine
-	/// when possible.
-	pub primary_source: bool,
-	/// Snapshot lru cache and size.
-	pub cache_size: u32,
-	/// Do we use node backend.
-	pub no_node_backend: bool,
-	/// Do we maintain key modification journaling for pruning?
-	pub journal_pruning: bool,
-	/// Should we debug value access in state machine against the trie values.
-	pub debug_assert: bool,
-	/// Lower block support, this should block reorg before it.
-	/// It contains encoded start block number.
-	pub start_block: Option<Vec<u8>>,
-	/// Diff usage.
-	pub diff_mode: SnapshotDBMode,
-	/// If defined, pruning window size to apply, `None` for archive.
-	pub pruning: Option<Option<u32>>,
-	/// Lazy pruning window. (place holder TODO unimplemented)
-	pub lazy_pruning: Option<u32>,
-	/// Technical field to identify if the conf has been initialized.
-	/// TODO remove and have Variable::is_defined function in remote historied_db
-	pub lazy_set: bool,
 }
 
 /// Full key value state iterator at a given state.
@@ -581,169 +536,3 @@ pub type StateIterDelta<'a> = Box<
 pub type ChildStateIterDelta<'a> = Box<
 	dyn Iterator<Item = (Vec<u8>, Option<Vec<u8>>)> + 'a,
 >;
-
-/// Implement exposed acces method to the snapshot db.
-/// TODO not in the right crate!!
-pub trait SnapshotDb<B: Block> {
-	/// Disable snapshot db and remove its content.
-	fn clear_snapshot_db(&self) -> error::Result<()>;
-
-	/// Change current snapshot db behavior.
-	fn update_running_conf(
-		&self,
-		use_as_primary: Option<bool>,
-		debug_assert: Option<bool>,
-		pruning_window: Option<Option<u32>>,
-		lazy_pruning_window: Option<u32>,
-		cache_size: Option<u32>,
-	) -> error::Result<()>;
-
-	/// Reset db at a given block.
-	fn re_init(
-		&self,
-		config: SnapshotDbConf,
-		best_block: B::Hash,
-		state_visit: impl StateVisitor,
-	) -> error::Result<()>;
-
-	/// Export a snapshot file.
-	fn export_snapshot(
-		&self,
-		output: &mut dyn std::io::Write,
-		last_finalized: NumberFor<B>,
-		from: NumberFor<B>,
-		to: NumberFor<B>,
-		flat: bool,
-		db_mode: SnapshotDBMode,
-		default_flat: impl StateVisitor,
-	) -> error::Result<()>;
-
-	/// Iterate on all values at a given block.
-	/// Note that we could also use `BuildStorage` trait
-	/// but don't as it would put the whole storage in memory.
-	/// (actually when importing we put the whole storage in
-	/// memory into the state machine transaction, but doesn't
-	/// sound like a reason to put more in memory).
-	/// So we do not use `reset_storage` but similar code at client level.
-	fn state_iter_at<'a>(
-		&'a self,
-		at: &B::Hash,
-		config: Option<&SnapshotDbConf>,
-	) -> error::Result<StateIter<'a>>;
-
-	/// Iterate on all values that differs from parent block at a given block.
-	fn state_iter_diff_at<'a>(
-		&'a self,
-		_at: &B::Hash,
-		_parent: &B::Hash,
-	) -> error::Result<StateIterDelta<'a>> {
-		unimplemented!("TODO");
-	}
-
-	/// Import snapshot db content.
-	/// TODO use range import struct instead
-	/// of from and is_flat and at...
-	fn import_snapshot_db(
-		&self,
-		from: &mut dyn std::io::Read,
-		config: &SnapshotDbConf,
-		is_flat: bool,
-		at: &B::Hash,
-	) -> error::Result<()>;
-}
-
-/// Visitor trait use to initiate a snapshot db.
-pub trait StateVisitor {
-	/// Visit with call back taking the child trie root path and related key values for arguments.
-	///
-	/// The ordered is required to be top trie then child trie by prefixed storage key order, with
-	/// every trie key values consecutively ordered.
-	fn state_visit(
-		&self,
-		visitor: impl FnMut(Option<&[u8]>, Vec<u8>, Vec<u8>) -> error::Result<()>,
-	) -> error::Result<()>;
-}
-
-/// The error type for snapshot database operations.
-#[derive(Debug)]
-pub enum SnapshotDbError {
-	Unsupported,
-}
-
-impl std::fmt::Display for SnapshotDbError {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			SnapshotDbError::Unsupported => {
-				write!(f, "Unsupported snapshot db.")
-			},
-		}
-	}
-}
-
-impl std::error::Error for SnapshotDbError {
-	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-		None
-	}
-}
-
-fn unsupported_error<R>() -> error::Result<R> {
-	Err(error::DatabaseError(Box::new(SnapshotDbError::Unsupported)))
-}
-
-/// Use '()' when no snapshot implementation.
-impl<B: Block> SnapshotDb<B> for () {
-	fn clear_snapshot_db(&self) -> error::Result<()> {
-		unsupported_error()
-	}
-
-	fn update_running_conf(
-		&self,
-		_use_as_primary: Option<bool>,
-		_debug_assert: Option<bool>,
-		_pruning_window: Option<Option<u32>>,
-		_lazy_pruning_window: Option<u32>,
-		_cache_size: Option<u32>,
-	) -> error::Result<()> {
-		unsupported_error()
-	}
-
-	fn re_init(
-		&self,
-		_config: SnapshotDbConf,
-		_best_block: B::Hash,
-		_state_visit: impl StateVisitor,
-	) -> error::Result<()> {
-		unsupported_error()
-	}
-
-	fn export_snapshot(
-		&self,
-		_output: &mut dyn std::io::Write,
-		_last_finalized: NumberFor<B>,
-		_from: NumberFor<B>,
-		_to: NumberFor<B>,
-		_flat: bool,
-		_db_mode: SnapshotDBMode,
-		_default_flat: impl StateVisitor,
-	) -> error::Result<()> {
-		unsupported_error()
-	}
-
-	fn state_iter_at<'a>(
-		&'a self,
-		_at: &B::Hash,
-		_config: Option<&SnapshotDbConf>,
-	) -> error::Result<StateIter<'a>> {
-		unsupported_error()
-	}
-
-	fn import_snapshot_db(
-		&self,
-		_from: &mut dyn std::io::Read,
-		_config: &SnapshotDbConf,
-		_is_flat: bool,
-		_at: &B::Hash,
-	) -> error::Result<()> {
-		unsupported_error()
-	}
-}
