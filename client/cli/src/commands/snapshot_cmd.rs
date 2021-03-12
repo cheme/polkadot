@@ -539,7 +539,6 @@ impl SnapshotImportCmd {
 			let header = backend.blockchain().header(BlockId::Hash(state_hash.clone()))?
 				.expect("Missing header");
 			let expected_root = header.state_root().clone();
-			println!("expected_rot {:?}", expected_root);
 			let mut op = backend.begin_operation()
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 			backend.begin_state_operation(&mut op, BlockId::Hash(Default::default()))
@@ -555,7 +554,6 @@ impl SnapshotImportCmd {
 			if expected_root != state_root {
 				panic!("Unexpected root {:?}, in header {:?}.", state_root, expected_root);
 			}
-			println!("bef_setblo");
 			// only state import, but need to have pending block to commit actual data.
 			op.set_block_data(
 				header,
@@ -563,11 +561,9 @@ impl SnapshotImportCmd {
 				None,
 				sc_client_api::NewBlockState::Final,
 			).map_err(|e| DatabaseError(Box::new(e)))?;
-			println!("setted!!");
 			backend.commit_operation(op)
 				.map_err(|e| DatabaseError(Box::new(e)))?;
-	
-			println!("ocmmited!!");
+
 			if self.without_snapshot {
 				// clear snapshot db
 				db.clear_snapshot_db()?;
@@ -699,7 +695,7 @@ impl CliConfiguration for SnapshotManageCmd {
 	}
 
 	fn pruning_params(&self) -> Option<&PruningParams> {
-		Some(&self.pruning_params)	
+		Some(&self.pruning_params)
 	}
 }
 
@@ -713,7 +709,7 @@ impl CliConfiguration for SnapshotExportCmd {
 	}
 
 	fn pruning_params(&self) -> Option<&PruningParams> {
-		Some(&self.pruning_params)	
+		Some(&self.pruning_params)
 	}
 }
 
@@ -727,6 +723,6 @@ impl CliConfiguration for SnapshotImportCmd {
 	}
 
 	fn pruning_params(&self) -> Option<&PruningParams> {
-		Some(&self.pruning_params)	
+		Some(&self.pruning_params)
 	}
 }

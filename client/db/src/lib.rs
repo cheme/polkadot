@@ -776,12 +776,10 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			b if b == 0 => (),
 			_ => return Err(sp_blockchain::Error::Backend("Invalid snapshot version.".into())),
 		}
-		println!("get ovarsion");
 		let mut reader = IoReader(encoded);
 		let to: NumberFor<Block> = Decode::decode(&mut reader).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 		)?;
-		println!("to {:?}", to);
 		/*let to_hash: Block::Hash = Decode::decode(&mut reader).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 		)?;*/
@@ -1498,7 +1496,6 @@ impl<Block: BlockT> Backend<Block> {
 			let lookup_key = utils::number_and_hash_to_lookup_key(number, hash)?;
 
 			let (enacted, retracted) = if pending_block.leaf_state.is_best() {
-				println!("bef set_head");
 				self.set_head_with_transaction(
 					&mut transaction,
 					parent_hash,
@@ -1509,7 +1506,6 @@ impl<Block: BlockT> Backend<Block> {
 				(Default::default(), Default::default())
 			};
 
-				println!("aft set_head");
 			utils::insert_hash_to_key_mapping(
 				&mut transaction,
 				columns::KEY_LOOKUP,
@@ -1517,9 +1513,7 @@ impl<Block: BlockT> Backend<Block> {
 				hash,
 			)?;
 
-				println!("b set_head2");
 			transaction.set_from_vec(columns::HEADER, &lookup_key, pending_block.header.encode());
-				println!("a set_head2");
 			if let Some(body) = &pending_block.body {
 				match self.transaction_storage {
 					TransactionStorageMode::BlockBody => {
@@ -1558,7 +1552,6 @@ impl<Block: BlockT> Backend<Block> {
 				let mut removal: u64 = 0;
 				let mut bytes_removal: u64 = 0;
 
-				println!("be dbup");
 				for (mut key, (val, rc)) in operation.db_updates.drain() {
 					if !self.storage.prefix_keys {
 						// Strip prefix
@@ -1587,7 +1580,6 @@ impl<Block: BlockT> Backend<Block> {
 						}
 					}
 				}
-				println!("ae dbup");
 				self.state_usage.tally_writes_nodes(ops, bytes);
 				self.state_usage.tally_removed_nodes(removal, bytes_removal);
 
@@ -1604,16 +1596,13 @@ impl<Block: BlockT> Backend<Block> {
 				self.state_usage.tally_writes(ops, bytes);
 				let number_u64 = number.saturated_into::<u64>();
 
-				println!("eieaeae dbup");
 				let commit = self.storage.state_db.insert_block(
 					&hash,
 					number_u64,
 					&pending_block.header.parent_hash(),
 					changeset,
 				).map_err(|e: sc_state_db::Error<io::Error>| sp_blockchain::Error::from_state_db(e))?;
-				println!("tatatat");
 				apply_state_commit(&mut transaction, commit);
-				println!("aftert stat commit");
 
 				// Check if need to finalize. Genesis is always finalized instantly.
 				let finalized = number_u64 == 0 || pending_block.leaf_state.is_final();
@@ -1626,7 +1615,6 @@ impl<Block: BlockT> Backend<Block> {
 			let is_best = pending_block.leaf_state.is_best();
 			let changes_trie_updates = operation.changes_trie_updates;
 			let changes_trie_config_update = operation.changes_trie_config_update;
-				println!("b ctup {}", finalized); // TODO if false, forcing it to true through new field
 			let parent_id = cache::ComplexBlockId::new(
 				*header.parent_hash(),
 				if number.is_zero() { Zero::zero() } else { number - One::one() },
@@ -1645,16 +1633,13 @@ impl<Block: BlockT> Backend<Block> {
 				changes_trie_config_update,
 				changes_trie_cache_ops,
 			)?);
-				println!("a ctup");
 			self.state_usage.merge_sm(operation.old_state.usage_info());
 			// release state reference so that it can be finalized
 			let cache = operation.old_state.into_cache_changes();
 
 			if finalized {
-				println!("be ens");
 				// TODO: ensure best chain contains this block.
 				self.ensure_sequential_finalization(header, Some(last_finalized_hash))?;
-				println!("af ens");
 				self.note_finalized(
 					&mut transaction,
 					true,
@@ -1663,7 +1648,6 @@ impl<Block: BlockT> Backend<Block> {
 					&mut changes_trie_cache_ops,
 					&mut finalization_displaced_leaves,
 				)?;
-				println!("af not");
 			} else {
 				// canonicalize blocks which are old enough, regardless of finality.
 				self.force_delayed_canonicalize(&mut transaction, hash, *header.number())?
@@ -1673,11 +1657,8 @@ impl<Block: BlockT> Backend<Block> {
 
 			let displaced_leaf = {
 				let mut leaves = self.blockchain.leaves.write();
-				println!("wut");
 				let displaced_leaf = leaves.import(hash, number, parent_hash);
-				println!("wat");
 				leaves.prepare_transaction(&mut transaction, columns::META, meta_keys::LEAF_PREFIX);
-				println!("wbt");
 
 				displaced_leaf
 			};
@@ -1724,7 +1705,6 @@ impl<Block: BlockT> Backend<Block> {
 			None
 		};
 
-				println!("dddddddd");
 		self.storage.db.commit(transaction)?;
 
 		// Apply all in-memory state shanges.
@@ -2205,7 +2185,6 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				if let Ok(()) = self.storage.state_db.pin(&hash) {
 					let root = hdr.state_root;
 					let alternative = self.snapshot_db.get_kvbackend(Some(&hash))?;
-					println!("root: {:?}", root);
 					let db_state = DbState::<Block>::new(
 						self.storage.clone(),
 						root,

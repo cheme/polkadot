@@ -1607,7 +1607,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>> {
 		Ok(None)
 	}
-	
+
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,

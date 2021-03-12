@@ -586,7 +586,6 @@ impl<Block: BlockT, T: CacheItemT, S: Storage<Block, T>> ListCache<Block, T, S> 
 		&mut self,
 		parent_block: &ComplexBlockId<Block>,
 	) {
-		println!("set best inner {:?}", parent_block);
 		self.best_finalized_block = parent_block.clone();
 	}
 }
