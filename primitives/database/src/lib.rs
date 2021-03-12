@@ -609,10 +609,10 @@ pub trait SnapshotDb<B: Block> {
 	/// Export a snapshot file.
 	fn export_snapshot(
 		&self,
-		output: &mut impl std::io::Write,
+		output: &mut dyn std::io::Write,
 		last_finalized: NumberFor<B>,
-		from: Option<NumberFor<B>>,
-		to: Option<NumberFor<B>>,
+		from: NumberFor<B>,
+		to: NumberFor<B>,
 		flat: bool,
 		db_mode: SnapshotDBMode,
 		default_flat: impl StateVisitor,
@@ -640,27 +640,16 @@ pub trait SnapshotDb<B: Block> {
 		unimplemented!("TODO");
 	}
 
-	/// Read import snapshot config. snapshot
-	fn read_import_def(
-		&self,
-		from: &mut impl std::io::Read,
-		config: &SnapshotDbConf,
-	) -> error::Result<SnapshotImportDef>;
-
 	/// Import snapshot db content.
+	/// TODO use range import struct instead
+	/// of from and is_flat and at...
 	fn import_snapshot_db(
 		&self,
-		from: &mut impl std::io::Read,
+		from: &mut dyn std::io::Read,
 		config: &SnapshotDbConf,
-		def: &SnapshotImportDef,
+		is_flat: bool,
 		at: &B::Hash,
 	) -> error::Result<()>;
-}
-
-/// Initial definition for a snapshot import.
-pub struct SnapshotImportDef {
-	/// Is it a single block flat import.
-	pub is_flat: bool,
 }
 
 /// Visitor trait use to initiate a snapshot db.
@@ -729,10 +718,10 @@ impl<B: Block> SnapshotDb<B> for () {
 
 	fn export_snapshot(
 		&self,
-		_output: &mut impl std::io::Write,
+		_output: &mut dyn std::io::Write,
 		_last_finalized: NumberFor<B>,
-		_from: Option<NumberFor<B>>,
-		_to: Option<NumberFor<B>>,
+		_from: NumberFor<B>,
+		_to: NumberFor<B>,
 		_flat: bool,
 		_db_mode: SnapshotDBMode,
 		_default_flat: impl StateVisitor,
@@ -748,19 +737,11 @@ impl<B: Block> SnapshotDb<B> for () {
 		unsupported_error()
 	}
 
-	fn read_import_def(
-		&self,
-		_from: &mut impl std::io::Read,
-		_config: &SnapshotDbConf,
-	) -> error::Result<SnapshotImportDef> {
-		unsupported_error()
-	}
-
 	fn import_snapshot_db(
 		&self,
-		_from: &mut impl std::io::Read,
+		_from: &mut dyn std::io::Read,
 		_config: &SnapshotDbConf,
-		_def: &SnapshotImportDef,
+		_is_flat: bool,
 		_at: &B::Hash,
 	) -> error::Result<()> {
 		unsupported_error()

@@ -391,7 +391,7 @@ impl SnapshotManageCmd {
 
 		let mut config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
 		config.start_block = Some(chain_info.best_number.encode());
-		let state_visitor = StateVisitorImpl(&backend, &chain_info.best_hash);
+		let state_visitor = sc_client_api::utils::StateVisitorImpl(&*backend.as_ref(), &chain_info.best_hash);
 		db.re_init(
 			config,
 			chain_info.best_hash,
@@ -423,49 +423,6 @@ impl SnapshotManageCmd {
 	}
 }
 
-struct StateVisitorImpl<'a, B: BlockT, BA>(&'a Arc<BA>, &'a B::Hash);
-
-impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
-	where
-		B: BlockT,
-		BA: sc_client_api::backend::Backend<B>,
-{
-	fn state_visit(
-		&self,
-		mut visitor: impl FnMut(Option<&[u8]>, Vec<u8>, Vec<u8>) -> std::result::Result<(), DatabaseError>,
-	) -> std::result::Result<(), DatabaseError> {
-		let mut state = self.0.state_at(BlockId::Hash(self.1.clone()))
-			.map_err(|e| DatabaseError(Box::new(e)))?;
-		let trie_state = state.as_trie_backend().expect("Snapshot runing on a trie backend.");
-
-		let mut prev_child = None;
-		let prev_child = &mut prev_child;
-		let mut prefixed_storage_key = None;
-		let prefixed_storage_key = &mut prefixed_storage_key;
-		trie_state.for_key_values(|child, key, value| {
-			if child != prev_child.as_ref() {
-				*prefixed_storage_key = child.map(|ci| ci.prefixed_storage_key().into_inner());
-				*prev_child = child.cloned();
-			}
-			visitor(
-				prefixed_storage_key.as_ref().map(Vec::as_slice),
-				key,
-				value,
-			).expect("Failure adding value to snapshot db.");
-		}).map_err(|e| {
-			let error: error::Error = e.into();
-			DatabaseError(Box::new(error))
-		})?;
-		Ok(())
-	}
-}
-
-#[repr(u8)]
-enum StateOnly {
-	Yes = 0,
-	No = 1,
-}
-
 impl SnapshotImportCmd {
 	/// Run the import-snapshot command
 	pub async fn run<B, BA>(
@@ -484,8 +441,13 @@ impl SnapshotImportCmd {
 			info!("DB path: {}", path.display());
 		}
 
+		let mut dest_config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
+
+		if !self.without_snapshot {
+			dest_config.enabled = false;
+		};
 		// TODO no real need for dyn here.
-		let mut file: Box<dyn crate::commands::import_blocks_cmd::ReadPlusSeek + Send> = match &self.input {
+		let mut file: Box<dyn std::io::Read + Send> = match &self.input {
 			Some(filename) => Box::new(std::fs::File::open(filename)?),
 			None => {
 				use std::io::Read;
@@ -496,93 +458,8 @@ impl SnapshotImportCmd {
 			}
 		};
 
-		let db = backend.snapshot_db().expect(UNSUPPORTED);
 		let dest_config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
-		let mut config = dest_config.clone();
-		// import default values will be reverted: tod can move to import_snapshot_db function
-		// (revert too)
-		config.enabled = true;
-		config.pruning = None;
-		config.lazy_pruning = None;
-		config.primary_source = true; // needed to access historied-db
-		config.debug_assert = false; // not really useful
-
-		let reader = &mut file;
-		let mut buf = [0];
-		reader.read_exact(&mut buf[..1])?;
-		let range = match buf[0] {
-			b if b == StateOnly::No as u8 => {
-				let range = backend.snapshot_sync().import_sync_head(reader)?.expect("head defined in client");
-				backend.snapshot_sync().import_sync_meta(reader, &range)?;
-				range
-			},
-			b if b == StateOnly::Yes as u8 => unimplemented!("TODO param?? or remove param: removing this byte seems good"),
-			_ => panic!("Invalid first byte for snapshot"),
-		};
-
-		// TODO read_import def seems rather useless, and all logic afterwards should be move to
-		// snapshot.rs
-		let snapshot_def = db.read_import_def(reader, &config)?;
-
-		if snapshot_def.is_flat {
-			let (state_hash) = if let Some(start_block) = dest_config.start_block.as_ref() {
-				unimplemented!("TODO fetch or better remove param");
-			} else {
-				debug_assert!(range.from_hash == range.to_hash);
-				range.to_hash.clone()
-			};
-
-			// init snapshot db
-			db.import_snapshot_db(reader, &config, &snapshot_def, &state_hash)?;
-
-			// header is imported by 'import_sync_meta'.
-			let header = backend.blockchain().header(BlockId::Hash(state_hash.clone()))?
-				.expect("Missing header");
-			let expected_root = header.state_root().clone();
-			let mut op = backend.begin_operation()
-				.map_err(|e| DatabaseError(Box::new(e)))?;
-			backend.begin_state_operation(&mut op, BlockId::Hash(Default::default()))
-				.map_err(|e| DatabaseError(Box::new(e)))?;
-			info!("Initializing import block/state (header-hash: {})",
-				state_hash,
-			);
-			let data = db.state_iter_at(&state_hash, Some(&config))?;
-			use sc_client_api::BlockImportOperation;
-			let state_root = op.inject_finalized_state(&state_hash, data)
-				.map_err(|e| DatabaseError(Box::new(e)))?;
-			// TODO get state root from header and pass as param
-			if expected_root != state_root {
-				panic!("Unexpected root {:?}, in header {:?}.", state_root, expected_root);
-			}
-			// only state import, but need to have pending block to commit actual data.
-			op.set_block_data(
-				header,
-				None,
-				None,
-				sc_client_api::NewBlockState::Final,
-			).map_err(|e| DatabaseError(Box::new(e)))?;
-			backend.commit_operation(op)
-				.map_err(|e| DatabaseError(Box::new(e)))?;
-
-			if self.without_snapshot {
-				// clear snapshot db
-				db.clear_snapshot_db()?;
-			} else {
-				db.update_running_conf(
-					Some(dest_config.primary_source),
-					Some(dest_config.debug_assert),
-					dest_config.pruning,
-					dest_config.lazy_pruning,
-					Some(dest_config.cache_size),
-				)?;
-				if dest_config.pruning.is_some() {
-					// run pruning now
-					unimplemented!();
-				}
-			}
-		} else {
-			unimplemented!();
-		}
+		backend.snapshot_sync().import_sync(&mut file, dest_config)?;
 		Ok(())
 	}
 }
@@ -605,8 +482,6 @@ impl SnapshotExportCmd {
 			info!("DB path: {}", path.display());
 		}
 
-		let db = backend.snapshot_db().expect(UNSUPPORTED);
-
 		let from = if let Some(from) = self.from.as_ref() {
 			Some(from.parse()?)
 		} else {
@@ -619,66 +494,29 @@ impl SnapshotExportCmd {
 		let (to, default_block) = if let Some(to) = self.to.as_ref() {
 			let to = to.parse()?;
 			let to_hash = backend.blockchain().hash(to)?.expect("Block number out of range.");
-			(Some(to), to_hash)
+			(to, to_hash)
 		} else {
-			(None, finalized_hash)
+			(finalized_number, finalized_hash)
 		};
-		let state_visitor = StateVisitorImpl(&backend, &default_block);
 		let db_mode = match self.db_mode {
 			SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
 			SnapshotMode::Xdelta3 => sc_client_api::SnapshotDBMode::Xdelta3Diff,
 		};
-
+		let range = RangeSnapshot {
+			to,
+			to_hash: default_block,
+			from: from.unwrap_or(to),
+			from_hash: backend.blockchain().hash(to)?
+				.expect("Block number out of range."),
+			flat: self.flat,
+			mode: db_mode,
+		};
 		if let Some(path) = &self.output {
 			let mut out = std::fs::File::create(path)?;
-			if self.state_only {
-				out.write(&[StateOnly::Yes as u8])?;
-			} else {
-				out.write(&[StateOnly::No as u8])?;
-				let to = to.unwrap_or(finalized_number);
-				let range = RangeSnapshot {
-					to,
-					to_hash: default_block,
-					from: from.unwrap_or(to),
-					from_hash: backend.blockchain().hash(to)?
-						.expect("Block number out of range."),
-				};
-				backend.snapshot_sync().export_sync_meta(&mut out, range)?;
-			}
-			db.export_snapshot(
-				&mut out,
-				finalized_number,
-				from,
-				to,
-				self.flat,
-				db_mode,
-				state_visitor,
-			)?;
+			backend.snapshot_sync().export_sync(&mut out, range)?;
 		} else {
 			let mut out = std::io::stdout();
-			if self.state_only {
-				out.write(&[StateOnly::Yes as u8])?;
-			} else{
-				out.write(&[StateOnly::No as u8])?;
-				let to = to.unwrap_or(finalized_number);
-				let range = RangeSnapshot {
-					to,
-					to_hash: default_block,
-					from: from.unwrap_or(to),
-					from_hash: backend.blockchain().hash(to)?
-						.expect("Block number out of range."),
-				};
-				backend.snapshot_sync().export_sync_meta(&mut out, range)?;
-			}
-			db.export_snapshot(
-				&mut out,
-				finalized_number,
-				from,
-				to,
-				self.flat,
-				db_mode,
-				state_visitor,
-			)?;
+			backend.snapshot_sync().export_sync(&mut out, range)?;
 		};
 
 		Ok(())

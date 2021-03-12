@@ -492,7 +492,7 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
 
 	/// Snapshot synching for this backend.
-	fn snapshot_sync(&self) -> Box<dyn SnapshotSync<Block>>;
+	fn snapshot_sync(&self) -> Box<dyn SnapshotSyncRoot<Block>>;
 
 	/// Add a sync component to use with the snapshot synching
 	/// of his backend.
@@ -550,35 +550,59 @@ pub struct RangeSnapshot<Block: BlockT> {
 	pub from_hash: Block::Hash,
 	pub to: NumberFor<Block>,
 	pub to_hash: Block::Hash,
+	pub mode: sp_database::SnapshotDBMode,
+	pub flat: bool,
 }
 
-/// Component that need to manage some export and import state
-/// when using snapshots.
-pub trait SnapshotSync<Block: BlockT>: Send + Sync {
+/// Common requirement for a `SnapshotSyncConsumer`.
+#[derive(Clone)]
+pub struct SnapshotSyncCommon<Block: BlockT> {
+	/// Headers needed to be in the chain but not in the block import
+	/// range.
+	pub additional_headers: Vec<(NumberFor<Block>, NumberFor<Block>)>,
+}
+
+/// Full implementation of snapshot export and import.
+pub trait SnapshotSyncRoot<Block: BlockT>: Send + Sync {
 	/// Write sync non state related persisting data.
-	fn export_sync_meta(
+	fn export_sync(
 		&self,
 		out: &mut dyn std::io::Write,
 		range: RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()>;
 
 	/// Read head, this could be in a separate trait.
-	fn import_sync_head(
+	fn import_sync(
 		&self,
 		encoded: &mut dyn std::io::Read,
-	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>>;
+		dest_config: sp_database::SnapshotDbConf,
+	) -> sp_blockchain::Result<RangeSnapshot<Block>>;
+}
 
-	/// Import sync non state related persisting data.
-	/// This cleans existing state.
+/// Component that need to manage some export and import state
+/// when using snapshots.
+pub trait SnapshotSync<Block: BlockT>: Send + Sync {
+	/// Export state needed, except state that can be shared with
+	/// other component.
+	/// Return pointers to state that can be shared with others components.
+	fn export_sync_meta(
+		&self,
+		out: &mut dyn std::io::Write,
+		range: &RangeSnapshot<Block>,
+	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>>;
+
+	/// Export state and return non imported content that is shared.
+	/// Note there is currently no callback with the shared content
+	/// because not use at this point, but will certainly be needed.
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
 		range: &RangeSnapshot<Block>,
-	) -> sp_blockchain::Result<()>;
+	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>>;
 }
 
-impl<Block: BlockT> SnapshotSync<Block> for () {
-	fn export_sync_meta(
+impl<Block: BlockT> SnapshotSyncRoot<Block> for () {
+	fn export_sync(
 		&self,
 		_out: &mut dyn std::io::Write,
 		_range: RangeSnapshot<Block>,
@@ -586,18 +610,11 @@ impl<Block: BlockT> SnapshotSync<Block> for () {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}
 
-	fn import_sync_head(
+	fn import_sync(
 		&self,
 		_encoded: &mut dyn std::io::Read,
-	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>> {
-		Ok(None)
-	}
-
-	fn import_sync_meta(
-		&self,
-		_encoded: &mut dyn std::io::Read,
-		_range: &RangeSnapshot<Block>,
-	) -> sp_blockchain::Result<()> {
+		_dest_config: sp_database::SnapshotDbConf,
+	) -> sp_blockchain::Result<RangeSnapshot<Block>> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}
 }

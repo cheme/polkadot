@@ -43,7 +43,7 @@ use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
 use codec::{Decode, Encode, Compact, IoReader};
-use sp_database::{SnapshotDbConf, SnapshotDBMode, SnapshotImportDef, StateIter, ChildStateIter};
+use sp_database::{SnapshotDbConf, SnapshotDBMode, StateIter, ChildStateIter};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
@@ -328,10 +328,10 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 	fn export_snapshot(
 		&self,
-		out: &mut impl std::io::Write,
+		out: &mut dyn std::io::Write,
 		last_finalized: NumberFor<Block>,
-		from: Option<NumberFor<Block>>,
-		to: Option<NumberFor<Block>>,
+		from: NumberFor<Block>,
+		to: NumberFor<Block>,
 		flat: bool,
 		db_mode: SnapshotDBMode,
 		default_flat: impl sc_client_api::StateVisitor,
@@ -372,30 +372,11 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		}
 	}
 
-	fn read_import_def(
-		&self,
-		from: &mut impl std::io::Read,
-		config: &SnapshotDbConf,
-	) -> sp_database::error::Result<SnapshotImportDef> {
-		let mut buf = [0];
-		from.read_exact(&mut buf[..1])
-			.map_err(|e| DatabaseError(Box::new(e)))?;
-		Ok(match buf[0] {
-			u if u == SnapshotMode::Flat as u8 => SnapshotImportDef {
-				is_flat: true,
-			},
-			_ => {
-				let e = ClientError::StateDatabase("Unknown snapshot mode.".into());
-				return Err(DatabaseError(Box::new(e)));
-			},
-		})
-	}
-
 	fn import_snapshot_db(
 		&self,
-		mut from: &mut impl std::io::Read,
+		mut from: &mut dyn std::io::Read,
 		config: &SnapshotDbConf,
-		def: &SnapshotImportDef,
+		is_flat: bool,
 		at: &Block::Hash,
 	) -> sp_database::error::Result<()> {
 		self.clear_snapshot_db()?;
@@ -409,7 +390,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 			}).map_err(|e| DatabaseError(Box::new(e)))?;
 		}
 
-		if def.is_flat {
+		if is_flat {
 			let (query_plan, update_plan) = self.historied_management.init_new_management(
 				at,
 				&self.ordered_db,
@@ -533,6 +514,12 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		}));
 
 		Ok(snapshot_db)
+	}
+
+	/// Read currently used config.
+	/// TODO could probably remove if moving some import stuff into this module
+	pub fn config(&self) -> &SnapshotDbConf {
+		&self.config
 	}
 
 	pub fn new_block_historied_db_mut(
@@ -728,9 +715,9 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		&self.historied_management
 	}
 
-	fn flat_from_state<O: std::io::Write>(
+	fn flat_from_state(
 		&self,
-		out: &mut O,
+		mut out: &mut dyn std::io::Write,
 		state_visit: impl sc_client_api::StateVisitor,
 	) -> sp_database::error::Result<()> {
 		out.write(&[SnapshotMode::Flat as u8, StateId::Top as u8])
@@ -751,7 +738,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		let child_storage_key = &mut child_storage_key;
 		state_visit.state_visit(|child, key, value| {
 			if child != last_child.as_ref().map(Vec::as_slice) {
-				default_key_writer.write_last(out);
+				default_key_writer.write_last(&mut out);
 				if let Some(child) = child.as_ref() {
 					*child_storage_key = PrefixedStorageKey::new(child.to_vec());
 					*last_child = Some(child.to_vec());
@@ -759,7 +746,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 						Some((ChildType::ParentKeyId, storage_key)) => {
 							out.write(&[StateId::DefaultChild as u8])
 								.map_err(|e| DatabaseError(Box::new(e)))?;
-							default_child_key_writer.write_next_owned(storage_key.to_vec(), out);
+							default_child_key_writer.write_next_owned(storage_key.to_vec(), &mut out);
 						},
 						_ => {
 							let e = ClientError::StateDatabase("Unknown child trie type in state".into());
@@ -774,12 +761,12 @@ impl<Block: BlockT> SnapshotDb<Block> {
 					previous: Default::default(),
 				};
 			}
-			default_key_writer.write_next_owned(key, out);
-			value.encode_to(out);
+			default_key_writer.write_next_owned(key, &mut out);
+			value.encode_to(&mut out);
 			Ok(())
 		})?;
 
-		default_key_writer.write_last(out);
+		default_key_writer.write_last(&mut out);
 		out.write(&[StateId::EndOfState as u8])
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 		Ok(())
@@ -807,7 +794,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 /// First byte of snapshot define
 /// its mode.
 #[repr(u8)]
-enum SnapshotMode {
+pub(crate) enum SnapshotMode {
 	/// Flat variant, no compression, and obviously no diff.
 	Flat = 0,
 }

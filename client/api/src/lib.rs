@@ -55,6 +55,7 @@ pub mod utils {
 	use sp_blockchain::{HeaderBackend, HeaderMetadata, Error};
 	use sp_runtime::traits::Block as BlockT;
 	use std::borrow::Borrow;
+	use crate::DatabaseError;
 
 	/// Returns a function for checking block ancestry, the returned function will
 	/// return `true` if the given hash (second parameter) is a descendent of the
@@ -88,6 +89,45 @@ pub mod utils {
 			let ancestor = sp_blockchain::lowest_common_ancestor(client, *hash, *base)?;
 
 			Ok(ancestor.hash == *base)
+		}
+	}
+
+	/// A state visitor implementation for a given backend at a given block.
+	pub struct StateVisitorImpl<'a, B: BlockT, BA>(pub &'a BA, pub &'a B::Hash);
+
+	impl<'a, B, BA> sp_database::StateVisitor for StateVisitorImpl<'a, B, BA>
+		where
+			B: BlockT,
+			BA: crate::backend::Backend<B>,
+	{
+		fn state_visit(
+			&self,
+			mut visitor: impl FnMut(Option<&[u8]>, Vec<u8>, Vec<u8>) -> std::result::Result<(), DatabaseError>,
+		) -> std::result::Result<(), DatabaseError> {
+			let mut state = self.0.state_at(sp_runtime::generic::BlockId::Hash(self.1.clone()))
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+			use sp_state_machine::Backend;
+			let trie_state = state.as_trie_backend().expect("Snapshot runing on a trie backend.");
+
+			let mut prev_child = None;
+			let prev_child = &mut prev_child;
+			let mut prefixed_storage_key = None;
+			let prefixed_storage_key = &mut prefixed_storage_key;
+			trie_state.for_key_values(|child, key, value| {
+				if child != prev_child.as_ref() {
+					*prefixed_storage_key = child.map(|ci| ci.prefixed_storage_key().into_inner());
+					*prev_child = child.cloned();
+				}
+				visitor(
+					prefixed_storage_key.as_ref().map(Vec::as_slice),
+					key,
+					value,
+				).expect("Failure adding value to snapshot db.");
+			}).map_err(|e| {
+				let error: String = e.into();
+				DatabaseError(Box::new(sp_blockchain::Error::Backend(error)))
+			})?;
+			Ok(())
 		}
 	}
 }

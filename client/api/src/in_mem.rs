@@ -765,7 +765,7 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> where Block::Hash
 		&self.import_lock
 	}
 
-	fn snapshot_sync(&self) -> Box<dyn backend::SnapshotSync<Block>> {
+	fn snapshot_sync(&self) -> Box<dyn backend::SnapshotSyncRoot<Block>> {
 		Box::new(())
 	}
 

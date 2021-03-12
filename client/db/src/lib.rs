@@ -91,13 +91,14 @@ use std::io;
 use std::collections::{HashMap, HashSet};
 use parking_lot::{Mutex, RwLock};
 use linked_hash_map::LinkedHashMap;
-use log::{trace, debug, warn};
+use log::{trace, debug, warn, info};
 
 use sc_client_api::{
 	UsageInfo, MemoryInfo, IoInfo, MemorySize,
 	backend::{NewBlockState, PrunableStateChangesTrieStorage, ProvideChtRoots,
-		SnapshotSync, RangeSnapshot},
+		SnapshotSync, SnapshotSyncRoot, RangeSnapshot},
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
+	StateVisitor, utils::StateVisitorImpl, DatabaseError,
 };
 use sp_blockchain::{
 	Result as ClientResult, Error as ClientError,
@@ -719,12 +720,21 @@ impl<Block: BlockT> ProvideChtRoots<Block> for BlockchainDb<Block> {
 	}
 }
 
-impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
-	fn export_sync_meta(
+/// Component of client needed to do snapshot import and export.
+pub struct ClientSnapshotSync<Block: BlockT> {
+	backend: Backend<Block>,
+}
+
+impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
+	fn export_sync(
 		&self,
 		mut out_dyn: &mut dyn std::io::Write,
 		range: RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<()> {
+
+		let chain_info = self.backend.blockchain.info();
+		let finalized_hash = chain_info.finalized_hash;
+		let finalized_number = chain_info.finalized_number;
 		// dyn to impl
 		let out = &mut out_dyn;
 		// version
@@ -743,7 +753,7 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		// and headers/blockids mapping (same)
 		let mut i = range.from;
 		while i <= range.to {
-			let header: Block::Header = self.header(BlockId::Number(i))?
+			let header: Block::Header = self.backend.blockchain.header(BlockId::Number(i))?
 				.ok_or_else(|| sp_blockchain::Error::Backend(
 					format!("Header missing at {:?}", i),
 				))?;
@@ -751,22 +761,36 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			i += One::one();
 		}
 		// registered components
-		let registered_snapshot_sync = self.registered_snapshot_sync.read();
+		let registered_snapshot_sync = self.backend.blockchain.registered_snapshot_sync.read();
 		let nb = registered_snapshot_sync.len();
 		Compact(nb as u32).encode_to(out);
 		for i in 0..nb {
 			registered_snapshot_sync[i].export_sync_meta(
 				out_dyn,
-				range.clone(),
+				&range,
 			)?;
 		}
+		use sc_client_api::SnapshotDb;
+		let state_visitor = StateVisitorImpl(&self.backend, &range.to_hash);
+		// TOOD use plain range as param
+		self.backend.snapshot_db.export_snapshot(
+			out_dyn,
+			finalized_number,
+			range.from,
+			range.to,
+			range.flat,
+			range.mode,
+			state_visitor,
+		)?;
+
 		Ok(())
 	}
 
-	fn import_sync_head(
+	fn import_sync(
 		&self,
 		encoded: &mut dyn std::io::Read,
-	) -> sp_blockchain::Result<Option<RangeSnapshot<Block>>> {
+		dest_config: SnapshotDbConf,
+	) -> sp_blockchain::Result<RangeSnapshot<Block>> {
 		let mut buf = [0];
 		// version
 		encoded.read_exact(&mut buf[..1]).map_err(|e|
@@ -794,8 +818,9 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 			from_hash: Default::default(),
 			to,
 			to_hash: Default::default(),
+			flat: false,
+			mode: sp_database::SnapshotDBMode::NoDiff,
 		};
-
 
 		let mut first = true;
 
@@ -832,32 +857,21 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 					hash,
 				)?;
 
-				self.update_meta(hash.clone(), number.clone(), true, true);
+				self.backend.blockchain.update_meta(hash.clone(), number.clone(), true, true);
 				transaction.set_from_vec(columns::META, meta_keys::BEST_BLOCK, lookup_key.clone());
 				transaction.set_from_vec(columns::META, meta_keys::FINALIZED_BLOCK, lookup_key);
 				first = false;
 			}
 			i += One::one();
-			let mut leaves = self.leaves.write();
+			let mut leaves = self.backend.blockchain.leaves.write();
 			let _displaced_leaf = leaves.import(hash, number, parent_hash);
 			leaves.prepare_transaction(&mut transaction, columns::META, meta_keys::LEAF_PREFIX);
 
-			self.db.commit(transaction)?;
+			self.backend.blockchain.db.commit(transaction)?;
 		}
 
-
-		Ok(Some(range))
-	}
-
-	fn import_sync_meta(
-		&self,
-		encoded: &mut dyn std::io::Read,
-		range: &RangeSnapshot<Block>,
-	) -> sp_blockchain::Result<()> {
-
-		let mut reader = IoReader(encoded);
 		// registered components
-		let registered_snapshot_sync = self.registered_snapshot_sync.read();
+		let registered_snapshot_sync = self.backend.blockchain.registered_snapshot_sync.read();
 		let expected = registered_snapshot_sync.len();
 		let nb: Compact<u32> = Decode::decode(&mut reader).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
@@ -869,10 +883,86 @@ impl<Block: BlockT> SnapshotSync<Block> for BlockchainDb<Block> {
 		for i in 0..expected {
 			registered_snapshot_sync[i].import_sync_meta(
 				reader.0,
-				range,
+				&range,
 			)?;
 		}
-		Ok(())
+
+		let mut buf = [0];
+		reader.0.read_exact(&mut buf[..1])
+			.map_err(|e| DatabaseError(Box::new(e)))?;
+		range.flat = match buf[0] {
+			u if u == snapshot::SnapshotMode::Flat as u8 => true,
+			_ => {
+				let e = ClientError::StateDatabase("Unknown snapshot mode.".into());
+				return Err(e);
+			},
+		};
+
+		let mut config = dest_config.clone();
+		// import default values will be reverted: tod can move to import_snapshot_db function
+		// (revert too)
+		config.enabled = true;
+		config.pruning = None;
+		config.lazy_pruning = None;
+		config.primary_source = true; // needed to access historied-db
+		config.debug_assert = false; // not really useful
+
+		if range.flat {
+			debug_assert!(range.from_hash == range.to_hash);
+			let state_hash = range.to_hash.clone();
+
+			// init snapshot db
+			use sp_database::SnapshotDb; // TODO does this trait function still makes sense.
+			self.backend.snapshot_db.import_snapshot_db(&mut reader.0, &config, range.flat, &state_hash)?;
+
+			// header is imported by 'import_sync_meta'.
+			let header = self.backend.blockchain.header(BlockId::Hash(state_hash.clone()))?
+				.expect("Missing header");
+			let expected_root = header.state_root().clone();
+			use sc_client_api::backend::{Backend, BlockImportOperation};
+			let mut op = self.backend.begin_operation()?;
+			self.backend.begin_state_operation(&mut op, BlockId::Hash(Default::default()))?;
+			info!("Initializing import block/state (header-hash: {})",
+				state_hash,
+			);
+			let data = self.backend.snapshot_db.state_iter_at(&state_hash, Some(&config))?;
+			let state_root = op.inject_finalized_state(&state_hash, data)
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+			// TODO get state root from header and pass as param
+			if expected_root != state_root {
+				panic!("Unexpected root {:?}, in header {:?}.", state_root, expected_root);
+			}
+			// only state import, but need to have pending block to commit actual data.
+			op.set_block_data(
+				header,
+				None,
+				None,
+				sc_client_api::NewBlockState::Final,
+			).map_err(|e| DatabaseError(Box::new(e)))?;
+			self.backend.commit_operation(op)
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+
+			if !dest_config.enabled {
+				// clear snapshot db
+				self.backend.snapshot_db.clear_snapshot_db()?;
+			} else {
+				self.backend.snapshot_db.update_running_conf(
+					Some(dest_config.primary_source),
+					Some(dest_config.debug_assert),
+					dest_config.pruning,
+					dest_config.lazy_pruning,
+					Some(dest_config.cache_size),
+				)?;
+				if dest_config.pruning.is_some() {
+					// run pruning now
+					unimplemented!();
+				}
+			}
+		} else {
+			unimplemented!();
+		}
+
+		Ok(range)
 	}
 }
 
@@ -1172,10 +1262,11 @@ impl<T: Clone> FrozenForDuration<T> {
 ///
 /// Disk backend keeps data in a key-value store. In archive mode, trie nodes are kept from all blocks.
 /// Otherwise, trie nodes are kept only from some recent blocks.
+#[derive(Clone)]
 pub struct Backend<Block: BlockT> {
 	storage: Arc<StorageDb<Block>>,
 	offchain_storage: offchain::LocalStorage,
-	changes_tries_storage: DbChangesTrieStorage<Block>,
+	changes_tries_storage: Arc<DbChangesTrieStorage<Block>>,
 	blockchain: BlockchainDb<Block>,
 	canonicalization_delay: u64,
 	shared_cache: SharedCache<Block>,
@@ -1183,7 +1274,7 @@ pub struct Backend<Block: BlockT> {
 	is_archive: bool,
 	keep_blocks: KeepBlocks,
 	transaction_storage: TransactionStorageMode,
-	io_stats: FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>,
+	io_stats: Arc<FrozenForDuration<(kvdb::IoStats, StateUsageInfo)>>,
 	state_usage: Arc<StateUsageStats>,
 	snapshot_db: snapshot::SnapshotDb<Block>,
 }
@@ -1257,7 +1348,7 @@ impl<Block: BlockT> Backend<Block> {
 			prefix_keys: !config.source.supports_ref_counting(),
 		};
 		let offchain_storage = offchain::LocalStorage::new(db.clone());
-		let changes_tries_storage = DbChangesTrieStorage::new(
+		let changes_tries_storage = Arc::new(DbChangesTrieStorage::new(
 			db.clone(),
 			blockchain.header_metadata_cache.clone(),
 			columns::META,
@@ -1271,7 +1362,7 @@ impl<Block: BlockT> Backend<Block> {
 			} else {
 				Some(MIN_BLOCKS_TO_KEEP_CHANGES_TRIES_FOR)
 			},
-		)?;
+		)?);
 
 		let historied_persistence = TransactionalMappedDB {
 			db: management_db,
@@ -1296,7 +1387,7 @@ impl<Block: BlockT> Backend<Block> {
 			),
 			import_lock: Default::default(),
 			is_archive: is_archive_pruning,
-			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
+			io_stats: Arc::new(FrozenForDuration::new(std::time::Duration::from_secs(1))),
 			state_usage: Arc::new(StateUsageStats::new()),
 			keep_blocks: config.keep_blocks.clone(),
 			transaction_storage: config.transaction_storage.clone(),
@@ -1985,7 +2076,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	}
 
 	fn changes_trie_storage(&self) -> Option<&dyn PrunableStateChangesTrieStorage<Block>> {
-		Some(&self.changes_tries_storage)
+		Some(&*self.changes_tries_storage.as_ref())
 	}
 
 	fn offchain_storage(&self) -> Option<Self::OffchainStorage> {
@@ -2239,8 +2330,10 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		&*self.import_lock
 	}
 
-	fn snapshot_sync(&self) -> Box<dyn SnapshotSync<Block>> {
-		Box::new(self.blockchain.clone())
+	fn snapshot_sync(&self) -> Box<dyn SnapshotSyncRoot<Block>> {
+		Box::new(ClientSnapshotSync {
+			backend: self.clone(),
+		})
 	}
 
 	fn register_sync(&self, sync: Box<dyn SnapshotSync<Block>>) {
