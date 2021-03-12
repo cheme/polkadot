@@ -1168,15 +1168,18 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 		// writing whole set (could limit to range in the future).
 		self.0.inner().read().encode_to(&mut out);
 
+		// TODO get an actual meaningfull range, using last hundred block for testing.
+		use sp_runtime::traits::Saturating;
+		let from = range.from.saturating_sub(100u32.into());
 		Ok(SnapshotSyncCommon {
-			additional_headers: Vec::new(),
+			additional_headers: vec![(from, range.to)],
 		})
 	}
 
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
-		_range: &RangeSnapshot<Block>,
+		range: &RangeSnapshot<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>> {
 		let mut buf = [0];
 		// version
@@ -1201,8 +1204,11 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 			)
 		);
 
+		// TODO get an actual meaningfull range, using last hundred block for testing.
+		use sp_runtime::traits::Saturating;
+		let from = range.from.saturating_sub(100u32.into());
 		Ok(SnapshotSyncCommon {
-			additional_headers: Vec::new(),
+			additional_headers: vec![(from, range.to)],
 		})
 	}
 }

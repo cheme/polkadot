@@ -443,10 +443,9 @@ impl SnapshotImportCmd {
 
 		let mut dest_config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
 
-		if !self.without_snapshot {
+		if self.without_snapshot {
 			dest_config.enabled = false;
 		};
-		// TODO no real need for dyn here.
 		let mut file: Box<dyn std::io::Read + Send> = match &self.input {
 			Some(filename) => Box::new(std::fs::File::open(filename)?),
 			None => {

@@ -546,11 +546,22 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 /// Range covered by snapshot.
 #[derive(Clone)]
 pub struct RangeSnapshot<Block: BlockT> {
+	/// Number to start from.
 	pub from: NumberFor<Block>,
+
+	/// Hash to start from.
 	pub from_hash: Block::Hash,
+
+	/// Number of max block.
 	pub to: NumberFor<Block>,
+
+	/// Hash of max block.
 	pub to_hash: Block::Hash,
+
+	/// Kind of snapshot db to use.
 	pub mode: sp_database::SnapshotDBMode,
+
+	/// Is the snapshot flat (only write last state).
 	pub flat: bool,
 }
 
