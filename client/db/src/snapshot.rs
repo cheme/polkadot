@@ -720,7 +720,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		mut out: &mut dyn std::io::Write,
 		state_visit: impl sc_client_api::StateVisitor,
 	) -> sp_database::error::Result<()> {
-		out.write(&[SnapshotMode::Flat as u8, StateId::Top as u8])
+		out.write(&[StateId::Top as u8])
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 
 		let mut default_key_writer = KeyWriter {
@@ -789,14 +789,6 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		}
 		Ok(())
 	}
-}
-
-/// First byte of snapshot define
-/// its mode.
-#[repr(u8)]
-pub(crate) enum SnapshotMode {
-	/// Flat variant, no compression, and obviously no diff.
-	Flat = 0,
 }
 
 /// First byte of snapshot define
