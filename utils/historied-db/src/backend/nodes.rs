@@ -994,6 +994,20 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		}
 		node.data.emplace(index.1, h);
 	}
+
+	fn apply_on(&self, index: Self::Index, action: impl FnMut(HistoriedValue<&V, S>)) {
+		if index.0 == self.end_node_index {
+			return self.inner.data.apply_on(index.1, action)
+		}
+		self.fetched.borrow()[index.0 as usize].data.apply_on(index.1, action)
+	}
+
+	fn apply_on_mut(&mut self, index: Self::Index, action: impl FnMut(HistoriedValue<&mut V, S>)) {
+		if index.0 == self.end_node_index {
+			return self.inner.data.apply_on_mut(index.1, action)
+		}
+		self.fetched.borrow_mut()[index.0 as usize].data.apply_on_mut(index.1, action)
+	}
 }
 
 impl EstimateSize for Vec<u8> {

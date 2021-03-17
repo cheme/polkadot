@@ -181,6 +181,12 @@ impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for $memory_only<V, S> {
 	fn emplace(&mut self, index: Self::Index, value: HistoriedValue<V, S>) {
 		self.0[index as usize] = value;
 	}
+	fn apply_on(&self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&V, S>)) {
+		action(self.0[index as usize].as_ref())
+	}
+	fn apply_on_mut(&mut self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&mut V, S>)) {
+		action(self.0[index as usize].as_mut())
+	}
 }
 
 // Dummy implementation related to some constraint.
