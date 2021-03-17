@@ -155,6 +155,16 @@ pub trait LinearStorageSlice<V: AsRef<[u8]>, S: Clone>: LinearStorage<V, S> {
 	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], S>;
 	/// Unchecked mutable access to mutable value slice and state.
 	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], S>;
+	/// Apply on variants of get slice.
+	fn apply_on_slice(&self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&[u8], S>)) {
+		let value = self.get_slice(index);
+		action(value)
+	}
+	/// Apply on variants of get slice mut.
+	fn apply_on_slice_mut(&mut self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&mut [u8], S>)) {
+		let value = self.get_slice_mut(index);
+		action(value);
+	}
 }
 
 /// Technical trait to use for composing without
