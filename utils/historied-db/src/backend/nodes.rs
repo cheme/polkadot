@@ -256,6 +256,7 @@ impl<V, S, D, M> Node<V, S, D, M> {
 
 impl<V, S, D, M> Node<V, S, D, M>
 	where
+		S: Clone,
 		D: LinearStorage<V, S>,
 {
 	fn clear(&mut self) {
@@ -371,6 +372,7 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
+		S: Clone,
 		D: Clone + Trigger + LinearStorage<V, S>,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
@@ -472,6 +474,7 @@ impl<B: Clone, NI: ContextBuilder> ContextBuilder for ContextHead<B, NI> {
 
 impl<V, S, D, M, B, NI> Trigger for Head<V, S, D, M, B, NI>
 	where
+		S: Clone,
 		D: Clone + Trigger + LinearStorage<V, S>,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
@@ -529,6 +532,7 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
+		S: Clone,
 		D: LinearStorage<V, S>,
 		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,
@@ -591,6 +595,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 #[cfg(test)]
 impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	where
+		S: Clone,
 		D: Clone + Trigger + LinearStorage<V, S>,
 		M: NodesMeta,
 		B: NodeStorage<V, S, D, M> + NodeStorageMut<V, S, D, M>,
@@ -607,6 +612,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 /// operation to rewrite correctly the sizes.
 impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	where
+		S: Clone,
 		D: Context<Context = NI> + LinearStorage<V, S>,
 		B: NodeStorage<V, S, D, M>,
 		M: NodesMeta,

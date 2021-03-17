@@ -43,7 +43,7 @@ pub mod nodes;
 /// is done with either `last` or `lookup` method.
 ///
 /// Implementation should always favor last index access over random lookup.
-pub trait LinearStorage<V, S>: InitFrom {
+pub trait LinearStorage<V, S: Clone>: InitFrom {
 	/// Internal index over a location in the storage.
 	/// Access to data when using this internal index should
 	/// be direct, allowing to iterate efficiently on data
@@ -123,10 +123,24 @@ pub trait LinearStorage<V, S>: InitFrom {
 	fn emplace_lookup(&mut self, at: usize, value: HistoriedValue<V, S>) {
 		self.lookup(at).map(|index| self.emplace(index, value));
 	}
+
+	/// Unchecked access to value pointer and state.
+	/// Note that default implementation does fetch the inner value.
+	fn apply_on(&self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&V, S>)) {
+		let value = self.get(index);
+		action(value.as_ref())
+	}
+	/// Unchecked access to value mutable pointer and state.
+	/// Note that default implementation does fetch and emplace the inner value.
+	fn apply_on_mut(&mut self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&mut V, S>)) {
+		let mut value = self.get(index);
+		action(value.as_mut());
+		self.emplace(index, value);
+	}
 }
 
 /// Backend for linear storage with inmemory reference.
-pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
+pub trait LinearStorageMem<V, S: Clone>: LinearStorage<V, S> {
 	/// Unchecked access to value pointer and state.
 	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S>;
 	/// Unchecked access to value mutable pointer and state.
@@ -134,7 +148,7 @@ pub trait LinearStorageMem<V, S>: LinearStorage<V, S> {
 }
 
 /// Backend for linear storage with inmemory reference to a slice of bytes.
-pub trait LinearStorageSlice<V: AsRef<[u8]>, S>: LinearStorage<V, S> {
+pub trait LinearStorageSlice<V: AsRef<[u8]>, S: Clone>: LinearStorage<V, S> {
 	/// Unchecked access to value slice and state.
 	fn get_slice(&self, index: Self::Index) -> HistoriedValue<&[u8], S>;
 	/// Unchecked mutable access to mutable value slice and state.
@@ -143,7 +157,7 @@ pub trait LinearStorageSlice<V: AsRef<[u8]>, S>: LinearStorage<V, S> {
 
 /// Technical trait to use for composing without
 /// the lifetime issue that can occurs with `LinearStorageSlice`.
-pub trait LinearStorageRange<'a, V, S>: LinearStorage<V, S> {
+pub trait LinearStorageRange<'a, V, S: Clone>: LinearStorage<V, S> {
 	/// Instantiate from an existing slice.
 	fn from_slice_owned(slice: &[u8]) -> Option<Self>;
 	/// Instantiate from an existing slice, keeping
@@ -161,13 +175,13 @@ pub trait LinearStorageRange<'a, V, S>: LinearStorage<V, S> {
 /// Iterator over the internal index stored in a backend stoarge.
 /// This allow to iterate over value without relying on unsafe code,
 /// since accessing an item with internal state should be cheap.
-pub struct RevIter<'a, V, S, D: LinearStorage<V, S>>(
+pub struct RevIter<'a, V, S: Clone, D: LinearStorage<V, S>>(
 	&'a D,
 	Option<D::Index>,
 	sp_std::marker::PhantomData<(V, S)>,
 );
 
-impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for RevIter<'a, V, S, D> {
+impl<'a, V, S: Clone, D: LinearStorage<V, S>>  Iterator for RevIter<'a, V, S, D> {
 	type Item = <D as LinearStorage<V, S>>::Index;
 	fn next(&mut self) -> Option<Self::Item> {
 		if let Some(index) = self.1.take() {
@@ -182,7 +196,7 @@ impl<'a, V, S, D: LinearStorage<V, S>>  Iterator for RevIter<'a, V, S, D> {
 /// Entry for a backend.
 ///
 /// Actual change get commited on drop.
-pub struct Entry<'a, V, S, D: LinearStorage<V, S>> {
+pub struct Entry<'a, V, S: Clone, D: LinearStorage<V, S>> {
 	value: Option<HistoriedValue<V, S>>,
 	index: Option<D::Index>,
 	storage: &'a mut D,
@@ -190,7 +204,7 @@ pub struct Entry<'a, V, S, D: LinearStorage<V, S>> {
 	insert: bool,
 }
 
-impl<'a, V, S, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
+impl<'a, V, S: Clone, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
 	/// Similar to `Vaccant` enum of rust std lib flavored entries.
 	pub fn is_vaccant(&self) -> bool {
 		self.insert
@@ -231,7 +245,7 @@ impl<'a, V, S, D: LinearStorage<V, S>> Entry<'a, V, S, D> {
 	}
 }
 
-impl<'a, V, S, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D> {
+impl<'a, V, S: Clone, D: LinearStorage<V, S>> Drop for Entry<'a, V, S, D> {
 	fn drop(&mut self) {
 		if self.changed {
 			if let Some(change) = self.value.take() {

@@ -138,7 +138,7 @@ trait StorageAdapter<'a, S, V, D, H> {
 }
 
 struct RefVecAdapter;
-impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
+impl<'a, S: Clone, V, D: LinearStorageMem<V, S>> StorageAdapter<
 	'a,
 	S,
 	&'a V,
@@ -151,7 +151,7 @@ impl<'a, S, V, D: LinearStorageMem<V, S>> StorageAdapter<
 }
 
 struct ValueVecAdapter;
-impl<'a, S, V, D: LinearStorage<V, S>> StorageAdapter<
+impl<'a, S: Clone, V, D: LinearStorage<V, S>> StorageAdapter<
 	'a,
 	S,
 	V,
@@ -164,7 +164,7 @@ impl<'a, S, V, D: LinearStorage<V, S>> StorageAdapter<
 }
 
 struct SliceAdapter;
-impl<'a, S, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
+impl<'a, S: Clone, D: LinearStorageSlice<Vec<u8>, S>> StorageAdapter<
 	'a,
 	S,
 	&'a [u8],

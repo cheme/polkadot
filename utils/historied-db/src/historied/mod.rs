@@ -31,7 +31,7 @@ pub mod aggregate;
 /// Basis trait for historied data.
 pub trait DataBasis {
 	/// State to query for this value.
-	type S;
+	type S: Clone;
 
 	/// Internal index for a single history item.
 	type Index;
