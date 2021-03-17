@@ -83,7 +83,7 @@ impl<V, S> Default for $memory_only<V, S> {
 	}
 }
 
-impl<V: Clone + Context, S: Clone> LinearStorageMem<V, S> for $memory_only<V, S> {
+impl<'a, V: Clone + Context + 'a, S: Clone> LinearStorageMem<'a, V, S> for $memory_only<V, S> {
 	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S> {
 		let HistoriedValue { value, state } = &self.0[index as usize];
 		HistoriedValue { value: &value, state: state.clone() }

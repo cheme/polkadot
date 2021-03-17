@@ -138,7 +138,7 @@ trait StorageAdapter<'a, S, V, D, H> {
 }
 
 struct RefVecAdapter;
-impl<'a, S: Clone, V, D: LinearStorageMem<V, S>> StorageAdapter<
+impl<'a, S: Clone, V, D: LinearStorageMem<'a, V, S>> StorageAdapter<
 	'a,
 	S,
 	&'a V,
@@ -295,7 +295,7 @@ impl<V, S, D> DataRef<V> for Linear<V, S, D>
 	where
 		V: ValueRef + Clone,
 		S: LinearState,
-		D: LinearStorageMem<V::Storage, S>,
+		D: for<'a> LinearStorageMem<'a, V::Storage, S>,
 {
 	fn get_ref(&self, at: &Self::S) -> Option<&V> {
 		self.get_adapt::<_, RefVecAdapter>(at).map(ValueRef::from_storage_ref)
@@ -479,7 +479,7 @@ impl<V, S, D> DataRefMut<V> for Linear<V, S, D>
 	where
 		V: ValueRef + Clone + Eq,
 		S: LinearState,
-		D: LinearStorageMem<V::Storage, S>,
+		D: for<'a> LinearStorageMem<'a, V::Storage, S>,
 {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let at = at.latest();

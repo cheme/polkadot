@@ -142,11 +142,19 @@ pub trait LinearStorage<V, S: Clone>: InitFrom {
 }
 
 /// Backend for linear storage with inmemory reference.
-pub trait LinearStorageMem<V, S: Clone>: LinearStorage<V, S> {
+pub trait LinearStorageMem<'a, V: 'a, S: Clone>: LinearStorage<V, S> {
 	/// Unchecked access to value pointer and state.
 	fn get_ref(&self, index: Self::Index) -> HistoriedValue<&V, S>;
 	/// Unchecked access to value mutable pointer and state.
 	fn get_ref_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut V, S>;
+	fn apply_on_ref(&'a self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&'a V, S>)) {
+		let value = self.get_ref(index);
+		action(value)
+	}
+	fn apply_on_ref_mut(&'a mut self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&'a mut V, S>)) {
+		let value = self.get_ref_mut(index);
+		action(value);
+	}
 }
 
 /// Backend for linear storage with inmemory reference to a slice of bytes.
@@ -156,12 +164,12 @@ pub trait LinearStorageSlice<V: AsRef<[u8]>, S: Clone>: LinearStorage<V, S> {
 	/// Unchecked mutable access to mutable value slice and state.
 	fn get_slice_mut(&mut self, index: Self::Index) -> HistoriedValue<&mut [u8], S>;
 	/// Apply on variants of get slice.
-	fn apply_on_slice(&self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&[u8], S>)) {
+	fn apply_on_slice<'a>(&'a self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&'a [u8], S>)) {
 		let value = self.get_slice(index);
 		action(value)
 	}
 	/// Apply on variants of get slice mut.
-	fn apply_on_slice_mut(&mut self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&mut [u8], S>)) {
+	fn apply_on_slice_mut<'a>(&'a mut self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&'a mut [u8], S>)) {
 		let value = self.get_slice_mut(index);
 		action(value);
 	}

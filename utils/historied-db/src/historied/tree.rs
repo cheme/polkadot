@@ -48,12 +48,13 @@ use core::default::Default;
 // Lookup first linear storage in parallel (until incorrect state ordering).
 // Call second linear historied value afterward.
 macro_rules! tree_get {
-	($fn_name: ident, $return_type: ty, $branch_query: ident, $value_query: expr, $post_process: expr, $b: lifetime) => {
+	($fn_name: ident, $return_type: ty, $apply_on_branch: ident, $value_query: expr, $post_process: expr, $b: lifetime) => {
 	fn $fn_name<$b>(&'a self, at: &<Self as DataBasis>::S) -> Option<$return_type> {
 		// note that we expect branch index to be linearily set
 		// along a branch (no state containing unordered branch_index
 		// and no history containing unorderd branch_index).
 		let mut next_branch_index = self.branches.last();
+		let mut final_result = None;
 		for (state_branch_range, state_branch_index) in at.iter() {
 			while let Some(branch_ix) = next_branch_index {
 				let branch_index = &self.branches.get_state(branch_ix);
@@ -63,9 +64,14 @@ macro_rules! tree_get {
 					// TODO add a lower bound check (maybe debug_assert it only).
 					let mut upper_bound = state_branch_range.end.clone();
 					upper_bound -= BI::one();
-					let branch = self.branches.$branch_query(branch_ix).value;
-					if let Some(result) = $value_query(&branch, &upper_bound) {
-						return Some($post_process(result, branch, branch_ix))
+					self.branches.$apply_on_branch(branch_ix, |value| {
+						let branch = value.value;
+						if let Some(result) = $value_query(branch, &upper_bound) {
+							final_result = Some($post_process(result, branch, branch_ix));
+						}
+					});
+					if final_result.is_some() {
+						return final_result;
 					}
 				}
 				next_branch_index = self.branches.previous_index(branch_ix);
@@ -76,15 +82,20 @@ macro_rules! tree_get {
 		while let Some(branch_ix) = next_branch_index {
 			let branch_index = &self.branches.get_state(branch_ix);
 			if branch_index <= &at.composite_treshold.0 {
-				let branch = self.branches.$branch_query(branch_ix).value;
-				if let Some(result) = $value_query(&branch, &at.composite_treshold.1) {
-					return Some($post_process(result, branch, branch_ix))
+				self.branches.$apply_on_branch(branch_ix, |value| {
+					let branch = value.value;
+					if let Some(result) = $value_query(branch, &at.composite_treshold.1) {
+						final_result = Some($post_process(result, branch, branch_ix));
+					}
+				});
+				if final_result.is_some() {
+					return final_result;
 				}
 			}
 			next_branch_index = self.branches.previous_index(branch_ix);
 		}
 	
-		None
+		final_result
 	}
 	}
 }
@@ -203,7 +214,7 @@ impl<I, BI, V, D, BD> IndexedDataBasis for Tree<I, BI, V, D, BD>
 {
 	type I = (D::Index, BD::Index);
 	// Not really used, but it would make sense to implement variants with get_ref.
-	tree_get!(index, Self::I, get, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r), 'a);
+	tree_get!(index, Self::I, apply_on, |b: &Linear<V, BI, BD>, ix| b.index(ix), |r, _, ix| (ix, r), 'a);
 }
 
 #[cfg(feature = "indexed-access")]
@@ -229,7 +240,7 @@ impl<I, BI, V, D, BD> Data<V> for Tree<I, BI, V, D, BD>
 		D: LinearStorage<Linear<V, BI, BD>, I>, // TODO rewrite to be linear storage of BD only.
 		BD: LinearStorage<V::Storage, BI>,
 {
-	tree_get!(get, V, get, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _, _| r, 'a);
+	tree_get!(get, V, apply_on, |b: &Linear<V, BI, BD>, ix| b.get(ix), |r, _, _| r, 'a);
 }
 
 impl<I, BI, V, D, BD> DataRef<V> for Tree<I, BI, V, D, BD>
@@ -237,10 +248,10 @@ impl<I, BI, V, D, BD> DataRef<V> for Tree<I, BI, V, D, BD>
 		I: Default + Ord + Clone,
 		BI: LinearState,
 		V: ValueRef + Clone,
-		D: LinearStorageMem<Linear<V, BI, BD>, I>,
-		BD: LinearStorageMem<V::Storage, BI>,
+		D: for<'a> LinearStorageMem<'a, Linear<V, BI, BD>, I>,
+		BD: for<'a> LinearStorageMem<'a, V::Storage, BI>,
 {
-	tree_get!(get_ref, &V, get_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _, _| r, 'a);
+	tree_get!(get_ref, &'a V, apply_on_ref, |b: &'a Linear<V, BI, BD>, ix| b.get_ref(ix), |r, _, _| r, 'a);
 }
 
 impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
@@ -816,8 +827,8 @@ impl<I, BI, V, D, BD> DataRefMut<V> for Tree<I, BI, V, D, BD>
 		I: Default + Ord + Clone + Encode,
 		BI: LinearState,
 		V: ValueRef + Clone + Eq,
-		D: LinearStorageMem<Linear<V, BI, BD>, I>,
-		BD: LinearStorageMem<V::Storage, BI, Context = D::Context> + Trigger,
+		D: for<'a> LinearStorageMem<'a, Linear<V, BI, BD>, I>,
+		BD: for<'a> LinearStorageMem<'a, V::Storage, BI, Context = D::Context> + Trigger,
 {
 	fn get_mut(&mut self, at: &Self::SE) -> Option<&mut V> {
 		let (branch_index, index) = at.latest();
@@ -895,7 +906,7 @@ impl<'a, I, BI, V, D, BD> DataSlices<'a, V> for Tree<I, BI, V, D, BD>
 	tree_get!(
 		get_slice,
 		&[u8],
-		get_slice,
+		apply_on_slice,
 		|b: &'a [u8], ix| <Linear<V, BI, BD>>::get_range(b, ix),
 		|result, b: &'a [u8], _| &b[result],
 		'b
