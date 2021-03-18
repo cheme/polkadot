@@ -1214,4 +1214,4 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 }
 
 // TODO get an actual meaningfull range, using last hundred block for testing.
-const HEADER_RANGE: u32 = 100_000;
+const HEADER_RANGE: u32 = 10_000;
