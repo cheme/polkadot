@@ -566,6 +566,7 @@ pub trait SnapshotSyncRoot<Block: BlockT>: Send + Sync {
 		&self,
 		out: &mut dyn std::io::Write,
 		range: RangeSnapshot<Block>,
+		state_only: bool,
 	) -> sp_blockchain::Result<()>;
 
 	/// Read head, this could be in a separate trait.
@@ -603,6 +604,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for () {
 		&self,
 		_out: &mut dyn std::io::Write,
 		_range: RangeSnapshot<Block>,
+		_state_only: bool,
 	) -> sp_blockchain::Result<()> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}

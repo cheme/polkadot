@@ -99,13 +99,24 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 		&self,
 		mut out_dyn: &mut dyn std::io::Write,
 		range: RangeSnapshot<Block>,
+		state_only: bool,
 	) -> sp_blockchain::Result<()> {
 
-		let chain_info = self.backend.blockchain.info();
-		let finalized_hash = chain_info.finalized_hash;
-		let finalized_number = chain_info.finalized_number;
 		// dyn to impl
 		let out = &mut out_dyn;
+
+		if state_only {
+			use sc_client_api::SnapshotDb;
+			let state_visitor = StateVisitorImpl(&self.backend, &range.to_hash);
+			self.backend.snapshot_db.export_snapshot(
+				out_dyn,
+				&range,
+				state_visitor,
+			)?;
+
+			return Ok(());
+		}
+
 		// version
 		out.write(&[0u8]).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot export error: {:?}", e)),
@@ -156,7 +167,6 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 
 
-		// TOOD use plain range as param
 		self.backend.snapshot_db.export_snapshot(
 			out_dyn,
 			&range,

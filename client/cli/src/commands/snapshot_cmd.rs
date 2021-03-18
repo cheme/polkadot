@@ -512,10 +512,10 @@ impl SnapshotExportCmd {
 		};
 		if let Some(path) = &self.output {
 			let mut out = std::fs::File::create(path)?;
-			backend.snapshot_sync().export_sync(&mut out, range)?;
+			backend.snapshot_sync().export_sync(&mut out, range, self.state_only)?;
 		} else {
 			let mut out = std::io::stdout();
-			backend.snapshot_sync().export_sync(&mut out, range)?;
+			backend.snapshot_sync().export_sync(&mut out, range, self.state_only)?;
 		};
 
 		Ok(())
