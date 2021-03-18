@@ -78,16 +78,15 @@ fn migrate_1_to_2<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_b
 /// Migration from version2 to version3:
 /// the number of columns has changed from 12 to 13, adding snapshot column;
 fn migrate_3_to_4<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
-	// Number of columns in v0.
+	// Number of columns in v2.
 	const V2_NUM_COLUMNS: u32 = 12;
-	{
-		let db_config = kvdb_rocksdb::DatabaseConfig::with_columns(V2_NUM_COLUMNS);
-		let path = db_path.to_str()
-			.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
-		let db = kvdb_rocksdb::Database::open(&db_config, &path)
-			.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
-		db.add_column().map_err(db_err)?;
-	}
+	let db_config = kvdb_rocksdb::DatabaseConfig::with_columns(V2_NUM_COLUMNS);
+	let path = db_path.to_str()
+		.ok_or_else(|| sp_blockchain::Error::Backend("Invalid database path".into()))?;
+	let db = kvdb_rocksdb::Database::open(&db_config, &path)
+		.map_err(|err| sp_blockchain::Error::Backend(format!("{}", err)))?;
+	db.add_column().map_err(db_err)
+}
 
 /// - The format of the stored Justification changed to support multiple Justifications.
 fn migrate_2_to_3<Block: BlockT>(db_path: &Path, _db_type: DatabaseType) -> sp_blockchain::Result<()> {
