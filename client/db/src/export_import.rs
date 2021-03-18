@@ -135,7 +135,6 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 		let nb = registered_snapshot_sync.len();
 		Compact(nb as u32).encode_to(out);
 		for i in 0..nb {
-			println!("Start H export {:?}", i);
 			let mut ranges = registered_snapshot_sync[i].export_sync_meta(
 				out_dyn,
 				&range,

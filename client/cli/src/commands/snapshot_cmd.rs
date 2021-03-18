@@ -510,6 +510,8 @@ impl SnapshotExportCmd {
 			flat: self.flat,
 			mode: db_mode,
 		};
+
+		info!("Export using range : {:?}", range);
 		if let Some(path) = &self.output {
 			let mut out = std::fs::File::create(path)?;
 			backend.snapshot_sync().export_sync(&mut out, range, self.state_only)?;
