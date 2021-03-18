@@ -252,6 +252,15 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 					hash,
 				)?;
 
+				// canonical blocks got a number mapping
+				utils::insert_number_to_key_mapping(
+					&mut transaction,
+					columns::KEY_LOOKUP,
+					number,
+					hash,
+				)?;
+
+
 				transaction.set_from_vec(columns::HEADER, &lookup_key, header.encode());
 
 				if i == range.to {
