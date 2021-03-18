@@ -224,7 +224,6 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 		let mut header_ranges = HeaderRanges::<NumberFor<Block>>::new();
 		header_ranges.insert((range.from.clone(), range.to.clone()));
 		for i in 0..expected {
-			println!("Start H import {:?}", i);
 			let mut ranges = registered_snapshot_sync[i].import_sync_meta(
 				reader.0,
 				&range,
