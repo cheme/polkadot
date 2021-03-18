@@ -186,7 +186,8 @@ impl<'a> ExportImportRevertExecutor<'a> {
 			"--dev",
 			"-d",
 			dir.path().to_str().unwrap(),
-			"--pruning=archive",
+			//	Not runing archive so state_db need to be initialize "
+			"--pruning=256",
 			"--without-snapshot",
 //			"--wasm_execution=Compiled",
 			"--log=info",

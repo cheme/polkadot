@@ -1170,7 +1170,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 
 		// TODO get an actual meaningfull range, using last hundred block for testing.
 		use sp_runtime::traits::Saturating;
-		let from = range.from.saturating_sub(100_000u32.into());
+		let from = range.from.saturating_sub(HEADER_RANGE.into());
 		Ok(SnapshotSyncCommon {
 			additional_headers: vec![(from, range.to)],
 		})
@@ -1206,9 +1206,12 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 
 		// TODO get an actual meaningfull range, using last hundred block for testing.
 		use sp_runtime::traits::Saturating;
-		let from = range.from.saturating_sub(100u32.into());
+		let from = range.from.saturating_sub(HEADER_RANGE.into());
 		Ok(SnapshotSyncCommon {
 			additional_headers: vec![(from, range.to)],
 		})
 	}
 }
+
+// TODO get an actual meaningfull range, using last hundred block for testing.
+const HEADER_RANGE: u32 = 100_000;
