@@ -312,7 +312,10 @@ fn export_import_snapshot() {
 	// Binary and binary should work.
 	let import_dir = executor.run_snapshot();
 
-	common::run_dev_node_for_a_while(import_dir.path());
+	common::run_dev_node_for_a_while_with_args(import_dir.path(), vec![
+		"--pruning=256",
+		"--unsafe-pruning",
+	]);
 
 	// TODO regex for new block produce so ok import.
 }

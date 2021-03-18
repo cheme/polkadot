@@ -264,7 +264,15 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 				transaction.set_from_vec(columns::HEADER, &lookup_key, header.encode());
 
 				if i == range.to {
+					use sp_runtime::SaturatedConversion;
 					range.to_hash = header.hash().clone();
+					// init state_db persistence
+					let (key, value) = self.backend.storage.state_db.last_canonical_base(
+						&header.parent_hash(),
+						i.clone().saturated_into::<u64>() - 1,
+					);
+					// TODO probably be useless
+					transaction.set_from_vec(columns::META, key.as_slice(), value);
 				}
 
 				if i == range.from {
