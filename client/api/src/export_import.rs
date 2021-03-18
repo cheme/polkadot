@@ -72,7 +72,7 @@ pub struct SnapshotDbConf {
 }
 
 /// Range covered by snapshot.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RangeSnapshot<B: BlockT> {
 	/// Number to start from.
 	pub from: NumberFor<B>,
