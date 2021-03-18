@@ -100,11 +100,12 @@ use sc_client_api::{
 		SnapshotSync, SnapshotSyncRoot},
 	SnapshotDbConf,
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
-	StateVisitor, utils::StateVisitorImpl, DatabaseError,
+	utils::{is_descendent_of, StateVisitorImpl},
+	StateVisitor, DatabaseError,
 };
 use sp_blockchain::{
 	Result as ClientResult, Error as ClientError,
-	well_known_cache_keys, HeaderBackend,
+	well_known_cache_keys, Backend as _, HeaderBackend,
 };
 use codec::{Decode, Encode};
 use hash_db::Prefix;
@@ -114,7 +115,7 @@ use sp_core::{Hasher, ChangesTrieConfiguration};
 use sp_core::offchain::OffchainOverlayedChange;
 use sp_core::storage::{well_known_keys, ChildInfo, ChildType, PrefixedStorageKey};
 use sp_arithmetic::traits::Saturating;
-use sp_runtime::{generic::{DigestItem, BlockId}, Justification, Storage};
+use sp_runtime::{generic::{DigestItem, BlockId}, Justification, Justifications, Storage};
 use sp_runtime::traits::{
 	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion, HashFor,
 };
@@ -401,7 +402,7 @@ pub(crate) mod columns {
 	pub const KEY_LOOKUP: u32 = 3;
 	pub const HEADER: u32 = 4;
 	pub const BODY: u32 = 5;
-	pub const JUSTIFICATION: u32 = 6;
+	pub const JUSTIFICATIONS: u32 = 6;
 	pub const CHANGES_TRIE: u32 = 7;
 	pub const AUX: u32 = 8;
 	/// Offchain workers local storage
@@ -417,7 +418,7 @@ pub use snapshot::snapshot_db_conf;
 
 struct PendingBlock<Block: BlockT> {
 	header: Block::Header,
-	justification: Option<Justification>,
+	justifications: Option<Justifications>,
 	body: Option<Vec<Block::Extrinsic>>,
 	leaf_state: NewBlockState,
 }
@@ -592,8 +593,8 @@ impl<Block: BlockT> sc_client_api::blockchain::Backend<Block> for BlockchainDb<B
 		}
 	}
 
-	fn justification(&self, id: BlockId<Block>) -> ClientResult<Option<Justification>> {
-		match read_db(&*self.db, columns::KEY_LOOKUP, columns::JUSTIFICATION, id)? {
+	fn justifications(&self, id: BlockId<Block>) -> ClientResult<Option<Justifications>> {
+		match read_db(&*self.db, columns::KEY_LOOKUP, columns::JUSTIFICATIONS, id)? {
 			Some(justification) => match Decode::decode(&mut &justification[..]) {
 				Ok(justification) => Ok(Some(justification)),
 				Err(err) => return Err(sp_blockchain::Error::Backend(
@@ -774,7 +775,7 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 		&mut self,
 		header: Block::Header,
 		body: Option<Vec<Block::Extrinsic>>,
-		justification: Option<Justification>,
+		justifications: Option<Justifications>,
 		leaf_state: NewBlockState,
 	) -> ClientResult<()> {
 		assert!(self.pending_block.is_none(), "Only one block per operation is allowed");
@@ -784,7 +785,7 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 		self.pending_block = Some(PendingBlock {
 			header,
 			body,
-			justification,
+			justifications,
 			leaf_state,
 		});
 		Ok(())
@@ -1261,9 +1262,9 @@ impl<Block: BlockT> Backend<Block> {
 
 		if let Some(justification) = justification {
 			transaction.set_from_vec(
-				columns::JUSTIFICATION,
+				columns::JUSTIFICATIONS,
 				&utils::number_and_hash_to_lookup_key(number, hash)?,
-				justification.encode(),
+				Justifications::from(justification).encode(),
 			);
 		}
 		Ok((*hash, number, false, true))
@@ -1378,8 +1379,8 @@ impl<Block: BlockT> Backend<Block> {
 					},
 				}
 			}
-			if let Some(justification) = pending_block.justification {
-				transaction.set_from_vec(columns::JUSTIFICATION, &lookup_key, justification.encode());
+			if let Some(justifications) = pending_block.justifications {
+				transaction.set_from_vec(columns::JUSTIFICATIONS, &lookup_key, justifications.encode());
 			}
 
 			if number.is_zero() {
@@ -1554,7 +1555,7 @@ impl<Block: BlockT> Backend<Block> {
 
 		self.storage.db.commit(transaction)?;
 
-		// Apply all in-memory state shanges.
+		// Apply all in-memory state changes.
 		// Code beyond this point can't fail.
 
 		if let Some((
@@ -1828,6 +1829,50 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		if let Some(number) = self.blockchain.block_number_from_id(&block)? {
 			self.snapshot_db.historied_management().migrate(&hash, number, &self.storage.db)?;
 		}
+		Ok(())
+	}
+
+	fn append_justification(
+		&self,
+		block: BlockId<Block>,
+		justification: Justification,
+	) -> ClientResult<()> {
+		let mut transaction: Transaction<DbHash> = Transaction::new();
+		let hash = self.blockchain.expect_block_hash_from_id(&block)?;
+		let header = self.blockchain.expect_header(block)?;
+		let number = *header.number();
+
+		// Check if the block is finalized first.
+		let is_descendent_of = is_descendent_of(&self.blockchain, None);
+		let last_finalized = self.blockchain.last_finalized()?;
+
+		// We can do a quick check first, before doing a proper but more expensive check
+		if number > self.blockchain.info().finalized_number
+			|| (hash != last_finalized && !is_descendent_of(&hash, &last_finalized)?)
+		{
+			return Err(ClientError::NotInFinalizedChain);
+		}
+
+		let justifications =
+			if let Some(mut stored_justifications) = self.blockchain.justifications(block)? {
+				if !stored_justifications.append(justification) {
+					return Err(ClientError::BadJustification(
+						"Duplicate consensus engine ID".into()
+					));
+				}
+				stored_justifications
+			} else {
+				Justifications::from(justification)
+			};
+
+		transaction.set_from_vec(
+			columns::JUSTIFICATIONS,
+			&utils::number_and_hash_to_lookup_key(number, hash)?,
+			justifications.encode(),
+		);
+
+		self.storage.db.commit(transaction)?;
+
 		Ok(())
 	}
 
@@ -2107,11 +2152,15 @@ pub(crate) mod tests {
 	use sp_core::H256;
 	use sc_client_api::backend::{Backend as BTrait, BlockImportOperation as Op};
 	use sc_client_api::blockchain::Backend as BLBTrait;
+	use sp_runtime::ConsensusEngineId;
 	use sp_runtime::testing::{Header, Block as RawBlock, ExtrinsicWrapper};
 	use sp_runtime::traits::{Hash, BlakeTwo256};
 	use sp_runtime::generic::DigestItem;
 	use sp_state_machine::{TrieMut, TrieDBMut};
 	use sp_blockchain::{lowest_common_ancestor, tree_route};
+
+	const CONS0_ENGINE_ID: ConsensusEngineId = *b"CON0";
+	const CONS1_ENGINE_ID: ConsensusEngineId = *b"CON1";
 
 	pub(crate) type Block = RawBlock<ExtrinsicWrapper<u64>>;
 
@@ -2703,12 +2752,47 @@ pub(crate) mod tests {
 		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
 		let _ = insert_header(&backend, 1, block0, None, Default::default());
 
-		let justification = Some(vec![1, 2, 3]);
+		let justification = Some((CONS0_ENGINE_ID, vec![1, 2, 3]));
 		backend.finalize_block(BlockId::Number(1), justification.clone()).unwrap();
 
 		assert_eq!(
-			backend.blockchain().justification(BlockId::Number(1)).unwrap(),
-			justification,
+			backend.blockchain().justifications(BlockId::Number(1)).unwrap(),
+			justification.map(Justifications::from),
+		);
+	}
+
+	#[test]
+	fn test_append_justification_to_finalized_block() {
+		use sc_client_api::blockchain::{Backend as BlockChainBackend};
+
+		let backend = Backend::<Block>::new_test(10, 10);
+
+		let block0 = insert_header(&backend, 0, Default::default(), None, Default::default());
+		let _ = insert_header(&backend, 1, block0, None, Default::default());
+
+		let just0 = (CONS0_ENGINE_ID, vec![1, 2, 3]);
+		backend.finalize_block(
+			BlockId::Number(1),
+			Some(just0.clone().into()),
+		).unwrap();
+
+		let just1 = (CONS1_ENGINE_ID, vec![4, 5]);
+		backend.append_justification(BlockId::Number(1), just1.clone()).unwrap();
+
+		let just2 = (CONS1_ENGINE_ID, vec![6, 7]);
+		assert!(matches!(
+			backend.append_justification(BlockId::Number(1), just2),
+			Err(ClientError::BadJustification(_))
+		));
+
+		let justifications = {
+			let mut just = Justifications::from(just0);
+			just.append(just1);
+			just
+		};
+		assert_eq!(
+			backend.blockchain().justifications(BlockId::Number(1)).unwrap(),
+			Some(justifications),
 		);
 	}
 
