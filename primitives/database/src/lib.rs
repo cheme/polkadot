@@ -21,8 +21,6 @@ pub mod error;
 mod mem;
 mod kvdb;
 
-use sp_runtime::traits::{Block, NumberFor};
-use codec::{Encode, Decode};
 pub use mem::MemDb;
 pub use crate::kvdb::{as_database, arc_as_database};
 pub use ordered::RadixTreeDatabase;
@@ -35,16 +33,9 @@ pub type ColumnId = u32;
 pub enum Change<H> {
 	Set(ColumnId, Vec<u8>, Vec<u8>),
 	Remove(ColumnId, Vec<u8>),
-	Store(H, Vec<u8>),
-	Release(H),
-}
-
-/// An alteration to the database that references the data.
-pub enum ChangeRef<'a, H> {
-	Set(ColumnId, &'a [u8], &'a [u8]),
-	Remove(ColumnId, &'a [u8]),
-	Store(H, &'a [u8]),
-	Release(H),
+	Store(ColumnId, H, Vec<u8>),
+	Reference(ColumnId, H),
+	Release(ColumnId, H),
 }
 
 /// A series of changes to the database that can be committed atomically. They do not take effect
@@ -70,49 +61,27 @@ impl<H> Transaction<H> {
 		self.0.push(Change::Remove(col, key.to_vec()))
 	}
 	/// Store the `preimage` of `hash` into the database, so that it may be looked up later with
-	/// `Database::lookup`. This may be called multiple times, but `Database::lookup` but subsequent
+	/// `Database::get`. This may be called multiple times, but subsequent
 	/// calls will ignore `preimage` and simply increase the number of references on `hash`.
-	pub fn store(&mut self, hash: H, preimage: &[u8]) {
-		self.0.push(Change::Store(hash, preimage.to_vec()))
+	pub fn store(&mut self, col: ColumnId, hash: H, preimage: Vec<u8>) {
+		self.0.push(Change::Store(col, hash, preimage))
+	}
+	/// Increase the number of references for `hash` in the database.
+	pub fn reference(&mut self, col: ColumnId, hash: H) {
+		self.0.push(Change::Reference(col, hash))
 	}
 	/// Release the preimage of `hash` from the database. An equal number of these to the number of
-	/// corresponding `store`s must have been given before it is legal for `Database::lookup` to
+	/// corresponding `store`s must have been given before it is legal for `Database::get` to
 	/// be unable to provide the preimage.
-	pub fn release(&mut self, hash: H) {
-		self.0.push(Change::Release(hash))
+	pub fn release(&mut self, col: ColumnId, hash: H) {
+		self.0.push(Change::Release(col, hash))
 	}
 }
 
-pub trait Database<H: Clone>: Send + Sync {
+pub trait Database<H: Clone + AsRef<[u8]>>: Send + Sync {
 	/// Commit the `transaction` to the database atomically. Any further calls to `get` or `lookup`
 	/// will reflect the new state.
-	fn commit(&self, transaction: Transaction<H>) -> error::Result<()> {
-		for change in transaction.0.into_iter() {
-			match change {
-				Change::Set(col, key, value) => self.set(col, &key, &value),
-				Change::Remove(col, key) => self.remove(col, &key),
-				Change::Store(hash, preimage) => self.store(&hash, &preimage),
-				Change::Release(hash) => self.release(&hash),
-			}?;
-		}
-
-		Ok(())
-	}
-
-	/// Commit the `transaction` to the database atomically. Any further calls to `get` or `lookup`
-	/// will reflect the new state.
-	fn commit_ref<'a>(&self, transaction: &mut dyn Iterator<Item=ChangeRef<'a, H>>) -> error::Result<()> {
-		let mut tx = Transaction::new();
-		for change in transaction {
-			match change {
-				ChangeRef::Set(col, key, value) => tx.set(col, key, value),
-				ChangeRef::Remove(col, key) => tx.remove(col, key),
-				ChangeRef::Store(hash, preimage) => tx.store(hash, preimage),
-				ChangeRef::Release(hash) => tx.release(hash),
-			}
-		}
-		self.commit(tx)
-	}
+	fn commit(&self, transaction: Transaction<H>) -> error::Result<()>;
 
 	/// Retrieve the value previously stored against `key` or `None` if
 	/// `key` is not currently in the database.
@@ -123,6 +92,11 @@ pub trait Database<H: Clone>: Send + Sync {
 		self.get(col, key).is_some()
 	}
 
+	/// Check value size in the database possibly without retrieving it.
+	fn value_size(&self, col: ColumnId, key: &[u8]) -> Option<usize> {
+		self.get(col, key).map(|v| v.len())
+	}
+
 	/// Call `f` with the value previously stored against `key`.
 	///
 	/// This may be faster than `get` since it doesn't allocate.
@@ -130,59 +104,11 @@ pub trait Database<H: Clone>: Send + Sync {
 	fn with_get(&self, col: ColumnId, key: &[u8], f: &mut dyn FnMut(&[u8])) {
 		self.get(col, key).map(|v| f(&v));
 	}
-
-	/// Set the value of `key` in `col` to `value`, replacing anything that is there currently.
-	fn set(&self, col: ColumnId, key: &[u8], value: &[u8]) -> error::Result<()> {
-		let mut t = Transaction::new();
-		t.set(col, key, value);
-		self.commit(t)
-	}
-	/// Remove the value of `key` in `col`.
-	fn remove(&self, col: ColumnId, key: &[u8]) -> error::Result<()> {
-		let mut t = Transaction::new();
-		t.remove(col, key);
-		self.commit(t)
-	}
-
-	/// Retrieve the first preimage previously `store`d for `hash` or `None` if no preimage is
-	/// currently stored.
-	fn lookup(&self, hash: &H) -> Option<Vec<u8>>;
-
-	/// Call `f` with the preimage stored for `hash` and return the result, or `None` if no preimage
-	/// is currently stored.
-	///
-	/// This may be faster than `lookup` since it doesn't allocate.
-	/// Use `with_lookup` helper function if you need `f` to return a value from `f`
-	fn with_lookup(&self, hash: &H, f: &mut dyn FnMut(&[u8])) {
-		self.lookup(hash).map(|v| f(&v));
-	}
-
-	/// Store the `preimage` of `hash` into the database, so that it may be looked up later with
-	/// `Database::lookup`. This may be called multiple times, but `Database::lookup` but subsequent
-	/// calls will ignore `preimage` and simply increase the number of references on `hash`.
-	fn store(&self, hash: &H, preimage: &[u8]) -> error::Result<()> {
-		let mut t = Transaction::new();
-		t.store(hash.clone(), preimage);
-		self.commit(t)
-	}
-
-	/// Release the preimage of `hash` from the database. An equal number of these to the number of
-	/// corresponding `store`s must have been given before it is legal for `Database::lookup` to
-	/// be unable to provide the preimage.
-	fn release(&self, hash: &H) -> error::Result<()> {
-		let mut t = Transaction::new();
-		t.release(hash.clone());
-		self.commit(t)
-	}
 }
 
-impl<H: Clone> Database<H> for std::sync::Arc<dyn Database<H>> {
+impl<H: Clone + AsRef<[u8]>> Database<H> for std::sync::Arc<dyn Database<H>> {
 	fn commit(&self, transaction: Transaction<H>) -> error::Result<()> {
 		self.as_ref().commit(transaction)
-	}
-
-	fn commit_ref<'a>(&self, transaction: &mut dyn Iterator<Item=ChangeRef<'a, H>>) -> error::Result<()> {
-		self.as_ref().commit_ref(transaction)
 	}
 
 	fn get(&self, col: ColumnId, key: &[u8]) -> Option<Vec<u8>> {
@@ -192,39 +118,11 @@ impl<H: Clone> Database<H> for std::sync::Arc<dyn Database<H>> {
 	fn with_get(&self, col: ColumnId, key: &[u8], f: &mut dyn FnMut(&[u8])) {
 		self.as_ref().with_get(col, key, f)
 	}
-
-	fn set(&self, col: ColumnId, key: &[u8], value: &[u8]) -> error::Result<()> {
-		self.as_ref().set(col, key, value)
-	}
-
-	fn remove(&self, col: ColumnId, key: &[u8]) -> error::Result<()> {
-		self.as_ref().remove(col, key)
-	}
-
-	fn lookup(&self, hash: &H) -> Option<Vec<u8>> {
-		self.as_ref().lookup(hash)
-	}
-
-	fn with_lookup(&self, hash: &H, f: &mut dyn FnMut(&[u8])) {
-		self.as_ref().with_lookup(hash, f)
-	}
-
-	fn store(&self, hash: &H, preimage: &[u8]) -> error::Result<()> {
-		self.as_ref().store(hash, preimage)
-	}
-
-	fn release(&self, hash: &H) -> error::Result<()> {
-		self.as_ref().release(hash)
-	}
 }
 
-impl<H: Clone> Database<H> for std::sync::Arc<dyn OrderedDatabase<H>> {
+impl<H: Clone + AsRef<[u8]>> Database<H> for std::sync::Arc<dyn OrderedDatabase<H>> {
 	fn commit(&self, transaction: Transaction<H>) -> error::Result<()> {
 		self.as_ref().commit(transaction)
-	}
-
-	fn commit_ref<'a>(&self, transaction: &mut dyn Iterator<Item=ChangeRef<'a, H>>) -> error::Result<()> {
-		self.as_ref().commit_ref(transaction)
 	}
 
 	fn get(&self, col: ColumnId, key: &[u8]) -> Option<Vec<u8>> {
@@ -234,33 +132,9 @@ impl<H: Clone> Database<H> for std::sync::Arc<dyn OrderedDatabase<H>> {
 	fn with_get(&self, col: ColumnId, key: &[u8], f: &mut dyn FnMut(&[u8])) {
 		self.as_ref().with_get(col, key, f)
 	}
-
-	fn set(&self, col: ColumnId, key: &[u8], value: &[u8]) -> error::Result<()> {
-		self.as_ref().set(col, key, value)
-	}
-
-	fn remove(&self, col: ColumnId, key: &[u8]) -> error::Result<()> {
-		self.as_ref().remove(col, key)
-	}
-
-	fn lookup(&self, hash: &H) -> Option<Vec<u8>> {
-		self.as_ref().lookup(hash)
-	}
-
-	fn with_lookup(&self, hash: &H, f: &mut dyn FnMut(&[u8])) {
-		self.as_ref().with_lookup(hash, f)
-	}
-
-	fn store(&self, hash: &H, preimage: &[u8]) -> error::Result<()> {
-		self.as_ref().store(hash, preimage)
-	}
-
-	fn release(&self, hash: &H) -> error::Result<()> {
-		self.as_ref().release(hash)
-	}
 }
 
-pub trait OrderedDatabase<H: Clone>: Database<H> {
+pub trait OrderedDatabase<H: Clone + AsRef<[u8]>>: Database<H> {
 	/// Iterate on value from the database.
 	fn iter<'a>(&'a self, col: ColumnId) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a>;
 
@@ -285,16 +159,18 @@ pub trait OrderedDatabase<H: Clone>: Database<H> {
 		&self,
 		col: ColumnId,
 		prefix: &[u8],
-	) {
+	) -> error::Result<()> {
+		let mut transaction = Transaction::new();
 		// Default implementation got problematic memory consumption,
 		// specific implementation should be use for backend targetting
-		// large volume.
-		let keys: Vec<_> = self.prefix_iter(col, prefix, false).map(|kv| kv.0).collect();
-		for key in keys {
+		// large volume other multiple transactions.
+		for key in self.prefix_iter(col, prefix, false).map(|kv| kv.0) {
 			// iterating on remove individually is bad for perf.
-			self.remove(col, key.as_slice())
-				.expect("Fail clearing prefix");
+			transaction.remove(col, key.as_slice());
 		}
+		self.commit(transaction)?;
+
+		Ok(())
 	}
 }
 
@@ -314,21 +190,14 @@ impl<H> std::fmt::Debug for dyn OrderedDatabase<H> {
 /// `key` is not currently in the database.
 ///
 /// This may be faster than `get` since it doesn't allocate.
-pub fn with_get<R, H: Clone>(db: &dyn Database<H>, col: ColumnId, key: &[u8], mut f: impl FnMut(&[u8]) -> R) -> Option<R> {
+pub fn with_get<R, H: Clone + AsRef<[u8]>>(
+	db: &dyn Database<H>,
+	col: ColumnId,
+	key: &[u8], mut f: impl FnMut(&[u8]) -> R
+) -> Option<R> {
 	let mut result: Option<R> = None;
 	let mut adapter = |k: &_| { result = Some(f(k)); };
 	db.with_get(col, key, &mut adapter);
-	result
-}
-
-/// Call `f` with the preimage stored for `hash` and return the result, or `None` if no preimage
-/// is currently stored.
-///
-/// This may be faster than `lookup` since it doesn't allocate.
-pub fn with_lookup<R, H: Clone>(db: &dyn Database<H>, hash: &H, mut f: impl FnMut(&[u8]) -> R) -> Option<R> {
-	let mut result: Option<R> = None;
-	let mut adapter = |k: &_| { result = Some(f(k)); };
-	db.with_lookup(hash, &mut adapter);
 	result
 }
 
@@ -344,6 +213,12 @@ mod ordered {
 
 	use core::fmt::Debug;
 
+	/// Trait alias for macro compatibility.
+	/// TODO try alternative in radix_tree crate
+	pub trait AsRefu8: AsRef<[u8]> { }
+
+	impl<T: AsRef<[u8]>> AsRefu8 for T { }
+
 	radix_tree::flatten_children!(
 		!value_bound: Codec,
 		Children256Flatten,
@@ -357,7 +232,7 @@ mod ordered {
 			>
 		>,
 		H,
-		{ H: Debug + PartialEq + Clone}
+		{ H: Debug + PartialEq + Clone + AsRefu8 }
 	);
 
 	#[derive(Clone)]
@@ -381,7 +256,7 @@ mod ordered {
 		}
 	}
 
-	impl<H: Clone> radix_tree::backends::ReadBackend for WrapColumnDb<H> {
+	impl<H: Clone + AsRef<[u8]>> radix_tree::backends::ReadBackend for WrapColumnDb<H> {
 		fn read(&self, k: &[u8]) -> Option<Vec<u8>> {
 			let prefix = &self.prefix;
 			subcollection_prefixed_key!(prefix, k);
@@ -391,12 +266,12 @@ mod ordered {
 
 	#[derive(Clone)]
 	/// Ordered database implementation through a indexing radix tree overlay.
-	pub struct RadixTreeDatabase<H: Clone + PartialEq + Debug> {
+	pub struct RadixTreeDatabase<H: Clone + PartialEq + Debug + AsRef<[u8]>> {
 		inner: Arc<dyn Database<H>>,
 		trees: Arc<RwLock<Vec<radix_tree::Tree<Node256LazyHashBackend<Vec<u8>, H>>>>>,
 	}
 
-	impl<H: Clone + PartialEq + Debug> RadixTreeDatabase<H> {
+	impl<H: Clone + PartialEq + Debug + AsRef<[u8]>> RadixTreeDatabase<H> {
 		/// Create new radix tree database.
 		pub fn new(inner: Arc<dyn Database<H>>) -> Self {
 			RadixTreeDatabase {
@@ -427,13 +302,12 @@ mod ordered {
 		}
 	}
 
-	impl<H: Clone + PartialEq + Debug + Default> Database<H> for RadixTreeDatabase<H> {
+	impl<H> Database<H> for RadixTreeDatabase<H>
+		where H: Clone + PartialEq + Debug + Default + AsRef<[u8]>,
+	{
 		fn get(&self, col: ColumnId, key: &[u8]) -> Option<Vec<u8>> {
 			self.lazy_column_init(col);
 			self.trees.write()[col as usize].get_mut(key).cloned()
-		}
-		fn lookup(&self, _hash: &H) -> Option<Vec<u8>> {
-			unimplemented!("No hash lookup on radix tree layer");
 		}
 		fn commit(&self, transaction: Transaction<H>) -> error::Result<()> {
 			for change in transaction.0.into_iter() {
@@ -446,10 +320,13 @@ mod ordered {
 						self.lazy_column_init(col);
 						self.trees.write()[col as usize].remove(key.as_slice());
 					},
-					Change::Store(_hash, _preimage) => {
+					Change::Store(_col, _hash, _preimage) => {
 						unimplemented!("No hash lookup on radix tree layer");
 					},
-					Change::Release(_hash) => {
+					Change::Reference(_col, _hash) => {
+						unimplemented!("No hash lookup on radix tree layer");
+					},
+					Change::Release(_col, _hash) => {
 						unimplemented!("No hash lookup on radix tree layer");
 					},
 				};
@@ -478,7 +355,9 @@ mod ordered {
 		}
 	}
 
-	impl<H: Clone + PartialEq + Debug + Default + 'static> OrderedDatabase<H> for RadixTreeDatabase<H> {
+	impl<H> OrderedDatabase<H> for RadixTreeDatabase<H>
+		where H: Clone + PartialEq + Debug + Default + 'static + AsRef<[u8]>,
+	{
 		fn iter<'a>(&'a self, col: ColumnId) -> ChildStateIter<'a> {
 			self.lazy_column_init(col);
 			let tree = self.trees.read()[col as usize].clone();
