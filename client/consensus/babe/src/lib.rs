@@ -1710,6 +1710,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 		)?;
 
 		let mut epoch = self.0.lock().clone();
+		epoch.prune_unfinalized(to);
 
 		let weight: sp_consensus_babe::BabeBlockWeight = crate::aux_schema::load_block_weight(&self.1, to_hash)?
 			.ok_or_else(|| sp_blockchain::Error::Backend(format!("No babe weight at: {:?}", to_hash)))?;
