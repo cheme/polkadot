@@ -136,8 +136,8 @@ impl<'a> ExportImportRevertExecutor<'a> {
 		let _ = fs::remove_dir_all(&self.db_path);
 	}
 
-	/// TODO
-	fn run_snapshot_export(&mut self) {
+	/// Runs the `snapshot-export` command.
+	fn run_snapshot_export(&mut self) -> u64 {
 		// hardcoded
 		let arguments: Vec<&str> = vec![
 			"snapshot-export",
@@ -145,10 +145,8 @@ impl<'a> ExportImportRevertExecutor<'a> {
 			"-d",
 			self.base_path.path().to_str().unwrap(),
 			"--pruning=archive",
-//			"--wasm_execution=Compiled",
 			"--log=info",
 			"--flat",
-// "--state-only",
 			self.exported_blocks_file.to_str().unwrap(),
 		];
 		let output = Command::new(cargo_bin("substrate"))
@@ -156,14 +154,6 @@ impl<'a> ExportImportRevertExecutor<'a> {
 			.output()
 			.unwrap();
 
-		println!("{:?}", output);
-	
-/*		// Using regex to find out how many block we exported.
-		let re = Regex::new(r"Exporting blocks from #\d* to #(?P<exported_blocks>\d*)").unwrap();
-		let caps = re.captures(&log).unwrap();
-		// Saving the number of blocks we've exported for further use.
-		self.num_exported_blocks = Some(caps["exported_blocks"].parse::<u64>().unwrap());
-*/
 		let metadata = fs::metadata(&self.exported_blocks_file).unwrap();
 		assert!(metadata.len() > 0, "file exported_blocks should not be empty");
 
@@ -171,14 +161,21 @@ impl<'a> ExportImportRevertExecutor<'a> {
 
 		let logged_output = String::from_utf8_lossy(&output.stderr).to_string();
 
-		println!("{:?}", logged_output);
+		// Using regex to find out how many block we exported.
+		let re = Regex::new(r"Export using .* to: (?P<exported_block>\d*)").unwrap();
+		let caps = re.captures(&logged_output).unwrap();
+
+		// Last imported is 3 block ahead of last finalized.
+		let last_exported = caps["exported_block"].parse::<u64>().unwrap();
+
 		// Making sure no error were logged.
 		assert!(!contains_error(&logged_output), "expected not to error but error'd!");
 		assert!(output.status.success());
+
+		last_exported
 	}
 
-	/// Runs the `import-blocks` command, asserting that an error was found or
-	/// not depending on `expected_to_fail`.
+	/// Runs the `snapshot-import` command.
 	fn run_snapshot_import(&mut self, dir: &TempDir) {
 		// hardcoded
 		let arguments: Vec<&str> = vec![
@@ -189,9 +186,7 @@ impl<'a> ExportImportRevertExecutor<'a> {
 			//	Not runing archive so state_db need to be initialize
 			"--pruning=256",
 			"--without-snapshot",
-//			"--wasm_execution=Compiled",
 			"--log=info",
-// "--state-only",
 			self.exported_blocks_file.to_str().unwrap(),
 		];
 		let output = Command::new(cargo_bin("substrate"))
@@ -199,11 +194,8 @@ impl<'a> ExportImportRevertExecutor<'a> {
 			.output()
 			.unwrap();
 
-		println!("{:?}", output);
-
 		let logged_output = String::from_utf8_lossy(&output.stderr).to_string();
 
-		println!("{:?}", logged_output);
 		let _ = fs::remove_dir_all(&self.db_path);
 
 		// Making sure no error were logged.
@@ -262,11 +254,11 @@ impl<'a> ExportImportRevertExecutor<'a> {
 	}
 
 	/// Helper function that runs the snapshot scenario.
-	fn run_snapshot(&mut self) -> TempDir {
-		self.run_snapshot_export();
+	fn run_snapshot(&mut self) -> (TempDir, u64) {
+		let last_exported = self.run_snapshot_export();
 		let dir = TempDir::new_in(self.base_path.clone()).unwrap();
 		self.run_snapshot_import(&dir);
-		dir
+		(dir, last_exported)
 	}
 
 }
@@ -310,12 +302,38 @@ fn export_import_snapshot() {
 	);
 
 	// Binary and binary should work.
-	let import_dir = executor.run_snapshot();
+	let (import_dir, last_exported) = executor.run_snapshot();
 
 	common::run_dev_node_for_a_while_with_args(import_dir.path(), vec![
 		"--pruning=256",
 		"--unsafe-pruning",
 	]);
 
-	// TODO regex for new block produce so ok import.
+	// getting last block from inspect command,
+	// getting it from regexp on out would be better.
+	let mut i = last_exported + 1;
+	while Command::new(cargo_bin("substrate"))
+		.args(&["inspect", "--dev", "--pruning=256", "--unsafe-pruning", "-d"])
+		.arg(import_dir.path())
+		.args(&["block", format!("{}", i).as_str()])
+		.status()
+		.unwrap()
+		.success() {
+			i += 1;
+	}
+
+	// should have more than a block in in the run for a while delay.
+	assert!(i > last_exported + 1);
+}
+
+#[test]
+fn tryrege() { // TODO del fn
+	let logged_output = 
+
+"2021-03-19 14:56:07  Essential task `basic-block-import-worker` failed. Shutting down service.    \n2021-03-19 14:56:07  DB path: /tmp/.tmpro7Nxx/chains/dev/db    \n2021-03-19 14:56:07  Export using range : RangeSnapshot { from: 3, from_hash: 0x9554950e6ce4b3472fdb8d0a9f2aa5efb80187f7560b420ca71ec3cdaf304e71, to: 3, to_hash: 0x9554950e6ce4b3472fdb8d0a9f2aa5efb80187f7560b420ca71ec3cdaf304e71, mode: NoDiff, flat: true }    \n".to_string();
+		//let re = Regex::new(r"Export using .* to: ?P<imported_block>\d*, .*").unwrap();
+		let re = Regex::new(r"Export using .* to: (?P<imported_block>\d*)").unwrap();
+		let caps = re.captures(&logged_output).unwrap();
+		panic!("{:?}", caps);
+	
 }

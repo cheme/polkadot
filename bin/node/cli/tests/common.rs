@@ -41,6 +41,7 @@ pub fn wait_for(child: &mut Child, secs: usize) -> Option<ExitStatus> {
 	}
 	eprintln!("Took too long to exit (> {} seconds). Killing...", secs);
 	let _ = child.kill();
+	panic!("Pout: {:?}", child.stdout);
 	child.wait().unwrap();
 
 	None
