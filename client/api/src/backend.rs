@@ -34,7 +34,7 @@ use crate::{
 		Backend as BlockchainBackend, well_known_cache_keys
 	},
 	light::RemoteBlockchain,
-	UsageInfo, RangeSnapshot, SnapshotDb, SnapshotDbConf,
+	UsageInfo, SnapshotConfig, SnapshotDb, SnapshotDbConf,
 };
 use sp_blockchain;
 use sp_consensus::BlockOrigin;
@@ -568,7 +568,7 @@ pub trait SnapshotSyncRoot<Block: BlockT>: Send + Sync {
 	fn export_sync(
 		&self,
 		out: &mut dyn std::io::Write,
-		range: RangeSnapshot<Block>,
+		range: SnapshotConfig<Block>,
 		state_only: bool,
 	) -> sp_blockchain::Result<()>;
 
@@ -577,7 +577,7 @@ pub trait SnapshotSyncRoot<Block: BlockT>: Send + Sync {
 		&self,
 		encoded: &mut dyn std::io::Read,
 		dest_config: SnapshotDbConf,
-	) -> sp_blockchain::Result<RangeSnapshot<Block>>;
+	) -> sp_blockchain::Result<SnapshotConfig<Block>>;
 }
 
 /// Component that need to manage some export and import state
@@ -589,7 +589,7 @@ pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 	fn export_sync_meta(
 		&self,
 		out: &mut dyn std::io::Write,
-		range: &RangeSnapshot<Block>,
+		range: &SnapshotConfig<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>>;
 
 	/// Export state and return non imported content that is shared.
@@ -598,7 +598,7 @@ pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
-		range: &RangeSnapshot<Block>,
+		range: &SnapshotConfig<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>>;
 }
 
@@ -606,7 +606,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for () {
 	fn export_sync(
 		&self,
 		_out: &mut dyn std::io::Write,
-		_range: RangeSnapshot<Block>,
+		_range: SnapshotConfig<Block>,
 		_state_only: bool,
 	) -> sp_blockchain::Result<()> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
@@ -616,7 +616,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for () {
 		&self,
 		_encoded: &mut dyn std::io::Read,
 		_dest_config: SnapshotDbConf,
-	) -> sp_blockchain::Result<RangeSnapshot<Block>> {
+	) -> sp_blockchain::Result<SnapshotConfig<Block>> {
 		Err(sp_blockchain::Error::Backend("Unsuponted snapshot sync".to_string()))
 	}
 }

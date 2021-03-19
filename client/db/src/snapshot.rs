@@ -19,7 +19,7 @@
 //! Key value snapshot db with history.
 
 use sc_client_api::{SnapshotDbConf, SnapshotDBMode, SnapshotDb as SnapshotDbT,
-	RangeSnapshot};
+	SnapshotConfig};
 use crate::tree_management::{TreeManagementSync, TreeManagementPersistence};
 use historied_db::{
 	DecodeWithContext,
@@ -330,7 +330,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	fn export_snapshot(
 		&self,
 		out: &mut dyn std::io::Write,
-		range: &RangeSnapshot<Block>,
+		range: &SnapshotConfig<Block>,
 		default_flat: impl sc_client_api::StateVisitor,
 	) -> sp_database::error::Result<()> {
 		if !self.config.enabled {
@@ -373,7 +373,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		&self,
 		mut from: &mut dyn std::io::Read,
 		config: &SnapshotDbConf,
-		range: &RangeSnapshot<Block>,
+		range: &SnapshotConfig<Block>,
 	) -> sp_database::error::Result<()> {
 		self.clear_snapshot_db()?;
 		{

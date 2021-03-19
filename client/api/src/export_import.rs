@@ -71,9 +71,9 @@ pub struct SnapshotDbConf {
 	pub lazy_set: bool,
 }
 
-/// Range covered by snapshot.
+/// Snapshot configuration.
 #[derive(Clone, Debug)]
-pub struct RangeSnapshot<B: BlockT> {
+pub struct SnapshotConfig<B: BlockT> {
 	/// Number to start from.
 	pub from: NumberFor<B>,
 
@@ -120,7 +120,7 @@ pub trait SnapshotDb<B: BlockT> {
 	fn export_snapshot(
 		&self,
 		output: &mut dyn std::io::Write,
-		range: &RangeSnapshot<B>,
+		range: &SnapshotConfig<B>,
 		default_flat: impl StateVisitor,
 	) -> error::Result<()>;
 
@@ -151,7 +151,7 @@ pub trait SnapshotDb<B: BlockT> {
 		&self,
 		from: &mut dyn std::io::Read,
 		config: &SnapshotDbConf,
-		range: &RangeSnapshot<B>,
+		range: &SnapshotConfig<B>,
 	) -> error::Result<()>;
 }
 
@@ -222,7 +222,7 @@ impl<B: BlockT> SnapshotDb<B> for () {
 	fn export_snapshot(
 		&self,
 		_output: &mut dyn std::io::Write,
-		_range: &RangeSnapshot<B>,
+		_range: &SnapshotConfig<B>,
 		_default_flat: impl StateVisitor,
 	) -> error::Result<()> {
 		unsupported_error()
@@ -240,7 +240,7 @@ impl<B: BlockT> SnapshotDb<B> for () {
 		&self,
 		_from: &mut dyn std::io::Read,
 		_config: &SnapshotDbConf,
-		_range: &RangeSnapshot<B>,
+		_range: &SnapshotConfig<B>,
 	) -> error::Result<()> {
 		unsupported_error()
 	}

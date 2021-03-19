@@ -63,7 +63,7 @@ use futures::{
 use log::{debug, error, info};
 use sc_client_api::{
 	backend::{AuxStore, Backend, SnapshotSync, SnapshotSyncCommon},
-	LockImportRun, BlockchainEvents, CallExecutor, RangeSnapshot,
+	LockImportRun, BlockchainEvents, CallExecutor, SnapshotConfig,
 	ExecutionStrategy, Finalizer, TransactionFor, ExecutorProvider,
 };
 use parity_scale_codec::{Decode, Encode, IoReader};
@@ -1158,7 +1158,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 	fn export_sync_meta(
 		&self,
 		mut out: &mut dyn std::io::Write,
-		range: &RangeSnapshot<Block>,
+		range: &SnapshotConfig<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>> {
 		// version
 		out.write(&[0u8]).map_err(|e|
@@ -1179,7 +1179,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
-		range: &RangeSnapshot<Block>,
+		range: &SnapshotConfig<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>> {
 		let mut buf = [0];
 		// version

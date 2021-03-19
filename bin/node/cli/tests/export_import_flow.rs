@@ -325,15 +325,3 @@ fn export_import_snapshot() {
 	// should have more than a block in in the run for a while delay.
 	assert!(i > last_exported + 1);
 }
-
-#[test]
-fn tryrege() { // TODO del fn
-	let logged_output = 
-
-"2021-03-19 14:56:07  Essential task `basic-block-import-worker` failed. Shutting down service.    \n2021-03-19 14:56:07  DB path: /tmp/.tmpro7Nxx/chains/dev/db    \n2021-03-19 14:56:07  Export using range : RangeSnapshot { from: 3, from_hash: 0x9554950e6ce4b3472fdb8d0a9f2aa5efb80187f7560b420ca71ec3cdaf304e71, to: 3, to_hash: 0x9554950e6ce4b3472fdb8d0a9f2aa5efb80187f7560b420ca71ec3cdaf304e71, mode: NoDiff, flat: true }    \n".to_string();
-		//let re = Regex::new(r"Export using .* to: ?P<imported_block>\d*, .*").unwrap();
-		let re = Regex::new(r"Export using .* to: (?P<imported_block>\d*)").unwrap();
-		let caps = re.captures(&logged_output).unwrap();
-		panic!("{:?}", caps);
-	
-}

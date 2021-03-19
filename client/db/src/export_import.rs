@@ -21,7 +21,7 @@
 use log::info;
 use sc_client_api::{
 	utils::StateVisitorImpl, DatabaseError,
-	SnapshotSyncRoot, SnapshotDbConf, RangeSnapshot, SnapshotDBMode,
+	SnapshotSyncRoot, SnapshotDbConf, SnapshotConfig, SnapshotDBMode,
 };
 use sp_blockchain::{
 	Error as ClientError,
@@ -98,7 +98,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 	fn export_sync(
 		&self,
 		mut out_dyn: &mut dyn std::io::Write,
-		range: RangeSnapshot<Block>,
+		range: SnapshotConfig<Block>,
 		state_only: bool,
 	) -> sp_blockchain::Result<()> {
 
@@ -179,7 +179,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 		&self,
 		encoded: &mut dyn std::io::Read,
 		dest_config: SnapshotDbConf,
-	) -> sp_blockchain::Result<RangeSnapshot<Block>> {
+	) -> sp_blockchain::Result<SnapshotConfig<Block>> {
 		let mut buf = [0];
 		// version
 		encoded.read_exact(&mut buf[..1]).map_err(|e|
@@ -201,7 +201,7 @@ impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
 		)?;
 		let from = to - nb;
 
-		let mut range = RangeSnapshot::<Block> {
+		let mut range = SnapshotConfig::<Block> {
 			from,
 			from_hash: Default::default(),
 			to,

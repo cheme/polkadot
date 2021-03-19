@@ -99,7 +99,7 @@ use sp_consensus::{
 use sp_consensus_babe::inherents::BabeInherentData;
 use sp_timestamp::TimestampInherentData;
 use sc_client_api::{
-	backend::AuxStore, BlockchainEvents, ProvideUncles, SnapshotSync, RangeSnapshot, SnapshotSyncCommon,
+	backend::AuxStore, BlockchainEvents, ProvideUncles, SnapshotSync, SnapshotConfig, SnapshotSyncCommon,
 };
 use sp_block_builder::BlockBuilder as BlockBuilderApi;
 use futures::channel::mpsc::{channel, Sender, Receiver};
@@ -1701,7 +1701,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 	fn export_sync_meta(
 		&self,
 		mut out: &mut dyn std::io::Write,
-		range: &RangeSnapshot<Block>,
+		range: &SnapshotConfig<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>> {
 		let to = range.to.clone();
 		let to_hash = range.to_hash.clone();
@@ -1728,7 +1728,7 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
-		_range: &RangeSnapshot<Block>,
+		_range: &SnapshotConfig<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>> {
 		let mut buf = [0];
 		// version

@@ -21,7 +21,7 @@ use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, 
 use crate::CliConfiguration;
 use log::info;
 use sc_service::config::DatabaseConfig;
-use sc_client_api::{SnapshotDb, StateBackend, StateVisitor, DatabaseError, RangeSnapshot};
+use sc_client_api::{SnapshotDb, StateBackend, StateVisitor, DatabaseError, SnapshotConfig};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use sp_runtime::generic::BlockId;
@@ -501,7 +501,7 @@ impl SnapshotExportCmd {
 			SnapshotMode::Default => sc_client_api::SnapshotDBMode::NoDiff,
 			SnapshotMode::Xdelta3 => sc_client_api::SnapshotDBMode::Xdelta3Diff,
 		};
-		let range = RangeSnapshot {
+		let range = SnapshotConfig {
 			to,
 			to_hash: default_block,
 			from: from.unwrap_or(to),
@@ -511,7 +511,7 @@ impl SnapshotExportCmd {
 			mode: db_mode,
 		};
 
-		info!("Export using range : {:?}", range);
+		info!("Export using config : {:?}", range);
 		if let Some(path) = &self.output {
 			let mut out = std::fs::File::create(path)?;
 			backend.snapshot_sync().export_sync(&mut out, range, self.state_only)?;
