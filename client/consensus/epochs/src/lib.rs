@@ -396,25 +396,6 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 		number: Number,
 		slot: E::Slot,
 	) -> Result<(), fork_tree::Error<D::Error>> {
-		self.prune_finalized_ignore(
-			descendent_of_builder,
-			hash,
-			number,
-			slot,
-			false,
-		)
-	}
-
-	/// `prune_finalized`, allows to ignore missing parents.
-	pub fn prune_finalized_ignore<D: IsDescendentOfBuilder<Hash>>(
-		&mut self,
-		descendent_of_builder: D,
-		hash: &Hash,
-		number: Number,
-		slot: E::Slot,
-		ignore_not_found: bool,
-	) -> Result<(), fork_tree::Error<D::Error>> {
-	
 		let is_descendent_of = descendent_of_builder
 			.build_is_descendent_of(None);
 
@@ -428,12 +409,11 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 		// prune any epochs which could not be _live_ as of the children of the
 		// finalized block, i.e. re-root the fork tree to the oldest ancestor of
 		// (hash, number) where epoch.end_slot() >= finalized_slot
-		let removed = self.inner.prune_ignore(
+		let removed = self.inner.prune(
 			hash,
 			&number,
 			&is_descendent_of,
 			&predicate,
-			ignore_not_found,
 		)?;
 
 		for (hash, number, _) in removed {
@@ -441,21 +421,6 @@ impl<Hash, Number, E: Epoch> EpochChanges<Hash, Number, E> where
 		}
 
 		Ok(())
-	}
-
-	/// Prune out unfinalized epochs, except for the one containing the last
-	/// finalized block.
-	pub fn prune_unfinalized(
-		&mut self,
-		number: Number,
-	) {
-		let removed = self.inner.prune_after(
-			&number,
-		);
-
-		for (hash, number, _) in removed {
-			self.epochs.remove(&(hash, number));
-		}
 	}
 
 	/// Get a reference to an epoch with given identifier.

@@ -1549,12 +1549,11 @@ fn prune_finalized<Block, Client>(
 			.slot()
 	};
 
-	epoch_changes.prune_finalized_ignore(
+	epoch_changes.prune_finalized(
 		descendent_query(&*client),
 		&info.finalized_hash,
 		info.finalized_number,
 		finalized_slot,
-		true, // TODO true only after a import_sync
 	).map_err(|e| ConsensusError::ClientImport(format!("{:?}", e)))?;
 
 	Ok(())
@@ -1711,7 +1710,6 @@ impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> f
 		)?;
 
 		let mut epoch = self.0.lock().clone();
-		epoch.prune_unfinalized(to);
 
 		let weight: sp_consensus_babe::BabeBlockWeight = crate::aux_schema::load_block_weight(&self.1, to_hash)?
 			.ok_or_else(|| sp_blockchain::Error::Backend(format!("No babe weight at: {:?}", to_hash)))?;
