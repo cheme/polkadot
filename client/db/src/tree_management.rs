@@ -324,7 +324,7 @@ impl<Block, S> TreeManagementSync<Block, S>
 
 	/// Delete all tree management information.
 	pub fn clear(db: &Arc<dyn OrderedDatabase<DbHash>>) -> ClientResult<()> {
-		db.clear_prefix(crate::columns::AUX, b"tree_mgmt/");
+		db.clear_prefix(crate::columns::AUX, b"tree_mgmt/")?;
 		Ok(())
 	}
 }

@@ -751,11 +751,8 @@ pub struct BlockImportOperation<Block: BlockT> {
 	finalized_blocks: Vec<(BlockId<Block>, Option<Justification>)>,
 	set_head: Option<BlockId<Block>>,
 	commit_state: bool,
-<<<<<<< HEAD
-	forced_import_finalized: bool,
-=======
 	index_ops: Vec<IndexOperation>,
->>>>>>> master
+	forced_import_finalized: bool,
 }
 
 impl<Block: BlockT> BlockImportOperation<Block> {
@@ -1868,11 +1865,8 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			finalized_blocks: Vec::new(),
 			set_head: None,
 			commit_state: false,
-<<<<<<< HEAD
-			forced_import_finalized: false,
-=======
 			index_ops: Default::default(),
->>>>>>> master
+			forced_import_finalized: false,
 		})
 	}
 

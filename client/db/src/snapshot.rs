@@ -201,8 +201,8 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 		TreeManagementSync::<Block, TreeManagementPersistence>::clear(&self.ordered_db)
 			.map_err(|e| DatabaseError(Box::new(e)))?;
-		self.ordered_db.clear_prefix(crate::columns::AUX, b"snapshot_db/");
-		self.ordered_db.clear_prefix(crate::columns::STATE_SNAPSHOT, b"");
+		self.ordered_db.clear_prefix(crate::columns::AUX, b"snapshot_db/")?;
+		self.ordered_db.clear_prefix(crate::columns::STATE_SNAPSHOT, b"")?;
 
 		Ok(())
 	}

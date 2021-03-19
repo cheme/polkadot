@@ -297,7 +297,6 @@ pub fn open_database_and_historied<Block: BlockT>(
 		},
 		#[cfg(feature = "with-parity-db")]
 		DatabaseSettingsSrc::ParityDb { path } => {
-<<<<<<< HEAD
 			let parity_db = crate::parity_db::open(&path, db_type)
 				.map_err(|e| sp_blockchain::Error::Backend(format!("{:?}", e)))?;
 			let inner = sp_database::RadixTreeDatabase::new(parity_db.clone());
@@ -305,10 +304,6 @@ pub fn open_database_and_historied<Block: BlockT>(
 			let management = Box::new(ordered_database::DatabaseStorage(inner.clone()));
 
 			(parity_db, ordered, management)
-=======
-			crate::parity_db::open(&path, db_type)
-				.map_err(|e| sp_blockchain::Error::Backend(format!("{}", e)))?
->>>>>>> master
 		},
 		#[cfg(not(feature = "with-parity-db"))]
 		DatabaseSettingsSrc::ParityDb { .. } => {
@@ -489,7 +484,29 @@ impl DatabaseType {
 	}
 }
 
-<<<<<<< HEAD
+pub(crate) struct JoinInput<'a, 'b>(&'a [u8], &'b [u8]);
+
+pub(crate) fn join_input<'a, 'b>(i1: &'a[u8], i2: &'b [u8]) -> JoinInput<'a, 'b> {
+	JoinInput(i1, i2)
+}
+
+impl<'a, 'b> codec::Input for JoinInput<'a, 'b> {
+	fn remaining_len(&mut self) -> Result<Option<usize>, codec::Error> {
+		Ok(Some(self.0.len() + self.1.len()))
+	}
+
+	fn read(&mut self, into: &mut [u8]) -> Result<(), codec::Error> {
+		let mut read = 0;
+		if self.0.len() > 0 {
+			read = std::cmp::min(self.0.len(), into.len());
+			self.0.read(&mut into[..read])?;
+		}
+		if read < into.len() {
+			self.1.read(&mut into[read..])?;
+		}
+		Ok(())
+	}
+}
 
 /// `OrderedDatabase` trait implementations.
 pub(crate) mod ordered_database {
@@ -506,7 +523,8 @@ pub(crate) mod ordered_database {
 
 	/// Database backed tree management for an unoredered database.
 	/// We set any Hash as inner type,
-	pub struct DatabaseStorage<H: Clone + PartialEq + std::fmt::Debug>(pub(super) RadixTreeDatabase<H>);
+	pub struct DatabaseStorage<H>(pub(super) RadixTreeDatabase<H>)
+		where H: Clone + PartialEq + std::fmt::Debug + AsRef<[u8]>;
 
 	/// We resolve rocksdb collection or subcollection.
 	/// Collections are defined by four byte encoding of their index.
@@ -603,7 +621,7 @@ pub(crate) mod ordered_database {
 	#[cfg(any(feature = "with-kvdb-rocksdb", test))]
 	// redundant code with kvdb implementation, here only to get iter_from implementation
 	// without putting iter_from into kvdb on patched branch TODO ?? remove
-	impl<H: Clone> Database<H> for RocksdbStorage {
+	impl<H: Clone + AsRef<[u8]>> Database<H> for RocksdbStorage {
 		fn commit(&self, transaction: Transaction<H>) -> sp_database::error::Result<()> {
 			use sp_database::Change;
 			let mut tx = kvdb::DBTransaction::new();
@@ -625,14 +643,10 @@ pub(crate) mod ordered_database {
 				}
 			}
 		}
-
-		fn lookup(&self, _hash: &H) -> Option<Vec<u8>> {
-			unimplemented!();
-		}
 	}
 
 	#[cfg(any(feature = "with-kvdb-rocksdb", test))]
-	impl<H: Clone> OrderedDatabase<H> for RocksdbStorage {
+	impl<H: Clone + AsRef<[u8]>> OrderedDatabase<H> for RocksdbStorage {
 		fn iter<'a>(&'a self, col: u32) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + 'a> {
 			Box::new(self.0.iter(col).map(|(k, v)| (k.to_vec(), v.to_vec())))
 		}
@@ -664,7 +678,7 @@ pub(crate) mod ordered_database {
 	}
 
 	impl<H> historied_db::mapped_db::MappedDB for DatabaseStorage<H>
-		where H: Clone + PartialEq + std::fmt::Debug + Default + 'static,
+		where H: Clone + PartialEq + std::fmt::Debug + Default + 'static + AsRef<[u8]>,
 	{
 		#[inline(always)]
 		fn is_active(&self) -> bool {
@@ -674,7 +688,9 @@ pub(crate) mod ordered_database {
 		fn write(&mut self, c: &'static [u8], k: &[u8], v: &[u8]) {
 			resolve_collection(c).map(|(c, p)| {
 				subcollection_prefixed_key!(p, k);
-				self.0.set(c, k, v)
+				let mut tx = sp_database::Transaction::<H>::new();
+				tx.set(c, k, v);
+				self.0.commit(tx)
 					.expect("Unsupported database error");
 			});
 		}
@@ -682,7 +698,9 @@ pub(crate) mod ordered_database {
 		fn remove(&mut self, c: &'static [u8], k: &[u8]) {
 			resolve_collection(c).map(|(c, p)| {
 				subcollection_prefixed_key!(p, k);
-				self.0.remove(c, k)
+				let mut tx = sp_database::Transaction::<H>::new();
+				tx.remove(c, k);
+				self.0.commit(tx)
 					.expect("Unsupported database error");
 			});
 		}
@@ -717,29 +735,6 @@ pub(crate) mod ordered_database {
 		fn contains_collection(&self, collection: &'static [u8]) -> bool {
 			resolve_collection(collection).is_some()
 		}
-=======
-pub(crate) struct JoinInput<'a, 'b>(&'a [u8], &'b [u8]);
-
-pub(crate) fn join_input<'a, 'b>(i1: &'a[u8], i2: &'b [u8]) -> JoinInput<'a, 'b> {
-	JoinInput(i1, i2)
-}
-
-impl<'a, 'b> codec::Input for JoinInput<'a, 'b> {
-	fn remaining_len(&mut self) -> Result<Option<usize>, codec::Error> {
-		Ok(Some(self.0.len() + self.1.len()))
-	}
-
-	fn read(&mut self, into: &mut [u8]) -> Result<(), codec::Error> {
-		let mut read = 0;
-		if self.0.len() > 0 {
-			read = std::cmp::min(self.0.len(), into.len());
-			self.0.read(&mut into[..read])?;
-		}
-		if read < into.len() {
-			self.1.read(&mut into[read..])?;
-		}
-		Ok(())
->>>>>>> master
 	}
 }
 
