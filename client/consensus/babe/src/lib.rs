@@ -1723,8 +1723,10 @@ impl<Block, Aux> SnapshotSyncComponent<Block> for SyncBackend<Block, Aux>
 		weight.encode_to(&mut out);
 		to_hash.encode_to(&mut out);
 
+		use sp_runtime::traits::Saturating;
+		let from = range.from.saturating_sub(HEADER_RANGE.into());
 		Ok(SnapshotSyncCommon {
-			additional_headers: Vec::new(),
+			additional_headers: vec![(from, range.to)],
 		})
 	}
 
@@ -1770,8 +1772,17 @@ impl<Block, Aux> SnapshotSyncComponent<Block> for SyncBackend<Block, Aux>
 			},
 		);
 
+		use sp_runtime::traits::Saturating;
+		let from = range.from.saturating_sub(HEADER_RANGE.into());
 		Ok(SnapshotSyncCommon {
-			additional_headers: Vec::new(),
+			additional_headers: vec![(from, range.to)],
 		})
 	}
 }
+
+// This is an indicative range, it can probably be lowered by a large factor.
+// It is related to `ForkTree` algorithms and pruning and finalisation chain asumption.
+// Changes would require analysing those and maybe doing some change (existing code generally
+// assume all headers exists).
+// But at this point it is not a very big overhead.
+const HEADER_RANGE: u32 = 10_000;
