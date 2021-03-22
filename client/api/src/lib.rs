@@ -56,7 +56,6 @@ pub mod utils {
 	use sp_blockchain::{HeaderBackend, HeaderMetadata, Error};
 	use sp_runtime::traits::Block as BlockT;
 	use std::borrow::Borrow;
-	use crate::DatabaseError;
 
 	/// Returns a function for checking block ancestry, the returned function will
 	/// return `true` if the given hash (second parameter) is a descendent of the

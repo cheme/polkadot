@@ -163,10 +163,9 @@ pub trait BlockImportOperation<Block: BlockT> {
 	) -> sp_blockchain::Result<()>;
 
 	/// Inject storage data into the database for a given state.
-	/// Should only be use on a cleaned state.
+	/// Should only be use on a cleaned state (eg for state snapshot import).
 	fn inject_finalized_state(
 		&mut self,
-		at: &Block::Hash,
 		data: StateIter,
 	) -> sp_blockchain::Result<Block::Hash>;
 

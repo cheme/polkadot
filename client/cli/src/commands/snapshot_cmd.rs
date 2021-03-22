@@ -21,7 +21,7 @@ use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, 
 use crate::CliConfiguration;
 use log::info;
 use sc_service::config::DatabaseConfig;
-use sc_client_api::{SnapshotDb, StateBackend, DatabaseError, SnapshotConfig};
+use sc_client_api::{SnapshotDb, SnapshotConfig};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use std::fmt::Debug;

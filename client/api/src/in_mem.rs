@@ -567,7 +567,6 @@ impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperatio
 
 	fn inject_finalized_state(
 		&mut self,
-		_at: &Block::Hash,
 		data: sp_database::StateIter,
 	) -> sp_blockchain::Result<Block::Hash> {
 		let (root, transaction) = self.old_state.full_storage_root(

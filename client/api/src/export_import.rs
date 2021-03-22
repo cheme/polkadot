@@ -18,9 +18,7 @@
 
 //! Api related to snapshot export and import.
 
-use sp_blockchain::{HeaderBackend, HeaderMetadata, Error};
 use sp_runtime::traits::{NumberFor, Block as BlockT};
-use std::borrow::Borrow;
 use crate::DatabaseError;
 use codec::{Encode, Decode};
 use sp_database::{error, StateIter, StateIterDelta};
@@ -158,6 +156,7 @@ pub trait SnapshotDb<B: BlockT> {
 /// The error type for snapshot database operations.
 #[derive(Debug)]
 pub enum SnapshotDbError {
+	/// Snapshot db is no supported for given backend implementation.
 	Unsupported,
 }
 

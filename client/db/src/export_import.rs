@@ -19,10 +19,8 @@
 //! Snapshot export and import implementation.
 
 use log::info;
-use sc_client_api::{
-	export_import::StateVisitor, DatabaseError,
-	SnapshotSync, SnapshotDbConf, SnapshotConfig, SnapshotDBMode,
-};
+use sc_client_api::{SnapshotSync, SnapshotDbConf, SnapshotConfig,
+	SnapshotDBMode, DatabaseError};
 use sp_blockchain::{
 	Error as ClientError,
 };
@@ -30,10 +28,6 @@ use codec::{Decode, Encode, Compact, IoReader};
 use sp_runtime::generic::BlockId;
 use sp_runtime::traits::{
 	Block as BlockT, Header as HeaderT, NumberFor, One
-};
-use sp_state_machine::{
-	StorageCollection,
-	StateMachineStats,
 };
 use crate::utils::meta_keys;
 use sp_blockchain::HeaderBackend;
@@ -195,10 +189,8 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 		let nb: NumberFor<Block> = Decode::decode(&mut reader).map_err(|e|
 			sp_blockchain::Error::Backend(format!("Snapshot import error: {:?}", e)),
 		)?;
-		let from = to - nb;
-
 		let mut range = SnapshotConfig::<Block> {
-			from,
+			from: to - nb,
 			from_hash: Default::default(),
 			to,
 			to_hash: Default::default(),
@@ -227,7 +219,6 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 			header_ranges.insert_all(ranges.additional_headers.drain(..));
 		}
 
-		let from = range.from;
 		for header_range in header_ranges.inner.into_iter() {
 
 			let mut i = header_range.0;
@@ -337,7 +328,7 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 				state_hash,
 			);
 			let data = self.backend.snapshot_db.state_iter_at(&state_hash, Some(&config))?;
-			let state_root = op.inject_finalized_state(&state_hash, data)
+			let state_root = op.inject_finalized_state(data)
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 			// TODO get state root from header and pass as param
 			if expected_root != state_root {
@@ -376,5 +367,3 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 		Ok(range)
 	}
 }
-
-

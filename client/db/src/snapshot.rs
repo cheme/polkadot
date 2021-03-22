@@ -49,7 +49,6 @@ use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
 use crate::historied_nodes::nodes_backend::Context;
-use std::borrow::Cow;
 use nodes_backend::NODES_COL;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
@@ -339,7 +338,6 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 				let e = ClientError::StateDatabase("Disabled snapshot db need to be created first".into());
 				return Err(DatabaseError(Box::new(e)));
 			} else {
-				use sc_client_api::SnapshotDb;
 				return self.flat_from_backend(out, backend, &range.to_hash);
 			}
 		}
@@ -406,13 +404,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 			};
 
 			let mut owned_tx = Default::default();
-			let mut tx = &mut owned_tx;
-			let mut count_tx = 0;
-			let count_tx = &mut count_tx;
-			let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
-			let child_storage_key = &mut child_storage_key;
-			let mut last_child: Option<Vec<u8>> = None;
-			let last_child = &mut last_child;
+			let tx = &mut owned_tx;
 			let mut key_reader = KeyReader {
 				previous: Vec::new(),
 			};
@@ -1418,7 +1410,7 @@ impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
 		let nodes_db = self.inner.nodes_db.clone();
 		let current_state = historied_db.current_state.clone();
 		let iter = self.inner.ordered_db.iter_from(NODES_COL, prefix.as_slice())
-			.take_while(move |(k, v)| {
+			.take_while(move |(k, _v)| {
 				k.starts_with(prefix.as_slice())
 			})
 			.filter_map(move |(mut k, v)| {
@@ -1621,7 +1613,7 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 				}
 			},
 		};
-		match if let Some(mut histo) = histo {
+		match if let Some(histo) = histo {
 			let update = histo.set_first_change(change, &self.current_state, &self.current_state_read)
 				.expect("Could not write change in snapshot db, DB corrupted");
 			(histo, update)
@@ -1634,12 +1626,12 @@ impl<DB: Database<DbHash>> HistoriedDBMut<DB> {
 				return;
 			}
 		} {
-			(mut value, UpdateResult::Changed(())) => {
+			(value, UpdateResult::Changed(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.set_from_vec(column, k, value.encode());
 				do_journal = true;
 			},
-			(mut value, UpdateResult::Cleared(())) => {
+			(value, UpdateResult::Cleared(())) => {
 				value.apply_nodes_backend_to_transaction(change_set);
 				change_set.remove(column, k);
 				do_journal = true;

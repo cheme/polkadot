@@ -100,8 +100,7 @@ use sc_client_api::{
 		SnapshotSyncComponent, SnapshotSync},
 	SnapshotDbConf,
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
-	utils::is_descendent_of, export_import::StateVisitor,
-	DatabaseError,
+	utils::is_descendent_of,
 };
 use sp_blockchain::{
 	Result as ClientResult, Error as ClientError,
@@ -816,7 +815,6 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block> for Bloc
 
 	fn inject_finalized_state(
 		&mut self,
-		at: &Block::Hash,
 		data: sp_database::StateIter,
 	) -> ClientResult<Block::Hash> {
 		let mut changes_trie_config: Option<ChangesTrieConfiguration> = None;

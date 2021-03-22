@@ -329,7 +329,6 @@ impl<S, Block> BlockImportOperation<Block> for ImportOperation<Block, S>
 
 	fn inject_finalized_state(
 		&mut self,
-		_at: &Block::Hash,
 		_data: sc_client_api::backend::StateIter,
 	) -> sp_blockchain::Result<Block::Hash> {
 		unimplemented!("Already existing ways to sync light db")
