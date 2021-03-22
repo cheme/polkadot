@@ -99,7 +99,8 @@ use sp_consensus::{
 use sp_consensus_babe::inherents::BabeInherentData;
 use sp_timestamp::TimestampInherentData;
 use sc_client_api::{
-	backend::AuxStore, BlockchainEvents, ProvideUncles, SnapshotSyncComponent, SnapshotConfig, SnapshotSyncCommon,
+	backend::AuxStore, BlockchainEvents, ProvideUncles, SnapshotSyncComponent,
+	SnapshotConfig, SnapshotSyncCommon,
 };
 use sp_block_builder::BlockBuilder as BlockBuilderApi;
 use futures::channel::mpsc::{channel, Sender, Receiver};
