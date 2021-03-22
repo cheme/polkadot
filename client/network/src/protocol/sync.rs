@@ -181,8 +181,6 @@ pub struct ChainSync<B: BlockT> {
 	blocks: BlockCollection<B>,
 	/// The best block number in our queue of blocks to import
 	best_queued_number: NumberFor<B>,
-	/// The initial finalized block (do not search common ancestor before it.
-	last_finalized: NumberFor<B>,
 	/// The best block hash in our queue of blocks to import
 	best_queued_hash: B::Hash,
 	/// The role of this node, e.g. light or full
@@ -456,15 +454,12 @@ impl<B: BlockT> ChainSync<B> {
 			required_block_attributes |= BlockAttributes::BODY
 		}
 
-		let last_finalized = client.info().finalized_number;
-
 		ChainSync {
 			client,
 			peers: HashMap::new(),
 			blocks: BlockCollection::new(),
 			best_queued_hash: info.best_hash,
 			best_queued_number: info.best_number,
-			last_finalized,
 			extra_justifications: ExtraRequests::new("justification"),
 			role,
 			required_block_attributes,
@@ -553,26 +548,16 @@ impl<B: BlockT> ChainSync<B> {
 					);
 					self.peers.insert(who.clone(), PeerSync {
 						peer_id: who,
-						common_number: std::cmp::max(self.best_queued_number, self.last_finalized),
+						common_number: self.best_queued_number,
 						best_hash,
 						best_number,
 						state: PeerSyncState::Available,
 					});
 					return Ok(None)
 				}
-					debug!(
-						target:"sync",
-						"cond {} ({}). {}",
-						self.best_queued_number,
-						self.last_finalized,
-						best_number,
-					);
 
-
-				// If we are at genesis, just start downloading, same for initial finalized block TODO not
-				// sure if correct, should be possible for any finalized block (upadte finalized block
-				// refreshing).
-				let (state, req) = if self.best_queued_number.is_zero() || self.best_queued_number <= best_number {
+				// If we are at genesis, just start downloading.
+				let (state, req) = if self.best_queued_number.is_zero() {
 					debug!(
 						target:"sync",
 						"New peer with best hash {} ({}).",
@@ -604,7 +589,7 @@ impl<B: BlockT> ChainSync<B> {
 				self.pending_requests.add(&who);
 				self.peers.insert(who.clone(), PeerSync {
 					peer_id: who,
-					common_number: self.last_finalized,
+					common_number: Zero::zero(),
 					best_hash,
 					best_number,
 					state,
@@ -904,10 +889,10 @@ impl<B: BlockT> ChainSync<B> {
 									// We've made progress on this chain since the search was started.
 									// Opportunistically set common number to updated number
 									// instead of the one that started the search.
-									peer.common_number = std::cmp::max(self.best_queued_number, self.last_finalized);
+									peer.common_number = self.best_queued_number;
 								}
 								else if peer.common_number < *current {
-									peer.common_number = std::cmp::max(*current, self.last_finalized);
+									peer.common_number = *current;
 								}
 							}
 							if matching_hash.is_none() && current.is_zero() {
@@ -1098,9 +1083,8 @@ impl<B: BlockT> ChainSync<B> {
 
 			match result {
 				Ok(BlockImportResult::ImportedKnown(number, who)) => {
-					let last_finalized = self.last_finalized.clone();
 					if let Some(peer) = who.and_then(|p| self.peers.get_mut(&p)) {
-						peer.update_common_number(std::cmp::max(number, last_finalized));
+						peer.update_common_number(number);
 					}
 				}
 				Ok(BlockImportResult::ImportedUnknown(number, aux, who)) => {
@@ -1131,9 +1115,8 @@ impl<B: BlockT> ChainSync<B> {
 						}
 					}
 
-					let last_finalized = self.last_finalized.clone();
 					if let Some(peer) = who.and_then(|p| self.peers.get_mut(&p)) {
-						peer.update_common_number(std::cmp::max(number, last_finalized));
+						peer.update_common_number(number);
 					}
 				},
 				Err(BlockImportError::IncompleteHeader(who)) => {
@@ -1244,7 +1227,7 @@ impl<B: BlockT> ChainSync<B> {
 					new_common_number,
 					peer.best_number,
 				);
-				peer.common_number = std::cmp::max(new_common_number, self.last_finalized);
+				peer.common_number = new_common_number;
 			}
 		}
 		self.pending_requests.set_all();
@@ -1484,11 +1467,11 @@ impl<B: BlockT> ChainSync<B> {
 		// is either one further ahead or it's the one they just announced, if we know about it.
 		if is_best {
 			if known && self.best_queued_number >= number {
-				peer.update_common_number(std::cmp::max(number, self.last_finalized));
+				peer.update_common_number(number);
 			} else if announce.header.parent_hash() == &self.best_queued_hash
 				|| known_parent && self.best_queued_number >= number
 			{
-				peer.update_common_number(std::cmp::max(number - One::one(), self.last_finalized));
+				peer.update_common_number(number - One::one());
 			}
 		}
 		self.pending_requests.add(&who);
