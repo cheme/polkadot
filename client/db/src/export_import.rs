@@ -139,9 +139,6 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 		let out = &mut out_dyn;
 
 		for range in header_ranges.inner.into_iter() {
-			// headers (TODO consider removing digest??)
-			// need to feed LeafSet::read_from_db (just insert in order)
-			// and headers/blockids mapping (same)
 			let mut i = range.0;
 			while i <= range.1 {
 				let header: Block::Header = self.backend.blockchain.header(BlockId::Number(i))?
@@ -255,12 +252,10 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 					use sp_runtime::SaturatedConversion;
 					range.to_hash = header.hash().clone();
 					// init state_db persistence
-					let (key, value) = self.backend.storage.state_db.last_canonical_base(
+					self.backend.storage.state_db.last_canonical_base(
 						&header.parent_hash(),
 						i.clone().saturated_into::<u64>() - 1,
 					);
-					// TODO probably be useless
-					transaction.set_from_vec(columns::META, key.as_slice(), value);
 				}
 
 				if i == range.from {

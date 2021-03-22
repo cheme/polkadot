@@ -508,17 +508,15 @@ impl<BlockHash: Hash, Key: Hash> NonCanonicalOverlay<BlockHash, Key> {
 		}
 	}
 
-	/// On imported snapshot set it as last canonical, and
-	/// return key value to update transaction.
+	/// On imported snapshot set it as last canonical.
 	pub fn imported_last_canonical(
 		&mut self,
 		hash: &BlockHash,
 		number: u64,
-	) -> (Vec<u8>, Vec<u8>) {
+	) {
 		let last_canonicalized = (hash.clone(), number);
 		let encoded = last_canonicalized.encode();
 		self.last_canonicalized = Some(last_canonicalized);
-		(to_meta_key(LAST_CANONICAL, &()), encoded)
 	}
 }
 

@@ -523,13 +523,12 @@ impl<BlockHash: Hash + MallocSizeOf, Key: Hash + MallocSizeOf> StateDb<BlockHash
 		self.db.read().memory_info()
 	}
 
-	/// On imported snapshot set it as last canonical, and
-	/// return key value to update transaction.
+	/// On imported snapshot set it as last canonical.
 	pub fn last_canonical_base(
 		&self,
 		hash: &BlockHash,
 		number: u64,
-	) -> (Vec<u8>, Vec<u8>) {
+	) {
 		self.db.write().non_canonical.imported_last_canonical(hash, number)
 	}
 }
