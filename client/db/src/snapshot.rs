@@ -735,7 +735,6 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		let last_child = &mut last_child;
 		let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
 		let child_storage_key = &mut child_storage_key;
-		use sc_client_api::SnapshotDb;
 		let state_visit = StateVisitor::<Block, _>(backend, block_hash);
 		state_visit.state_visit(|child, key, value| {
 			if child != last_child.as_ref().map(Vec::as_slice) {
@@ -747,7 +746,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 						Some((ChildType::ParentKeyId, storage_key)) => {
 							out.write(&[StateId::DefaultChild as u8])
 								.map_err(|e| DatabaseError(Box::new(e)))?;
-							default_child_key_writer.write_next_owned(storage_key.to_vec(), &mut out);
+							default_child_key_writer.write_next(storage_key.to_vec(), &mut out);
 						},
 						_ => {
 							let e = ClientError::StateDatabase("Unknown child trie type in state".into());
@@ -762,7 +761,7 @@ impl<Block: BlockT> SnapshotDb<Block> {
 					previous: Default::default(),
 				};
 			}
-			default_key_writer.write_next_owned(key, &mut out);
+			default_key_writer.write_next(key, &mut out);
 			value.encode_to(&mut out);
 			Ok(())
 		})?;
@@ -855,8 +854,8 @@ impl Decode for KeyDelta {
 }
 
 /// Key are written in delta mode (since they are sorted it is a big size gain).
-struct KeyWriter<'a> {
-	previous: Cow<'a, [u8]>,
+struct KeyWriter {
+	previous: Vec<u8>,
 }
 
 fn common_depth(v1: &[u8], v2: &[u8]) -> usize {
@@ -869,8 +868,8 @@ fn common_depth(v1: &[u8], v2: &[u8]) -> usize {
 	upper_bound
 }
 
-impl<'a> KeyWriter<'a> {
-	fn write_next_owned<O: codec::Output + ?Sized>(&mut self, next: Vec<u8>, out: &mut O) {
+impl KeyWriter {
+	fn write_next(&mut self, next: Vec<u8>, out: &mut (impl codec::Output + ?Sized)) {
 		let previous = &self.previous[..];
 		let common = common_depth(previous, next.as_slice());
 		let keydelta = if common < previous.len() {
@@ -880,23 +879,10 @@ impl<'a> KeyWriter<'a> {
 		};
 		keydelta.encode_to(out);
 		out.write(&next[common..]);
-		self.previous = next.into();
+		self.previous = next;
 	}
 
-	fn write_next<O: codec::Output + ?Sized>(&mut self, next: &'a [u8], out: &mut O) {
-		let previous = &self.previous;
-		let common = common_depth(previous, next);
-		let keydelta = if common < previous.len() {
-			KeyDelta::PopAugment(previous.len() - common, next.len() - common)
-		} else {
-			KeyDelta::Augment(next.len() - common)
-		};
-		keydelta.encode_to(out);
-		out.write(&next[common..]);
-		self.previous = next.into();
-	}
-
-	fn write_last<O: codec::Output + ?Sized>(&mut self, out: &mut O) {
+	fn write_last(&mut self, out: &mut (impl codec::Output + ?Sized)) {
 		KeyDelta::Last.encode_to(out);
 		self.previous = [][..].into();
 	}

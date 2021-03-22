@@ -24,21 +24,15 @@ use sc_service::config::DatabaseConfig;
 use sc_client_api::{SnapshotDb, StateBackend, DatabaseError, SnapshotConfig};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
-use sp_runtime::generic::BlockId;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use structopt::StructOpt;
 use structopt::clap::arg_enum;
 use sp_runtime::codec::Encode;
-use std::io::Write;
 
-// TODO current cache does worsen perf,
-// when fix restore a non null default value
-// const DEFAULT_CACHE_SIZE: u32 = 1000;
-const DEFAULT_CACHE_SIZE: u32 = 0;
+const DEFAULT_CACHE_SIZE: u32 = 1_000;
 
 arg_enum! {
 	/// Mode for the snapshot
