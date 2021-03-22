@@ -107,36 +107,12 @@ impl<H, N, V> ForkTree<H, N, V> where
 			  F: Fn(&H, &H) -> Result<bool, E>,
 			  P: Fn(&V) -> bool,
 	{
-		self.prune_ignore(hash, number, is_descendent_of, predicate, false)
-	}
-
-	/// `prune`, also allows ignoring unresolved descendant queries.
-	/// (eg for synch without all headers).
-	pub fn prune_ignore<F, E, P>(
-		&mut self,
-		hash: &H,
-		number: &N,
-		is_descendent_of: &F,
-		predicate: &P,
-		ignore_not_found: bool,
-	) -> Result<impl Iterator<Item=(H, N, V)>, Error<E>>
-		where E: std::error::Error,
-			  F: Fn(&H, &H) -> Result<bool, E>,
-			  P: Fn(&V) -> bool,
-	{
-		let new_root_index = match self.find_node_index_where(
+		let new_root_index = self.find_node_index_where(
 			hash,
 			number,
 			is_descendent_of,
 			predicate,
-		) {
-			Ok(r) => r,
-			Err(e) => if ignore_not_found {
-				return Ok(RemovedIterator { stack: Default::default() })
-			} else {
-				return Err(e);
-			},
-		};
+		)?;
 
 		let removed = if let Some(mut root_index) = new_root_index {
 			let mut old_roots = std::mem::take(&mut self.roots);

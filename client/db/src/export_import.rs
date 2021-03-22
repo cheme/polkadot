@@ -641,7 +641,7 @@ fn key_writer_reader_encode_decode() {
 		previous: [][..].into(),
 	};
 	for key in keys.iter() {
-		writer.write_next(key.as_slice(), &mut dest)
+		writer.write_next(key.clone(), &mut dest)
 	}
 	writer.write_last(&mut dest);
 	let mut decoded = Vec::new();

@@ -686,7 +686,7 @@ mod tests {
 
 	#[test]
 	fn changes_tries_are_pruned_on_finalization() {
-		let mut backend = Backend::<Block>::new_test(1000, 100);
+		let backend = Backend::<Block>::new_test(1000, 100);
 		backend.changes_tries_storage.min_blocks_to_keep.as_ref()
 			.map(|min| min.store(8, Ordering::Relaxed));
 
@@ -898,7 +898,7 @@ mod tests {
 
 	#[test]
 	fn test_finalize_several_configuration_change_blocks_in_single_operation() {
-		let mut backend = Backend::<Block>::new_test(10, 10);
+		let backend = Backend::<Block>::new_test(10, 10);
 		backend.changes_tries_storage.min_blocks_to_keep.as_ref()
 			.map(|min| min.store(8, Ordering::Relaxed));
 
