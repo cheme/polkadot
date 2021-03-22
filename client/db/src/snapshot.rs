@@ -19,7 +19,7 @@
 //! Key value snapshot db with history.
 
 use sc_client_api::{SnapshotDbConf, SnapshotDBMode, SnapshotDb as SnapshotDbT,
-	SnapshotConfig};
+	SnapshotConfig, StateVisitor};
 use crate::tree_management::{TreeManagementSync, TreeManagementPersistence};
 use historied_db::{
 	DecodeWithContext,
@@ -246,7 +246,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		&self,
 		mut config: SnapshotDbConf,
 		best_block: Block::Hash,
-		state_visit: impl sc_client_api::StateVisitor,
+		backend: &impl sc_client_api::Backend<Block>,
 	) -> sp_database::error::Result<()> {
 		self.clear_snapshot_db()?;
 
@@ -286,6 +286,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		let child_storage_key = &mut child_storage_key;
 		let mut last_child: Option<Vec<u8>> = None;
 		let last_child = &mut last_child;
+		let state_visit = StateVisitor(backend, &best_block);
 		state_visit.state_visit(|child, key, value| {
 			let key = if let Some(child) = child {
 				if Some(child) != last_child.as_ref().map(Vec::as_slice) {
@@ -331,14 +332,15 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 		&self,
 		out: &mut dyn std::io::Write,
 		range: &SnapshotConfig<Block>,
-		default_flat: impl sc_client_api::StateVisitor,
+		backend: &impl sc_client_api::Backend<Block>,
 	) -> sp_database::error::Result<()> {
 		if !self.config.enabled {
 			if !range.flat {
 				let e = ClientError::StateDatabase("Disabled snapshot db need to be created first".into());
 				return Err(DatabaseError(Box::new(e)));
 			} else {
-				return self.flat_from_state(out, default_flat);
+				use sc_client_api::SnapshotDb;
+				return self.flat_from_backend(out, backend, &range.to_hash);
 			}
 		}
 
@@ -710,11 +712,12 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		&self.historied_management
 	}
 
-	/// Create flat snapshot from state.
-	fn flat_from_state(
+	/// Create flat snapshot from backend.
+	fn flat_from_backend(
 		&self,
 		mut out: &mut dyn std::io::Write,
-		state_visit: impl sc_client_api::StateVisitor,
+		backend: &impl sc_client_api::Backend<Block>,
+		block_hash: &Block::Hash,
 	) -> sp_database::error::Result<()> {
 		out.write(&[StateId::Top as u8])
 			.map_err(|e| DatabaseError(Box::new(e)))?;
@@ -732,6 +735,8 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		let last_child = &mut last_child;
 		let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
 		let child_storage_key = &mut child_storage_key;
+		use sc_client_api::SnapshotDb;
+		let state_visit = StateVisitor::<Block, _>(backend, block_hash);
 		state_visit.state_visit(|child, key, value| {
 			if child != last_child.as_ref().map(Vec::as_slice) {
 				default_key_writer.write_last(&mut out);

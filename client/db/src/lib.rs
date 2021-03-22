@@ -100,8 +100,8 @@ use sc_client_api::{
 		SnapshotSyncComponent, SnapshotSync},
 	SnapshotDbConf,
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
-	utils::{is_descendent_of, StateVisitorImpl},
-	StateVisitor, DatabaseError,
+	utils::is_descendent_of, export_import::StateVisitor,
+	DatabaseError,
 };
 use sp_blockchain::{
 	Result as ClientResult, Error as ClientError,

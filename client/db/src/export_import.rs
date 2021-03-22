@@ -20,7 +20,7 @@
 
 use log::info;
 use sc_client_api::{
-	utils::StateVisitorImpl, DatabaseError,
+	export_import::StateVisitor, DatabaseError,
 	SnapshotSync, SnapshotDbConf, SnapshotConfig, SnapshotDBMode,
 };
 use sp_blockchain::{
@@ -106,12 +106,10 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 		let out = &mut out_dyn;
 
 		if state_only {
-			use sc_client_api::SnapshotDb;
-			let state_visitor = StateVisitorImpl(&self.backend, &range.to_hash);
 			self.backend.snapshot_db.export_snapshot(
 				out_dyn,
 				&range,
-				state_visitor,
+				&self.backend,
 			)?;
 
 			return Ok(());
@@ -161,15 +159,13 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 		}
 
 		use sc_client_api::SnapshotDb;
-		let state_visitor = StateVisitorImpl(&self.backend, &range.to_hash);
 		out_dyn.write(&[SnapshotMode::Flat as u8])
 			.map_err(|e| DatabaseError(Box::new(e)))?;
-
 
 		self.backend.snapshot_db.export_snapshot(
 			out_dyn,
 			&range,
-			state_visitor,
+			&self.backend,
 		)?;
 
 		Ok(())

@@ -113,7 +113,7 @@ pub trait SnapshotDb<B: BlockT> {
 		&self,
 		config: SnapshotDbConf,
 		best_block: B::Hash,
-		state_visit: impl StateVisitor,
+		backend: &impl crate::Backend<B>,
 	) -> error::Result<()>;
 
 	/// Export a snapshot file.
@@ -121,7 +121,7 @@ pub trait SnapshotDb<B: BlockT> {
 		&self,
 		output: &mut dyn std::io::Write,
 		range: &SnapshotConfig<B>,
-		default_flat: impl StateVisitor,
+		backend: &impl crate::Backend<B>,
 	) -> error::Result<()>;
 
 	/// Iterate on all values at a given block.
@@ -152,18 +152,6 @@ pub trait SnapshotDb<B: BlockT> {
 		from: &mut dyn std::io::Read,
 		config: &SnapshotDbConf,
 		range: &SnapshotConfig<B>,
-	) -> error::Result<()>;
-}
-
-/// Visitor trait use to initiate a snapshot db.
-pub trait StateVisitor {
-	/// Visit with call back taking the child trie root path and related key values for arguments.
-	///
-	/// The ordered is required to be top trie then child trie by prefixed storage key order, with
-	/// every trie key values consecutively ordered.
-	fn state_visit(
-		&self,
-		visitor: impl FnMut(Option<&[u8]>, Vec<u8>, Vec<u8>) -> error::Result<()>,
 	) -> error::Result<()>;
 }
 
@@ -214,7 +202,7 @@ impl<B: BlockT> SnapshotDb<B> for () {
 		&self,
 		_config: SnapshotDbConf,
 		_best_block: B::Hash,
-		_state_visit: impl StateVisitor,
+		_backend: &impl crate::Backend<B>,
 	) -> error::Result<()> {
 		unsupported_error()
 	}
@@ -223,7 +211,7 @@ impl<B: BlockT> SnapshotDb<B> for () {
 		&self,
 		_output: &mut dyn std::io::Write,
 		_range: &SnapshotConfig<B>,
-		_default_flat: impl StateVisitor,
+		_backend: &impl crate::Backend<B>,
 	) -> error::Result<()> {
 		unsupported_error()
 	}
@@ -247,14 +235,18 @@ impl<B: BlockT> SnapshotDb<B> for () {
 }
 
 /// A state visitor implementation for a given backend at a given block.
-pub struct StateVisitorImpl<'a, B: BlockT, BA>(pub &'a BA, pub &'a B::Hash);
+pub struct StateVisitor<'a, B: BlockT, BA>(pub &'a BA, pub &'a B::Hash);
 
-impl<'a, B, BA> StateVisitor for StateVisitorImpl<'a, B, BA>
+impl<'a, B, BA> StateVisitor<'a, B, BA>
 	where
 		B: BlockT,
 		BA: crate::backend::Backend<B>,
 {
-	fn state_visit(
+	/// Visit with call back taking the child trie root path and related key values for arguments.
+	///
+	/// The ordered is required to be top trie then child trie by prefixed storage key order, with
+	/// every trie key values consecutively ordered.
+	pub fn state_visit(
 		&self,
 		mut visitor: impl FnMut(Option<&[u8]>, Vec<u8>, Vec<u8>) -> std::result::Result<(), DatabaseError>,
 	) -> std::result::Result<(), DatabaseError> {

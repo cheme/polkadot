@@ -21,7 +21,7 @@ use crate::params::{GenericNumber, DatabaseParams, PruningParams, SharedParams, 
 use crate::CliConfiguration;
 use log::info;
 use sc_service::config::DatabaseConfig;
-use sc_client_api::{SnapshotDb, StateBackend, StateVisitor, DatabaseError, SnapshotConfig};
+use sc_client_api::{SnapshotDb, StateBackend, DatabaseError, SnapshotConfig};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 use sp_runtime::generic::BlockId;
@@ -391,11 +391,10 @@ impl SnapshotManageCmd {
 
 		let mut config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
 		config.start_block = Some(chain_info.best_number.encode());
-		let state_visitor = sc_client_api::utils::StateVisitorImpl(&*backend.as_ref(), &chain_info.best_hash);
 		db.re_init(
 			config,
 			chain_info.best_hash,
-			state_visitor,
+			&*backend.as_ref(),
 		)?;
 		Ok(())
 	}
