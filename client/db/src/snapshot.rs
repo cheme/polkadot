@@ -43,7 +43,7 @@ use log::{debug, info, warn};
 use sp_blockchain::{Result as ClientResult, Error as ClientError};
 use sp_database::{Database, OrderedDatabase};
 use sp_state_machine::kv_backend::KVBackend;
-use codec::{Decode, Encode, Compact, IoReader};
+use codec::{Decode, Encode};
 use sp_database::{StateIter, ChildStateIter};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
@@ -338,7 +338,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 				let e = ClientError::StateDatabase("Disabled snapshot db need to be created first".into());
 				return Err(DatabaseError(Box::new(e)));
 			} else {
-				return self.flat_from_backend(out, backend, &range.to_hash);
+				return crate::export_import::flat_from_backend(out, backend, &range.to_hash);
 			}
 		}
 
@@ -371,7 +371,7 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 	fn import_snapshot_db(
 		&self,
-		mut from: &mut dyn std::io::Read,
+		from: &mut dyn std::io::Read,
 		config: &SnapshotDbConf,
 		range: &SnapshotConfig<Block>,
 	) -> sp_database::error::Result<()> {
@@ -405,55 +405,18 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 
 			let mut owned_tx = Default::default();
 			let tx = &mut owned_tx;
-			let mut key_reader = KeyReader {
-				previous: Vec::new(),
-			};
-	
-			let mut default_child_key_reader = KeyReader {
-				previous: Vec::new(),
-			};
-	
-			let mut buf = [0];
-			loop {
-				let journal_change = || None; // no change journaling for initial state.
-				from.read_exact(&mut buf[..1])
-					.map_err(|e| DatabaseError(Box::new(e)))?;
-				match buf[0] {
-					u if u == StateId::Top as u8 => {
-						while let Some(key) = key_reader.read_next(&mut IoReader(&mut from))
-								.map_err(|e| DatabaseError(Box::new(e)))? {
-							let value: Vec<u8> = Decode::decode(&mut IoReader(&mut from))
-								.map_err(|e| DatabaseError(Box::new(e)))?;
-							let key = child_prefixed_key_inner_top(key);
-							historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change());
-						}
-					},
-					u if u == StateId::DefaultChild as u8 => {
-						let child_key = if let Some(child_key) = default_child_key_reader.read_next(&mut IoReader(&mut from))
-							.map_err(|e| DatabaseError(Box::new(e)))? {
-								child_key
-						} else {
-							let e = ClientError::StateDatabase("Unexpected child key encoding.".into());
-							return Err(DatabaseError(Box::new(e)));
-						};
-						//let child_info = ChildInfo::new_default(child_key);
-						while let Some(key) = key_reader.read_next(&mut IoReader(&mut from))
-							.map_err(|e| DatabaseError(Box::new(e)))? {
-							let key = child_prefixed_key_inner_default(child_key, key);
-							let value = Decode::decode(&mut IoReader(&mut from))
-								.map_err(|e| DatabaseError(Box::new(e)))?;
-							historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change());
-						}
-					},
-					u if u == StateId::EndOfState as u8 => {
-						break;
-					},
-					_ => {
-						let e = ClientError::StateDatabase("Unknown state type.".into());
-						return Err(DatabaseError(Box::new(e)));
-					},
+
+			let journal_change = || None; // no change journaling for initial state.
+			crate::export_import::snapshot_state_visit(from, |child_key, key, value| {
+				if let Some(child_key) = child_key {
+					let key = child_prefixed_key_inner_default(child_key, key);
+					historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change());
+				} else {
+					let key = child_prefixed_key_inner_top(key);
+					historied_db.unchecked_new_single_inner(key, value, tx, crate::columns::STATE_SNAPSHOT, journal_change());
 				}
-			}
+				Ok(())
+			})?;
 
 			self.ordered_db.commit(owned_tx)?;
 		} else {
@@ -704,66 +667,6 @@ impl<Block: BlockT> SnapshotDb<Block> {
 		&self.historied_management
 	}
 
-	/// Create flat snapshot from backend.
-	fn flat_from_backend(
-		&self,
-		mut out: &mut dyn std::io::Write,
-		backend: &impl sc_client_api::Backend<Block>,
-		block_hash: &Block::Hash,
-	) -> sp_database::error::Result<()> {
-		out.write(&[StateId::Top as u8])
-			.map_err(|e| DatabaseError(Box::new(e)))?;
-
-		let mut default_key_writer = KeyWriter {
-			previous: [][..].into(),
-		};
-		let default_key_writer = &mut default_key_writer;
-		let mut default_child_key_writer = KeyWriter {
-			previous: Default::default(),
-		};
-		let default_child_key_writer = &mut default_child_key_writer;
-
-		let mut last_child: Option<Vec<u8>> = None;
-		let last_child = &mut last_child;
-		let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
-		let child_storage_key = &mut child_storage_key;
-		let state_visit = StateVisitor::<Block, _>(backend, block_hash);
-		state_visit.state_visit(|child, key, value| {
-			if child != last_child.as_ref().map(Vec::as_slice) {
-				default_key_writer.write_last(&mut out);
-				if let Some(child) = child.as_ref() {
-					*child_storage_key = PrefixedStorageKey::new(child.to_vec());
-					*last_child = Some(child.to_vec());
-					match ChildType::from_prefixed_key(&child_storage_key) {
-						Some((ChildType::ParentKeyId, storage_key)) => {
-							out.write(&[StateId::DefaultChild as u8])
-								.map_err(|e| DatabaseError(Box::new(e)))?;
-							default_child_key_writer.write_next(storage_key.to_vec(), &mut out);
-						},
-						_ => {
-							let e = ClientError::StateDatabase("Unknown child trie type in state".into());
-							return Err(DatabaseError(Box::new(e)));
-						},
-					}
-				} else {
-					out.write(&[StateId::Top as u8])
-						.map_err(|e| DatabaseError(Box::new(e)))?;
-				}
-				*default_key_writer = KeyWriter {
-					previous: Default::default(),
-				};
-			}
-			default_key_writer.write_next(key, &mut out);
-			value.encode_to(&mut out);
-			Ok(())
-		})?;
-
-		default_key_writer.write_last(&mut out);
-		out.write(&[StateId::EndOfState as u8])
-			.map_err(|e| DatabaseError(Box::new(e)))?;
-		Ok(())
-	}
-
 	/// Handle new head, this only do minor assertions
 	/// as historied value do not care about head.
 	pub fn set_head_with_transaction(
@@ -780,132 +683,6 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			}
 		}
 		Ok(())
-	}
-}
-
-/// First byte of snapshot define
-/// its mode.
-#[repr(u8)]
-enum StateId {
-	/// End of state.
-	/// This allow putting state payload in non final position.
-	EndOfState = 0,
-	/// Top state
-	Top = 1,
-	/// Default child trie, followed by unprefixed path from default trie prefix.
-	/// Path is a KeyDelta from previous child trie.
-	DefaultChild = 2,
-}
-
-enum KeyDelta {
-	Augment(usize),
-	PopAugment(usize, usize),
-	// last is a pop augment with a 0 size pop
-	// So 1
-	Last,
-}
-
-impl Encode for KeyDelta {
-	fn size_hint(&self) -> usize {
-		2
-	}
-
-	fn encode_to<T: codec::Output + ?Sized>(&self, out: &mut T) {
-		match self {
-			KeyDelta::Augment(nb) => {
-				let augment_nb = nb * 2; // 0 as last bit
-				Compact(augment_nb as u64).encode_to(out);
-			},
-			KeyDelta::PopAugment(nb, nb2) => {
-				let pop_nb = (nb * 2) + 1; // 1 as last bit
-				Compact(pop_nb as u64).encode_to(out);
-				Compact(*nb2 as u64).encode_to(out);
-			},
-			KeyDelta::Last => {
-				let pop_nb = (0 * 2) + 1; // 1 as last bit
-				Compact(pop_nb as u64).encode_to(out);
-			},
-		}
-	}
-}
-
-impl Decode for KeyDelta {
-	fn decode<I: codec::Input>(input: &mut I) -> Result<Self, codec::Error> {
-		let first = Compact::<u64>::decode(input)?.0;
-		if first % 2 == 0 {
-			Ok(KeyDelta::Augment((first / 2) as usize))
-		} else {
-			let pop_size = first / 2;
-			if pop_size == 0 {
-				return Ok(KeyDelta::Last);
-			}
-			let second = Compact::<u64>::decode(input)?.0;
-			Ok(KeyDelta::PopAugment(pop_size as usize, second as usize))
-		}
-	}
-}
-
-/// Key are written in delta mode (since they are sorted it is a big size gain).
-struct KeyWriter {
-	previous: Vec<u8>,
-}
-
-fn common_depth(v1: &[u8], v2: &[u8]) -> usize {
-	let upper_bound = std::cmp::min(v1.len(), v2.len());
-	for a in 0 .. upper_bound {
-		if v1[a] != v2[a] {
-			return a;
-		}
-	}
-	upper_bound
-}
-
-impl KeyWriter {
-	fn write_next(&mut self, next: Vec<u8>, out: &mut (impl codec::Output + ?Sized)) {
-		let previous = &self.previous[..];
-		let common = common_depth(previous, next.as_slice());
-		let keydelta = if common < previous.len() {
-			KeyDelta::PopAugment(previous.len() - common, next.len() - common)
-		} else {
-			KeyDelta::Augment(next.len() - common)
-		};
-		keydelta.encode_to(out);
-		out.write(&next[common..]);
-		self.previous = next;
-	}
-
-	fn write_last(&mut self, out: &mut (impl codec::Output + ?Sized)) {
-		KeyDelta::Last.encode_to(out);
-		self.previous = [][..].into();
-	}
-}
-
-/// Key are read in delta mode (since they are sorted it is a big size gain).
-struct KeyReader {
-	previous: Vec<u8>,
-}
-
-impl KeyReader {
-	fn read_next<I: codec::Input>(&mut self, input: &mut I)  -> Result<Option<&[u8]>, codec::Error> {
-		let nb = match KeyDelta::decode(input)? {
-			KeyDelta::Last => {
-				self.previous.clear();
-				return Ok(None);
-			},
-			KeyDelta::Augment(nb) => nb,
-			KeyDelta::PopAugment(nb, nb2) => {
-				let old_len = self.previous.len();
-				if old_len < nb {
-					return Err("Invalid keydiff encoding".into());
-				}
-				self.previous.truncate(old_len - nb);
-				nb2
-			},
-		};
-		let old_len = self.previous.len();
-		self.previous.resize(old_len + nb, 0);
-		input.read(&mut self.previous[old_len..])?;
-		Ok(Some(self.previous.as_slice()))
 	}
 }
 
@@ -1797,52 +1574,4 @@ impl HValueCache {
 			let _ = self.cache.pop(&key);
 		}
 	}
-}
-
-
-#[test]
-fn key_writer_reader_encode_decode() {
-	let keys = [
-		vec![17u8, 243, 186, 46, 28, 221, 109, 98, 242, 255, 155, 85, 137, 231, 255,
-			129, 186, 127, 184, 116, 87, 53, 220, 59, 226, 162, 198, 26, 114, 195,
-			158, 120],
-		vec![24, 9, 215, 131, 70, 114, 122, 14, 245, 140, 15, 160, 59, 175, 163, 35,
-			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
-		vec![26, 115, 109, 55, 80, 76, 46, 63, 183, 61, 173, 22, 12, 85, 178, 145,
-			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
-		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
-			6, 21, 91, 60, 217, 168, 201, 229, 233, 162, 63, 213, 220, 19, 165, 237],
-		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
-			94, 6, 33, 196, 134, 154, 166, 12, 2, 190, 154, 220, 201, 138, 13, 29],
-		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
-			102, 232, 240, 53, 200, 173, 190, 127, 21, 71, 180, 60, 81, 230, 248, 164],
-		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
-			103, 135, 17, 209, 94, 187, 206, 186, 92, 208, 206, 161, 88, 230, 103, 90],
-		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
-			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
-		vec![28, 182, 243, 110, 2, 122, 187, 32, 145, 207, 181, 17, 10, 181, 8, 127,
-			170, 207, 0, 185, 180, 31, 218, 122, 146, 104, 130, 28, 42, 43, 62, 76],
-		vec![32, 153, 215, 241, 9, 214, 229, 53, 251, 0, 11, 186, 98, 63, 212, 64,
-			76, 1, 78, 107, 248, 184, 194, 192, 17, 231, 41, 11, 133, 105, 107, 179],
-		vec![32, 153, 215, 241, 9, 214, 229, 53, 251, 0, 11, 186, 98, 63, 212, 64,
-			135, 141, 67, 77, 97, 37, 180, 4, 67, 254, 17, 253, 41, 45, 19, 164],
-	];
-	let mut dest = Vec::new();
-	let mut writer = KeyWriter {
-		previous: [][..].into(),
-	};
-	for key in keys.iter() {
-		writer.write_next(key.as_slice(), &mut dest)
-	}
-	writer.write_last(&mut dest);
-	let mut decoded = Vec::new();
-	let mut key_reader = KeyReader {
-		previous: Vec::new(),
-	};
-	let input = &mut dest.as_slice();
-	while let Some(key) = key_reader.read_next(input).unwrap() {
-		decoded.push(key.to_vec());
-	}
-	assert_eq!(&keys[..], &decoded[..]);
-	assert!(input.len() == 0);
 }

@@ -1734,7 +1734,7 @@ impl<Block, Aux> SnapshotSyncComponent<Block> for SyncBackend<Block, Aux>
 	fn import_sync_meta(
 		&self,
 		encoded: &mut dyn std::io::Read,
-		_range: &SnapshotConfig<Block>,
+		range: &SnapshotConfig<Block>,
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>> {
 		let mut buf = [0];
 		// version
