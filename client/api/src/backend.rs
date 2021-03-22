@@ -503,11 +503,11 @@ pub trait Backend<Block: BlockT>: AuxStore + Send + Sync {
 	fn snapshot_db(&self) -> Option<Self::SnapshotDb>;
 
 	/// Snapshot synching for this backend.
-	fn snapshot_sync(&self) -> Box<dyn SnapshotSyncRoot<Block>>;
+	fn snapshot_sync(&self) -> Box<dyn SnapshotSync<Block>>;
 
 	/// Add a sync component to use with the snapshot synching
 	/// of his backend.
-	fn register_sync(&self, sync: Box<dyn SnapshotSync<Block>>);
+	fn register_sync(&self, sync: Box<dyn SnapshotSyncComponent<Block>>);
 
 	/// Returns true if state for given block is available.
 	fn have_state_at(&self, hash: &Block::Hash, _number: NumberFor<Block>) -> bool {
@@ -563,7 +563,7 @@ pub struct SnapshotSyncCommon<Block: BlockT> {
 }
 
 /// Full implementation of snapshot export and import.
-pub trait SnapshotSyncRoot<Block: BlockT>: Send + Sync {
+pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 	/// Write sync non state related persisting data.
 	fn export_sync(
 		&self,
@@ -582,7 +582,7 @@ pub trait SnapshotSyncRoot<Block: BlockT>: Send + Sync {
 
 /// Component that need to manage some export and import state
 /// when using snapshots.
-pub trait SnapshotSync<Block: BlockT>: Send + Sync {
+pub trait SnapshotSyncComponent<Block: BlockT>: Send + Sync {
 	/// Export state needed, except state that can be shared with
 	/// other component.
 	/// Return pointers to state that can be shared with others components.
@@ -602,7 +602,7 @@ pub trait SnapshotSync<Block: BlockT>: Send + Sync {
 	) -> sp_blockchain::Result<SnapshotSyncCommon<Block>>;
 }
 
-impl<Block: BlockT> SnapshotSyncRoot<Block> for () {
+impl<Block: BlockT> SnapshotSync<Block> for () {
 	fn export_sync(
 		&self,
 		_out: &mut dyn std::io::Write,

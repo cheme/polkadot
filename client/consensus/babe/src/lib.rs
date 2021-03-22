@@ -99,7 +99,7 @@ use sp_consensus::{
 use sp_consensus_babe::inherents::BabeInherentData;
 use sp_timestamp::TimestampInherentData;
 use sc_client_api::{
-	backend::AuxStore, BlockchainEvents, ProvideUncles, SnapshotSync, SnapshotConfig, SnapshotSyncCommon,
+	backend::AuxStore, BlockchainEvents, ProvideUncles, SnapshotSyncComponent, SnapshotConfig, SnapshotSyncCommon,
 };
 use sp_block_builder::BlockBuilder as BlockBuilderApi;
 use futures::channel::mpsc::{channel, Sender, Receiver};
@@ -1692,11 +1692,15 @@ struct SyncBackend<Block: BlockT, Aux>(SharedEpochChanges<Block, Epoch>, Aux);
 pub fn sync_backend<Block: BlockT, Aux: AuxStore + Send + Sync + 'static>(
 	epoch_changes: SharedEpochChanges<Block, Epoch>,
 	aux: Aux,
-) -> Box<dyn SnapshotSync<Block>> {
+) -> Box<dyn SnapshotSyncComponent<Block>> {
 	Box::new(SyncBackend(epoch_changes, aux))
 }
 
-impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> for SyncBackend<Block, Aux> {
+impl<Block, Aux> SnapshotSyncComponent<Block> for SyncBackend<Block, Aux>
+	where
+		Block: BlockT,
+		Aux: AuxStore + Send + Sync + 'static,
+{
 	fn export_sync_meta(
 		&self,
 		mut out: &mut dyn std::io::Write,

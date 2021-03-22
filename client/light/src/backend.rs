@@ -38,7 +38,7 @@ use sp_blockchain::{Error as ClientError, Result as ClientResult};
 use sc_client_api::{
 	backend::{
 		AuxStore, Backend as ClientBackend, BlockImportOperation, RemoteBackend, NewBlockState,
-		PrunableStateChangesTrieStorage, SnapshotSync, SnapshotSyncRoot,
+		PrunableStateChangesTrieStorage, SnapshotSyncComponent, SnapshotSync,
 	},
 	blockchain::{
 		HeaderBackend as BlockchainHeaderBackend, well_known_cache_keys,
@@ -255,12 +255,12 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 		&self.import_lock
 	}
 
-	fn snapshot_sync(&self) -> Box<dyn SnapshotSyncRoot<Block>> {
+	fn snapshot_sync(&self) -> Box<dyn SnapshotSync<Block>> {
 		// specific rpc for light.
 		Box::new(())
 	}
 
-	fn register_sync(&self, _sync: Box<dyn SnapshotSync<Block>>) {
+	fn register_sync(&self, _sync: Box<dyn SnapshotSyncComponent<Block>>) {
 	}
 }
 

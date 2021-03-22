@@ -21,7 +21,7 @@
 use log::info;
 use sc_client_api::{
 	utils::StateVisitorImpl, DatabaseError,
-	SnapshotSyncRoot, SnapshotDbConf, SnapshotConfig, SnapshotDBMode,
+	SnapshotSync, SnapshotDbConf, SnapshotConfig, SnapshotDBMode,
 };
 use sp_blockchain::{
 	Error as ClientError,
@@ -94,7 +94,7 @@ impl<N: Ord> HeaderRanges<N> {
 	}
 }
 
-impl<Block: BlockT> SnapshotSyncRoot<Block> for ClientSnapshotSync<Block> {
+impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 	fn export_sync(
 		&self,
 		mut out_dyn: &mut dyn std::io::Write,

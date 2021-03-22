@@ -97,7 +97,7 @@ use log::{trace, debug, warn};
 use sc_client_api::{
 	UsageInfo, MemoryInfo, IoInfo, MemorySize,
 	backend::{NewBlockState, PrunableStateChangesTrieStorage, ProvideChtRoots,
-		SnapshotSync, SnapshotSyncRoot},
+		SnapshotSyncComponent, SnapshotSync},
 	SnapshotDbConf,
 	leaves::{LeafSet, FinalizationDisplaced}, cht,
 	utils::{is_descendent_of, StateVisitorImpl},
@@ -463,7 +463,7 @@ pub struct BlockchainDb<Block: BlockT> {
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
 	header_cache: Arc<Mutex<LinkedHashMap<Block::Hash, Option<Block::Header>>>>,
 	transaction_storage: TransactionStorageMode,
-	registered_snapshot_sync: Arc<RwLock<Vec<Box<dyn SnapshotSync<Block>>>>>,
+	registered_snapshot_sync: Arc<RwLock<Vec<Box<dyn SnapshotSyncComponent<Block>>>>>,
 }
 
 impl<Block: BlockT> BlockchainDb<Block> {
@@ -2242,13 +2242,13 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 		&*self.import_lock
 	}
 
-	fn snapshot_sync(&self) -> Box<dyn SnapshotSyncRoot<Block>> {
+	fn snapshot_sync(&self) -> Box<dyn SnapshotSync<Block>> {
 		Box::new(export_import::ClientSnapshotSync {
 			backend: self.clone(),
 		})
 	}
 
-	fn register_sync(&self, sync: Box<dyn SnapshotSync<Block>>) {
+	fn register_sync(&self, sync: Box<dyn SnapshotSyncComponent<Block>>) {
 		self.blockchain.registered_snapshot_sync.write().push(sync);
 	}
 }

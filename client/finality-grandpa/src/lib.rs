@@ -62,7 +62,7 @@ use futures::{
 };
 use log::{debug, error, info};
 use sc_client_api::{
-	backend::{AuxStore, Backend, SnapshotSync, SnapshotSyncCommon},
+	backend::{AuxStore, Backend, SnapshotSyncComponent, SnapshotSyncCommon},
 	LockImportRun, BlockchainEvents, CallExecutor, SnapshotConfig,
 	ExecutionStrategy, Finalizer, TransactionFor, ExecutorProvider,
 };
@@ -1150,11 +1150,15 @@ struct SyncBackend<Block: BlockT, Aux>(SharedAuthoritySet<Block::Hash, NumberFor
 pub fn sync_backend<Block: BlockT, Aux: AuxStore + Send + Sync + 'static>(
 	authority_set: SharedAuthoritySet<Block::Hash, NumberFor<Block>>,
 	aux: Aux,
-) -> Box<dyn SnapshotSync<Block>> {
+) -> Box<dyn SnapshotSyncComponent<Block>> {
 	Box::new(SyncBackend(authority_set, aux))
 }
 
-impl<Block: BlockT, Aux: AuxStore + Send + Sync + 'static> SnapshotSync<Block> for SyncBackend<Block, Aux> {
+impl<Block, Aux> SnapshotSyncComponent<Block> for SyncBackend<Block, Aux>
+	where
+		Block: BlockT,
+		Aux: AuxStore + Send + Sync + 'static,
+{
 	fn export_sync_meta(
 		&self,
 		mut out: &mut dyn std::io::Write,
