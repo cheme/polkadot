@@ -452,7 +452,6 @@ impl SnapshotImportCmd {
 			}
 		};
 
-		let dest_config: sc_client_api::SnapshotDbConf = self.snapshot_conf.clone().into();
 		backend.snapshot_sync().import_sync(&mut file, dest_config)?;
 		Ok(())
 	}
