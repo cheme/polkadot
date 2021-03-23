@@ -341,9 +341,10 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 
 			if !dest_config.enabled {
-				// clear snapshot db
+				info!("Clear snapshot db.");
 				self.backend.snapshot_db.clear_snapshot_db()?;
 			} else {
+				info!("Update snapshot db.");
 				self.backend.snapshot_db.update_running_conf(
 					Some(dest_config.primary_source),
 					Some(dest_config.debug_assert),

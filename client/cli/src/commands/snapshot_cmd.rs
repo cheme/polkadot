@@ -34,7 +34,7 @@ use structopt::StructOpt;
 use structopt::clap::arg_enum;
 use sp_runtime::codec::Encode;
 
-const DEFAULT_CACHE_SIZE: u32 = 1_000;
+const DEFAULT_CACHE_SIZE: u32 = 5_000;
 
 arg_enum! {
 	/// Mode for the snapshot
