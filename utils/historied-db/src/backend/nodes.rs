@@ -19,6 +19,7 @@
 
 use sp_std::marker::PhantomData;
 use sp_std::collections::btree_map::BTreeMap;
+use sp_std::collections::vec_deque::VecDeque;
 use sp_std::cell::RefCell;
 use sp_std::vec::Vec;
 use sp_std::borrow::Cow;
@@ -276,7 +277,7 @@ pub struct Head<V, S, D, M, B, NI> {
 	/// Accessed nodes are kept in memory.
 	/// This is a reversed ordered `Vec`, starting at end 'index - 1' and
 	/// finishing at most at the very first historied node.
-	fetched: RefCell<Vec<Node<V, S, D, M>>>,
+	fetched: RefCell<VecDeque<Node<V, S, D, M>>>,
 	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u64,
 	/// Keep trace of initial index end to apply change lazilly.
@@ -354,7 +355,7 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 				let reference_len = reference_len.unwrap_or_else(|| data.estimate_size());
 				Head {
 					inner: Node::new(data, reference_len),
-					fetched: RefCell::new(Vec::new()),
+					fetched: RefCell::new(VecDeque::new()),
 					old_start_node_index: head_decoded.start_node_index,
 					old_end_node_index: head_decoded.end_node_index,
 					start_node_index: head_decoded.start_node_index,
@@ -516,7 +517,7 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 				reference_len: 0,
 				_ph: PhantomData,
 			},
-			fetched: RefCell::new(Vec::new()),
+			fetched: RefCell::new(VecDeque::new()),
 			old_start_node_index: 0,
 			old_end_node_index: 0,
 			start_node_index: 0,
@@ -577,7 +578,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 						} else {
 							None
 						};
-						self.fetched.borrow_mut().push(node);
+						self.fetched.borrow_mut().push_back(node);
 
 						if r.is_some() {
 							return r;
@@ -645,7 +646,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					i,
 				) {
 					let inner_index = node.data.last();
-					self.fetched.borrow_mut().push(node);
+					self.fetched.borrow_mut().push_back(node);
 					inner_index
 				} else {
 					None
@@ -690,7 +691,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 						self.end_node_index - 1 - index.0,
 					) {
 						debug_assert!(switched);
-						self.fetched.borrow_mut().push(node);
+						self.fetched.borrow_mut().push_back(node);
 						continue;
 					} else {
 						return None;
@@ -819,7 +820,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		};
 		self.inner.changed = true;
 		let prev = sp_std::mem::replace(&mut self.inner, new_node);
-		self.fetched.borrow_mut().insert(0, prev);
+		self.fetched.borrow_mut().push_front(prev);
 	}
 	fn insert(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
 		let mut fetched_mut;
@@ -865,7 +866,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		// to happen.
 		if pop {
 			self.start_node_index += 1;
-			self.fetched.borrow_mut().pop();
+			self.fetched.borrow_mut().pop_back();
 		}
 	}
 	fn pop(&mut self) -> Option<HistoriedValue<V, S>> {
@@ -886,8 +887,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 						self.fetch_node(self.len - self.inner.data.len() - 1);
 					}
 				}
-				if self.fetched.borrow().len() > 0 {
-					let removed = self.fetched.borrow_mut().remove(0);
+				if let Some(removed) = self.fetched.borrow_mut().pop_front() {
 					self.inner = removed;
 					self.end_node_index -= 1;
 				}
@@ -900,14 +900,13 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					self.fetch_node(self.len - self.inner.data.len() - 1);
 				}
 			}
-			if self.fetched.borrow().len() > 0 {
-				let removed = self.fetched.borrow_mut().remove(0);
+			if let Some(removed) = self.fetched.borrow_mut().pop_front() {
 				self.inner = removed;
 				self.end_node_index -= 1;
-				self.pop()
 			} else {
-				None
+				return None;
 			}
+			self.pop()
 		}
 	}
 	fn clear(&mut self) {
@@ -963,9 +962,10 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			let mut fetched_mut = self.fetched.borrow_mut();
 			// reversed ordered.
 			for i in 0..fetch_index + 1 {
-				let removed = fetched_mut.remove(0);
-				if i == fetch_index {
-					self.inner = removed;
+				if let Some(removed) = fetched_mut.pop_front() {
+					if i == fetch_index {
+						self.inner = removed;
+					}
 				}
 			}
 			self.inner.changed = true;
