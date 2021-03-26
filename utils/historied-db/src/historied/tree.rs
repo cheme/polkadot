@@ -289,10 +289,13 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 			let iter_branch_index = self.branches.get_state(branch_ix);
 			if &iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
-				let mut branch = self.branches.get(branch_ix);
-				return match branch.value.set(value, &index) {
+				let mut result = UpdateResult::Unchanged;
+				self.branches.apply_on_mut(branch_ix, |branch| {
+					result = branch.value.set(value, &index);
+					matches!(result, UpdateResult::Changed(_))
+				});
+				return match result {
 					UpdateResult::Changed(_) => {
-						self.branches.emplace(branch_ix, branch);
 						UpdateResult::Changed(())
 					},
 					UpdateResult::Cleared(_) => {
@@ -304,7 +307,7 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 						}
 					},
 					UpdateResult::Unchanged => UpdateResult::Unchanged,
-				};
+				}
 			}
 			if &iter_branch_index < branch_index {
 				break;
@@ -326,12 +329,12 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 			let iter_branch_index = self.branches.get_state(branch_ix);
 			if &iter_branch_index == branch_index {
 				let index = Latest::unchecked_latest(index.clone());
-				let mut branch = self.branches.get(branch_ix);
-				return match branch.value.discard(&index) {
-					UpdateResult::Changed(v) => {
-						self.branches.emplace(branch_ix, branch);
-						UpdateResult::Changed(v)
-					},
+				let mut result = UpdateResult::Unchanged;
+				self.branches.apply_on_mut(branch_ix, |branch| {
+					result = branch.value.discard(&index);
+					matches!(result, UpdateResult::Changed(_))
+				});
+				return match result {
 					UpdateResult::Cleared(v) => {
 						self.remove_branch(branch_ix);
 						if self.branches.len() == 0 {
@@ -340,7 +343,7 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 							UpdateResult::Changed(v)
 						}
 					},
-					UpdateResult::Unchanged => UpdateResult::Unchanged,
+					result => result,
 				};
 			}
 			if &iter_branch_index < branch_index {

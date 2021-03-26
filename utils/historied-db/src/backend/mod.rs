@@ -127,17 +127,21 @@ pub trait LinearStorage<V, S: Clone>: InitFrom {
 	/// Unchecked access to value pointer and state.
 	/// Note that default implementation does fetch the inner value, and if in memory
 	/// is viable, one should always reimplement to avoid clone.
-	fn apply_on(&self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&V, S>)) {
+	/// This is expected to fail when index do not exist.
+	fn apply_on(&self, index: Self::Index, action: impl FnOnce(HistoriedValue<&V, S>)) {
 		let value = self.get(index);
 		action(value.as_ref())
 	}
 	/// Unchecked access to value mutable pointer and state.
 	/// Note that default implementation does fetch and emplace the inner value which
 	/// in most case can be optimized with a custom implementation.
-	fn apply_on_mut(&mut self, index: Self::Index, mut action: impl FnMut(HistoriedValue<&mut V, S>)) {
+	/// This is expected to fail when index do not exist.
+	/// The action to apply return true if inner state did change.
+	fn apply_on_mut(&mut self, index: Self::Index, action: impl FnOnce(HistoriedValue<&mut V, S>) -> bool) {
 		let mut value = self.get(index);
-		action(value.as_mut());
-		self.emplace(index, value);
+		if action(value.as_mut()) {
+			self.emplace(index, value);
+		}
 	}
 }
 

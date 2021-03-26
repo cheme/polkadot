@@ -995,18 +995,35 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		node.data.emplace(index.1, h);
 	}
 
-	fn apply_on(&self, index: Self::Index, action: impl FnMut(HistoriedValue<&V, S>)) {
+	fn apply_on(&self, index: Self::Index, action: impl FnOnce(HistoriedValue<&V, S>)) {
 		if index.0 == self.end_node_index {
 			return self.inner.data.apply_on(index.1, action)
 		}
 		self.fetched.borrow()[index.0 as usize].data.apply_on(index.1, action)
 	}
 
-	fn apply_on_mut(&mut self, index: Self::Index, action: impl FnMut(HistoriedValue<&mut V, S>)) {
-		if index.0 == self.end_node_index {
-			return self.inner.data.apply_on_mut(index.1, action)
+	fn apply_on_mut(
+		&mut self,
+		index: Self::Index,
+		action: impl FnOnce(HistoriedValue<&mut V, S>) -> bool,
+	) {
+		let mut fetched_mut;
+		let node = if index.0 == self.end_node_index {
+			&mut self.inner
+		} else {
+			fetched_mut = self.fetched.borrow_mut();
+			&mut fetched_mut[index.0 as usize]
+		};
+		let result = &mut false;
+		node.data.apply_on_mut(index.1, |v| {
+			if action(v) {
+				*result = true;
+			}
+			*result
+		});
+		if *result {
+			node.changed = true;
 		}
-		self.fetched.borrow_mut()[index.0 as usize].data.apply_on_mut(index.1, action)
 	}
 }
 
