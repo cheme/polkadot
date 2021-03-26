@@ -812,12 +812,12 @@ mod single_node_nodiff {
 		management::tree::ForkPlan,
 	};
 
-	type LinearBackend = historied_db::backend::in_memory::MemoryOnly64<
+	type LinearBackend = historied_db::backend::in_memory::MemoryOnly<
 		Option<Vec<u8>>,
 		u64,
 	>;
 
-	type TreeBackend = historied_db::backend::in_memory::MemoryOnly32<
+	type TreeBackend = historied_db::backend::in_memory::MemoryOnly<
 		historied_db::historied::linear::Linear<Option<Vec<u8>>, u64, LinearBackend>,
 		u32,
 	>;
@@ -839,12 +839,12 @@ mod single_node_xdelta {
 		historied::aggregate::xdelta::{BytesDelta, BytesDiff},
 	};
 
-	type LinearBackend = historied_db::backend::in_memory::MemoryOnly64<
+	type LinearBackend = historied_db::backend::in_memory::MemoryOnly<
 		<BytesDiff as historied_db::historied::Value>::Storage,
 		u64,
 	>;
 
-	type TreeBackend = historied_db::backend::in_memory::MemoryOnly32<
+	type TreeBackend = historied_db::backend::in_memory::MemoryOnly<
 		historied_db::historied::linear::Linear<BytesDiff, u64, LinearBackend>,
 		u32,
 	>;
