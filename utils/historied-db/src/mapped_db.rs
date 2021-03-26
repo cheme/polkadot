@@ -735,7 +735,7 @@ impl<'a> Iterator for TransactionalIter<'a> {
 			None,
 			Cache,
 			DB,
-		};
+		}
 		let next = match (self.next_cache.as_ref(), self.next_db.as_ref()) {
 			(Some((cache_key, _)), Some((db_key, _))) => {
 				match cache_key.cmp(&db_key) {

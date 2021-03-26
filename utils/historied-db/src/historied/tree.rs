@@ -227,8 +227,11 @@ impl<I, BI, V, D, BD> IndexedData<V> for Tree<I, BI, V, D, BD>
 		BD: LinearStorage<V::Storage, BI>,
 {
 	fn get_by_internal_index(&self, at: Self::I) -> V {
-		let branch = self.branches.get(at.0).value;
-		branch.get_by_internal_index(at.1)
+		let mut result = None;
+		self.branches.apply_on(at.0, |branch| {
+			result = Some(branch.value.get_by_internal_index(at.1));
+		});
+		result.expect("apply_on panic on missing indexes")
 	}
 }
 
