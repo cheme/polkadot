@@ -399,6 +399,8 @@ impl<I, BI, V, D, BD> DataMut<V> for Tree<I, BI, V, D, BD>
 				// merge all less than composite treshold in composite treshold index branch.
 				loop {
 					if let Some(index) = self.branches.lookup(i) {
+						// TODO this does a copy of the full branch: should be rewrite
+						// to use apply_on_mut.
 						let mut branch = self.branches.get(index);
 						if branch.state <= gc.composite_treshold.0 {
 							if let Some(new_branch) = new_branch.as_mut() {
@@ -477,17 +479,19 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 					new_end:  Some(end),
 				};
 
-				let mut branch = self.branches.get(index);
-				match branch.value.gc(&mut gc) {
-					UpdateResult::Unchanged => (),
-					UpdateResult::Changed(_) => {
-						self.branches.emplace(index, branch);
-						result = UpdateResult::Changed(());
-					},
-					UpdateResult::Cleared(_) => {
-						self.remove_branch(index);
-						result = UpdateResult::Changed(());
+				self.branches.apply_on_mut(index, |branch| {
+					match branch.value.gc(&mut gc) {
+						UpdateResult::Unchanged => false,
+						UpdateResult::Changed(_) => {
+							result = UpdateResult::Changed(());
+							true
+						},
+						UpdateResult::Cleared(_) => true,
 					}
+				});
+				if matches!(result, UpdateResult::Cleared(_)) {
+					self.remove_branch(index);
+					result = UpdateResult::Changed(());
 				}
 
 				o_gc = gc_iter.next();
