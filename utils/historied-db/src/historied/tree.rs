@@ -523,6 +523,8 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		let mut first_new_start = false;
 		let mut next_branch_index = self.branches.last();
 		while let Some(branch_ix) = next_branch_index {
+			// TODO this involve a full branch copy, rewrite that using
+			// apply_on_mut for performance
 			let mut branch = self.branches.get(branch_ix);
 			let new_start = if branch.state <= gc.composite_treshold.0 {
 				match start_history.as_ref() {
@@ -594,11 +596,12 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 	}
 
 	fn trigger_clear_branch(&mut self, branch_ix: D::Index) {
-		let mut branch = self.branches.get(branch_ix); // TODO have a
-		// variant of remove that return old value.
-		// Also TODO a get_ref_mut version
-		branch.value.storage_mut().clear();
-		branch.trigger_flush();
+		// TODO have variant of remove that return old value.
+		self.branches.apply_on_mut(branch_ix, |branch| {
+			branch.value.storage_mut().clear();
+			branch.value.trigger_flush();
+			true
+		});
 	}
 
 	// any removal of branch need to trigger its old value.
@@ -670,16 +673,17 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 				if &index > branch_index {
 					return false;
 				} else if &index == branch_index {
-					let branch = branches.get(handle).value;
-					branch.map_backward(|index, handle, branch| {
-						if index < branch_range.end {
-							if index >= branch_range.start {
-								accu.push(branch.get(handle));
-							} else {
-								return true;
+					branches.apply_on(handle, |branch| {
+						branch.value.map_backward(|index, handle, branch| {
+							if index < branch_range.end {
+								if index >= branch_range.start {
+									accu.push(branch.get(handle));
+								} else {
+									return true;
+								}
 							}
-						}
-						false
+							false
+						});
 					});
 					return false;
 				} else {
@@ -689,13 +693,14 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 
 			if !include_all_treshold_value {
 				if include_treshold_value {
-					let branch = branches.get(handle).value;
-					branch.map_backward(|index, handle, branch| {
-						if &index < composite_treshold {
-							accu.push(branch.get(handle));
-							return true;
-						}
-						false
+					branches.apply_on(handle, |branch| {
+						branch.value.map_backward(|index, handle, branch| {
+							if &index < composite_treshold {
+								accu.push(branch.get(handle));
+								return true;
+							}
+							false
+						});
 					});
 					return true;
 				} else {
@@ -703,12 +708,13 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 				}
 			}
 
-			let branch = branches.get(handle).value;
-			branch.map_backward(|index, handle, branch| {
-				if &index < composite_treshold {
-					accu.push(branch.get(handle));
-				}
-				false
+			branches.apply_on(handle, |branch| {
+				branch.value.map_backward(|index, handle, branch| {
+					if &index < composite_treshold {
+						accu.push(branch.get(handle));
+					}
+					false
+				});
 			});
 
 			false
@@ -741,10 +747,11 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		let mut accu = Vec::new();
 		let accu = &mut accu;
 		self.map_backward(|index_br, handle, branches| {
-			let branch = branches.get(handle).value;
-			branch.map_backward(|index, handle, branch| {
-				accu.push((index_br.clone(), index, V::from_storage(branch.get(handle).value)));
-				false
+			branches.apply_on(handle, |branch| {
+				branch.value.map_backward(|index, handle, branch| {
+					accu.push((index_br.clone(), index, V::from_storage(branch.get(handle).value)));
+					false
+				});
 			});
 			false
 		});
@@ -819,12 +826,13 @@ impl<I, BI, V, D, BD> TreeTestMethods for Tree<I, BI, V, D, BD>
 		BD: LinearStorage<V::Storage, BI>,
 {
 	fn nb_internal_history(&self) -> usize {
-		let mut nb = 0;
+		let nb = &mut 0;
 		for index in self.branches.rev_index_iter() {
-			let branch = self.branches.get(index);
-			nb += branch.value.storage().len();
+			self.branches.apply_on(index, |branch| {
+				*nb += branch.value.storage().len();
+			});
 		}
-		nb
+		*nb
 	}
 
 	fn nb_internal_branch(&self) -> usize {
@@ -1000,9 +1008,12 @@ pub mod aggregate {
 						// TODO add a lower bound check (maybe debug_assert it only).
 						let mut upper_bound = state_branch_range.end.clone();
 						upper_bound -= BI::one();
-						// TODO get_ref variant?
-						let branch = self.branches.get(branch_ix).value;
-						if LinearSum::<V, _, _>(&branch).get_sum_values(&upper_bound, changes) {
+						let result = &mut false;
+						self.branches.apply_on(branch_ix, |branch| {
+							*result = LinearSum::<V, _, _>(&branch.value)
+								.get_sum_values(&upper_bound, changes);
+						});
+						if *result {
 							return true;
 						}
 					}
@@ -1014,8 +1025,12 @@ pub mod aggregate {
 			while let Some(branch_ix) = next_branch_index {
 				let branch_index = &self.branches.get_state(branch_ix);
 				if branch_index <= &at.composite_treshold.0 {
-					let branch = self.branches.get(branch_ix).value;
-					if LinearSum::<V, _, _>(&branch).get_sum_values(&at.composite_treshold.1, changes) {
+					let result = &mut false;
+					self.branches.apply_on(branch_ix, |branch| {
+						*result = LinearSum::<V, _, _>(&branch.value)
+							.get_sum_values(&at.composite_treshold.1, changes);
+					});
+					if *result {
 						return true;
 					}
 				}
@@ -1049,10 +1064,13 @@ pub mod force {
 				let iter_branch_index = self.branches.get_state(branch_ix);
 				if &iter_branch_index == branch_index {
 					let index = index.clone();
-					let mut branch = self.branches.get(branch_ix);
-					return match branch.value.force_set(value, &index) {
+					let mut result= UpdateResult::Unchanged;
+					self.branches.apply_on_mut(branch_ix, |branch| {
+						result = branch.value.force_set(value, &index);
+						matches!(result, UpdateResult::Changed(_))
+					});
+					return match result {
 						UpdateResult::Changed(_) => {
-							self.branches.emplace(branch_ix, branch);
 							UpdateResult::Changed(())
 						},
 						UpdateResult::Cleared(_) => {
@@ -1138,16 +1156,16 @@ pub mod conditional {
 			for branch_ix in self.branches.rev_index_iter() {
 				let iter_branch_index = self.branches.get_state(branch_ix);
 				if &iter_branch_index == branch_index {
-					let mut branch = self.branches.get(branch_ix);
-					return match if no_overwrite {
-						branch.value.set_if_possible_no_overwrite(value, &index)
-					} else {
-						branch.value.set_if_possible(value, &index)
-					} {
-						Some(UpdateResult::Changed(_)) => {
-							self.branches.emplace(branch_ix, branch);
-							Some(UpdateResult::Changed(()))
-						},
+					let mut result = None;
+					self.branches.apply_on_mut(branch_ix, |branch| {
+						result = if no_overwrite {
+							branch.value.set_if_possible_no_overwrite(value, &index)
+						} else {
+							branch.value.set_if_possible(value, &index)
+						};
+						matches!(result, Some(UpdateResult::Changed(_)))
+					});
+					return match result {
 						Some(UpdateResult::Cleared(_)) => {
 							self.remove_branch(branch_ix);
 							if self.branches.len() == 0 {
@@ -1182,8 +1200,11 @@ pub mod conditional {
 			for branch_ix in self.branches.rev_index_iter() {
 				let iter_branch_index = self.branches.get_state(branch_ix);
 				if &iter_branch_index == branch_index {
-					let branch = self.branches.get(branch_ix);
-					return branch.value.can_set(value, &index);
+					let result = &mut false;
+					self.branches.apply_on(branch_ix, |branch| {
+						*result = branch.value.can_set(value, &index);
+					});
+					return *result;
 				}
 				if &iter_branch_index < branch_index {
 					break;
