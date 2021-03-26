@@ -30,21 +30,10 @@ macro_rules! memory_only_stack_size {
 	($memory_only: ident, $allocated_history: expr) => {
 
 /// Array like buffer for in memory storage.
-/// By in memory we expect that this will
+/// Being in memory, we expect that this will
 /// not required persistence and is not serialized.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct $memory_only<V, S>(pub(crate) smallvec::SmallVec<[HistoriedValue<V, S>; $allocated_history]>);
-
-
-impl<V: Encode, S: Encode> Encode for $memory_only<V, S> {
-	fn size_hint(&self) -> usize {
-		self.0.as_slice().size_hint()
-	}
-
-	fn encode(&self) -> Vec<u8> {
-		self.0.as_slice().encode()
-	}
-}
 
 impl<V: Decode, S: Decode> Decode for $memory_only<V, S> {
 	fn decode<I: Input>(value: &mut I) -> Result<Self, codec::Error> {
@@ -80,6 +69,88 @@ impl<V, S> DecodeWithContext for $memory_only<V, S>
 impl<V, S> Default for $memory_only<V, S> {
 	fn default() -> Self {
 		$memory_only(smallvec::SmallVec::default())
+	}
+}
+
+impl<V: Clone + Context, S: Clone> $memory_only<V, S> {
+	fn truncate_until_impl(&mut self, split_off: usize) {
+		let split_off = sp_std::cmp::min(split_off, self.0.len());
+		if self.0.spilled() {
+			let new = replace(&mut self.0, Default::default());
+			self.0 = smallvec::SmallVec::from_vec(new.into_vec().split_off(split_off));
+		} else {
+			for i in 0..split_off {
+				self.0.remove(i);
+			}
+		}
+	}
+}
+
+memory_only_stack_size!(@inner, $memory_only);
+	};
+	($memory_only: ident) => {
+/// Vec like buffer for in memory storage.
+/// Being in memory, we expect that this will
+/// not required persistence and is not serialized.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct $memory_only<V, S>(pub(crate) Vec<HistoriedValue<V, S>>);
+
+impl<V: Decode, S: Decode> Decode for $memory_only<V, S> {
+	fn decode<I: Input>(value: &mut I) -> Result<Self, codec::Error> {
+		// Note that we always decode on heap.
+		let v = Vec::decode(value)?;
+		Ok($memory_only(v))
+	}
+}
+
+impl<V, S> DecodeWithContext for $memory_only<V, S>
+	where
+		V: DecodeWithContext,
+		S: Decode,
+{
+	fn decode_with_context<I: Input>(input: &mut I, init: &Self::Context) -> Option<Self> {
+		// this align on scale codec inner implementation (DecodeWithContext trait
+		// could be a scale trait).
+		<codec::Compact<u32>>::decode(input).ok().and_then(|len| {
+			let len = len.0 as usize;
+			let mut result = Vec::with_capacity(len);
+			for _ in 0..len {
+				if let Some(value) = HistoriedValue::decode_with_context(input, init) {
+					result.push(value);
+				} else {
+					return None;
+				}
+			}
+			Some($memory_only(result))
+		})
+	}
+}
+
+impl<V, S> Default for $memory_only<V, S> {
+	fn default() -> Self {
+		$memory_only(Default::default())
+	}
+}
+
+impl<V: Clone + Context, S: Clone> $memory_only<V, S> {
+	fn truncate_until_impl(&mut self, split_off: usize) {
+		let split_off = sp_std::cmp::min(split_off, self.0.len());
+		self.0 = self.0.split_off(split_off)
+	}
+}
+
+
+memory_only_stack_size!(@inner, $memory_only);
+	};
+	(@inner, $memory_only: ident) => {
+
+impl<V: Encode, S: Encode> Encode for $memory_only<V, S> {
+	fn size_hint(&self) -> usize {
+		self.0.as_slice().size_hint()
+	}
+
+	fn encode(&self) -> Vec<u8> {
+		self.0.as_slice().encode()
 	}
 }
 
@@ -142,14 +213,7 @@ impl<V: Clone + Context, S: Clone> LinearStorage<V, S> for $memory_only<V, S> {
 		}
 	}
 	fn truncate_until(&mut self, split_off: usize) {
-		if self.0.spilled() {
-			let new = replace(&mut self.0, Default::default());
-			self.0 = smallvec::SmallVec::from_vec(new.into_vec().split_off(split_off));
-		} else {
-			for i in 0..sp_std::cmp::min(split_off, self.0.len()) {
-				self.0.remove(i);
-			}
-		}
+		self.truncate_until_impl(split_off)
 	}
 	fn len(&self) -> usize {
 		self.0.len()
@@ -197,10 +261,10 @@ impl<V: EstimateSize, S: EstimateSize> EstimateSize for $memory_only<V, S> {
 		unimplemented!("This should be avoided");
 	}
 }
+	};
+}
 
-}}
-
-memory_only_stack_size!(MemoryOnly, 2); // TOOD replace by a Vec implementation!!
+memory_only_stack_size!(MemoryOnly);
 memory_only_stack_size!(MemoryOnly2, 2);
 memory_only_stack_size!(MemoryOnly4, 4);
 memory_only_stack_size!(MemoryOnly8, 8);
