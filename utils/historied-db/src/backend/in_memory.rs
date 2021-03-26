@@ -200,7 +200,8 @@ impl<V: EstimateSize, S: EstimateSize> EstimateSize for $memory_only<V, S> {
 
 }}
 
-memory_only_stack_size!(MemoryOnly, 2);
+memory_only_stack_size!(MemoryOnly, 2); // TOOD replace by a Vec implementation!!
+memory_only_stack_size!(MemoryOnly2, 2);
 memory_only_stack_size!(MemoryOnly4, 4);
 memory_only_stack_size!(MemoryOnly8, 8);
 memory_only_stack_size!(MemoryOnly16, 16);
