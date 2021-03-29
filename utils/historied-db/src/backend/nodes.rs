@@ -280,17 +280,14 @@ pub struct Head<V, S, D, M, B, NI> {
 	fetched: RefCell<VecDeque<Node<V, S, D, M>>>,
 	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u64,
+	/// Keep trace of initial index end to apply change lazilly.
+	old_end_node_index: u64,
 	/// The index of the first node, inclusive.
 	start_node_index: u64,
 	/// The index of the last node, non inclusive (next index to use).
 	/// It can also be seen as the head index (but head is not stored
 	/// on the node backend).
 	end_node_index: u64,
-	/// Removed at end nodes, since they can be rewritten we keep them
-	/// separately.
-	end_removed: Vec<(u64, Node<V, S, D, M>)>,
-	/// Keep trace of nodes that should be removed.
-	old_end_removable: u64,
 	/// Number of historied values stored in head and all past nodes.
 	len: usize,
 	/// Backend key used for this head, or any unique identifying key
@@ -360,10 +357,9 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 					inner: Node::new(data, reference_len),
 					fetched: RefCell::new(VecDeque::new()),
 					old_start_node_index: head_decoded.start_node_index,
-					end_removed: Default::default(),
+					old_end_node_index: head_decoded.end_node_index,
 					start_node_index: head_decoded.start_node_index,
 					end_node_index: head_decoded.end_node_index,
-					old_end_removable: head_decoded.end_node_index,
 					len: head_decoded.len as usize,
 					reference_key: init.key.clone(),
 					backend: init.backend.clone(),
@@ -385,14 +381,9 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	/// Changes must always be flushed to be effective.
 	/// This is used with `Trigger` `trigger_flush` method.
 	fn flush_changes(&mut self, trigger: bool) {
-		let mut fetched_nodes = self.fetched.borrow_mut();
 		for d in self.old_start_node_index .. self.start_node_index {
-			if let Some(mut node) = fetched_nodes.remove((self.end_node_index - d) as usize) {
-				if trigger {
-					node.clear();
-					node.trigger_flush();
-				}
-			} else if trigger{
+			if trigger {
+				// TODO do not query if already fetched.
 				if let Some(mut node) = self.backend.get_node(
 					&self.reference_key[..],
 					&self.parent_encoded_indexes[..],
@@ -409,10 +400,22 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 			);
 		}
 		self.old_start_node_index = self.start_node_index;
-		for (d, mut node) in self.end_removed.drain(..) {
+	
+		// this comparison is needed in case we completly clear the initial range,
+		// then we avoid deleting nodes that got created.
+		let end_node_index = sp_std::cmp::max(self.end_node_index, self.old_start_node_index);
+		self.old_start_node_index = self.start_node_index;
+		for d in end_node_index .. self.old_end_node_index {
 			if trigger {
-				node.clear();
-				node.trigger_flush();
+				// TODO do not query if already fetched.
+				if let Some(mut node) = self.backend.get_node(
+					&self.reference_key[..],
+					&self.parent_encoded_indexes[..],
+					d,
+				) {
+					node.clear();
+					node.trigger_flush();
+				}
 			}
 			self.backend.remove_node(
 				&self.reference_key[..],
@@ -420,8 +423,8 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 				d,
 			);
 		}
-		for (index, mut node) in fetched_nodes.iter_mut().enumerate() {
-			let index = index as u64;
+		self.old_end_node_index = self.end_node_index;
+		for (index, mut node) in self.fetched.borrow_mut().iter_mut().enumerate() {
 			if node.changed {
 				if trigger {
 					node.trigger_flush();
@@ -429,7 +432,7 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 				self.backend.set_node(
 					&self.reference_key[..],
 					&self.parent_encoded_indexes[..],
-					self.end_node_index - 1 - index,
+					self.end_node_index - 1 - index as u64,
 					node,
 				);
 				node.changed = false;
@@ -516,8 +519,7 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 			},
 			fetched: RefCell::new(VecDeque::new()),
 			old_start_node_index: 0,
-			end_removed: Default::default(),
-			old_end_removable: Default::default(),
+			old_end_node_index: 0,
 			start_node_index: 0,
 			end_node_index: 0,
 			len: 0,
@@ -539,22 +541,25 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 		V: EstimateSize,
 		NI: Clone,
 {
-	// return node index.
+	// return node index (if node index is end_node_index this is in head),
+	// and index in it.
 	// Fetch is done backward.
-	fn fetch_node(&self, index: usize) -> Option<(Option<usize>, usize)> {
+	fn fetch_node(&self, index: usize) -> Option<(usize, usize)> {
 		if self.len > index {
 			let mut start = self.len as usize - self.inner.data.len();
 			if index >= start {
-				return Some((None, index - start));
+				return Some((self.end_node_index as usize, index - start));
 			}
-			let mut i = (self.end_node_index - 1) as usize;
-			while i >= self.start_node_index as usize {
-				let fetch_index = self.end_node_index as usize - i;
+			let mut i = self.end_node_index as usize;
+			while i > self.start_node_index as usize {
+				i -= 1;
+				// fetch_index is 0..(self.end_node_index - self.start_node_index)
+				let fetch_index = self.end_node_index as usize - i - 1;
 				let has_node = {
 					if let Some(node) = self.fetched.borrow().get(fetch_index) {
 						start -= node.data.len();
 						if index >= start {
-							return Some((Some(fetch_index), index - start));
+							return Some((fetch_index, index - start));
 						}
 						true
 					} else {
@@ -565,15 +570,23 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 					if let Some(node) = self.backend.get_node(
 						self.reference_key.as_slice(),
 						self.parent_encoded_indexes.as_slice(),
-						i as u64 - 1,
+						i as u64,
 					) {
+						start -= node.data.len();
+						let r = if index >= start {
+							Some((self.fetched.borrow().len(), index - start))
+						} else {
+							None
+						};
 						self.fetched.borrow_mut().push_back(node);
-						continue;
+
+						if r.is_some() {
+							return r;
+						}
 					} else {
 						return None;
 					}
 				}
-				i -= 1;
 			}
 		}
 		None
@@ -608,57 +621,57 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		V: EstimateSize + Trigger,
 		NI: ContextBuilder,
 {
-	// Fetched node index, `None` for head.
-	type Index = (Option<u64>, D::Index);
+	// Fetched node index (end_node_index is head).
+	// If true the node needs to be inserted.
+	// Inner node linear storage index.
+	type Index = (u64, D::Index);
 	fn last(&self) -> Option<Self::Index> {
 		if self.len == 0 {
 			return None;
 		}
 		if let Some(inner_index) = self.inner.data.last() {
-			return Some((None, inner_index));
+			return Some((self.end_node_index, inner_index));
 		}
 
 		let mut i = self.end_node_index;
-		while i >= self.start_node_index {
-			let fetch_index = self.end_node_index - i;
+		while i > self.start_node_index {
+			i -= 1;
+			let fetch_index = self.end_node_index - i - 1;
 			let inner_index = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
 				node.data.last()
 			} else {
 				if let Some(node) = self.backend.get_node(
 					self.reference_key.as_slice(),
 					self.parent_encoded_indexes.as_slice(),
-					i - 1,
+					i,
 				) {
+					let inner_index = node.data.last();
 					self.fetched.borrow_mut().push_back(node);
-					continue;
+					inner_index
 				} else {
 					None
 				}
 			};
 			if let Some(inner_index) = inner_index {
-				return Some((Some(fetch_index), inner_index));
+				return Some((fetch_index, inner_index));
 			}
-			i -= 1;
 		}
 		None
 	}
 	fn previous_index(&self, mut index: Self::Index) -> Option<Self::Index> {
 		let mut switched = false;
-		let mut fetched_index = if let Some(index) = index.0 {
-			index
-		} else {
+		if index.0 >= self.end_node_index {
 			if let Some(inner_index) = self.inner.data.previous_index(index.1) {
 				index.1 = inner_index;
 				return Some(index);
 			} else {
 				switched = true;
-				0
+				index.0 = 0;
 			}
-		};
+		}
 
-		while self.end_node_index > self.start_node_index + fetched_index {
-			let (try_fetch, inner_index) = if let Some(node) = self.fetched.borrow()
-				.get(fetched_index as usize) {
+		while index.0 + self.start_node_index < self.end_node_index {
+			let (try_fetch, inner_index) = if let Some(node) = self.fetched.borrow().get(index.0 as usize) {
 				let inner_index = if switched {
 					switched = false;
 					node.data.last()
@@ -675,7 +688,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					if let Some(node) = self.backend.get_node(
 						self.reference_key.as_slice(),
 						self.parent_encoded_indexes.as_slice(),
-						self.end_node_index - 1 - fetched_index,
+						self.end_node_index - 1 - index.0,
 					) {
 						debug_assert!(switched);
 						self.fetched.borrow_mut().push_back(node);
@@ -688,25 +701,24 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				},
 				(_, Some(inner_index)) => {
 					index.1 = inner_index;
-					index.0 = Some(fetched_index);
 					return Some(index);
 				},
 			}
 
-			fetched_index += 1;
+			index.0 += 1;
 			switched = true;
 		}
 		None
 	}
 	fn lookup(&self, index: usize) -> Option<Self::Index> {
 		self.fetch_node(index).and_then(|(node_index, inner_node_index)| {
-			if let Some(node_index) = node_index {
+			if node_index == self.end_node_index as usize {
+				self.inner.data.lookup(inner_node_index).map(|index| (node_index as u64, index))
+			} else {
 				self.fetched.borrow().get(node_index)
 					.and_then(|inner|
-					inner.data.lookup(inner_node_index).map(|index| (Some(node_index as u64), index))
+					inner.data.lookup(inner_node_index).map(|index| (node_index as u64, index))
 				)
-			} else {
-				self.inner.data.lookup(inner_node_index).map(|index| (None, index))
 			}
 		})
 	}
@@ -714,30 +726,28 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		self.len
 	}
 	fn get(&self, index: Self::Index) -> HistoriedValue<V, S> {
-		if let Some(node_index) = index.0 {
-			self.fetched.borrow()[node_index as usize].data.get(index.1)
-		} else {
-			self.inner.data.get(index.1)
+		if index.0 == self.end_node_index {
+			return self.inner.data.get(index.1)
 		}
+		self.fetched.borrow()[index.0 as usize].data.get(index.1)
 	}
 	fn get_state(&self, index: Self::Index) -> S {
-		if let Some(node_index) = index.0 {
-			self.fetched.borrow()[node_index as usize].data.get_state(index.1)
-		} else {
-			self.inner.data.get_state(index.1)
+		if index.0 == self.end_node_index {
+			return self.inner.data.get_state(index.1)
 		}
+		self.fetched.borrow()[index.0 as usize].data.get_state(index.1)
 	}
 	fn truncate_until(&mut self, split_off: usize) {
 		let i = {
 			let mut fetched_mut;
 			let (node, i, ix) = match self.fetch_node(split_off) {
-				Some((None, ix)) => {
-					(&mut self.inner, None, ix)
+				Some((i, ix)) if i >= self.end_node_index as usize =>  {
+					(&mut self.inner, i, ix)
 				},
-				Some((Some(i), ix)) => {
+				Some((i, ix)) => {
 					fetched_mut = self.fetched.borrow_mut();
 					if let Some(node) = fetched_mut.get_mut(i) {
-						(node, Some(i), ix)
+						(node, i, ix)
 					} else {
 						unreachable!("fetch node returns existing index");
 					}
@@ -746,6 +756,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					return;
 				},
 			};
+
 
 			if ix > 0 {
 				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
@@ -761,10 +772,10 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				node.changed = true;
 				node.data.truncate_until(ix);
 			}
-			self.start_node_index = if let Some(i) = i {
-				self.end_node_index - i as u64 - 1
-			} else {
+			self.start_node_index = if i as u64 == self.end_node_index {
 				self.end_node_index
+			} else {
+				self.end_node_index - i as u64 - 1
 			};
 			if self.len > split_off {
 				self.len -= split_off;
@@ -774,9 +785,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			i
 		};
 		// reversed ordered.
-		if let Some(i) = i {
-			self.fetched.borrow_mut().truncate(i + 1);
-		}
+		self.fetched.borrow_mut().truncate(i + 1);
 	}
 	fn push(&mut self, value: HistoriedValue<V, S>) {
 		self.len += 1;
@@ -815,11 +824,11 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	}
 	fn insert(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
 		let mut fetched_mut;
-		let node = if let Some(index) = index.0 {
-			fetched_mut = self.fetched.borrow_mut();
-			&mut fetched_mut[index as usize]
-		} else {
+		let node = if index.0 == self.end_node_index {
 			&mut self.inner
+		} else {
+			fetched_mut = self.fetched.borrow_mut();
+			&mut fetched_mut[index.0 as usize]
 		};
 
 		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
@@ -832,14 +841,14 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	fn remove(&mut self, index: Self::Index) {
 		let pop = {
 			let mut fetched_mut;
-			let (node, first) = if let Some(index) = index.0 {
+			let (node, first) = if index.0 == self.end_node_index {
+				(&mut self.inner, false)
+			} else {
 				fetched_mut = self.fetched.borrow_mut();
 				let len = fetched_mut.len();
 				
-				(&mut fetched_mut[index as usize], index as usize == len - 1 &&
+				(&mut fetched_mut[index.0 as usize], index.0 as usize == len - 1 &&
 					len as u64 == self.end_node_index - self.start_node_index)
-			} else {
-				(&mut self.inner, false)
 			};
 
 			node.changed = true;
@@ -879,11 +888,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					}
 				}
 				if let Some(removed) = self.fetched.borrow_mut().pop_front() {
-					let removed = sp_std::mem::replace(&mut self.inner, removed);
-					if self.end_node_index < self.old_end_removable {
-						self.old_end_removable = self.end_node_index;
-						self.end_removed.push((self.end_node_index, removed));
-					}
+					self.inner = removed;
 					self.end_node_index -= 1;
 				}
 			}
@@ -915,13 +920,13 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		let (in_head, i) = {
 			let mut fetched_mut;
 			let (node, i, ix, in_head) = match self.fetch_node(at) {
-				Some((None, ix)) =>  {
-					(&mut self.inner, None, ix, true)
+				Some((i, ix)) if i == self.end_node_index as usize =>  {
+					(&mut self.inner, i, ix, true)
 				},
-				Some((Some(i), ix)) => {
+				Some((i, ix)) => {
 					fetched_mut = self.fetched.borrow_mut();
 					if let Some(node) = fetched_mut.get_mut(i) {
-						(node, Some(i), ix, false)
+						(node, i, ix, false)
 					} else {
 						unreachable!("fetch node returns existing index");
 					}
@@ -952,34 +957,27 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		}
 		// indicates head is empty and all index up to i
 		if !in_head {
-			if let Some(i) = i {
-				let fetch_index = i as u64;
-				let mut fetched_mut = self.fetched.borrow_mut();
-				// reversed ordered.
-				for i in 0..fetch_index + 1 {
-					if let Some(removed) = fetched_mut.pop_front() {
-						if i == fetch_index {
-							self.inner = removed;
-						} else {
-							if self.end_node_index < self.old_end_removable {
-								self.end_removed.push((self.end_node_index - i - 1, removed))
-							}
-						}
+			let fetch_index = i as u64;
+			self.end_node_index -= fetch_index + 1;	
+			let mut fetched_mut = self.fetched.borrow_mut();
+			// reversed ordered.
+			for i in 0..fetch_index + 1 {
+				if let Some(removed) = fetched_mut.pop_front() {
+					if i == fetch_index {
+						self.inner = removed;
 					}
 				}
-				self.end_node_index -= fetch_index + 1;	
-				self.old_end_removable = self.end_node_index;
 			}
 			self.inner.changed = true;
 		}
 	}
 	fn emplace(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
 		let mut fetched_mut;
-		let node = if let Some(index) = index.0 {
-			fetched_mut = self.fetched.borrow_mut();
-			&mut fetched_mut[index as usize]
-		} else {
+		let node = if index.0 == self.end_node_index {
 			&mut self.inner
+		} else {
+			fetched_mut = self.fetched.borrow_mut();
+			&mut fetched_mut[index.0 as usize]
 		};
 
 		node.changed = true;
@@ -998,11 +996,10 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 	}
 
 	fn apply_on(&self, index: Self::Index, action: impl FnOnce(HistoriedValue<&V, S>)) {
-		if let Some(index0) = index.0 {
-			self.fetched.borrow()[index0 as usize].data.apply_on(index.1, action)
-		} else {
-			self.inner.data.apply_on(index.1, action)
+		if index.0 == self.end_node_index {
+			return self.inner.data.apply_on(index.1, action)
 		}
+		self.fetched.borrow()[index.0 as usize].data.apply_on(index.1, action)
 	}
 
 	fn apply_on_mut(
@@ -1011,11 +1008,11 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		action: impl FnOnce(HistoriedValue<&mut V, S>) -> bool,
 	) {
 		let mut fetched_mut;
-		let node = if let Some(index) = index.0 {
-			fetched_mut = self.fetched.borrow_mut();
-			&mut fetched_mut[index as usize]
-		} else {
+		let node = if index.0 == self.end_node_index {
 			&mut self.inner
+		} else {
+			fetched_mut = self.fetched.borrow_mut();
+			&mut fetched_mut[index.0 as usize]
 		};
 		let result = &mut false;
 		node.data.apply_on_mut(index.1, |v| {
@@ -1250,11 +1247,11 @@ pub(crate) mod test {
 		assert_eq!(backend.0.borrow().len(), 2);
 
 		// first index is fetched node index which is reversed
-		let index2 = (Some(1), 1);
-		let index3 = (Some(1), 2);
-		let index6 = (Some(0), 2);
+		let index2 = (1, 1);
+		let index3 = (1, 2);
+		let index6 = (0, 2);
 		// and head is at nb node (not fetched node)
-		let index8 = (None, 1);
+		let index8 = (2, 1);
 		let value2 = head.get(index2).value;
 		assert_eq!(value2, vec![1]);
 		assert_eq!(head.get(index6).value, vec![2]);
@@ -1307,10 +1304,10 @@ pub(crate) mod test {
 		head.truncate_until(5);
 		assert_eq!(head.lookup(4), None);
 		assert_eq!(head.lookup(5), None);
-		let index1 = (Some(0), 0);
+		let index1 = (0, 0);
 		assert_eq!(head.lookup(0), Some(index1));
 		// end node index do not change
-		let index3 = (None, 1);
+		let index3 = (2, 1);
 		assert_eq!(head.lookup(2), Some(index3));
 		assert_eq!(head.get(index1).value, vec![2]); // refer to previous index 6
 		assert_eq!(head.get(index3).value, vec![7]); // refer to previous index 8
