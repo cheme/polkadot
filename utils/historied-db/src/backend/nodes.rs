@@ -19,6 +19,7 @@
 
 use sp_std::marker::PhantomData;
 use sp_std::collections::btree_map::BTreeMap;
+use sp_std::collections::btree_set::BTreeSet;
 use sp_std::collections::vec_deque::VecDeque;
 use sp_std::cell::RefCell;
 use sp_std::vec::Vec;
@@ -219,8 +220,6 @@ impl<V: Clone, S: Clone, D: Clone, M: NodesMeta> NodeStorageMut<V, S, D, M> for 
 pub struct Node<V, S, D, M> {
 	/// Inner linear backend of historied values.
 	data: D,
-	/// If changed, the node needs to be updated in `Head` backend.
-	changed: bool,
 	/// Keep trace of node byte length for `APPLY_SIZE_LIMIT`.
 	reference_len: usize,
 	_ph: PhantomData<(V, S, D, M)>,
@@ -233,7 +232,7 @@ impl<V, S, D, M> Trigger for Node<V, S, D, M>
 	const TRIGGER: bool = <D as Trigger>::TRIGGER;
 
 	fn trigger_flush(&mut self) {
-		if Self::TRIGGER && self.changed {
+		if Self::TRIGGER {
 			self.data.trigger_flush();
 		}
 	}
@@ -249,7 +248,6 @@ impl<V, S, D, M> Node<V, S, D, M> {
 		Node {
 			data,
 			reference_len,
-			changed: false,
 			_ph: PhantomData::default(),
 		}
 	}
@@ -262,7 +260,6 @@ impl<V, S, D, M> Node<V, S, D, M>
 {
 	fn clear(&mut self) {
 		self.reference_len = 0;
-		self.changed = true;
 		self.data.clear();
 	}
 }
@@ -274,10 +271,17 @@ impl<V, S, D, M> Node<V, S, D, M>
 pub struct Head<V, S, D, M, B, NI> {
 	/// Head contains the last `Node` content.
 	inner: Node<V, S, D, M>,
+	/// Is inner node modified.
+	changed_inner: bool,
 	/// Accessed nodes are kept in memory.
 	/// This is a reversed ordered `Vec`, starting at end 'index - 1' and
 	/// finishing at most at the very first historied node.
 	fetched: RefCell<VecDeque<Node<V, S, D, M>>>,
+	/// Modified node reference, kept at `Head` level to avoid
+	/// full scan of large set of node.
+	/// The index is a distance from `end_node_index`, so it stays aligned
+	/// when changing nodes content of `fetched`.
+	changed_nodes: BTreeSet<u64>,
 	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u64,
 	/// The index of the first node, inclusive.
@@ -358,7 +362,9 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 				let reference_len = reference_len.unwrap_or_else(|| data.estimate_size());
 				Head {
 					inner: Node::new(data, reference_len),
+					changed_inner: false,
 					fetched: RefCell::new(VecDeque::new()),
+					changed_nodes: Default::default(),
 					old_start_node_index: head_decoded.start_node_index,
 					start_node_index: head_decoded.start_node_index,
 					end_node_index: head_decoded.end_node_index,
@@ -421,18 +427,20 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 				d,
 			);
 		}
-		for (index, mut node) in fetched_nodes.iter_mut().enumerate() {
-			if node.changed {
-				if trigger {
-					node.trigger_flush();
+		for node_index in sp_std::mem::take(&mut self.changed_nodes).into_iter() {
+			if self.end_node_index >= node_index + 1 {
+				let fetch_index = self.end_node_index - node_index - 1;
+				if let Some(node) = fetched_nodes.get_mut(fetch_index as usize) {
+					if trigger {
+						node.trigger_flush();
+					}
+					self.backend.set_node(
+						&self.reference_key[..],
+						&self.parent_encoded_indexes[..],
+						node_index,
+						node,
+					);
 				}
-				self.backend.set_node(
-					&self.reference_key[..],
-					&self.parent_encoded_indexes[..],
-					self.end_node_index - 1 - index as u64,
-					node,
-				);
-				node.changed = false;
 			}
 		}
 		self.old_end_removable = self.end_node_index;
@@ -484,8 +492,9 @@ impl<V, S, D, M, B, NI> Trigger for Head<V, S, D, M, B, NI>
 
 	fn trigger_flush(&mut self) {
 		// first apply to inner data.
-		if D::TRIGGER {
+		if D::TRIGGER && self.changed_inner {
 			self.inner.trigger_flush();
+			self.changed_inner = false;
 		}
 		self.flush_changes(D::TRIGGER)
 	}
@@ -511,11 +520,12 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 		Head {
 			inner: Node {
 				data: D::init_from(init.node_init_from.clone()),
-				changed: false,
 				reference_len: 0,
 				_ph: PhantomData,
 			},
+			changed_inner: Default::default(),
 			fetched: RefCell::new(VecDeque::new()),
+			changed_nodes: Default::default(),
 			old_start_node_index: 0,
 			start_node_index: 0,
 			end_node_index: 0,
@@ -759,12 +769,14 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					}
 					node.reference_len -= add_size;
 				}
-				node.changed = true;
 				node.data.truncate_until(ix);
 			}
 			self.start_node_index = if let Some(i) = i {
-				self.end_node_index - i as u64 - 1
+				let index = self.end_node_index - i as u64 - 1;
+				self.changed_nodes.insert(index);
+				index
 			} else {
+				self.changed_inner = true;
 				self.end_node_index
 			};
 			if self.len > split_off {
@@ -801,32 +813,33 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 
 		// New head
 		let add_size = additional_size.unwrap_or_else(|| 0);
+		self.changed_nodes.insert(self.end_node_index);
 		self.end_node_index += 1;
 		let mut data = D::init_from(self.node_init_from.clone());
 		data.push(value);
 		let new_node = Node::<V, S, D, M> {
 			data,
-			changed: true,
 			reference_len: add_size,
 			_ph: PhantomData,
 		};
-		self.inner.changed = true;
+		self.changed_inner = true;
 		let prev = sp_std::mem::replace(&mut self.inner, new_node);
 		self.fetched.borrow_mut().push_front(prev);
 	}
 	fn insert(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
 		let mut fetched_mut;
 		let node = if let Some(index) = index.0 {
+			self.changed_nodes.insert(self.end_node_index - index - 1);
 			fetched_mut = self.fetched.borrow_mut();
 			&mut fetched_mut[index as usize]
 		} else {
+			self.changed_inner = true;
 			&mut self.inner
 		};
 
 		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			node.reference_len += h.value.estimate_size() + h.state.estimate_size();
 		}
-		node.changed = true;
 		self.len += 1;
 		node.data.insert(index.1, h);
 	}
@@ -834,16 +847,17 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		let pop = {
 			let mut fetched_mut;
 			let (node, first) = if let Some(index) = index.0 {
+				self.changed_nodes.insert(self.end_node_index - index - 1);
 				fetched_mut = self.fetched.borrow_mut();
 				let len = fetched_mut.len();
 				
 				(&mut fetched_mut[index as usize], index as usize == len - 1 &&
 					len as u64 == self.end_node_index - self.start_node_index)
 			} else {
+				self.changed_inner = true;
 				(&mut self.inner, false)
 			};
 
-			node.changed = true;
 			self.len -= 1;
 
 			if M::APPLY_SIZE_LIMIT && V::ACTIVE {
@@ -872,7 +886,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 					self.inner.reference_len -= h.value.estimate_size() + h.state.estimate_size();
 				}
-				self.inner.changed = true;
+				self.changed_inner = true;
 			} else {
 				if self.fetched.borrow().len() == 0 {
 					if self.len > self.inner.data.len() + 1 {
@@ -915,6 +929,8 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		self.len = 0;
 		self.fetched.borrow_mut().clear();
 		self.inner.clear();
+		self.changed_inner = true;
+		self.changed_nodes.clear();
 	}
 	fn truncate(&mut self, at: usize) {
 		let i = {
@@ -947,7 +963,11 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					}
 					node.reference_len -= add_size;
 				}
-				node.changed = true;
+				if let Some(i) = i {
+					self.changed_nodes.insert(self.end_node_index - i as u64 - 1);
+				} else {
+					self.changed_inner = true;
+				}
 				node.data.truncate(ix)
 			}
 			i
@@ -976,19 +996,20 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				}
 			}
 			self.old_end_removable = self.end_node_index;
-			self.inner.changed = true;
+			self.changed_inner = true;
 		}
 	}
 	fn emplace(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
 		let mut fetched_mut;
 		let node = if let Some(index) = index.0 {
+			self.changed_nodes.insert(self.end_node_index - index - 1);
 			fetched_mut = self.fetched.borrow_mut();
 			&mut fetched_mut[index as usize]
 		} else {
+			self.changed_inner = true;
 			&mut self.inner
 		};
 
-		node.changed = true;
 
 		if M::APPLY_SIZE_LIMIT && V::ACTIVE {
 			let h_old = node.data.get(index.1);
@@ -1031,7 +1052,11 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			*result
 		});
 		if *result {
-			node.changed = true;
+			if let Some(index) = index.0 {
+				self.changed_nodes.insert(self.end_node_index - index - 1);
+			} else {
+				self.changed_inner = true;
+			}
 		}
 	}
 }
@@ -1224,7 +1249,7 @@ pub(crate) mod test {
 	}
 
 	#[test]
-	fn test_change_with_backend() {
+	fn test_change_with_backend_one_level() {
 		use crate::Trigger;
 		type D = MemoryOnly<Vec<u8>, u64>;
 		type M = MetaNb3;
