@@ -409,21 +409,11 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 		}
 		self.old_start_node_index = self.start_node_index;
 	
-		// this comparison is needed in case we completly clear the initial range,
-		// then we avoid deleting nodes that got created.
-		let end_node_index = sp_std::cmp::max(self.end_node_index, self.old_start_node_index);
 		self.old_start_node_index = self.start_node_index;
-		for d in end_node_index .. self.old_end_node_index {
+		for (d, mut node) in self.end_removed.drain(..) {
 			if trigger {
-				// TODO do not query if already fetched.
-				if let Some(mut node) = self.backend.get_node(
-					&self.reference_key[..],
-					&self.parent_encoded_indexes[..],
-					d,
-				) {
-					node.clear();
-					node.trigger_flush();
-				}
+				node.clear();
+				node.trigger_flush();
 			}
 			self.backend.remove_node(
 				&self.reference_key[..],
@@ -447,7 +437,6 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 			}
 		}
 		self.old_end_removable = self.end_node_index;
-		self.end_removed.clear();
 	}
 }
 
