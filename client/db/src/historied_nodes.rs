@@ -171,6 +171,14 @@ pub(crate) mod nodes_backend {
 
 	type StorageFor<V> = <V as Value>::Storage;
 
+	/// Number of fetched node kept in memory after being flushed
+	/// to db.
+	/// This should be exposed as a configuration, it makes
+	/// sense to have small treshold when syncing node, and
+	/// more cached node while runing the synced node (when
+	/// reorg matters).
+	pub(crate) const CACHE_KEEP_FETCHED: Option<usize> = Some(1000);
+
 	/// Alias for tree context.
 	pub type Context = (ContextHead<BranchNodes, ContextHead<BlockNodes, ()>>, ContextHead<BlockNodes, ()>);
 
@@ -255,6 +263,7 @@ pub(crate) mod nodes_backend {
 						backend: block_nodes,
 						encoded_indexes: parent_encoded_indexes.to_vec(),
 						node_init_from: (),
+						prune_fetched_node: CACHE_KEEP_FETCHED,
 					},
 				).map(|data| Node::new (
 					data,

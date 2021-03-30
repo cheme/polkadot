@@ -48,7 +48,7 @@ use sp_database::{StateIter, ChildStateIter};
 use sp_database::error::DatabaseError;
 pub use sc_state_db::PruningMode;
 use crate::historied_nodes::nodes_database::{BranchNodes, BlockNodes};
-use crate::historied_nodes::nodes_backend::Context;
+use crate::historied_nodes::nodes_backend::{Context, CACHE_KEEP_FETCHED};
 use nodes_backend::NODES_COL;
 
 /// Definition of mappings used by `TreeManagementPersistence`.
@@ -901,12 +901,14 @@ impl HValue {
 			backend: block_nodes.clone(),
 			encoded_indexes: Vec::new(),
 			node_init_from: (),
+			prune_fetched_node: CACHE_KEEP_FETCHED,
 		};
 		let init = ContextHead {
 			key: key.to_vec(),
 			backend: branch_nodes.clone(),
 			encoded_indexes: Vec::new(),
 			node_init_from: init_nodes.clone(),
+			prune_fetched_node: CACHE_KEEP_FETCHED,
 		};
 		((init, init_nodes), branch_nodes, block_nodes)
 	}
