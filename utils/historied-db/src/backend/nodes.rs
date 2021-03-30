@@ -921,16 +921,16 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		self.inner.clear();
 	}
 	fn truncate(&mut self, at: usize) {
-		let (in_head, i) = {
+		let i = {
 			let mut fetched_mut;
-			let (node, i, ix, in_head) = match self.fetch_node(at) {
+			let (node, i, ix) = match self.fetch_node(at) {
 				Some((None, ix)) => {
-					(&mut self.inner, None, ix, true)
+					(&mut self.inner, None, ix)
 				},
 				Some((Some(i), ix)) => {
 					fetched_mut = self.fetched.borrow_mut();
 					if let Some(node) = fetched_mut.get_mut(i) {
-						(node, Some(i), ix, false)
+						(node, Some(i), ix)
 					} else {
 						unreachable!("fetch node returns existing index");
 					}
@@ -954,29 +954,25 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				node.changed = true;
 				node.data.truncate(ix)
 			}
-			(in_head, i)
+			i
 		};
 		if self.len > at {
 			self.len = at;
 		}
 		// indicates head is empty and all index up to i
-		if !in_head {
-			if let Some(i) = i {
-				let fetch_index = i as u64;
-				self.end_node_index -= fetch_index + 1;	
-				let mut fetched_mut = self.fetched.borrow_mut();
-				// reversed ordered.
-				for i in 0..fetch_index + 1 {
-					if let Some(removed) = fetched_mut.pop_front() {
-						if i == fetch_index {
-							self.inner = removed;
-						}
+		if let Some(i) = i {
+			let fetch_index = i as u64;
+			self.end_node_index -= fetch_index + 1;	
+			let mut fetched_mut = self.fetched.borrow_mut();
+			// reversed ordered.
+			for i in 0..fetch_index + 1 {
+				if let Some(removed) = fetched_mut.pop_front() {
+					if i == fetch_index {
+						self.inner = removed;
 					}
 				}
-				self.inner.changed = true;
-			} else {
-				unreachable!("TODO i is incorrect? should be iter from prev loop");
 			}
+			self.inner.changed = true;
 		}
 	}
 	fn emplace(&mut self, index: Self::Index, h: HistoriedValue<V, S>) {
