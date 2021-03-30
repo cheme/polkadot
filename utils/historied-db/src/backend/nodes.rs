@@ -552,9 +552,8 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 			}
 			let mut i = self.end_node_index as usize;
 			while i > self.start_node_index as usize {
-				i -= 1;
 				// fetch_index is 0..(self.end_node_index - self.start_node_index)
-				let fetch_index = self.end_node_index as usize - i - 1;
+				let fetch_index = self.end_node_index as usize - i;
 				let has_node = {
 					if let Some(node) = self.fetched.borrow().get(fetch_index) {
 						start -= node.data.len();
@@ -570,23 +569,15 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 					if let Some(node) = self.backend.get_node(
 						self.reference_key.as_slice(),
 						self.parent_encoded_indexes.as_slice(),
-						i as u64,
+						i as u64 - 1,
 					) {
-						start -= node.data.len();
-						let r = if index >= start {
-							Some((Some(self.fetched.borrow().len()), index - start))
-						} else {
-							None
-						};
 						self.fetched.borrow_mut().push_back(node);
-
-						if r.is_some() {
-							return r;
-						}
+						continue;
 					} else {
 						return None;
 					}
 				}
+				i -= 1;
 			}
 		}
 		None
