@@ -46,6 +46,9 @@ pub struct ClientSnapshotSync<Block: BlockT> {
 enum SnapshotMode {
 	/// Flat variant, no compression, and obviously no diff.
 	Flat = 0,
+
+	/// Key value stored with their history over a given range.
+	Historied = 1,
 }
 
 struct HeaderRanges<N> {
@@ -151,8 +154,13 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 		}
 
 		use sc_client_api::SnapshotDb;
-		out_dyn.write(&[SnapshotMode::Flat as u8])
-			.map_err(|e| DatabaseError(Box::new(e)))?;
+		if range.flat {
+			out_dyn.write(&[SnapshotMode::Flat as u8])
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+		} else {
+			out_dyn.write(&[SnapshotMode::Historied as u8])
+				.map_err(|e| DatabaseError(Box::new(e)))?;
+		}
 
 		self.backend.snapshot_db.export_snapshot(
 			out_dyn,
@@ -289,6 +297,7 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 		range.flat = match buf[0] {
 			u if u == SnapshotMode::Flat as u8 => true,
+			u if u == SnapshotMode::Historied as u8 => false,
 			_ => {
 				let e = ClientError::StateDatabase("Unknown snapshot mode.".into());
 				return Err(e);
