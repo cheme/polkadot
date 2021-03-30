@@ -280,8 +280,6 @@ pub struct Head<V, S, D, M, B, NI> {
 	fetched: RefCell<VecDeque<Node<V, S, D, M>>>,
 	/// Keep trace of initial index start to apply change lazilly.
 	old_start_node_index: u64,
-	/// Keep trace of initial index end to apply change lazilly.
-	old_end_node_index: u64,
 	/// The index of the first node, inclusive.
 	start_node_index: u64,
 	/// The index of the last node, non inclusive (next index to use).
@@ -362,7 +360,6 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 					inner: Node::new(data, reference_len),
 					fetched: RefCell::new(VecDeque::new()),
 					old_start_node_index: head_decoded.start_node_index,
-					old_end_node_index: head_decoded.end_node_index,
 					start_node_index: head_decoded.start_node_index,
 					end_node_index: head_decoded.end_node_index,
 					end_removed: Default::default(),
@@ -390,8 +387,12 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 	fn flush_changes(&mut self, trigger: bool) {
 		let mut fetched_nodes = self.fetched.borrow_mut();
 		for d in self.old_start_node_index .. self.start_node_index {
-			if trigger {
-				// TODO do not query if already fetched.
+			if let Some(mut node) = fetched_nodes.remove((self.end_node_index - d - 1) as usize) {
+				if trigger {
+					node.clear();
+					node.trigger_flush();
+				}
+			} else if trigger{
 				if let Some(mut node) = self.backend.get_node(
 					&self.reference_key[..],
 					&self.parent_encoded_indexes[..],
@@ -409,7 +410,6 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 		}
 		self.old_start_node_index = self.start_node_index;
 	
-		self.old_start_node_index = self.start_node_index;
 		for (d, mut node) in self.end_removed.drain(..) {
 			if trigger {
 				node.clear();
@@ -421,7 +421,6 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 				d,
 			);
 		}
-		self.old_end_node_index = self.end_node_index;
 		for (index, mut node) in fetched_nodes.iter_mut().enumerate() {
 			if node.changed {
 				if trigger {
@@ -518,7 +517,6 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 			},
 			fetched: RefCell::new(VecDeque::new()),
 			old_start_node_index: 0,
-			old_end_node_index: 0,
 			start_node_index: 0,
 			end_node_index: 0,
 			end_removed: Default::default(),
