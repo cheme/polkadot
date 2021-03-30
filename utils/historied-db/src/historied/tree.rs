@@ -1273,12 +1273,14 @@ mod test {
 			key: b"any".to_vec(),
 			node_init_from: (),
 			encoded_indexes: Vec::new(),
+			prune_fetched_node: None,
 		};
 		let init_head = ContextHead {
 			backend: Backend2::new(),
 			key: b"any".to_vec(),
 			node_init_from: init_head_child.clone(),
 			encoded_indexes: Vec::new(),
+			prune_fetched_node: None,
 		};
 		let item: Tree<u64, u64, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
 		let at: ForkPlan<u64, u64> = Default::default();
@@ -1323,12 +1325,14 @@ mod test {
 			key: b"any".to_vec(),
 			node_init_from: (),
 			encoded_indexes: Vec::new(),
+			prune_fetched_node: None,
 		};
 		let init_head = ContextHead {
 			backend: Backend2::new(),
 			key: b"any".to_vec(),
 			node_init_from: init_head_child.clone(),
 			encoded_indexes: Vec::new(),
+			prune_fetched_node: None,
 		};
 		let item: Tree<u32, u32, Vec<u8>, D, BD> = InitFrom::init_from((init_head.clone(), init_head_child.clone()));
 		let at: ForkPlan<u32, u32> = Default::default();
@@ -1949,6 +1953,7 @@ mod test {
 			key: b"any".to_vec(),
 			node_init_from: (),
 			encoded_indexes: Vec::new(),
+			prune_fetched_node: None,
 		};
 		let backend2 = Backend2::new();
 		let init_head = ContextHead {
@@ -1956,6 +1961,7 @@ mod test {
 			key: b"any".to_vec(),
 			node_init_from: init_head_child.clone(),
 			encoded_indexes: Vec::new(),
+			prune_fetched_node: None,
 		};
 		type Tree = super::Tree<u32, u32, Value, D, BD>;
 		let context1 = (init_head, init_head_child);

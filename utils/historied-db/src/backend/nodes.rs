@@ -308,6 +308,10 @@ pub struct Head<V, S, D, M, B, NI> {
 	backend: B,
 	/// New node initializing contant.
 	node_init_from: NI,
+	/// Prune old in memory fetched node when flushing.
+	/// Note that this could be limited to unmodified fetched
+	/// node or best unaccessed old fetched node in the future.
+	prune_fetched_node: Option<usize>,
 }
 
 #[derive(Encode, Decode)]
@@ -375,6 +379,7 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 					backend: init.backend.clone(),
 					node_init_from,
 					parent_encoded_indexes: head_decoded.parent_encoded_indexes.into_owned(),
+					prune_fetched_node: init.prune_fetched_node.clone(),
 				}
 			})
 		})
@@ -444,6 +449,9 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 			}
 		}
 		self.old_end_removable = self.end_node_index;
+		if let Some(pruning) = self.prune_fetched_node.as_ref() {
+			fetched_nodes.truncate(*pruning);
+		}
 	}
 }
 
@@ -458,6 +466,10 @@ pub struct ContextHead<B, NI> {
 	pub backend: B,
 	/// Int type for internal node content.
 	pub node_init_from: NI,
+	/// Prune old in memory fetched node when flushing.
+	/// Note that this could be limited to unmodified fetched
+	/// node or best unaccessed old fetched node in the future.
+	pub prune_fetched_node: Option<usize>,
 }
 
 impl<B: Clone, NI: ContextBuilder> ContextBuilder for ContextHead<B, NI> {
@@ -471,6 +483,7 @@ impl<B: Clone, NI: ContextBuilder> ContextBuilder for ContextHead<B, NI> {
 			backend: self.backend.clone(),
 			node_init_from: self.node_init_from.clone(),
 			encoded_indexes,
+			prune_fetched_node: self.prune_fetched_node.clone(),
 		}
 	}
 
@@ -536,6 +549,7 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 			backend: init.backend,
 			node_init_from: init.node_init_from,
 			parent_encoded_indexes,
+			prune_fetched_node: init.prune_fetched_node.clone(),
 		}
 	}
 }
@@ -1205,6 +1219,7 @@ pub(crate) mod test {
 			key: b"any".to_vec(),
 			encoded_indexes: Vec::new(),
 			node_init_from: (),
+			prune_fetched_node: None,
 		};
 		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head);
 		assert_eq!(head.get_state_lookup(0), None);
@@ -1243,6 +1258,7 @@ pub(crate) mod test {
 			key: b"any".to_vec(),
 			encoded_indexes: Vec::new(),
 			node_init_from: (),
+			prune_fetched_node: None,
 		};
 		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head);
 		crate::backend::test::test_linear_storage(&mut head);
@@ -1259,6 +1275,7 @@ pub(crate) mod test {
 			key: b"any".to_vec(),
 			encoded_indexes: Vec::new(),
 			node_init_from: (),
+			prune_fetched_node: Some(2),
 		};
 		let mut head = Head::<Vec<u8>, u64, D, M, _, _>::init_from(init_head.clone());
 		assert_eq!(backend.0.borrow().len(), 0);
@@ -1371,6 +1388,7 @@ pub(crate) mod test {
 			key: b"any".to_vec(),
 			encoded_indexes: Vec::new(),
 			node_init_from: (),
+			prune_fetched_node: Some(0),
 		};
 		let backend2 = Backend2::new();
 		let init_head2 = ContextHead {
@@ -1378,6 +1396,7 @@ pub(crate) mod test {
 			key: Vec::new(),
 			encoded_indexes: Vec::new(),
 			node_init_from: init_head1.clone(),
+			prune_fetched_node: Some(1),
 		};
 		let mut head2 = Head2::init_from(init_head2.clone());
 		for i in 0u8..9 {
