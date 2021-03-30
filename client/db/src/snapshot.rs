@@ -342,7 +342,31 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 			}
 		}
 
-		unimplemented!("TODO next");
+		let mut config = self.config.clone();
+		config.cache_size = 0;
+		if range.flat {
+			// TODO use snapshot as input in a variant: optimization, not strictly necessary.
+			crate::export_import::flat_from_backend(out, backend, &range.to_hash)?;
+		} else {
+			let mut query_plan = self.get_historied_db(Some(&range.to_hash), Some(&config))
+				.map_err(|e| DatabaseError(Box::new(e)))?
+				.expect("Unknown block")
+				.current_state.clone();
+			use std::convert::TryInto;
+			query_plan.composite_treshold.1 = if let Ok(from) = range.from.try_into() {
+				from
+			} else {
+				panic!("snapshot db only support 64 bit block numbers");
+			};
+			crate::export_import::canonical_historied::<Block>(
+				out,
+				self.tree_iter_at(&range.to_hash, Some(&config))?,
+				&range.from,
+				&range.to,
+				query_plan,
+			)?;
+		}
+		Ok(())
 	}
 
 	fn state_iter_at<'a>(
@@ -352,12 +376,12 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 	) -> sp_database::error::Result<StateIter<'a>> {
 		let historied_db = self.get_historied_db(Some(at), config)
 			.map_err(|e| DatabaseError(Box::new(e)))?;
-		let mut iter = HistoriedDbBKVIter {
+		let mut iter = HistoriedDbBKVIter(HistoriedDbIterInner {
 			inner: self,
 			next_child: None,
 			last_child_root_key: None,
 			historied_db,
-		};
+		});
 		if let Some(top) = iter.next() {
 			Ok((
 				top.1,
@@ -683,6 +707,30 @@ impl<Block: BlockT> SnapshotDb<Block> {
 			}
 		}
 		Ok(())
+	}
+
+	fn tree_iter_at<'a>(
+		&'a self,
+		at: &Block::Hash,
+		config: Option<&SnapshotDbConf>,
+	) -> sp_database::error::Result<StateHValueIter<'a>> {
+		let historied_db = self.get_historied_db(Some(at), config)
+			.map_err(|e| DatabaseError(Box::new(e)))?;
+		let mut iter = HistoriedDbBHValueIter(HistoriedDbIterInner {
+			inner: self,
+			next_child: None,
+			last_child_root_key: None,
+			historied_db,
+		});
+		if let Some(top) = iter.next() {
+			Ok((
+				top.1,
+				Box::new(iter.map(|(child, iter)| (child.expect("Only first is top."), iter))),
+			))
+		} else {
+			let e = ClientError::StateDatabase("Empty state".into());
+			return Err(DatabaseError(Box::new(e)));
+		}
 	}
 }
 
@@ -1163,7 +1211,9 @@ impl HistoriedDB {
 	}
 }
 
-struct HistoriedDbBKVIter<'a, B: BlockT> {
+struct HistoriedDbBKVIter<'a, B: BlockT>(HistoriedDbIterInner<'a, B>);
+
+struct HistoriedDbIterInner<'a, B: BlockT> {
 	// we could only build on historied_db,
 	// but due to lifetime awkwardness we
 	// creat iter directly from snapshotdb
@@ -1174,10 +1224,13 @@ struct HistoriedDbBKVIter<'a, B: BlockT> {
 	last_child_root_key: Option<PrefixedStorageKey>,
 }
 
-impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
-	type Item = (Option<Vec<u8>>, ChildStateIter<'a>);
 
-	fn next(&mut self) -> Option<Self::Item> {
+struct HistoriedDbBHValueIter<'a, B: BlockT>(HistoriedDbIterInner<'a, B>);
+
+impl<'a, B: BlockT> HistoriedDbIterInner<'a, B> {
+	fn inner_next<R: 'a>(&mut self, f: fn(HValue, &ForkPlan<u32, u64>) -> Option<R>) -> Option<
+		(Option<Vec<u8>>, Box<dyn Iterator<Item = (Vec<u8>, R)> + 'a>)
+	>	{
 		let historied_db = match self.historied_db.as_ref() {
 			Some(historied_db) => historied_db,
 			None => return None,
@@ -1203,8 +1256,7 @@ impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
 					None
 				})
 				.expect("Invalid encoded historied value, DB corrupted");
-			let v = v.value(&current_state)
-				.expect("Invalid encoded historied value, DB corrupted");
+			let v = f(v, &current_state);
 			v.map(|v| (k.split_off(prefix_len), v))
 		});
 
@@ -1232,6 +1284,30 @@ impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
 		}
 
 		Some((iter_child_key, Box::new(iter)))
+	}
+}
+
+impl<'a, B: BlockT> Iterator for HistoriedDbBKVIter<'a, B> {
+	type Item = (Option<Vec<u8>>, ChildStateIter<'a>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.inner_next(|v, current_state| v.value(&current_state)
+			.expect("Invalid encoded historied value, DB corrupted"))
+	}
+}
+
+pub(crate) type StateHValueIter<'a> = (
+	ChildStateHValueIter<'a>,
+	Box<dyn Iterator<Item = (Vec<u8>, ChildStateHValueIter<'a>)> + 'a>,
+);
+
+pub(crate) type ChildStateHValueIter<'a> = Box<dyn Iterator<Item = (Vec<u8>, HValue)> + 'a>;
+
+impl<'a, B: BlockT> Iterator for HistoriedDbBHValueIter<'a, B> {
+	type Item = (Option<Vec<u8>>, ChildStateHValueIter<'a>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.inner_next(|v, _current_state| Some(v))
 	}
 }
 

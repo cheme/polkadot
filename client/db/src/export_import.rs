@@ -47,8 +47,8 @@ enum SnapshotMode {
 	/// Flat variant, no compression, and obviously no diff.
 	Flat = 0,
 
-	/// Key value stored with their history over a given range.
-	Historied = 1,
+	/// Key value stored with their history over a canonical given range.
+	CanonicalHistoried = 1,
 }
 
 struct HeaderRanges<N> {
@@ -158,7 +158,7 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 			out_dyn.write(&[SnapshotMode::Flat as u8])
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 		} else {
-			out_dyn.write(&[SnapshotMode::Historied as u8])
+			out_dyn.write(&[SnapshotMode::CanonicalHistoried as u8])
 				.map_err(|e| DatabaseError(Box::new(e)))?;
 		}
 
@@ -297,7 +297,7 @@ impl<Block: BlockT> SnapshotSync<Block> for ClientSnapshotSync<Block> {
 			.map_err(|e| DatabaseError(Box::new(e)))?;
 		range.flat = match buf[0] {
 			u if u == SnapshotMode::Flat as u8 => true,
-			u if u == SnapshotMode::Historied as u8 => false,
+			u if u == SnapshotMode::CanonicalHistoried as u8 => false,
 			_ => {
 				let e = ClientError::StateDatabase("Unknown snapshot mode.".into());
 				return Err(e);
@@ -556,6 +556,130 @@ pub(crate) fn flat_from_backend<Block: BlockT>(
 	})?;
 
 	default_key_writer.write_last(&mut out);
+	out.write(&[StateId::EndOfState as u8])
+		.map_err(|e| DatabaseError(Box::new(e)))?;
+	Ok(())
+}
+
+mod export_canonical {
+	use super::*;
+	use historied_db::{
+		historied::linear::Linear,
+		backend::in_memory::MemoryOnly,
+		InitFrom,
+		management::tree::ForkPlan,
+	};
+
+	type Value = Option<Vec<u8>>;
+	type State = u64;
+	/// HValue without diff for canonical only (linear).
+	/// TODO create linear that stream data on push.
+	type HValue = Linear<
+		Value,
+		State,
+		MemoryOnly<Value, State>,
+	>;
+
+	pub(super) fn write_canonical_from_tree(
+		mut out: &mut dyn std::io::Write,
+		tree: crate::snapshot::HValue,
+		filter: &ForkPlan<u32, u64>,
+	) -> sp_database::error::Result<()> {
+		let mut dest = HValue::init_from(());
+		match tree {
+			crate::snapshot::HValue::NodesNoDiff(inner, _, _) => {
+				inner.export_to_linear(
+					filter,
+					false, // include_all_treshold_value: bool,
+					true, // include_treshold_value: bool, TODO for composite we would not
+					&mut dest,
+					false, // need_prev: bool, 
+					|_prev, v| v, // map_value: impl Fn(Option<&V>, V) -> V2
+				);
+			},
+			crate::snapshot::HValue::NodesXDelta(_inner, _, _) => {
+				unimplemented!("TODO: export to linear not for sum backend")
+			},
+			crate::snapshot::HValue::SingleNodeNoDiff(inner) => {
+				inner.export_to_linear(
+					filter,
+					false, // include_all_treshold_value: bool,
+					true, // include_treshold_value: bool, TODO for composite we would not
+					&mut dest,
+					false, // need_prev: bool, 
+					|_prev, v| v, // map_value: impl Fn(Option<&V>, V) -> V2
+				);
+			},
+			crate::snapshot::HValue::SingleNodeXDelta(_inner) => {
+				unimplemented!("TODO: export to linear not for sum backend")
+			},
+		}
+	
+		dest.backend().0.encode_to(&mut out);
+	
+		Ok(())
+	}
+}
+
+/// Create canonical linear history snapshot from backend.
+pub(crate) fn canonical_historied<Block: BlockT>(
+	mut out: &mut dyn std::io::Write,
+	hvalue_iter: crate::snapshot::StateHValueIter,
+	from: &NumberFor<Block>,
+	to: &NumberFor<Block>,
+	plan: historied_db::management::tree::ForkPlan<u32, u64>,
+) -> sp_database::error::Result<()> {
+	out.write(from.encode().as_slice())
+		.map_err(|e| DatabaseError(Box::new(e)))?;
+	out.write(to.encode().as_slice())
+		.map_err(|e| DatabaseError(Box::new(e)))?;
+	out.write(&[StateId::Top as u8])
+		.map_err(|e| DatabaseError(Box::new(e)))?;
+
+	let mut default_key_writer = KeyWriter {
+		previous: [][..].into(),
+	};
+	let default_key_writer = &mut default_key_writer;
+	let mut default_child_key_writer = KeyWriter {
+		previous: Default::default(),
+	};
+	let default_child_key_writer = &mut default_child_key_writer;
+
+	let mut last_child: Option<Vec<u8>> = None;
+	let last_child = &mut last_child;
+	let mut child_storage_key = PrefixedStorageKey::new(Vec::new());
+	let child_storage_key = &mut child_storage_key;
+
+	for (key, hvalue) in hvalue_iter.0 {
+		default_key_writer.write_next(key, &mut out);
+		export_canonical::write_canonical_from_tree(out, hvalue, &plan)?;
+	}
+	default_key_writer.write_last(&mut out);
+
+	for (child, iter_child) in hvalue_iter.1 {
+		*child_storage_key = PrefixedStorageKey::new(child.to_vec());
+		*last_child = Some(child.to_vec());
+		match ChildType::from_prefixed_key(&child_storage_key) {
+			Some((ChildType::ParentKeyId, storage_key)) => {
+				out.write(&[StateId::DefaultChild as u8])
+					.map_err(|e| DatabaseError(Box::new(e)))?;
+				default_child_key_writer.write_next(storage_key.to_vec(), &mut out);
+			},
+			_ => {
+				let e = ClientError::StateDatabase("Unknown child trie type in state".into());
+				return Err(DatabaseError(Box::new(e)));
+			},
+		}
+		*default_key_writer = KeyWriter {
+			previous: Default::default(),
+		};
+		for (key, hvalue) in iter_child {
+			default_key_writer.write_next(key, &mut out);
+			export_canonical::write_canonical_from_tree(out, hvalue, &plan)?;
+		}
+		default_key_writer.write_last(&mut out);
+	}
+
 	out.write(&[StateId::EndOfState as u8])
 		.map_err(|e| DatabaseError(Box::new(e)))?;
 	Ok(())
