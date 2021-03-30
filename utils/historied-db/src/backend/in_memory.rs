@@ -33,7 +33,7 @@ macro_rules! memory_only_stack_size {
 /// Being in memory, we expect that this will
 /// not required persistence and is not serialized.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct $memory_only<V, S>(pub(crate) smallvec::SmallVec<[HistoriedValue<V, S>; $allocated_history]>);
+pub struct $memory_only<V, S>(pub smallvec::SmallVec<[HistoriedValue<V, S>; $allocated_history]>);
 
 impl<V: Decode, S: Decode> Decode for $memory_only<V, S> {
 	fn decode<I: Input>(value: &mut I) -> Result<Self, codec::Error> {
@@ -93,7 +93,7 @@ memory_only_stack_size!(@inner, $memory_only);
 /// Being in memory, we expect that this will
 /// not required persistence and is not serialized.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct $memory_only<V, S>(pub(crate) Vec<HistoriedValue<V, S>>);
+pub struct $memory_only<V, S>(pub Vec<HistoriedValue<V, S>>);
 
 impl<V: Decode, S: Decode> Decode for $memory_only<V, S> {
 	fn decode<I: Input>(value: &mut I) -> Result<Self, codec::Error> {

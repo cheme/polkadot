@@ -85,6 +85,13 @@ impl<V, S, D: Context> Context for Linear<V, S, D> {
 	type Context = <D as Context>::Context;
 }
 
+impl<V, S, D: InitFrom> Linear<V, S, D> {
+	/// Access inner linear backend.
+	pub fn backend(&self) -> &D {
+		&self.0
+	}
+}
+
 impl<V, S, D: InitFrom> InitFrom for Linear<V, S, D> {
 	fn init_from(init: Self::Context) -> Self {
 		Linear(<D as InitFrom>::init_from(init), PhantomData)
