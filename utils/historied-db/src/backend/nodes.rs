@@ -624,19 +624,17 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 
 		let mut i = self.end_node_index;
 		while i > self.start_node_index {
-			i -= 1;
-			let fetch_index = self.end_node_index - i - 1;
+			let fetch_index = self.end_node_index - i;
 			let inner_index = if let Some(node) = self.fetched.borrow().get(fetch_index as usize) {
 				node.data.last()
 			} else {
 				if let Some(node) = self.backend.get_node(
 					self.reference_key.as_slice(),
 					self.parent_encoded_indexes.as_slice(),
-					i,
+					i - 1,
 				) {
-					let inner_index = node.data.last();
 					self.fetched.borrow_mut().push_back(node);
-					inner_index
+					continue;
 				} else {
 					None
 				}
@@ -644,6 +642,7 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 			if let Some(inner_index) = inner_index {
 				return Some((Some(fetch_index), inner_index));
 			}
+			i -= 1;
 		}
 		None
 	}
