@@ -288,6 +288,11 @@ pub struct Head<V, S, D, M, B, NI> {
 	/// It can also be seen as the head index (but head is not stored
 	/// on the node backend).
 	end_node_index: u64,
+	/// Removed at end nodes, since they can be rewritten we keep them
+	/// separately.
+	end_removed: Vec<(u64, Node<V, S, D, M>)>,
+	/// Keep trace of nodes that should be removed.
+	old_end_removable: u64,
 	/// Number of historied values stored in head and all past nodes.
 	len: usize,
 	/// Backend key used for this head, or any unique identifying key
@@ -360,6 +365,8 @@ impl<V, S, D, M, B, NI> DecodeWithContext for Head<V, S, D, M, B, NI>
 					old_end_node_index: head_decoded.end_node_index,
 					start_node_index: head_decoded.start_node_index,
 					end_node_index: head_decoded.end_node_index,
+					end_removed: Default::default(),
+					old_end_removable: head_decoded.end_node_index,
 					len: head_decoded.len as usize,
 					reference_key: init.key.clone(),
 					backend: init.backend.clone(),
@@ -439,6 +446,8 @@ impl<V, S, D, M, B, NI> Head<V, S, D, M, B, NI>
 				node.changed = false;
 			}
 		}
+		self.old_end_removable = self.end_node_index;
+		self.end_removed.clear();
 	}
 }
 
@@ -523,6 +532,8 @@ impl<V, S, D, M, B, NI> InitFrom for Head<V, S, D, M, B, NI>
 			old_end_node_index: 0,
 			start_node_index: 0,
 			end_node_index: 0,
+			end_removed: Default::default(),
+			old_end_removable: 0,
 			len: 0,
 			reference_key: init.key,
 			backend: init.backend,
@@ -882,8 +893,12 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 					}
 				}
 				if let Some(removed) = self.fetched.borrow_mut().pop_front() {
-					self.inner = removed;
 					self.end_node_index -= 1;
+					let removed = sp_std::mem::replace(&mut self.inner, removed);
+					if self.end_node_index < self.old_end_removable {
+						self.old_end_removable = self.end_node_index;
+						self.end_removed.push((self.end_node_index, removed));
+					}
 				}
 			}
 
@@ -895,8 +910,12 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 				}
 			}
 			if let Some(removed) = self.fetched.borrow_mut().pop_front() {
-				self.inner = removed;
 				self.end_node_index -= 1;
+				let removed = sp_std::mem::replace(&mut self.inner, removed);
+				if self.end_node_index < self.old_end_removable {
+					self.old_end_removable = self.end_node_index;
+					self.end_removed.push((self.end_node_index, removed));
+				}
 			} else {
 				return None;
 			}
@@ -952,16 +971,24 @@ impl<V, S, D, M, B, NI> LinearStorage<V, S> for Head<V, S, D, M, B, NI>
 		// indicates head is empty and all index up to i
 		if let Some(i) = i {
 			let fetch_index = i as u64;
-			self.end_node_index -= fetch_index + 1;	
 			let mut fetched_mut = self.fetched.borrow_mut();
 			// reversed ordered.
 			for i in 0..fetch_index + 1 {
+				self.end_node_index -= 1;	
 				if let Some(removed) = fetched_mut.pop_front() {
 					if i == fetch_index {
-						self.inner = removed;
+						let removed = sp_std::mem::replace(&mut self.inner, removed);
+						if self.end_node_index < self.old_end_removable {
+							self.end_removed.push((self.end_node_index, removed));
+						}
+					} else {
+						if self.end_node_index < self.old_end_removable {
+							self.end_removed.push((self.end_node_index, removed));
+						}
 					}
 				}
 			}
+			self.old_end_removable = self.end_node_index;
 			self.inner.changed = true;
 		}
 	}
