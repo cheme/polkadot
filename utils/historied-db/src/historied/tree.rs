@@ -652,7 +652,7 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 	/// Export a given tree value to linear history, given a read query plan.
 	pub fn export_to_linear<V2, BO>	(
 		&self,
-		filter: ForkPlan<I, BI>, // Self::S
+		filter: &ForkPlan<I, BI>, // Self::S
 		include_all_treshold_value: bool,
 		include_treshold_value: bool,
 		dest: &mut crate::historied::linear::Linear<V2, BI, BO>,
