@@ -442,14 +442,8 @@ impl SnapshotImportCmd {
 			dest_config.enabled = false;
 		};
 		let mut file: Box<dyn std::io::Read + Send> = match &self.input {
-			Some(filename) => Box::new(std::fs::File::open(filename)?),
-			None => {
-				use std::io::Read;
-				let mut buffer = Vec::new();
-				// TODO use an actual read
-				std::io::stdin().read_to_end(&mut buffer)?;
-				Box::new(std::io::Cursor::new(buffer))
-			}
+			Some(filename) => Box::new(zstd::Decoder::new(std::fs::File::open(filename)?)?),
+			None => Box::new(zstd::Decoder::new(std::io::stdin())?),
 		};
 
 		backend.snapshot_sync().import_sync(&mut file, dest_config)?;
@@ -507,11 +501,15 @@ impl SnapshotExportCmd {
 
 		info!("Export using config : {:?}", range);
 		if let Some(path) = &self.output {
-			let mut out = std::fs::File::create(path)?;
+			let out = std::fs::File::create(path)?;
+			let mut out = zstd::Encoder::new(out, 3)?;
 			backend.snapshot_sync().export_sync(&mut out, range, self.state_only)?;
+			out.finish()?;
 		} else {
-			let mut out = std::io::stdout();
+			let out = std::io::stdout();
+			let mut out = zstd::Encoder::new(out, 3)?;
 			backend.snapshot_sync().export_sync(&mut out, range, self.state_only)?;
+			out.finish()?;
 		};
 
 		Ok(())

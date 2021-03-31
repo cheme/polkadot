@@ -7025,6 +7025,7 @@ dependencies = [
  "thiserror",
  "tiny-bip39",
  "tokio 0.2.25",
+ "zstd",
 ]
 
 [[package]]
