@@ -693,6 +693,8 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		}
 
 		// Composite part.
+		let mut halt = false;
+		let halt = &mut halt;
 		while let Some(branch_ix) = next_branch_index {
 			let branch_index = &self.branches.get_state(branch_ix);
 			if branch_index <= &filter.composite_treshold.0 {
@@ -703,6 +705,7 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 							if include_treshold_value {
 								if &index < &filter.composite_treshold.1 {
 									accu.push(branch.get(handle));
+									*halt = true;
 									return true;
 								} else {
 									// actually with well formed fork plan this
@@ -710,11 +713,12 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 									return false;
 								}
 							} else {
+								*halt = true;
 								return true;
 							}
 						}
 						accu.push(branch.get(handle));
-						false
+						*halt
 					});
 				});
 			}
