@@ -18,7 +18,7 @@
 
 //! Snapshot export and import implementation.
 
-use log::info;
+use log::{info, debug};
 use sc_client_api::{SnapshotSync, SnapshotDbConf, SnapshotConfig,
 	SnapshotDBMode, DatabaseError, StateVisitor};
 use sp_blockchain::{
@@ -589,7 +589,7 @@ mod export_canonical {
 		filter: &ForkPlan<u32, u64>,
 	) -> sp_database::error::Result<()> {
 		let mut dest = HValue::init_from(());
-		println!("export for :{:?}", key);
+		debug!("Export of:{:?}", key);
 		match tree {
 			crate::snapshot::HValue::NodesNoDiff(inner, _, _) => {
 				if !inner.export_to_linear(
@@ -600,7 +600,7 @@ mod export_canonical {
 					false, // need_prev: bool, 
 					|_prev, v| v, // map_value: impl Fn(Option<&V>, V) -> V2
 				) {
-					println!("no change");
+					debug!("No changes, skipped.");
 					return Ok(());
 				}
 			},
@@ -626,7 +626,7 @@ mod export_canonical {
 	
 		default_key_writer.write_next(key, &mut out);
 		dest.backend().0.encode_to(&mut out);
-		println!("written");
+		debug!("Written.");
 	
 		Ok(())
 	}
