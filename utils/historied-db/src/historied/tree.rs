@@ -664,19 +664,21 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 	{
 		let mut accu = Vec::new();
 		let accu = &mut accu;
-		let mut iter_forkplan = filter.iter();
-		let mut fork_plan_head = iter_forkplan.next();
-		let fork_plan_head = &mut fork_plan_head;
-		let composite_treshold = &filter.composite_treshold.1;
-		self.map_backward(|index, handle, branches| {
-			while let Some((branch_range, branch_index)) = fork_plan_head.as_ref() {
-				if &index > branch_index {
-					return false;
-				} else if &index == branch_index {
-					branches.apply_on(handle, |branch| {
-						branch.value.map_backward(|index, handle, branch| {
-							if index < branch_range.end {
-								if index >= branch_range.start {
+		let mut next_branch_index = self.branches.last();
+		for (state_branch_range, state_branch_index) in filter.iter() {
+			while let Some(branch_ix) = next_branch_index {
+				let branch_index = &self.branches.get_state(branch_ix);
+				if branch_index < &state_branch_index {
+					break;
+				} else if branch_index == &state_branch_index {
+					// TODO add a lower bound check (maybe debug_assert it only).
+					let mut upper_bound = state_branch_range.end.clone();
+					upper_bound -= BI::one();
+					self.branches.apply_on(branch_ix, |value| {
+						let branch = value.value;
+						branch.map_backward(|index, handle, branch| {
+							if index < state_branch_range.end {
+								if index >= state_branch_range.start {
 									accu.push(branch.get(handle));
 								} else {
 									return true;
@@ -685,41 +687,40 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 							false
 						});
 					});
-					return false;
-				} else {
-					*fork_plan_head = iter_forkplan.next();
 				}
+				next_branch_index = self.branches.previous_index(branch_ix);
 			}
+		}
 
-			if !include_all_treshold_value {
-				if include_treshold_value {
-					branches.apply_on(handle, |branch| {
-						branch.value.map_backward(|index, handle, branch| {
-							if &index < composite_treshold {
-								accu.push(branch.get(handle));
+		// Composite part.
+		while let Some(branch_ix) = next_branch_index {
+			let branch_index = &self.branches.get_state(branch_ix);
+			if branch_index <= &filter.composite_treshold.0 {
+				self.branches.apply_on(branch_ix, |value| {
+					let branch = value.value;
+					branch.map_backward(|index, handle, branch| {
+						if !include_all_treshold_value {
+							if include_treshold_value {
+								if &index < &filter.composite_treshold.1 {
+									accu.push(branch.get(handle));
+									return true;
+								} else {
+									// actually with well formed fork plan this
+									// should be unreachable.
+									return false;
+								}
+							} else {
 								return true;
 							}
-							false
-						});
-					});
-					return true;
-				} else {
-					return true;
-				}
-			}
-
-			branches.apply_on(handle, |branch| {
-				branch.value.map_backward(|index, handle, branch| {
-					if &index < composite_treshold {
+						}
 						accu.push(branch.get(handle));
-					}
-					false
+						false
+					});
 				});
-			});
-
-			false
-		});
-
+			}
+			next_branch_index = self.branches.previous_index(branch_ix);
+		}
+	
 		let mut prev = None;
 		while let Some(value) = accu.pop() {
 			let v = V::from_storage(value.value);
@@ -1385,6 +1386,60 @@ mod test {
 		}
 	}
 
+	#[test]
+	fn test_export_linear() {
+		type BD = crate::backend::in_memory::MemoryOnly<u32, u32>;
+		type D = crate::backend::in_memory::MemoryOnly<
+			crate::historied::linear::Linear<u32, u32, BD>,
+			u32,
+		>;
+		type Tree = super::Tree<u32, u32, u32, D, BD>;
+		type LinearExport = Linear<u32, u32, BD>;
+
+
+		// 0> 1: _ _ X
+		// |			 |> 3: 1
+		// |			 |> 4: 1
+		// |		 |> 5: 1
+		// |> 2: _
+		let mut states = test_states();
+		// could rand shuffle if rand get imported later.
+		let disordered = [
+			[1u16,2,3,4,5],
+			[1,2,3,5,4],
+			[2,5,1,3,4],
+			[5,3,2,4,1],
+		];
+		for r in disordered.iter() {
+			let mut item: Tree = InitFrom::init_from(((), ()));
+
+			for i in r {
+				let v: u32 = i.clone().into();
+				let i: u32 = i.clone().into();
+				item.set(v, &states.unchecked_latest_at(i).unwrap());
+			}
+			for i in r {
+				let v: u32 = i.clone().into();
+				let i: u32 = i.clone().into();
+				let mut query_plan = states.query_plan(i);
+				assert_eq!(item.get(&query_plan), Some(v));
+				for t in 1..5 {
+					query_plan.set_composite_treshold(t);
+					let mut exported_linear = LinearExport::init_from(());
+					item.export_to_linear(
+						&query_plan,
+						false, // include_all_treshold_value: bool,
+						true, // include_treshold_value: bool, TODO for composite we would not
+						&mut exported_linear,
+						false, // need_prev: bool, 
+						|_prev, v| v, // map_value: impl Fn(Option<&V>, V) -> V2
+					);
+					// TODO test somehow: maybe fix and more readable values.
+					// or get from treshold to i for get.
+				}
+			}
+		}
+	}
 
 	fn test_set_get<T, V>(context: T::Context)
 		where
@@ -1454,6 +1509,7 @@ mod test {
 			}
 		}
 	}
+
 
 	#[cfg(not(feature = "conditional-data"))]
 	fn test_conditional_set_get<T, V>(_context: T::Context, _context2: T::Context)

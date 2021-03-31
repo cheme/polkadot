@@ -477,7 +477,7 @@ impl<H, I, BI, S> TreeManagement<H, I, BI, S>
 		self.canonicalize(qp, (branch_index, switch_index.clone()), prune_index)
 	}
 
-	/// Canonicalize a fork plan up to a given index.
+	/// Canonicalize given a fork plan up to a given index.
 	pub fn canonicalize(&mut self, branch: ForkPlan<I, BI>, switch_index: (I, BI), prune_index: Option<BI>) -> bool {
 		// TODO makes last index the end of this canonicalize branch
 
@@ -1046,7 +1046,7 @@ impl<I: Default, BI: Default> Default for ForkPlan<I, BI> {
 /// Query plan element for a single branch.
 pub struct BranchPlan<I, BI> {
 	index: I,
-	 state: BranchRange<BI>,
+	state: BranchRange<BI>,
 }
 
 impl<I, BI> ForkPlan<I, BI>
@@ -1058,6 +1058,30 @@ impl<I, BI> ForkPlan<I, BI>
 	/// (more recent first).
 	pub fn iter(&self) -> ForkPlanIter<I, BI> {
 		ForkPlanIter(self, self.history.len())
+	}
+
+	/// Change fork plan to use a different composite treshold.
+	/// If treshould is less than current one, then fork plan
+	/// do not change.
+	pub fn set_composite_treshold(&mut self, height: BI) {
+		if self.composite_treshold.1 >= height {
+			return;
+		} else {
+			let mut ix = 0;
+			for branch in self.history.iter_mut() {
+				if branch.state.start >= height {
+					break;
+				}
+				self.composite_treshold.0 = branch.index.clone();
+				if branch.state.end > height {
+					branch.state.start = height.clone();
+					break;
+				}
+				ix += 1;
+			}
+			self.history = self.history.split_off(ix);
+			self.composite_treshold.1 = height;
+		}
 	}
 }
 
