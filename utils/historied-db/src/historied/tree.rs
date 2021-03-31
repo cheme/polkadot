@@ -650,6 +650,7 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 	}
 
 	/// Export a given tree value to linear history, given a read query plan.
+	/// Return false if the exported content is empty.
 	pub fn export_to_linear<V2, BO>	(
 		&self,
 		filter: &ForkPlan<I, BI>, // Self::S
@@ -658,9 +659,10 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		dest: &mut crate::historied::linear::Linear<V2, BI, BO>,
 		need_prev: bool, 
 		map_value: impl Fn(Option<&V>, V) -> V2
-	)	where
-		V2: Value + Clone + Eq,
-		BO: LinearStorage<V2::Storage, BI>,
+	) -> bool
+		where
+			V2: Value + Clone + Eq,
+			BO: LinearStorage<V2::Storage, BI>,
 	{
 		let mut accu = Vec::new();
 		let accu = &mut accu;
@@ -726,6 +728,7 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 		}
 	
 		let mut prev = None;
+		let result = !accu.is_empty();
 		while let Some(value) = accu.pop() {
 			let v = V::from_storage(value.value);
 			let prev2 = need_prev.then(|| v.clone());
@@ -733,6 +736,7 @@ impl<I, BI, V, D, BD> Tree<I, BI, V, D, BD>
 			prev = prev2;
 			assert!(matches!(dest.set(v2, &Latest(value.state)), UpdateResult::Changed(..)));
 		}
+		result
 	}
 
 	/// Export a given tree value to another tree value, given a read query plan.
