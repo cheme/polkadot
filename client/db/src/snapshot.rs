@@ -353,11 +353,11 @@ impl<Block: BlockT> SnapshotDbT<Block> for SnapshotDb<Block> {
 				.expect("Unknown block")
 				.current_state.clone();
 			use std::convert::TryInto;
-			query_plan.composite_treshold.1 = if let Ok(from) = range.from.try_into() {
+			query_plan.set_composite_treshold(if let Ok(from) = range.from.try_into() {
 				from
 			} else {
 				panic!("snapshot db only support 64 bit block numbers");
-			};
+			});
 			crate::export_import::canonical_historied::<Block>(
 				out,
 				self.tree_iter_at(&range.to_hash, Some(&config))?,

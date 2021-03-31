@@ -580,7 +580,10 @@ mod export_canonical {
 		MemoryOnly<Value, State>,
 	>;
 
+	// TODO rewrite to write key and skip empty backends.
 	pub(super) fn write_canonical_from_tree(
+		key: Vec<u8>,
+		default_key_writer: &mut KeyWriter,
 		mut out: &mut dyn std::io::Write,
 		tree: crate::snapshot::HValue,
 		filter: &ForkPlan<u32, u64>,
@@ -588,33 +591,38 @@ mod export_canonical {
 		let mut dest = HValue::init_from(());
 		match tree {
 			crate::snapshot::HValue::NodesNoDiff(inner, _, _) => {
-				inner.export_to_linear(
+				if !inner.export_to_linear(
 					filter,
 					false, // include_all_treshold_value: bool,
 					true, // include_treshold_value: bool, TODO for composite we would not
 					&mut dest,
 					false, // need_prev: bool, 
 					|_prev, v| v, // map_value: impl Fn(Option<&V>, V) -> V2
-				);
+				) {
+					return Ok(());
+				}
 			},
 			crate::snapshot::HValue::NodesXDelta(_inner, _, _) => {
 				unimplemented!("TODO: export to linear not for sum backend")
 			},
 			crate::snapshot::HValue::SingleNodeNoDiff(inner) => {
-				inner.export_to_linear(
+				if !inner.export_to_linear(
 					filter,
 					false, // include_all_treshold_value: bool,
 					true, // include_treshold_value: bool, TODO for composite we would not
 					&mut dest,
 					false, // need_prev: bool, 
 					|_prev, v| v, // map_value: impl Fn(Option<&V>, V) -> V2
-				);
+				) {
+					return Ok(());
+				}
 			},
 			crate::snapshot::HValue::SingleNodeXDelta(_inner) => {
 				unimplemented!("TODO: export to linear not for sum backend")
 			},
 		}
 	
+		default_key_writer.write_next(key, &mut out);
 		dest.backend().0.encode_to(&mut out);
 	
 		Ok(())
@@ -651,8 +659,7 @@ pub(crate) fn canonical_historied<Block: BlockT>(
 	let child_storage_key = &mut child_storage_key;
 
 	for (key, hvalue) in hvalue_iter.0 {
-		default_key_writer.write_next(key, &mut out);
-		export_canonical::write_canonical_from_tree(out, hvalue, &plan)?;
+		export_canonical::write_canonical_from_tree(key, default_key_writer, out, hvalue, &plan)?;
 	}
 	default_key_writer.write_last(&mut out);
 
@@ -674,8 +681,7 @@ pub(crate) fn canonical_historied<Block: BlockT>(
 			previous: Default::default(),
 		};
 		for (key, hvalue) in iter_child {
-			default_key_writer.write_next(key, &mut out);
-			export_canonical::write_canonical_from_tree(out, hvalue, &plan)?;
+			export_canonical::write_canonical_from_tree(key, default_key_writer, out, hvalue, &plan)?;
 		}
 		default_key_writer.write_last(&mut out);
 	}
