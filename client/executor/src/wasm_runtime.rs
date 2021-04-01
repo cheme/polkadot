@@ -41,7 +41,8 @@ pub enum WasmExecutionMethod {
 	/// Uses the Wasmtime compiled runtime.
 	/// Inner bool indicate if debug mode
 	/// should be enabled (debug mode requires
-	/// a runtime build for debug).
+	/// a runtime build for debug, usually by
+	/// using a wasm runtime override).
 	#[cfg(feature = "wasmtime")]
 	Compiled(bool),
 }
