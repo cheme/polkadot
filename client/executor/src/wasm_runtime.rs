@@ -39,8 +39,11 @@ pub enum WasmExecutionMethod {
 	/// Uses the Wasmi interpreter.
 	Interpreted,
 	/// Uses the Wasmtime compiled runtime.
+	/// Inner bool indicate if debug mode
+	/// should be enabled (debug mode requires
+	/// a runtime build for debug).
 	#[cfg(feature = "wasmtime")]
-	Compiled,
+	Compiled(bool),
 }
 
 impl Default for WasmExecutionMethod {
@@ -296,17 +299,19 @@ pub fn create_wasm_runtime_with_code(
 				heap_pages,
 				host_functions,
 				allow_missing_func_imports,
+				false,
 			)
 			.map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) })
 		}
 		#[cfg(feature = "wasmtime")]
-		WasmExecutionMethod::Compiled =>
+		WasmExecutionMethod::Compiled(debug) =>
 			sc_executor_wasmtime::create_runtime(
 				code,
 				heap_pages,
 				host_functions,
 				allow_missing_func_imports,
 				cache_path,
+				debug,
 			).map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) }),
 	}
 }

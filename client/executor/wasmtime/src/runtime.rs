@@ -168,6 +168,7 @@ pub fn create_runtime(
 	host_functions: Vec<&'static dyn Function>,
 	allow_missing_func_imports: bool,
 	cache_path: Option<&Path>,
+	debug: bool,
 ) -> std::result::Result<WasmtimeRuntime, WasmError> {
 	// Create the engine, store and finally the module from the given code.
 	let mut config = Config::new();
@@ -180,6 +181,7 @@ pub fn create_runtime(
 			);
 		}
 	}
+	config.debug_info(debug);
 
 	let engine = Engine::new(&config);
 	let module_wrapper = ModuleWrapper::new(&engine, code)

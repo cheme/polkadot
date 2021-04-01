@@ -645,7 +645,11 @@ pub fn create_runtime(
 	heap_pages: u64,
 	host_functions: Vec<&'static dyn Function>,
 	allow_missing_func_imports: bool,
+	debug: bool,
 ) -> Result<WasmiRuntime, WasmError> {
+	if debug {
+		unimplemented!("Debug mode for wasmi.");
+	}
 	let module = Module::from_buffer(&code).map_err(|_| WasmError::InvalidModule)?;
 
 	// Extract the data segments from the wasm code.

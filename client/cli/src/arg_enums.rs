@@ -29,6 +29,9 @@ arg_enum! {
 		Interpreted,
 		// Uses a compiled runtime.
 		Compiled,
+		// Uses a compiled runtime, enforcing
+		// debug information.
+		CompiledDebug,
 	}
 }
 
@@ -38,7 +41,8 @@ impl WasmExecutionMethod {
 		Self::variants()
 			.iter()
 			.cloned()
-			.filter(|&name| cfg!(feature = "wasmtime") || name != "Compiled")
+			.filter(|&name| cfg!(feature = "wasmtime")
+				|| (name != "Compiled" && name != "CompiledDebug"))
 			.collect()
 	}
 }
@@ -50,9 +54,12 @@ impl Into<sc_service::config::WasmExecutionMethod> for WasmExecutionMethod {
 				sc_service::config::WasmExecutionMethod::Interpreted
 			}
 			#[cfg(feature = "wasmtime")]
-			WasmExecutionMethod::Compiled => sc_service::config::WasmExecutionMethod::Compiled,
+			WasmExecutionMethod::Compiled => sc_service::config::WasmExecutionMethod::Compiled(false),
+			#[cfg(feature = "wasmtime")]
+			WasmExecutionMethod::CompiledDebug => sc_service::config::WasmExecutionMethod::Compiled(true),
 			#[cfg(not(feature = "wasmtime"))]
-			WasmExecutionMethod::Compiled => panic!(
+			WasmExecutionMethod::CompiledDebug
+			| WasmExecutionMethod::Compiled => panic!(
 				"Substrate must be compiled with \"wasmtime\" feature for compiled Wasm execution"
 			),
 		}
