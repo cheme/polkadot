@@ -305,15 +305,23 @@ pub fn create_wasm_runtime_with_code(
 			.map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) })
 		}
 		#[cfg(feature = "wasmtime")]
-		WasmExecutionMethod::Compiled(debug) =>
+		WasmExecutionMethod::Compiled(debug) => {
+			let blob = sc_executor_common::runtime_blob::RuntimeBlob::new(code)?;
 			sc_executor_wasmtime::create_runtime(
-				code,
-				heap_pages,
+				sc_executor_wasmtime::CodeSupplyMode::Verbatim { blob },
+				sc_executor_wasmtime::Config {
+					heap_pages: heap_pages as u32,
+					allow_missing_func_imports,
+					cache_path: cache_path.map(ToOwned::to_owned),
+					semantics: sc_executor_wasmtime::Semantics {
+						fast_instance_reuse: true,
+						stack_depth_metering: false,
+					},
+					debug,
+				},
 				host_functions,
-				allow_missing_func_imports,
-				cache_path,
-				debug,
-			).map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) }),
+			).map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) })
+		},
 	}
 }
 
