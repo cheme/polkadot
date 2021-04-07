@@ -28,8 +28,10 @@
 use sp_std::{any::{Any, TypeId}, vec::Vec, boxed::Box};
 
 use sp_storage::{ChildInfo, TrackedStorageKey};
+use ambassador::{Delegate, delegatable_trait};
 
-pub use scope_limited::{set_and_run_with_externalities, with_externalities};
+pub use scope_limited::{set_and_run_with_externalities, with_externalities,
+	with_externalities_and_extension, externalities_and_extension};
 pub use extensions::{Extension, Extensions, ExtensionStore};
 
 mod extensions;
@@ -48,11 +50,16 @@ pub enum Error {
 	ExtensionIsNotRegistered(TypeId),
 	/// Failed to update storage,
 	StorageUpdateFailed(&'static str),
+	/// Extension store is locked due to an
+	/// extension accessing externalities in
+	/// a mutable manner.
+	ExtensionLocked,
 }
 
 /// The Substrate externalities.
 ///
 /// Provides access to the storage and to other registered extensions.
+#[delegatable_trait]
 pub trait Externalities: ExtensionStore {
 	/// Write a key value pair to the offchain storage database.
 	fn set_offchain_storage(&mut self, key: &[u8], value: Option<&[u8]>);
@@ -141,15 +148,16 @@ pub trait Externalities: ExtensionStore {
 	/// Clear an entire child storage.
 	///
 	/// Deletes all keys from the overlay and up to `limit` keys from the backend. No
-	/// limit is applied if `limit` is `None`. Returns `true` if the child trie was
+	/// limit is applied if `limit` is `None`. Returned boolean is `true` if the child trie was
 	/// removed completely and `false` if there are remaining keys after the function
-	/// returns.
+	/// returns. Returned `u32` is the number of keys that was removed at the end of the
+	/// operation.
 	///
 	/// # Note
 	///
 	/// An implementation is free to delete more keys than the specified limit as long as
 	/// it is able to do that in constant time.
-	fn kill_child_storage(&mut self, child_info: &ChildInfo, limit: Option<u32>) -> bool;
+	fn kill_child_storage(&mut self, child_info: &ChildInfo, limit: Option<u32>) -> (bool, u32);
 
 	/// Clear storage entries which keys are start with the given prefix.
 	fn clear_prefix(&mut self, prefix: &[u8]);
@@ -235,6 +243,16 @@ pub trait Externalities: ExtensionStore {
 	/// early kill.
 	fn storage_commit_transaction(&mut self) -> Result<Vec<TaskId>, ()>;
 
+	/// Index specified transaction slice and store it.
+	fn storage_index_transaction(&mut self, _index: u32, _offset: u32) {
+		unimplemented!("storage_index_transaction");
+	}
+
+	/// Renew existing piece of transaction storage.
+	fn storage_renew_transaction_index(&mut self, _index: u32, _hash: &[u8], _size: u32) {
+		unimplemented!("storage_renew_transaction_index");
+	}
+
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	/// Benchmarking related functionality and shouldn't be used anywhere else!
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -279,10 +297,10 @@ pub trait Externalities: ExtensionStore {
 	/// Adds new storage keys to the DB tracking whitelist.
 	fn set_whitelist(&mut self, new: Vec<TrackedStorageKey>);
 
-	/// Get externalities to use with a future worker.
+	/// Get externalities to use from within a child worker.
 	fn get_worker_externalities(
 		&mut self,
-		worker_id: u64,
+		worker_id: TaskId,
 		declaration: WorkerDeclaration,
 	) -> Box<dyn AsyncExternalities>;
 
@@ -293,11 +311,10 @@ pub trait Externalities: ExtensionStore {
 	/// for instance from a worker point of view the result may be valid,
 	/// but after checking against parent externalities, it may change
 	/// to invalid (`None`).
-	fn resolve_worker_result(&mut self, state_update: WorkerResult) -> Option<Vec<u8>>;
+	fn resolve_worker_result(&mut self, result: WorkerResult) -> Option<Vec<u8>>;
 
 	/// Worker result have been dissmiss, inner externality state and constraint
 	/// needs to be lifted.
-	/// TODO consider making it a worker result varian and only have 'resolve_worker_result'.
 	fn dismiss_worker(&mut self, id: TaskId);
 }
 
@@ -361,7 +378,7 @@ pub enum WorkerResult {
 	RuntimePanic,
 	/// Technical panic when runing the worker.
 	/// This propagate panic in caller, and also
-	/// indicate the process should be stop. 
+	/// indicate the process should be stop.
 	HardPanic,
 }
 
@@ -477,9 +494,21 @@ pub struct StateLog {
 	/// Worker did iterate over a given interval.
 	/// Interval is a pair of inclusive start and end key.
 	pub read_intervals: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+	/// Key write with no read access.
+	pub write_only_key: Vec<Vec<u8>>, 
+	/// Append operation in write only mode.
+	pub write_only_append_key: Vec<Vec<u8>>, 
 }
 
 impl StateLog {
+	/// Check that no incompatible access are done.
+	/// TODO debug assert call it where relevant: only for test or double check
+	pub fn validate(&self) -> bool {
+		if !self.write_only_key.is_empty() || !self.write_only_append_key.is_empty() {
+			unimplemented!()
+		}
+		true
+	}
 	/// Return true if a read related information was logged.
 	pub fn has_read(&self) -> bool {
 		!self.read_keys.is_empty() || !self.read_intervals.is_empty()
@@ -490,7 +519,10 @@ impl StateLog {
 	}
 }
 
-/// A unique indentifier for a transactional level.
+/// A unique identifier type for a child worker.
+/// This is not unique between nested worker (unique
+/// id with nested support would be an array of u64, but
+/// not needed).
 pub type TaskId = u64;
 
 /// How declaration error is handled.
@@ -798,5 +830,39 @@ impl ExternalitiesExt for &mut dyn Externalities {
 
 	fn deregister_extension<T: Extension>(&mut self) -> Result<(), Error> {
 		self.deregister_extension_by_type_id(TypeId::of::<T>())
+	}
+}
+
+/// Externalities with partially locked extension store.
+///
+/// It forbid access to a mutably borrowed extension as if the extension
+/// was behind a refcell.
+/// Note that we do an unsafe inner unsafe access and therefore
+/// also lock `register_extension` and `deregister_extension`.
+#[derive(Delegate)]
+#[delegate(Externalities, target = "externalities")]
+pub struct ExternalitiesLockedExtension<'a> {
+	externalities: &'a mut dyn Externalities,
+	locked: TypeId,
+}
+
+impl<'a> ExtensionStore for ExternalitiesLockedExtension<'a> {
+	fn extension_by_type_id(&mut self, type_id: TypeId) -> Option<&mut dyn Any> {
+		if self.locked == type_id {
+			panic!("Reentrant mutable access to extension.");
+		}
+		self.externalities.extension_by_type_id(type_id)
+	}
+
+	fn register_extension_with_type_id(
+		&mut self,
+		_type_id: TypeId,
+		_extension: Box<dyn Extension>,
+	) -> Result<(), Error> {
+		Err(Error::ExtensionLocked)
+	}
+
+	fn deregister_extension_by_type_id(&mut self, _type_id: TypeId) -> Result<(), Error> {
+		Err(Error::ExtensionLocked)
 	}
 }

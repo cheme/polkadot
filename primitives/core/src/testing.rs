@@ -148,14 +148,12 @@ impl crate::traits::SpawnNamed for TaskExecutor {
 	fn spawn_blocking(&self, _: &'static str, future: futures::future::BoxFuture<'static, ()>) {
 		self.0.spawn_ok(future);
 	}
-	fn spawn(&self, _: &'static str, future: futures::future::BoxFuture<'static, ()>) {
-		self.0.spawn_ok(future);
-	}
-	fn spawn_with_handle(
+
+	fn spawn(
 		&self,
 		_name: &'static str,
 		future: futures::future::BoxFuture<'static, ()>,
-	) -> Option<crate::traits::RemoteHandle> {
+	) -> Option<crate::traits::TaskHandle> {
 		use futures::task::SpawnExt;
 		if let Some(handle) = self.0.spawn_with_handle(future).ok() {
 			Some(Box::new(Handle(Some(handle))))
@@ -166,12 +164,42 @@ impl crate::traits::SpawnNamed for TaskExecutor {
 }
 
 #[cfg(feature = "std")]
+impl crate::traits::SpawnLimit for TaskExecutor {
+	fn try_reserve(&self, number_of_tasks: usize) -> usize {
+		// using a thread pool in backend there is no use to apply a limit
+		number_of_tasks
+	}
+
+	fn release(&self, _number_of_tasks: usize) {
+	}
+}
+
+#[cfg(feature = "std")]
 struct Handle(Option<futures::future::RemoteHandle<()>>);
 
 #[cfg(feature = "std")]
-impl crate::traits::SpawnHandle for Handle {
+impl crate::traits::TaskHandleTrait for Handle {
 	fn dismiss(&mut self) {
 		// drop the remote handle to free pool.
 		self.0.take();
+	}
+}
+
+#[cfg(feature = "std")]
+impl Drop for Handle {
+	fn drop(&mut self) {
+		// avoid dropping thread when we don't
+		// use the handle.
+		self.0.take().map(|inner| inner.forget());
+	}
+}
+
+#[cfg(feature = "std")]
+impl crate::traits::SpawnEssentialNamed for TaskExecutor {
+	fn spawn_essential_blocking(&self, _: &'static str, future: futures::future::BoxFuture<'static, ()>) {
+		self.0.spawn_ok(future);
+	}
+	fn spawn_essential(&self, _: &'static str, future: futures::future::BoxFuture<'static, ()>) {
+		self.0.spawn_ok(future);
 	}
 }

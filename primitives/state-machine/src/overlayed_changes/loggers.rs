@@ -119,7 +119,7 @@ impl StateLogger {
 			!value.is_empty()
 		});
 		let mut to_remove = Vec::new();
-		for (key, value) in self.children_write_prefix.iter_mut().value_iter_mut() {
+		for (key, value) in self.children_write_prefix.iter_mut().value_iter() {
 			value.remove(&marker);
 			if value.is_empty() {
 				to_remove.push(key.to_vec())

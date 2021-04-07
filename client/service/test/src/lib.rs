@@ -279,6 +279,7 @@ fn node_config<G: RuntimeGenesis + 'static, E: ChainSpecExtension + Clone + 'sta
 		base_path: Some(BasePath::new(root)),
 		informant_output_format: Default::default(),
 		disable_log_reloading: false,
+		worker_limit: None,
 	}
 }
 
@@ -335,7 +336,7 @@ impl<G, E, F, L, U> TestNet<G, E, F, L, U> where
 			let node_config = node_config(
 				self.nodes,
 				&self.chain_spec,
-				Role::Authority { sentry_nodes: Vec::new() },
+				Role::Authority,
 				task_executor.clone(),
 				Some(key),
 				self.base_port,

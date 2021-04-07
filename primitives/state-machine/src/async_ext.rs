@@ -38,7 +38,6 @@ use crate::{StorageValue, StorageKey, AsyncBackend, trace};
 /// and returns its changes on `join`.
 pub struct AsyncExt {
 	kind: WorkerType,
-	// Actually unused at this point, is for write variant.
 	overlay: OverlayedChanges,
 	spawn_id: TaskId,
 	backend: Box<dyn AsyncBackend>,
@@ -119,6 +118,7 @@ impl AsyncExt {
 	/// This does not indicate that a given write will
 	/// be allowend or will not result in an invalid
 	/// worker execution.
+	/// TODO check if used
 	pub fn write_access(&self) -> bool {
 		match self.kind {
 			WorkerType::Stateless
@@ -133,7 +133,6 @@ impl AsyncExt {
 			| WorkerType::WriteDeclarative => true,
 		}
 	}
-
 }
 
 impl Externalities for AsyncExt {
@@ -256,7 +255,7 @@ impl Externalities for AsyncExt {
 		&mut self,
 		_child_info: &ChildInfo,
 		_limit: Option<u32>,
-	) -> bool {
+	) -> (bool, u32) {
 		panic!("`kill_child_storage`: should not be used in read only worker externalities!");
 	}
 
@@ -342,7 +341,7 @@ impl Externalities for AsyncExt {
 
 	fn get_worker_externalities(
 		&mut self,
-		worker_id: u64,
+		worker_id: TaskId,
 		declaration: WorkerDeclaration,
 	) -> Box<dyn AsyncExternalities> {
 		let backend = self.backend.async_backend();

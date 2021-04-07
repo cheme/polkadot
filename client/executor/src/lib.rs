@@ -38,8 +38,9 @@ mod wasm_runtime;
 mod integration_tests;
 
 pub use wasmi;
-pub use native_executor::{with_externalities_safe, NativeExecutor, WasmExecutor,
-	NativeExecutionDispatch, RuntimeInstanceSpawn};
+pub use sp_tasks::{with_externalities_safe, pool_spawn::RuntimeInstanceSpawn};
+pub use native_executor::{NativeExecutor, WasmExecutor,
+	NativeExecutionDispatch};
 pub use sp_version::{RuntimeVersion, NativeVersion};
 pub use codec::Codec;
 #[doc(hidden)]
@@ -81,6 +82,7 @@ mod tests {
 			Some(8),
 			sp_io::SubstrateHostFunctions::host_functions(),
 			8,
+			None,
 		);
 		let res = executor.call_in_wasm(
 			&wasm_binary_unwrap()[..],

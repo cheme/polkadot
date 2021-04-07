@@ -36,12 +36,13 @@ use sc_client_db::{
 };
 use sc_block_builder::BlockBuilderProvider;
 use sc_service::client::{self, Client, LocalCallExecutor, new_in_mem};
-use sp_runtime::traits::{
-	BlakeTwo256, Block as BlockT, Header as HeaderT,
+use sp_runtime::{
+	ConsensusEngineId,
+	traits::{BlakeTwo256, Block as BlockT, Header as HeaderT},
 };
 use substrate_test_runtime::TestAPI;
 use sp_state_machine::backend::Backend as _;
-use sp_api::{ProvideRuntimeApi, OffchainOverlayedChanges};
+use sp_api::ProvideRuntimeApi;
 use sp_core::{H256, ChangesTrieConfiguration, blake2_256, testing::TaskExecutor};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -51,11 +52,14 @@ use sp_consensus::{
 };
 use sp_storage::StorageKey;
 use sp_trie::{TrieConfiguration, trie_types::Layout};
-use sp_runtime::{generic::BlockId, DigestItem};
+use sp_runtime::{generic::BlockId, DigestItem, Justifications};
 use hex_literal::hex;
+use futures::executor::block_on;
 
 mod light;
 mod db;
+
+const TEST_ENGINE_ID: ConsensusEngineId = *b"TEST";
 
 native_executor_instance!(
 	Executor,
@@ -105,7 +109,7 @@ pub fn prepare_client_with_key_changes() -> (
 			}).unwrap();
 		}
 		let block = builder.build().unwrap().block;
-		remote_client.import(BlockOrigin::Own, block).unwrap();
+		block_on(remote_client.import(BlockOrigin::Own, block)).unwrap();
 
 		let header = remote_client.header(&BlockId::Number(i as u64 + 1)).unwrap().unwrap();
 		let trie_root = header.digest().log(DigestItem::as_changes_trie_root)
@@ -163,7 +167,6 @@ fn construct_block(
 	};
 	let hash = header.hash();
 	let mut overlay = OverlayedChanges::default();
-	let mut offchain_overlay = OffchainOverlayedChanges::default();
 	let backend_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&backend);
 	let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
 	let task_executor = Box::new(TaskExecutor::new());
@@ -172,7 +175,6 @@ fn construct_block(
 		backend,
 		sp_state_machine::disabled_changes_trie_state::<_, u64>(),
 		&mut overlay,
-		&mut offchain_overlay,
 		&executor(),
 		"Core_initialize_block",
 		&header.encode(),
@@ -188,7 +190,6 @@ fn construct_block(
 			backend,
 			sp_state_machine::disabled_changes_trie_state::<_, u64>(),
 			&mut overlay,
-			&mut offchain_overlay,
 			&executor(),
 			"BlockBuilder_apply_extrinsic",
 			&tx.encode(),
@@ -204,7 +205,6 @@ fn construct_block(
 		backend,
 		sp_state_machine::disabled_changes_trie_state::<_, u64>(),
 		&mut overlay,
-		&mut offchain_overlay,
 		&executor(),
 		"BlockBuilder_finalize_block",
 		&[],
@@ -252,13 +252,11 @@ fn construct_genesis_should_work_with_native() {
 	let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
 
 	let mut overlay = OverlayedChanges::default();
-	let mut offchain_overlay = OffchainOverlayedChanges::default();
 
 	let _ = StateMachine::new(
 		&backend,
 		sp_state_machine::disabled_changes_trie_state::<_, u64>(),
 		&mut overlay,
-		&mut offchain_overlay,
 		&executor(),
 		"Core_execute_block",
 		&b1data,
@@ -288,13 +286,11 @@ fn construct_genesis_should_work_with_wasm() {
 	let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
 
 	let mut overlay = OverlayedChanges::default();
-	let mut offchain_overlay = OffchainOverlayedChanges::default();
 
 	let _ = StateMachine::new(
 		&backend,
 		sp_state_machine::disabled_changes_trie_state::<_, u64>(),
 		&mut overlay,
-		&mut offchain_overlay,
 		&executor(),
 		"Core_execute_block",
 		&b1data,
@@ -324,13 +320,11 @@ fn construct_genesis_with_bad_transaction_should_panic() {
 	let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
 
 	let mut overlay = OverlayedChanges::default();
-	let mut offchain_overlay = OffchainOverlayedChanges::default();
 
 	let r = StateMachine::new(
 		&backend,
 		sp_state_machine::disabled_changes_trie_state::<_, u64>(),
 		&mut overlay,
-		&mut offchain_overlay,
 		&executor(),
 		"Core_execute_block",
 		&b1data,
@@ -370,7 +364,7 @@ fn block_builder_works_with_no_transactions() {
 
 	let block = client.new_block(Default::default()).unwrap().build().unwrap().block;
 
-	client.import(BlockOrigin::Own, block).unwrap();
+	block_on(client.import(BlockOrigin::Own, block)).unwrap();
 
 	assert_eq!(client.chain_info().best_number, 1);
 }
@@ -389,7 +383,7 @@ fn block_builder_works_with_transactions() {
 	}).unwrap();
 
 	let block = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, block).unwrap();
+	block_on(client.import(BlockOrigin::Own, block)).unwrap();
 
 	assert_eq!(client.chain_info().best_number, 1);
 	assert_ne!(
@@ -435,7 +429,7 @@ fn block_builder_does_not_include_invalid() {
 	);
 
 	let block = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, block).unwrap();
+	block_on(client.import(BlockOrigin::Own, block)).unwrap();
 
 	assert_eq!(client.chain_info().best_number, 1);
 	assert_ne!(
@@ -483,11 +477,11 @@ fn uncles_with_only_ancestors() {
 
 	// G -> A1
 	let a1 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	// A1 -> A2
 	let a2 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 	let v: Vec<H256> = Vec::new();
 	assert_eq!(v, client.uncles(a2.hash(), 3).unwrap());
 }
@@ -503,7 +497,7 @@ fn uncles_with_multiple_forks() {
 
 	// G -> A1
 	let a1 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	// A1 -> A2
 	let a2 = client.new_block_at(
@@ -511,7 +505,7 @@ fn uncles_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	// A2 -> A3
 	let a3 = client.new_block_at(
@@ -519,7 +513,7 @@ fn uncles_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a3.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a3.clone())).unwrap();
 
 	// A3 -> A4
 	let a4 = client.new_block_at(
@@ -527,7 +521,7 @@ fn uncles_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a4.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a4.clone())).unwrap();
 
 	// A4 -> A5
 	let a5 = client.new_block_at(
@@ -535,7 +529,7 @@ fn uncles_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a5.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a5.clone())).unwrap();
 
 	// A1 -> B2
 	let mut builder = client.new_block_at(
@@ -551,7 +545,7 @@ fn uncles_with_multiple_forks() {
 		nonce: 0,
 	}).unwrap();
 	let b2 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, b2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b2.clone())).unwrap();
 
 	// B2 -> B3
 	let b3 = client.new_block_at(
@@ -559,7 +553,7 @@ fn uncles_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b3.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b3.clone())).unwrap();
 
 	// B3 -> B4
 	let b4 = client.new_block_at(
@@ -567,7 +561,7 @@ fn uncles_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b4.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b4.clone())).unwrap();
 
 	// // B2 -> C3
 	let mut builder = client.new_block_at(
@@ -583,7 +577,7 @@ fn uncles_with_multiple_forks() {
 		nonce: 1,
 	}).unwrap();
 	let c3 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, c3.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, c3.clone())).unwrap();
 
 	// A1 -> D2
 	let mut builder = client.new_block_at(
@@ -599,7 +593,7 @@ fn uncles_with_multiple_forks() {
 		nonce: 0,
 	}).unwrap();
 	let d2 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, d2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, d2.clone())).unwrap();
 
 	let genesis_hash = client.chain_info().genesis_hash;
 
@@ -631,11 +625,11 @@ fn best_containing_on_longest_chain_with_single_chain_3_blocks() {
 
 	// G -> A1
 	let a1 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	// A1 -> A2
 	let a2 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	let genesis_hash = client.chain_info().genesis_hash;
 
@@ -655,7 +649,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 
 	// G -> A1
 	let a1 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	// A1 -> A2
 	let a2 = client.new_block_at(
@@ -663,7 +657,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	// A2 -> A3
 	let a3 = client.new_block_at(
@@ -671,7 +665,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a3.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a3.clone())).unwrap();
 
 	// A3 -> A4
 	let a4 = client.new_block_at(
@@ -679,7 +673,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a4.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a4.clone())).unwrap();
 
 	// A4 -> A5
 	let a5 = client.new_block_at(
@@ -687,7 +681,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a5.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a5.clone())).unwrap();
 
 	// A1 -> B2
 	let mut builder = client.new_block_at(
@@ -703,7 +697,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		nonce: 0,
 	}).unwrap();
 	let b2 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, b2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b2.clone())).unwrap();
 
 	// B2 -> B3
 	let b3 = client.new_block_at(
@@ -711,7 +705,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b3.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b3.clone())).unwrap();
 
 	// B3 -> B4
 	let b4 = client.new_block_at(
@@ -719,7 +713,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b4.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b4.clone())).unwrap();
 
 	// // B2 -> C3
 	let mut builder = client.new_block_at(
@@ -735,7 +729,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		nonce: 1,
 	}).unwrap();
 	let c3 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, c3.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, c3.clone())).unwrap();
 
 	// A1 -> D2
 	let mut builder = client.new_block_at(
@@ -751,7 +745,7 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 		nonce: 0,
 	}).unwrap();
 	let d2 = builder.build().unwrap().block;
-	client.import(BlockOrigin::Own, d2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, d2.clone())).unwrap();
 
 	assert_eq!(client.chain_info().best_hash, a5.hash());
 
@@ -959,11 +953,15 @@ fn best_containing_on_longest_chain_with_multiple_forks() {
 	assert_eq!(None, longest_chain_select.finality_target(
 		b4.hash(), Some(0)).unwrap());
 
-	assert_eq!(None, longest_chain_select.finality_target(
-		c3.hash().clone(), Some(0)).unwrap());
+	assert_eq!(
+		None,
+		longest_chain_select.finality_target(c3.hash().clone(), Some(0)).unwrap(),
+	);
 
-	assert_eq!(None, longest_chain_select.finality_target(
-		d2.hash().clone(), Some(0)).unwrap());
+	assert_eq!(
+		None,
+		longest_chain_select.finality_target(d2.hash().clone(), Some(0)).unwrap(),
+	);
 }
 
 #[test]
@@ -975,15 +973,18 @@ fn best_containing_on_longest_chain_with_max_depth_higher_than_best() {
 
 	// G -> A1
 	let a1 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	// A1 -> A2
 	let a2 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	let genesis_hash = client.chain_info().genesis_hash;
 
-	assert_eq!(a2.hash(), longest_chain_select.finality_target(genesis_hash, Some(10)).unwrap().unwrap());
+	assert_eq!(
+		a2.hash(),
+		longest_chain_select.finality_target(genesis_hash, Some(10)).unwrap().unwrap(),
+	);
 }
 
 #[test]
@@ -998,10 +999,13 @@ fn key_changes_works() {
 			None,
 			&StorageKey(key),
 		).unwrap();
-		match actual_result == expected_result {
-			true => (),
-			false => panic!(format!("Failed test {}: actual = {:?}, expected = {:?}",
-			                        index, actual_result, expected_result)),
+		if actual_result != expected_result {
+			panic!(
+				"Failed test {}: actual = {:?}, expected = {:?}",
+				index,
+				actual_result,
+				expected_result,
+			);
 		}
 	}
 }
@@ -1012,7 +1016,7 @@ fn import_with_justification() {
 
 	// G -> A1
 	let a1 = client.new_block(Default::default()).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	// A1 -> A2
 	let a2 = client.new_block_at(
@@ -1020,16 +1024,16 @@ fn import_with_justification() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	// A2 -> A3
-	let justification = vec![1, 2, 3];
+	let justification = Justifications::from((TEST_ENGINE_ID, vec![1, 2, 3]));
 	let a3 = client.new_block_at(
 		&BlockId::Hash(a2.hash()),
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import_justified(BlockOrigin::Own, a3.clone(), justification.clone()).unwrap();
+	block_on(client.import_justified(BlockOrigin::Own, a3.clone(), justification.clone())).unwrap();
 
 	assert_eq!(
 		client.chain_info().finalized_hash,
@@ -1037,17 +1041,17 @@ fn import_with_justification() {
 	);
 
 	assert_eq!(
-		client.justification(&BlockId::Hash(a3.hash())).unwrap(),
+		client.justifications(&BlockId::Hash(a3.hash())).unwrap(),
 		Some(justification),
 	);
 
 	assert_eq!(
-		client.justification(&BlockId::Hash(a1.hash())).unwrap(),
+		client.justifications(&BlockId::Hash(a1.hash())).unwrap(),
 		None,
 	);
 
 	assert_eq!(
-		client.justification(&BlockId::Hash(a2.hash())).unwrap(),
+		client.justifications(&BlockId::Hash(a2.hash())).unwrap(),
 		None,
 	);
 }
@@ -1064,14 +1068,14 @@ fn importing_diverged_finalized_block_should_trigger_reorg() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	let a2 = client.new_block_at(
 		&BlockId::Hash(a1.hash()),
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	let mut b1 = client.new_block_at(
 		&BlockId::Number(0),
@@ -1095,8 +1099,8 @@ fn importing_diverged_finalized_block_should_trigger_reorg() {
 	);
 
 	// importing B1 as finalized should trigger a re-org and set it as new best
-	let justification = vec![1, 2, 3];
-	client.import_justified(BlockOrigin::Own, b1.clone(), justification).unwrap();
+	let justification = Justifications::from((TEST_ENGINE_ID, vec![1, 2, 3]));
+	block_on(client.import_justified(BlockOrigin::Own, b1.clone(), justification)).unwrap();
 
 	assert_eq!(
 		client.chain_info().best_hash,
@@ -1121,14 +1125,14 @@ fn finalizing_diverged_block_should_trigger_reorg() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	let a2 = client.new_block_at(
 		&BlockId::Hash(a1.hash()),
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	let mut b1 = client.new_block_at(
 		&BlockId::Number(0),
@@ -1143,14 +1147,14 @@ fn finalizing_diverged_block_should_trigger_reorg() {
 		nonce: 0,
 	}).unwrap();
 	let b1 = b1.build().unwrap().block;
-	client.import(BlockOrigin::Own, b1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b1.clone())).unwrap();
 
 	let b2 = client.new_block_at(
 		&BlockId::Hash(b1.hash()),
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b2.clone())).unwrap();
 
 	// A2 is the current best since it's the longest chain
 	assert_eq!(
@@ -1188,7 +1192,7 @@ fn finalizing_diverged_block_should_trigger_reorg() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b3.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b3.clone())).unwrap();
 
 	assert_eq!(
 		client.chain_info().best_hash,
@@ -1231,7 +1235,7 @@ fn state_reverted_on_reorg() {
 		nonce: 0,
 	}).unwrap();
 	let a1 = a1.build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	let mut b1 = client.new_block_at(
 		&BlockId::Number(0),
@@ -1246,7 +1250,7 @@ fn state_reverted_on_reorg() {
 	}).unwrap();
 	let b1 = b1.build().unwrap().block;
 	// Reorg to B1
-	client.import_as_best(BlockOrigin::Own, b1.clone()).unwrap();
+	block_on(client.import_as_best(BlockOrigin::Own, b1.clone())).unwrap();
 
 	assert_eq!(950, current_balance(&client));
 	let mut a2 = client.new_block_at(
@@ -1262,7 +1266,7 @@ fn state_reverted_on_reorg() {
 	}).unwrap();
 	let a2 = a2.build().unwrap().block;
 	// Re-org to A2
-	client.import_as_best(BlockOrigin::Own, a2).unwrap();
+	block_on(client.import_as_best(BlockOrigin::Own, a2)).unwrap();
 	assert_eq!(980, current_balance(&client));
 }
 
@@ -1301,14 +1305,14 @@ fn doesnt_import_blocks_that_revert_finality() {
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a1.clone())).unwrap();
 
 	let a2 = client.new_block_at(
 		&BlockId::Hash(a1.hash()),
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, a2.clone())).unwrap();
 
 	let mut b1 = client.new_block_at(&BlockId::Number(0), Default::default(), false).unwrap();
 
@@ -1320,11 +1324,11 @@ fn doesnt_import_blocks_that_revert_finality() {
 		nonce: 0,
 	}).unwrap();
 	let b1 = b1.build().unwrap().block;
-	client.import(BlockOrigin::Own, b1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b1.clone())).unwrap();
 
 	let b2 = client.new_block_at(&BlockId::Hash(b1.hash()), Default::default(), false)
 		.unwrap().build().unwrap().block;
-	client.import(BlockOrigin::Own, b2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::Own, b2.clone())).unwrap();
 
 	// prepare B3 before we finalize A2, because otherwise we won't be able to
 	// read changes trie configuration after A2 is finalized
@@ -1335,9 +1339,11 @@ fn doesnt_import_blocks_that_revert_finality() {
 	// B3 at the same height but that doesn't include it
 	ClientExt::finalize_block(&client, BlockId::Hash(a2.hash()), None).unwrap();
 
-	let import_err = client.import(BlockOrigin::Own, b3).err().unwrap();
+	let import_err = block_on(client.import(BlockOrigin::Own, b3)).err().unwrap();
 	let expected_err = ConsensusError::ClientImport(
-		sp_blockchain::Error::NotInFinalizedChain.to_string()
+		sp_blockchain::Error::RuntimeApiError(
+			sp_api::ApiError::Application(Box::new(sp_blockchain::Error::NotInFinalizedChain))
+		).to_string()
 	);
 
 	assert_eq!(
@@ -1358,7 +1364,7 @@ fn doesnt_import_blocks_that_revert_finality() {
 	}).unwrap();
 	let c1 = c1.build().unwrap().block;
 
-	let import_err = client.import(BlockOrigin::Own, c1).err().unwrap();
+	let import_err = block_on(client.import(BlockOrigin::Own, c1)).err().unwrap();
 	let expected_err = ConsensusError::ClientImport(
 		sp_blockchain::Error::NotInFinalizedChain.to_string()
 	);
@@ -1368,7 +1374,6 @@ fn doesnt_import_blocks_that_revert_finality() {
 		expected_err.to_string(),
 	);
 }
-
 
 #[test]
 fn respects_block_rules() {
@@ -1398,7 +1403,7 @@ fn respects_block_rules() {
 			allow_missing_state: false,
 			import_existing: false,
 		};
-		assert_eq!(client.check_block(params).unwrap(), ImportResult::imported(false));
+		assert_eq!(block_on(client.check_block(params)).unwrap(), ImportResult::imported(false));
 
 		// this is 0x0d6d6612a10485370d9e085aeea7ec427fb3f34d961c6a816cdbe5cde2278864
 		let mut block_not_ok = client.new_block_at(&BlockId::Number(0), Default::default(), false)
@@ -1416,11 +1421,11 @@ fn respects_block_rules() {
 		if record_only {
 			known_bad.insert(block_not_ok.hash());
 		} else {
-			assert_eq!(client.check_block(params).unwrap(), ImportResult::KnownBad);
+			assert_eq!(block_on(client.check_block(params)).unwrap(), ImportResult::KnownBad);
 		}
 
 		// Now going to the fork
-		client.import_as_final(BlockOrigin::Own, block_ok).unwrap();
+		block_on(client.import_as_final(BlockOrigin::Own, block_ok)).unwrap();
 
 		// And check good fork
 		let mut block_ok = client.new_block_at(&BlockId::Number(1), Default::default(), false)
@@ -1438,7 +1443,7 @@ fn respects_block_rules() {
 		if record_only {
 			fork_rules.push((1, block_ok.hash().clone()));
 		}
-		assert_eq!(client.check_block(params).unwrap(), ImportResult::imported(false));
+		assert_eq!(block_on(client.check_block(params)).unwrap(), ImportResult::imported(false));
 
 		// And now try bad fork
 		let mut block_not_ok = client.new_block_at(&BlockId::Number(1), Default::default(), false)
@@ -1455,7 +1460,7 @@ fn respects_block_rules() {
 		};
 
 		if !record_only {
-			assert_eq!(client.check_block(params).unwrap(), ImportResult::KnownBad);
+			assert_eq!(block_on(client.check_block(params)).unwrap(), ImportResult::KnownBad);
 		}
 	}
 
@@ -1493,8 +1498,11 @@ fn returns_status_for_pruned_blocks() {
 
 	let mut client = TestClientBuilder::with_backend(backend).build();
 
-	let a1 = client.new_block_at(&BlockId::Number(0), Default::default(), false)
-		.unwrap().build().unwrap().block;
+	let a1 = client.new_block_at(
+		&BlockId::Number(0),
+		Default::default(),
+		false,
+	).unwrap().build().unwrap().block;
 
 	let mut b1 = client.new_block_at(&BlockId::Number(0), Default::default(), false).unwrap();
 
@@ -1515,17 +1523,32 @@ fn returns_status_for_pruned_blocks() {
 		import_existing: false,
 	};
 
-	assert_eq!(client.check_block(check_block_a1.clone()).unwrap(), ImportResult::imported(false));
-	assert_eq!(client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(), BlockStatus::Unknown);
+	assert_eq!(
+		block_on(client.check_block(check_block_a1.clone())).unwrap(),
+		ImportResult::imported(false),
+	);
+	assert_eq!(
+		client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(),
+		BlockStatus::Unknown,
+	);
 
-	client.import_as_final(BlockOrigin::Own, a1.clone()).unwrap();
+	block_on(client.import_as_final(BlockOrigin::Own, a1.clone())).unwrap();
 
-	assert_eq!(client.check_block(check_block_a1.clone()).unwrap(), ImportResult::AlreadyInChain);
-	assert_eq!(client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(), BlockStatus::InChainWithState);
+	assert_eq!(
+		block_on(client.check_block(check_block_a1.clone())).unwrap(),
+		ImportResult::AlreadyInChain,
+	);
+	assert_eq!(
+		client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(),
+		BlockStatus::InChainWithState,
+	);
 
-	let a2 = client.new_block_at(&BlockId::Hash(a1.hash()), Default::default(), false)
-		.unwrap().build().unwrap().block;
-	client.import_as_final(BlockOrigin::Own, a2.clone()).unwrap();
+	let a2 = client.new_block_at(
+		&BlockId::Hash(a1.hash()),
+		Default::default(),
+		false,
+	).unwrap().build().unwrap().block;
+	block_on(client.import_as_final(BlockOrigin::Own, a2.clone())).unwrap();
 
 	let check_block_a2 = BlockCheckParams {
 		hash: a2.hash().clone(),
@@ -1535,15 +1558,30 @@ fn returns_status_for_pruned_blocks() {
 		import_existing: false,
 	};
 
-	assert_eq!(client.check_block(check_block_a1.clone()).unwrap(), ImportResult::AlreadyInChain);
-	assert_eq!(client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(), BlockStatus::InChainPruned);
-	assert_eq!(client.check_block(check_block_a2.clone()).unwrap(), ImportResult::AlreadyInChain);
-	assert_eq!(client.block_status(&BlockId::hash(check_block_a2.hash)).unwrap(), BlockStatus::InChainWithState);
+	assert_eq!(
+		block_on(client.check_block(check_block_a1.clone())).unwrap(),
+		ImportResult::AlreadyInChain,
+	);
+	assert_eq!(
+		client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(),
+		BlockStatus::InChainPruned,
+	);
+	assert_eq!(
+		block_on(client.check_block(check_block_a2.clone())).unwrap(),
+		ImportResult::AlreadyInChain,
+	);
+	assert_eq!(
+		client.block_status(&BlockId::hash(check_block_a2.hash)).unwrap(),
+		BlockStatus::InChainWithState,
+	);
 
-	let a3 = client.new_block_at(&BlockId::Hash(a2.hash()), Default::default(), false)
-		.unwrap().build().unwrap().block;
+	let a3 = client.new_block_at(
+		&BlockId::Hash(a2.hash()),
+		Default::default(),
+		false,
+	).unwrap().build().unwrap().block;
 
-	client.import_as_final(BlockOrigin::Own, a3.clone()).unwrap();
+	block_on(client.import_as_final(BlockOrigin::Own, a3.clone())).unwrap();
 	let check_block_a3 = BlockCheckParams {
 		hash: a3.hash().clone(),
 		number: 2,
@@ -1553,12 +1591,30 @@ fn returns_status_for_pruned_blocks() {
 	};
 
 	// a1 and a2 are both pruned at this point
-	assert_eq!(client.check_block(check_block_a1.clone()).unwrap(), ImportResult::AlreadyInChain);
-	assert_eq!(client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(), BlockStatus::InChainPruned);
-	assert_eq!(client.check_block(check_block_a2.clone()).unwrap(), ImportResult::AlreadyInChain);
-	assert_eq!(client.block_status(&BlockId::hash(check_block_a2.hash)).unwrap(), BlockStatus::InChainPruned);
-	assert_eq!(client.check_block(check_block_a3.clone()).unwrap(), ImportResult::AlreadyInChain);
-	assert_eq!(client.block_status(&BlockId::hash(check_block_a3.hash)).unwrap(), BlockStatus::InChainWithState);
+	assert_eq!(
+		block_on(client.check_block(check_block_a1.clone())).unwrap(),
+		ImportResult::AlreadyInChain,
+	);
+	assert_eq!(
+		client.block_status(&BlockId::hash(check_block_a1.hash)).unwrap(),
+		BlockStatus::InChainPruned,
+	);
+	assert_eq!(
+		block_on(client.check_block(check_block_a2.clone())).unwrap(),
+		ImportResult::AlreadyInChain,
+	);
+	assert_eq!(
+		client.block_status(&BlockId::hash(check_block_a2.hash)).unwrap(),
+		BlockStatus::InChainPruned,
+	);
+	assert_eq!(
+		block_on(client.check_block(check_block_a3.clone())).unwrap(),
+		ImportResult::AlreadyInChain,
+	);
+	assert_eq!(
+		client.block_status(&BlockId::hash(check_block_a3.hash)).unwrap(),
+		BlockStatus::InChainWithState,
+	);
 
 	let mut check_block_b1 = BlockCheckParams {
 		hash: b1.hash().clone(),
@@ -1567,11 +1623,20 @@ fn returns_status_for_pruned_blocks() {
 		allow_missing_state: false,
 		import_existing: false,
 	};
-	assert_eq!(client.check_block(check_block_b1.clone()).unwrap(), ImportResult::MissingState);
+	assert_eq!(
+		block_on(client.check_block(check_block_b1.clone())).unwrap(),
+		ImportResult::MissingState,
+	);
 	check_block_b1.allow_missing_state = true;
-	assert_eq!(client.check_block(check_block_b1.clone()).unwrap(), ImportResult::imported(false));
+	assert_eq!(
+		block_on(client.check_block(check_block_b1.clone())).unwrap(),
+		ImportResult::imported(false),
+	);
 	check_block_b1.parent_hash = H256::random();
-	assert_eq!(client.check_block(check_block_b1.clone()).unwrap(), ImportResult::UnknownParent);
+	assert_eq!(
+		block_on(client.check_block(check_block_b1.clone())).unwrap(),
+		ImportResult::UnknownParent,
+	);
 }
 
 #[test]
@@ -1602,18 +1667,18 @@ fn imports_blocks_with_changes_tries_config_change() {
 	(1..11).for_each(|number| {
 		let block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false)
 			.unwrap().build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(11..12).for_each(|number| {
 		let mut block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false).unwrap();
 		block.push_storage_change(vec![42], Some(number.to_le_bytes().to_vec())).unwrap();
 		let block = block.build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(12..23).for_each(|number| {
 		let block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false)
 			.unwrap().build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(23..24).for_each(|number| {
 		let mut block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false).unwrap();
@@ -1622,24 +1687,24 @@ fn imports_blocks_with_changes_tries_config_change() {
 			digest_levels: 1,
 		})).unwrap();
 		let block = block.build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(24..26).for_each(|number| {
 		let mut block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false).unwrap();
 		block.push_storage_change(vec![42], Some(number.to_le_bytes().to_vec())).unwrap();
 		let block = block.build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(26..27).for_each(|number| {
 		let block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false)
 			.unwrap().build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(27..28).for_each(|number| {
 		let mut block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false).unwrap();
 		block.push_storage_change(vec![42], Some(number.to_le_bytes().to_vec())).unwrap();
 		let block = block.build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(28..29).for_each(|number| {
 		let mut block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false).unwrap();
@@ -1648,23 +1713,23 @@ fn imports_blocks_with_changes_tries_config_change() {
 			digest_levels: 1,
 		})).unwrap();
 		let block = block.build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(29..30).for_each(|number| {
 		let block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false)
 			.unwrap().build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(30..31).for_each(|number| {
 		let mut block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false).unwrap();
 		block.push_storage_change(vec![42], Some(number.to_le_bytes().to_vec())).unwrap();
 		let block = block.build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 	(31..32).for_each(|number| {
 		let block = client.new_block_at(&BlockId::Number(number - 1), Default::default(), false)
 			.unwrap().build().unwrap().block;
-		client.import(BlockOrigin::Own, block).unwrap();
+		block_on(client.import(BlockOrigin::Own, block)).unwrap();
 	});
 
 	// now check that configuration cache works
@@ -1749,6 +1814,7 @@ fn cleans_up_closed_notification_sinks_on_block_import() {
 			&substrate_test_runtime_client::GenesisParameters::default().genesis_storage(),
 			None,
 			None,
+			None,
 			Box::new(TaskExecutor::new()),
 			Default::default(),
 		)
@@ -1779,7 +1845,7 @@ fn cleans_up_closed_notification_sinks_on_block_import() {
 		let mut import = BlockImportParams::new(origin, header);
 		import.body = Some(extrinsics);
 		import.fork_choice = Some(ForkChoiceStrategy::LongestChain);
-		client.import_block(import, Default::default()).unwrap();
+		block_on(client.import_block(import, Default::default())).unwrap();
 	};
 
 	// after importing a block we should still have 4 notification sinks
@@ -1822,14 +1888,14 @@ fn reorg_triggers_a_notification_even_for_sources_that_should_not_trigger_notifi
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::NetworkInitialSync, a1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::NetworkInitialSync, a1.clone())).unwrap();
 
 	let a2 = client.new_block_at(
 		&BlockId::Hash(a1.hash()),
 		Default::default(),
 		false,
 	).unwrap().build().unwrap().block;
-	client.import(BlockOrigin::NetworkInitialSync, a2.clone()).unwrap();
+	block_on(client.import(BlockOrigin::NetworkInitialSync, a2.clone())).unwrap();
 
 	let mut b1 = client.new_block_at(
 		&BlockId::Number(0),
@@ -1844,7 +1910,7 @@ fn reorg_triggers_a_notification_even_for_sources_that_should_not_trigger_notifi
 		nonce: 0,
 	}).unwrap();
 	let b1 = b1.build().unwrap().block;
-	client.import(BlockOrigin::NetworkInitialSync, b1.clone()).unwrap();
+	block_on(client.import(BlockOrigin::NetworkInitialSync, b1.clone())).unwrap();
 
 	let b2 = client.new_block_at(
 		&BlockId::Hash(b1.hash()),
@@ -1853,7 +1919,7 @@ fn reorg_triggers_a_notification_even_for_sources_that_should_not_trigger_notifi
 	).unwrap().build().unwrap().block;
 
 	// Should trigger a notification because we reorg
-	client.import_as_best(BlockOrigin::NetworkInitialSync, b2.clone()).unwrap();
+	block_on(client.import_as_best(BlockOrigin::NetworkInitialSync, b2.clone())).unwrap();
 
 	// There should be one notification
 	let notification = notification_stream.next().unwrap();

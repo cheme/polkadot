@@ -27,8 +27,10 @@ use sp_std::{
 	boxed::Box,
 	vec::Vec,
 };
+use dyn_clone::DynClone;
 
-pub use sp_externalities::{Externalities, ExternalitiesExt, AsyncExternalities, WorkerResult, WorkerDeclaration};
+pub use sp_externalities::{Externalities, ExternalitiesExt, AsyncExternalities,
+	WorkerDeclaration, WorkerResult, TaskId};
 
 /// Code execution engine.
 #[cfg(feature = "std")]
@@ -40,7 +42,7 @@ pub trait CodeExecutor: Sized + Send + Sync + CallInWasm + Clone + 'static {
 	/// or an execution error) together with a `bool`, which is true if native execution was used.
 	fn call<
 		R: codec::Codec + PartialEq,
-		NC: FnOnce() -> Result<R, String> + UnwindSafe,
+		NC: FnOnce() -> Result<R, Box<dyn std::error::Error + Send + Sync>> + UnwindSafe,
 	>(
 		&self,
 		ext: &mut dyn Externalities,
@@ -208,7 +210,7 @@ pub trait RuntimeSpawn: Send {
 		data: Vec<u8>,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> u64;
+	) -> TaskId;
 
 	/// Create new runtime instance and use dynamic dispatch to invoke with specified payload.
 	///
@@ -221,27 +223,25 @@ pub trait RuntimeSpawn: Send {
 		payload: Vec<u8>,
 		declaration: WorkerDeclaration,
 		ext: &mut dyn Externalities,
-	) -> u64;
-	
+	) -> TaskId;
+
 	/// Join the result of previously created runtime instance invocation.
-	fn join(&self, handle: u64, calling_ext: &mut dyn Externalities) -> Option<Vec<u8>>;
+	fn join(&self, handle: TaskId, calling_ext: &mut dyn Externalities) -> Option<Vec<u8>>;
 
 	/// Stop the previous created runtime instance invocation.
 	///
-	/// After calling `dismiss`, `join` would only result in `None`,
-	/// but there is no guaranty the running process is actually stopped.
-	/// Note that `dismiss` can be more expensive than `join`, as
-	/// it can involve spawning again the worker, when `join` just
-	/// release it.
-	fn dismiss(&self, handle: u64, calling_ext: &mut dyn Externalities);
+	/// This only guarantee that next call to join with this handle
+	/// will return `None`.
+	/// Client can handle this as he can (for instance worker
+	/// can not always be stopped).
+	fn dismiss(&self, handle: TaskId, calling_ext: &mut dyn Externalities);
 
-	/// Change the number of runtime runing in the pool.
+	/// Possibly change the number of runtime runing in the pool.
 	/// Note that this should only increase capacity (default value
 	/// being 0).
-	/// Also notice that this capacity increase may be noops when the
-	/// client limit the number of concurrent threads, but this is
-	/// not consensus critical, just a way to indicate a cost for
-	/// the runtime.
+	/// This capacity increase is optional from the client side, and
+	/// client can limit the number of concurrent threads, as this is
+	/// not consensus critical.
 	fn set_capacity(&self, capacity: u32);
 }
 
@@ -250,71 +250,96 @@ sp_externalities::decl_extension! {
 	pub struct RuntimeSpawnExt(Box<dyn RuntimeSpawn>);
 }
 
-/// Hacky trait to trick `SpawnNamed` trait
-/// to exists in no_std but without actual
-/// `Clone` feature.
-/// This could be remove when/if dyn_cloneable crate
-/// become no_std (not much work, TODO make a PR for it).
-#[cfg(not(feature = "std"))]
-pub trait Clone { }
-
-/// Remote handle for a future, dropping it
-/// should do as much as supported to remove
-/// thread from its thread pool.
-pub type RemoteHandle = Box<dyn SpawnHandle>;
+/// Remote handle for a future.
+pub type TaskHandle = Box<dyn TaskHandleTrait>;
 
 /// Alias of the future type to use with `SpawnedNamed` trait.
 pub type BoxFuture = futures::future::BoxFuture<'static, ()>;
 
-/// Something that can spawn futures (blocking and non-blocking) with an assigned name.
-/// TODO not having dyn_clonable make it not really usable in no_std, but trait exists
-/// so we can query extension for it.
-#[cfg_attr(feature = "std", dyn_clonable::clonable)]
-pub trait SpawnNamed: Clone + Send + Sync {
+/// Something that can spawn tasks (blocking and non-blocking) with an assigned name.
+pub trait SpawnNamed: SpawnLimit + DynClone + Send + Sync {
 	/// Spawn the given blocking future.
 	///
 	/// The given `name` is used to identify the future in tracing.
 	fn spawn_blocking(&self, name: &'static str, future: BoxFuture);
 
 	/// Spawn the given non-blocking future.
+	/// The handle optionally allows to signal that the task can be dismiss.
 	///
 	/// The given `name` is used to identify the future in tracing.
-	fn spawn(&self, name: &'static str, future: BoxFuture);
-
-	/// Spawn the given non-blocking future if possible, returns a handle.
-	///
-	/// The given `name` is used to identify the future in tracing.
-	fn spawn_with_handle(
+	fn spawn(
 		&self,
 		name: &'static str,
 		future: BoxFuture,
-	) -> Option<RemoteHandle>;
+	) -> Option<TaskHandle>;
 }
+dyn_clone::clone_trait_object!(SpawnNamed);
+
+/// This can be use to implement shared pool.
+pub trait SpawnLimit: DynClone + Send + Sync {
+	/// Ask for a given number of tasks, return the
+	/// actual number reserved.
+	fn try_reserve(&self, number_of_tasks: usize) -> usize;
+
+	/// Release a given number of task.
+	fn release(&self, number_of_tasks: usize);
+}
+dyn_clone::clone_trait_object!(SpawnLimit);
 
 /// Handle over a spawn named future.
-pub trait SpawnHandle: Send {
-	/// Associated future can be dropped
-	/// and remove from pool if a pool is used.
+pub trait TaskHandleTrait: Send {
+	/// Indicate to the scheduler that task can
+	/// be dropped.
 	fn dismiss(&mut self);
 }
 
-#[cfg(not(feature = "std"))]
-impl Clone for Box<dyn SpawnNamed> { }
 
 impl SpawnNamed for Box<dyn SpawnNamed> {
 	fn spawn_blocking(&self, name: &'static str, future: BoxFuture) {
 		(**self).spawn_blocking(name, future)
 	}
 
-	fn spawn(&self, name: &'static str, future: BoxFuture) {
-		(**self).spawn(name, future)
-	}
-
-	fn spawn_with_handle(
+	fn spawn(
 		&self,
 		name: &'static str,
 		future: BoxFuture,
-	) -> Option<RemoteHandle> {
-		(**self).spawn_with_handle(name, future)
+	) -> Option<TaskHandle> {
+		(**self).spawn(name, future)
+	}
+}
+
+impl SpawnLimit for Box<dyn SpawnNamed> {
+	fn try_reserve(&self, number_of_tasks: usize) -> usize {
+		(**self).try_reserve(number_of_tasks)
+	}
+
+	fn release(&self, number_of_tasks: usize) {
+		(**self).release(number_of_tasks)
+	}
+}
+
+/// Something that can spawn essential tasks (blocking and non-blocking) with an assigned name.
+///
+/// Essential tasks are special tasks that should take down the node when they end.
+pub trait SpawnEssentialNamed: DynClone + Send + Sync {
+	/// Spawn the given blocking future.
+	///
+	/// The given `name` is used to identify the future in tracing.
+	fn spawn_essential_blocking(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>);
+	/// Spawn the given non-blocking future.
+	///
+	/// The given `name` is used to identify the future in tracing.
+	fn spawn_essential(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>);
+}
+dyn_clone::clone_trait_object!(SpawnEssentialNamed);
+
+#[cfg(feature = "std")]
+impl SpawnEssentialNamed for Box<dyn SpawnEssentialNamed> {
+	fn spawn_essential_blocking(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>) {
+		(**self).spawn_essential_blocking(name, future)
+	}
+
+	fn spawn_essential(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>) {
+		(**self).spawn_essential(name, future)
 	}
 }

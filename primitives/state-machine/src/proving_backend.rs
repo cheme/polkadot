@@ -33,7 +33,7 @@ use crate::{Error, ExecutionError, Backend, DBValue, AsyncBackend};
 use sp_core::storage::ChildInfo;
 
 /// Patricia trie-based backend specialized in get value proofs.
-pub struct ProvingBackendRecorder<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> {
+pub struct ProvingBackendRecorder<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
 	pub(crate) backend: &'a TrieBackendEssence<S, H>,
 	pub(crate) proof_recorder: &'a mut Recorder<H::Out>,
 }
@@ -137,17 +137,18 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Clone for OwnedProvingBackend<S, H> {
 }
 
 /// Trie backend storage with its proof recorder.
-pub struct ProofRecorderBackend<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> {
+pub struct ProofRecorderBackend<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
 	backend: &'a S,
 	proof_recorder: ProofRecorder<H>,
 }
 
+// TODO is it usede
 pub struct OwnedProofRecorderBackend<S: TrieBackendStorage<H>, H: Hasher> {
 	backend: S,
 	proof_recorder: ProofRecorder<H>,
 }
 
-impl<'a, S: 'a + TrieBackendStorage<H>, H: Hasher> ProvingBackend<'a, S, H>
+impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 	where H::Out: Codec
 {
 	/// Create new proving backend.
@@ -282,7 +283,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> std::fmt::Debug for OwnedProvingBacken
 impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 	where
 		S: TrieBackendStorage<H>,
-		H: Hasher,
+		H: 'static + Hasher,
 		H::Out: Ord + Codec,
 {
 	type Error = String;
@@ -385,8 +386,8 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 
 impl<S, H> Backend<H> for OwnedProvingBackend<S, H>
 	where
-		S: TrieBackendStorage<H> + 'static,
-		H: Hasher + 'static,
+		S: TrieBackendStorage<H>,
+		H: Hasher,
 		H::Out: Ord + Codec,
 {
 	type Error = String;

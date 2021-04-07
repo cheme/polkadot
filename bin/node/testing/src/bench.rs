@@ -50,7 +50,8 @@ use node_runtime::{
 	AccountId,
 	Signature,
 };
-use sp_core::{ExecutionContext, blake2_256, traits::{SpawnNamed, RemoteHandle}, Pair, Public, sr25519, ed25519};
+use sp_core::{ExecutionContext, blake2_256, traits::{SpawnNamed, SpawnLimit, TaskHandle},
+	Pair, Public, sr25519, ed25519};
 use sp_api::ProvideRuntimeApi;
 use sp_block_builder::BlockBuilder;
 use sp_inherents::InherentData;
@@ -259,24 +260,29 @@ impl TaskExecutor {
 }
 
 impl SpawnNamed for TaskExecutor {
-	fn spawn(&self, _: &'static str, future: BoxFuture<'static, ()>) {
-		self.pool.spawn_ok(future);
-	}
-
 	fn spawn_blocking(&self, _: &'static str, future: BoxFuture<'static, ()>) {
 		self.pool.spawn_ok(future);
 	}
 
-	fn spawn_with_handle(
+	fn spawn(
 		&self,
 		_name: &'static str,
 		future: BoxFuture<'static, ()>,
-	) -> Option<RemoteHandle> {
+	) -> Option<TaskHandle> {
 		self.pool.spawn_ok(future);
 		// no dismiss
 		None
 	}
+}
 
+impl SpawnLimit for TaskExecutor {
+	fn try_reserve(&self, number_of_tasks: usize) -> usize {
+		// no shared limit on tests
+		number_of_tasks
+	}
+
+	fn release(&self, _number_of_tasks: usize) {
+	}
 }
 
 /// Iterator for block content.
@@ -428,14 +434,16 @@ impl BenchDb {
 		};
 		let task_executor = TaskExecutor::new();
 
-		let (client, backend) = sc_service::new_client(
-			db_config,
+		let backend = sc_service::new_db_backend(db_config).expect("Should not fail");
+		let client = sc_service::new_client(
+			backend.clone(),
 			NativeExecutor::new(WasmExecutionMethod::Compiled, None, 8),
 			&keyring.generate_genesis(),
 			None,
 			None,
-			ExecutionExtensions::new(profile.into_execution_strategies(), None),
+			ExecutionExtensions::new(profile.into_execution_strategies(), None, None),
 			Box::new(task_executor.clone()),
+			None,
 			None,
 			Default::default(),
 		).expect("Should not fail");
@@ -700,7 +708,7 @@ impl BenchContext {
 		assert_eq!(self.client.chain_info().best_number, 0);
 
 		assert_eq!(
-			self.client.import_block(import_params, Default::default())
+			futures::executor::block_on(self.client.import_block(import_params, Default::default()))
 				.expect("Failed to import block"),
 			ImportResult::Imported(
 				ImportedAux {

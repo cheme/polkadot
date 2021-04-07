@@ -91,15 +91,6 @@ where
 	}
 }
 
-/*impl<H: Hasher> Clone for TrieBackend<MemoryDB<H>, H>
-where
-	H::Out: Codec + Ord,
-{
-	fn clone(&self) -> Self {
-		TrieBackend::new(self.backend_storage().clone(), self.root().clone())
-	}
-}*/
-
 impl<H> Default for TrieBackend<MemoryDB<H>, H>
 where
 	H: Hasher + 'static,

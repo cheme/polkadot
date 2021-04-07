@@ -126,6 +126,8 @@ pub struct Configuration {
 	pub base_path: Option<BasePath>,
 	/// Configuration of the output format that the informant uses.
 	pub informant_output_format: sc_informant::OutputFormat,
+	/// Limit to the number of runtime worker, 'None' for no limit.
+	pub worker_limit: Option<usize>,
 }
 
 /// Type for tasks spawned by the executor.
@@ -198,8 +200,22 @@ impl Configuration {
 	}
 
 	/// Returns the prometheus metrics registry, if available.
-	pub fn prometheus_registry<'a>(&'a self) -> Option<&'a Registry> {
+	pub fn prometheus_registry(&self) -> Option<&Registry> {
 		self.prometheus_config.as_ref().map(|config| &config.registry)
+	}
+
+	/// Returns the network protocol id from the chain spec, or the default.
+	pub fn protocol_id(&self) -> sc_network::config::ProtocolId {
+		let protocol_id_full = match self.chain_spec.protocol_id() {
+			Some(pid) => pid,
+			None => {
+				log::warn!("Using default protocol ID {:?} because none is configured in the \
+					chain specs", crate::DEFAULT_PROTOCOL_ID
+				);
+				crate::DEFAULT_PROTOCOL_ID
+			}
+		};
+		sc_network::config::ProtocolId::from(protocol_id_full)
 	}
 }
 

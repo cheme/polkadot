@@ -19,6 +19,7 @@
 //! Substrate service tasks management module.
 
 use std::{panic, result::Result, pin::Pin};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use exit_future::Signal;
 use log::{debug, error};
 use futures::{
@@ -39,11 +40,46 @@ mod prometheus_future;
 #[cfg(test)]
 mod tests;
 
+/// A shared tasks limit to use with
+/// spawn task handle.
+#[derive(Clone)]
+pub struct TaskLimit(Arc<Option<AtomicUsize>>);
+
+impl TaskLimit {
+	/// Initalize limiter as a sized
+	/// pool, 'None' for no limit.
+	pub fn new(max_running: Option<usize>) -> Self {
+		TaskLimit(Arc::new(max_running.map(|max| AtomicUsize::new(max))))
+	}
+}
+
+impl sp_core::traits::SpawnLimit for TaskLimit {
+	fn try_reserve(&self, number_of_tasks: usize) -> usize {
+		if let Some(limit) = self.0.as_ref() {
+			let old = limit.fetch_update(
+				Ordering::SeqCst,
+				Ordering::SeqCst,
+				|limit| Some(limit.saturating_sub(number_of_tasks))
+			).expect("Change only return Some; qed");
+			std::cmp::min(old, number_of_tasks)
+		} else {
+			number_of_tasks
+		}
+	}
+
+	fn release(&self, number_of_tasks: usize) {
+		if let Some(limit) = self.0.as_ref() {
+			limit.fetch_add(number_of_tasks, Ordering::SeqCst);
+		}
+	}
+}
+
 /// An handle for spawning tasks in the service.
 #[derive(Clone)]
 pub struct SpawnTaskHandle {
 	on_exit: exit_future::Exit,
 	executor: TaskExecutor,
+	limiter: TaskLimit,
 	metrics: Option<Metrics>,
 	task_notifier: TracingUnboundedSender<JoinFuture>,
 }
@@ -122,7 +158,8 @@ impl SpawnTaskHandle {
 			}
 		};
 
-		let join_handle = self.executor.spawn(Box::pin(future.in_current_span()), task_type);
+		let join_handle = self.executor.spawn(future.in_current_span().boxed(), task_type);
+
 		let mut task_notifier = self.task_notifier.clone();
 		self.executor.spawn(
 			Box::pin(async move {
@@ -140,18 +177,24 @@ impl sp_core::traits::SpawnNamed for SpawnTaskHandle {
 		self.spawn_blocking(name, future);
 	}
 
-	fn spawn(&self, name: &'static str, future: BoxFuture<'static, ()>) {
-		self.spawn(name, future);
-	}
-
-	fn spawn_with_handle(
+	fn spawn(
 		&self,
 		name: &'static str,
 		future: BoxFuture<'static, ()>,
-	) -> Option<sp_core::traits::RemoteHandle> {
-		// This is not using pool, and no way to abort task either.
-		self.spawn_with_handle(name, future);
+	) -> Option<sp_core::traits::TaskHandle> {
+		self.spawn(name, future);
+		// Not using pool, returned handle is of no use.
 		None
+	}
+}
+
+impl sp_core::traits::SpawnLimit for SpawnTaskHandle {
+	fn try_reserve(&self, number_of_tasks: usize) -> usize {
+		self.limiter.try_reserve(number_of_tasks)
+	}
+
+	fn release(&self, number_of_tasks: usize) {
+		self.limiter.release(number_of_tasks)
 	}
 }
 
@@ -159,6 +202,7 @@ impl sp_core::traits::SpawnNamed for SpawnTaskHandle {
 /// task spawned through it fails. The service should be on the receiver side
 /// and will shut itself down whenever it receives any message, i.e. an
 /// essential task has failed.
+#[derive(Clone)]
 pub struct SpawnEssentialTaskHandle {
 	essential_failed_tx: TracingUnboundedSender<()>,
 	inner: SpawnTaskHandle,
@@ -212,6 +256,16 @@ impl SpawnEssentialTaskHandle {
 	}
 }
 
+impl sp_core::traits::SpawnEssentialNamed for SpawnEssentialTaskHandle {
+	fn spawn_essential_blocking(&self, name: &'static str, future: BoxFuture<'static, ()>) {
+		self.spawn_blocking(name, future);
+	}
+
+	fn spawn_essential(&self, name: &'static str, future: BoxFuture<'static, ()>) {
+		self.spawn(name, future);
+	}
+}
+
 /// Helper struct to manage background/async tasks in Service.
 pub struct TaskManager {
 	/// A future that resolves when the service has exited, this is useful to
@@ -221,6 +275,10 @@ pub struct TaskManager {
 	signal: Option<Signal>,
 	/// How to spawn background tasks.
 	executor: TaskExecutor,
+	/// Indicator of task limit to use when using the manager.
+	/// Currently it is only use for workers and is more or less
+	/// a runtime worker pool limit.
+	limiter: TaskLimit,
 	/// Prometheus metric where to report the polling times.
 	metrics: Option<Metrics>,
 	/// Send a signal when a spawned essential task has concluded. The next time
@@ -241,11 +299,12 @@ pub struct TaskManager {
 }
 
 impl TaskManager {
- 	/// If a Prometheus registry is passed, it will be used to report statistics about the
- 	/// service tasks.
-	pub(super) fn new(
+	/// If a Prometheus registry is passed, it will be used to report statistics about the
+	/// service tasks.
+	pub fn new(
 		executor: TaskExecutor,
-		prometheus_registry: Option<&Registry>
+		worker_pool_size: Option<usize>,
+		prometheus_registry: Option<&Registry>,
 	) -> Result<Self, PrometheusError> {
 		let (signal, on_exit) = exit_future::signal();
 
@@ -263,11 +322,14 @@ impl TaskManager {
 			TaskType::Async,
 		);
 
+		let limiter = TaskLimit::new(worker_pool_size);
+
 		Ok(Self {
 			on_exit,
 			signal: Some(signal),
 			executor,
 			metrics,
+			limiter,
 			essential_failed_tx,
 			essential_failed_rx,
 			keep_alive: Box::new(()),
@@ -282,6 +344,7 @@ impl TaskManager {
 		SpawnTaskHandle {
 			on_exit: self.on_exit.clone(),
 			executor: self.executor.clone(),
+			limiter: self.limiter.clone(),
 			metrics: self.metrics.clone(),
 			task_notifier: self.task_notifier.clone(),
 		}
