@@ -55,7 +55,7 @@ pub(super) struct AccessLogger {
 	/// Keep trace of read logging required to compare with children
 	/// logged access.
 	log_read: OriginLog,
-	/// Keep trace of read logging required to compare with children
+	/// Keep trace of write logging required to compare with children
 	/// logged access.
 	log_write: OriginLog,
 	/// Log that we access all key in read mode (usually by calling storage root).
@@ -355,7 +355,7 @@ impl AccessLogger {
 		true
 	}
 
-	pub(super) fn log_writes(&mut self, children: Option<TaskId>) {
+	pub(super) fn log_writes_against(&mut self, children: Option<TaskId>) {
 		if let Some(worker) = children {
 			self.log_write.insert(worker);
 		} else {
@@ -363,7 +363,7 @@ impl AccessLogger {
 		}
 	}
 
-	pub(super) fn log_reads(&mut self, children: Option<TaskId>) {
+	pub(super) fn log_reads_against(&mut self, children: Option<TaskId>) {
 		if let Some(worker) = children {
 			self.log_read.insert(worker);
 		} else {
@@ -742,11 +742,11 @@ mod test {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		let task2 = 2u64;
-		parent_access_base.log_writes(Some(task1));
-		parent_access_base.log_writes(Some(task2));
+		parent_access_base.log_writes_against(Some(task1));
+		parent_access_base.log_writes_against(Some(task2));
 		// log read should not interfere
-		parent_access_base.log_reads(Some(task1));
-		parent_access_base.log_reads(Some(task2));
+		parent_access_base.log_reads_against(Some(task1));
+		parent_access_base.log_reads_against(Some(task2));
 		let mut child_access = StateLog::default();
 		child_access.read_write_keys.push(b"key1".to_vec());
 		child_access.read_write_prefix.push(b"prefix".to_vec());
@@ -809,9 +809,9 @@ mod test {
 	fn test_check_write_read() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
-		parent_access_base.log_writes(Some(task1));
+		parent_access_base.log_writes_against(Some(task1));
 		// log read in parent should not interfere
-		parent_access_base.log_reads(Some(task1));
+		parent_access_base.log_reads_against(Some(task1));
 		let mut child_access = StateLog::default();
 		child_access.read_write_keys.push(b"keyw".to_vec());
 		child_access.read_write_prefix.push(b"prefixw".to_vec());
@@ -882,9 +882,9 @@ mod test {
 	fn test_check_read_write() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
-		parent_access_base.log_writes(Some(task1));
+		parent_access_base.log_writes_against(Some(task1));
 		// log read in parent should not interfere
-		parent_access_base.log_reads(Some(task1));
+		parent_access_base.log_reads_against(Some(task1));
 		let mut child_access = StateLog::default();
 		child_access.read_write_keys.push(b"keyw".to_vec());
 		child_access.read_write_prefix.push(b"prefixw".to_vec());

@@ -444,7 +444,7 @@ impl OverlayedChanges {
 	///
 	/// For worker declaration it also guard child declaration on parent, resulting in failure when
 	/// child declaration allows more than current parent allowed access.
-	pub fn declare_worker_in_parent(&mut self, child_marker: TaskId, declaration: WorkerDeclaration) {
+	pub fn declare_child_worker(&mut self, child_marker: TaskId, declaration: WorkerDeclaration) {
 		self.markers.set_marker(child_marker);
 		match declaration {
 			WorkerDeclaration::Stateless
@@ -452,14 +452,14 @@ impl OverlayedChanges {
 			| WorkerDeclaration::ReadAtSpawn
 			| WorkerDeclaration::WriteAtSpawn => (),
 			WorkerDeclaration::ReadOptimistic => {
-				self.optimistic_logger.log_writes(Some(child_marker));
+				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
 			WorkerDeclaration::WriteLightOptimistic => {
-				self.optimistic_logger.log_writes(Some(child_marker));
+				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
 			WorkerDeclaration::WriteOptimistic => {
-				self.optimistic_logger.log_reads(Some(child_marker));
-				self.optimistic_logger.log_writes(Some(child_marker));
+				self.optimistic_logger.log_reads_against(Some(child_marker));
+				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
 			WorkerDeclaration::ReadDeclarative(filter, failure) => {
 				self.filters.guard_child_filter_read(&filter);
@@ -494,14 +494,14 @@ impl OverlayedChanges {
 			| WorkerDeclaration::ReadAtSpawn
 			| WorkerDeclaration::WriteAtSpawn => (),
 			WorkerDeclaration::ReadOptimistic => {
-				self.optimistic_logger.log_reads(None);
+				self.optimistic_logger.log_reads_against(None);
 			},
 			WorkerDeclaration::WriteLightOptimistic => {
-				self.optimistic_logger.log_writes(None);
+				self.optimistic_logger.log_writes_against(None);
 			},
 			WorkerDeclaration::WriteOptimistic => {
-				self.optimistic_logger.log_reads(None);
-				self.optimistic_logger.log_writes(None);
+				self.optimistic_logger.log_reads_against(None);
+				self.optimistic_logger.log_writes_against(None);
 			},
 			WorkerDeclaration::ReadDeclarative(filter, failure) => {
 				self.filters.set_failure_handler(None, failure); 

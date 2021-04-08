@@ -1328,6 +1328,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9521a61c2b177e0515b69dd1bd0f396a6b322832c54b4ba03cd33030ff6014b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9099,6 +9110,7 @@ dependencies = [
 name = "sp-state-machine"
 version = "0.9.0"
 dependencies = [
+ "delegate",
  "hash-db",
  "hex-literal",
  "log",

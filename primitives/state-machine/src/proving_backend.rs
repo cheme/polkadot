@@ -31,6 +31,7 @@ use crate::trie_backend::TrieBackend;
 use crate::trie_backend_essence::{Ephemeral, TrieBackendEssence, TrieBackendStorage};
 use crate::{Error, ExecutionError, Backend, DBValue, AsyncBackend};
 use sp_core::storage::ChildInfo;
+use delegate::delegate;
 
 /// Patricia trie-based backend specialized in get value proofs.
 pub struct ProvingBackendRecorder<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> {
@@ -394,94 +395,53 @@ impl<S, H> Backend<H> for OwnedProvingBackend<S, H>
 	type Transaction = S::Overlay;
 	type TrieBackendStorage = S;
 
-	fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.0.storage(key)
-	}
-
-	fn child_storage(
-		&self,
-		child_info: &ChildInfo,
-		key: &[u8],
-	) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.0.child_storage(child_info, key)
-	}
-
-	fn apply_to_child_keys_while<F: FnMut(&[u8]) -> bool>(
-		&self,
-		child_info: &ChildInfo,
-		f: F,
-	) {
-		self.0.apply_to_child_keys_while(child_info, f)
-	}
-
-	fn next_storage_key(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.0.next_storage_key(key)
-	}
-
-	fn next_child_storage_key(
-		&self,
-		child_info: &ChildInfo,
-		key: &[u8],
-	) -> Result<Option<Vec<u8>>, Self::Error> {
-		self.0.next_child_storage_key(child_info, key)
-	}
-
-	fn for_keys_with_prefix<F: FnMut(&[u8])>(&self, prefix: &[u8], f: F) {
-		self.0.for_keys_with_prefix(prefix, f)
-	}
-
-	fn for_key_values_with_prefix<F: FnMut(&[u8], &[u8])>(&self, prefix: &[u8], f: F) {
-		self.0.for_key_values_with_prefix(prefix, f)
-	}
-
-	fn for_child_keys_with_prefix<F: FnMut(&[u8])>(
-		&self,
-		child_info: &ChildInfo,
-		prefix: &[u8],
-		f: F,
-	) {
-		self.0.for_child_keys_with_prefix( child_info, prefix, f)
-	}
-
-	fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
-		self.0.pairs()
-	}
-
-	fn keys(&self, prefix: &[u8]) -> Vec<Vec<u8>> {
-		self.0.keys(prefix)
-	}
-
-	fn child_keys(
-		&self,
-		child_info: &ChildInfo,
-		prefix: &[u8],
-	) -> Vec<Vec<u8>> {
-		self.0.child_keys(child_info, prefix)
-	}
-
-	fn storage_root<'b>(
-		&self,
-		delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
-	) -> (H::Out, Self::Transaction) where H::Out: Ord {
-		self.0.storage_root(delta)
-	}
-
-	fn child_storage_root<'b>(
-		&self,
-		child_info: &ChildInfo,
-		delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
-	) -> (H::Out, bool, Self::Transaction) where H::Out: Ord {
-		self.0.child_storage_root(child_info, delta)
-	}
-
-	fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats) { }
-
-	fn usage_info(&self) -> crate::stats::UsageInfo {
-		self.0.usage_info()
-	}
-
-	fn async_backend(&self) -> Box<dyn AsyncBackend> {
-		self.0.async_backend()
+	delegate! {
+		to self.0 {
+			fn storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
+			fn child_storage(
+				&self,
+				child_info: &ChildInfo,
+				key: &[u8],
+			) -> Result<Option<Vec<u8>>, Self::Error>;
+			fn apply_to_child_keys_while<F: FnMut(&[u8]) -> bool>(
+				&self,
+				child_info: &ChildInfo,
+				f: F,
+			);
+			fn next_storage_key(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
+			fn next_child_storage_key(
+				&self,
+				child_info: &ChildInfo,
+				key: &[u8],
+			) -> Result<Option<Vec<u8>>, Self::Error>;
+			fn for_keys_with_prefix<F: FnMut(&[u8])>(&self, prefix: &[u8], f: F);
+			fn for_key_values_with_prefix<F: FnMut(&[u8], &[u8])>(&self, prefix: &[u8], f: F);
+			fn for_child_keys_with_prefix<F: FnMut(&[u8])>(
+				&self,
+				child_info: &ChildInfo,
+				prefix: &[u8],
+				f: F,
+			);
+			fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)>;
+			fn keys(&self, prefix: &[u8]) -> Vec<Vec<u8>>;
+			fn child_keys(
+				&self,
+				child_info: &ChildInfo,
+				prefix: &[u8],
+			) -> Vec<Vec<u8>>;
+			fn storage_root<'b>(
+				&self,
+				delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
+			) -> (H::Out, Self::Transaction) where H::Out: Ord;
+			fn child_storage_root<'b>(
+				&self,
+				child_info: &ChildInfo,
+				delta: impl Iterator<Item=(&'b [u8], Option<&'b [u8]>)>,
+			) -> (H::Out, bool, Self::Transaction) where H::Out: Ord;
+			fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats);
+			fn usage_info(&self) -> crate::stats::UsageInfo;
+			fn async_backend(&self) -> Box<dyn AsyncBackend>;
+		}
 	}
 }
 

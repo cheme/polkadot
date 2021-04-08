@@ -86,7 +86,7 @@ pub fn new_child_worker_async_ext(
 	};
 	parent_overlay.map(|overlay| {
 		result.overlay = overlay.child_worker_overlay();
-		overlay.declare_worker_in_parent(worker_id, declaration.clone());
+		overlay.declare_child_worker(worker_id, declaration.clone());
 	});
 	result.overlay.set_worker_declaration(declaration);
 	result
