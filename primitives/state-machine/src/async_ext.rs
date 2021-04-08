@@ -27,7 +27,7 @@ use sp_std::{
 use sp_core::{
 	storage::{ChildInfo, TrackedStorageKey},
 };
-use sp_externalities::{Externalities, TaskId, AsyncExternalitiesPostExecution,
+use sp_externalities::{Externalities, TaskId, WorkerState,
 	WorkerResult, WorkerDeclaration, WorkerType, AsyncExternalities};
 use sp_core::hexdisplay::HexDisplay;
 use crate::ext::guard;
@@ -390,16 +390,16 @@ impl AsyncExternalities for AsyncExt {
 		}
 	}
 
-	fn extract_state(&mut self) -> AsyncExternalitiesPostExecution {
+	fn extract_state(&mut self) -> WorkerState {
 		if !self.kind.need_resolve() {
-			return AsyncExternalitiesPostExecution::Valid;
+			return WorkerState::Valid;
 		}
 		if self.overlay.did_fail() {
-			return AsyncExternalitiesPostExecution::Invalid;
+			return WorkerState::Invalid;
 		}
 		if let Some(optimistic) = self.overlay.extract_access_log() {
-			return AsyncExternalitiesPostExecution::Optimistic(optimistic);
+			return WorkerState::Optimistic(optimistic);
 		}
-		AsyncExternalitiesPostExecution::NeedResolve
+		WorkerState::NeedResolve
 	}
 }

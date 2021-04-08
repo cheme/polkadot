@@ -18,7 +18,7 @@
 //! Common utilities and types for implementing `RuntimeSpawn` trait.
 
 use sp_externalities::{WorkerResult, Externalities, AsyncExternalities,
-	AsyncExternalitiesPostExecution, TaskId};
+	WorkerState, TaskId};
 use sp_std::sync::Arc;
 use sp_std::boxed::Box;
 use sp_std::vec::Vec;
@@ -290,16 +290,16 @@ pub(crate) fn process_task_inner<
 	};
 
 	match async_ext.extract_state() {
-		AsyncExternalitiesPostExecution::Invalid => {
+		WorkerState::Invalid => {
 			WorkerResult::Invalid
 		},
-		AsyncExternalitiesPostExecution::NeedResolve => {
+		WorkerState::NeedResolve => {
 			WorkerResult::CallAt(result, async_ext.extract_delta(), handle)
 		},
-		AsyncExternalitiesPostExecution::Valid => {
+		WorkerState::Valid => {
 			WorkerResult::Valid(result, async_ext.extract_delta())
 		},
-		AsyncExternalitiesPostExecution::Optimistic(access) => {
+		WorkerState::Optimistic(access) => {
 			WorkerResult::Optimistic(result, async_ext.extract_delta(), handle, access)
 		},
 	}

@@ -325,11 +325,11 @@ pub trait AsyncExternalities: Externalities + Send {
 
 	/// After execution, we call back async externalities to check
 	/// produce worker result.
-	fn extract_state(&mut self) -> AsyncExternalitiesPostExecution;
+	fn extract_state(&mut self) -> WorkerState;
 }
 
 /// State of async externality of a child workre after 'join' is called.
-pub enum AsyncExternalitiesPostExecution {
+pub enum WorkerState {
 	/// Some condition fails and the state is invalid.
 	/// With an invalid state we consider that worker
 	/// execution, even if it did finish is invalid.

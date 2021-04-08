@@ -31,7 +31,7 @@ use sp_externalities::{
 	Externalities, Extensions, ExternalitiesExt as _, TaskId, WorkerResult,
 	WorkerDeclaration, AsyncExternalities as AsyncExternalitiesTrait,
 	ambassador_impl_Externalities_body_single_struct,
-	AsyncExternalitiesPostExecution,
+	WorkerState,
 };
 
 // Module to expose AsyncExternalities without alias to delegate macro.
@@ -123,7 +123,7 @@ impl AsyncExternalitiesTrait for AsyncExternalities {
 		self.state.extract_delta()
 	}
 
-	fn extract_state(&mut self) -> AsyncExternalitiesPostExecution {
+	fn extract_state(&mut self) -> WorkerState {
 		self.state.extract_state()
 	}
 }
