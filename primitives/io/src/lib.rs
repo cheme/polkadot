@@ -198,16 +198,11 @@ pub trait Storage {
 		let to_drop_tasks = self.storage_rollback_transaction()
 			.expect("No open transaction that can be rolled back.");
 		if to_drop_tasks.len() > 0 {
-			let ext_unsafe = *self as *mut dyn Externalities;
-			if let Some(runtime_spawn) = self.extension::<RuntimeSpawnExt>() {
-				// TODO could wrap ext_unsafe in a ext struct that filter calls to extension of
-				// a given id, to make this safer.
-				let ext_unsafe: &mut _  = unsafe { &mut *ext_unsafe };
+			sp_externalities::externalities_and_extension::<RuntimeSpawnExt, _, _>(*self, |ext, runtime_spawn| {
 				for task in to_drop_tasks.into_iter() {
-					runtime_spawn.dismiss(task, ext_unsafe)
+					runtime_spawn.dismiss(task, ext)
 				}
-				core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::AcqRel);
-			}
+			}).expect("Missing runtime spawn extension");
 		}
 	}
 
@@ -222,16 +217,11 @@ pub trait Storage {
 		let to_drop_tasks = self.storage_commit_transaction()
 			.expect("No open transaction that can be committed.");
 		if to_drop_tasks.len() > 0 {
-			let ext_unsafe = *self as *mut dyn Externalities;
-			if let Some(runtime_spawn) = self.extension::<RuntimeSpawnExt>() {
-				// TODO could wrap ext_unsafe in a ext struct that filter calls to extension of
-				// a given id, to make this safer.
-				let ext_unsafe: &mut _  = unsafe { &mut *ext_unsafe };
+			sp_externalities::externalities_and_extension::<RuntimeSpawnExt, _, _>(*self, |ext, runtime_spawn| {
 				for task in to_drop_tasks.into_iter() {
-					runtime_spawn.dismiss(task, ext_unsafe)
+					runtime_spawn.dismiss(task, ext)
 				}
-				core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::AcqRel);
-			}
+			}).expect("Missing runtime spawn extension");
 		}
 	}
 }
