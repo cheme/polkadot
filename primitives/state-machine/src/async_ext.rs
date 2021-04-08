@@ -195,7 +195,7 @@ impl Externalities for AsyncExt {
 	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
 		self.guard_stateless("`next_storage_key`: should not be used in async externalities!");
 		let next_backend_key = self.backend.next_storage_key(key);
-		let next_overlay_key_change = self.overlay.next_storage_key_change(key);
+		let next_overlay_key_change = self.overlay.next_storage_key_change(key, next_backend_key.as_ref());
 
 		match (next_backend_key, next_overlay_key_change) {
 			(Some(backend_key), Some(overlay_key)) if &backend_key[..] < overlay_key.0 => Some(backend_key),
@@ -216,10 +216,12 @@ impl Externalities for AsyncExt {
 		self.guard_stateless(
 			"`next_child_storage_key`: should not be used in async externalities!",
 		);
-		let next_backend_key = self.backend.next_child_storage_key(child_info, key);
+		let next_backend_key = self.backend
+			.next_child_storage_key(child_info, key);
 		let next_overlay_key_change = self.overlay.next_child_storage_key_change(
-			child_info.storage_key(),
-			key
+			&child_info,
+			key,
+			next_backend_key.as_ref(),
 		);
 
 		match (next_backend_key, next_overlay_key_change) {

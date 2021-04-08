@@ -862,7 +862,13 @@ impl OverlayedChanges {
 
 	/// Returns the next (in lexicographic order) storage key in the overlayed alongside its value.
 	/// If no value is next then `None` is returned.
-	pub fn next_storage_key_change(&self, key: &[u8]) -> Option<(&[u8], &OverlayedValue)> {
+	pub fn next_storage_key_change(
+		&self,
+		key: &[u8],
+		backend_accessed: Option<&Vec<u8>>,
+	) -> Option<(&[u8], &OverlayedValue)> {
+		self.filters.guard_read_interval(None, key, backend_accessed.map(Vec::as_slice));
+		self.optimistic_logger.log_read_interval(None, key, backend_accessed.map(Vec::as_slice));
 		self.top.next_change(key)
 	}
 
@@ -870,9 +876,13 @@ impl OverlayedChanges {
 	/// value.  If no value is next then `None` is returned.
 	pub fn next_child_storage_key_change(
 		&self,
-		storage_key: &[u8],
-		key: &[u8]
+		child_info: &ChildInfo,
+		key: &[u8],
+		backend_accessed: Option<&Vec<u8>>,
 	) -> Option<(&[u8], &OverlayedValue)> {
+		self.filters.guard_read_interval(Some(child_info), key, backend_accessed.map(Vec::as_slice));
+		self.optimistic_logger.log_read_interval(Some(child_info), key, backend_accessed.map(Vec::as_slice));
+		let storage_key = child_info.storage_key();
 		self.children
 			.get(storage_key)
 			.and_then(|(overlay, _)|
@@ -883,28 +893,6 @@ impl OverlayedChanges {
 	/// Read only access ot offchain overlay.
 	pub fn offchain(&self) -> &OffchainOverlayedChanges {
 		&self.offchain
-	}
-
-	/// Assert read worker access over a given interval.
-	/// Generally such assertion are done at overlay level, but this one needs to be exposed
-	/// as the result from the overlay can be a bigger interval than the one from the backend.
-	pub fn guard_read_interval(
-		&self,
-		child_info: Option<&ChildInfo>,
-		key: &[u8],
-		key_end: Option<&[u8]>,
-	) {
-		self.filters.guard_read_interval(child_info, key, key_end)
-	}
-
-	/// Similar use as `guard_read_interval` but for optimistic worker.
-	pub fn log_read_interval(
-		&self,
-		child_info: Option<&ChildInfo>,
-		key: &[u8],
-		key_end: Option<&[u8]>,
-	) {
-		self.optimistic_logger.log_read_interval(child_info, key, key_end)
 	}
 
 	/// For optimistic worker, we extract logs from the overlay.
@@ -1303,28 +1291,28 @@ mod tests {
 		overlay.set_storage(vec![30], None);
 
 		// next_prospective < next_committed
-		let next_to_5 = overlay.next_storage_key_change(&[5]).unwrap();
+		let next_to_5 = overlay.next_storage_key_change(&[5], None).unwrap();
 		assert_eq!(next_to_5.0.to_vec(), vec![10]);
 		assert_eq!(next_to_5.1.value(), Some(&vec![10]));
 
 		// next_committed < next_prospective
-		let next_to_10 = overlay.next_storage_key_change(&[10]).unwrap();
+		let next_to_10 = overlay.next_storage_key_change(&[10], None).unwrap();
 		assert_eq!(next_to_10.0.to_vec(), vec![20]);
 		assert_eq!(next_to_10.1.value(), Some(&vec![20]));
 
 		// next_committed == next_prospective
-		let next_to_20 = overlay.next_storage_key_change(&[20]).unwrap();
+		let next_to_20 = overlay.next_storage_key_change(&[20], None).unwrap();
 		assert_eq!(next_to_20.0.to_vec(), vec![30]);
 		assert_eq!(next_to_20.1.value(), None);
 
 		// next_committed, no next_prospective
-		let next_to_30 = overlay.next_storage_key_change(&[30]).unwrap();
+		let next_to_30 = overlay.next_storage_key_change(&[30], None).unwrap();
 		assert_eq!(next_to_30.0.to_vec(), vec![40]);
 		assert_eq!(next_to_30.1.value(), Some(&vec![40]));
 
 		overlay.set_storage(vec![50], Some(vec![50]));
 		// next_prospective, no next_committed
-		let next_to_40 = overlay.next_storage_key_change(&[40]).unwrap();
+		let next_to_40 = overlay.next_storage_key_change(&[40], None).unwrap();
 		assert_eq!(next_to_40.0.to_vec(), vec![50]);
 		assert_eq!(next_to_40.1.value(), Some(&vec![50]));
 	}
@@ -1333,7 +1321,6 @@ mod tests {
 	fn next_child_storage_key_change_works() {
 		let child_info = ChildInfo::new_default(b"Child1");
 		let child_info = &child_info;
-		let child = child_info.storage_key();
 		let mut overlay = OverlayedChanges::default();
 		overlay.start_transaction();
 		overlay.set_child_storage(child_info, vec![20], Some(vec![20]));
@@ -1344,28 +1331,28 @@ mod tests {
 		overlay.set_child_storage(child_info, vec![30], None);
 
 		// next_prospective < next_committed
-		let next_to_5 = overlay.next_child_storage_key_change(child, &[5]).unwrap();
+		let next_to_5 = overlay.next_child_storage_key_change(child_info, &[5], None).unwrap();
 		assert_eq!(next_to_5.0.to_vec(), vec![10]);
 		assert_eq!(next_to_5.1.value(), Some(&vec![10]));
 
 		// next_committed < next_prospective
-		let next_to_10 = overlay.next_child_storage_key_change(child, &[10]).unwrap();
+		let next_to_10 = overlay.next_child_storage_key_change(child_info, &[10], None).unwrap();
 		assert_eq!(next_to_10.0.to_vec(), vec![20]);
 		assert_eq!(next_to_10.1.value(), Some(&vec![20]));
 
 		// next_committed == next_prospective
-		let next_to_20 = overlay.next_child_storage_key_change(child, &[20]).unwrap();
+		let next_to_20 = overlay.next_child_storage_key_change(child_info, &[20], None).unwrap();
 		assert_eq!(next_to_20.0.to_vec(), vec![30]);
 		assert_eq!(next_to_20.1.value(), None);
 
 		// next_committed, no next_prospective
-		let next_to_30 = overlay.next_child_storage_key_change(child, &[30]).unwrap();
+		let next_to_30 = overlay.next_child_storage_key_change(child_info, &[30], None).unwrap();
 		assert_eq!(next_to_30.0.to_vec(), vec![40]);
 		assert_eq!(next_to_30.1.value(), Some(&vec![40]));
 
 		overlay.set_child_storage(child_info, vec![50], Some(vec![50]));
 		// next_prospective, no next_committed
-		let next_to_40 = overlay.next_child_storage_key_change(child, &[40]).unwrap();
+		let next_to_40 = overlay.next_child_storage_key_change(child_info, &[40], None).unwrap();
 		assert_eq!(next_to_40.0.to_vec(), vec![50]);
 		assert_eq!(next_to_40.1.value(), Some(&vec![50]));
 	}
