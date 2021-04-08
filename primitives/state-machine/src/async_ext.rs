@@ -99,7 +99,7 @@ impl AsyncExt {
 	) {
 		match self.kind {
 			WorkerType::Stateless => {
-				panic!(panic)
+				panic!("{}", panic)
 			},
 			_ => (),
 		}
@@ -110,7 +110,7 @@ impl AsyncExt {
 		panic: &'static str,
 	) {
 		if !self.write_access() {
-			panic!(panic)
+			panic!("{}", panic)
 		}
 	}
 

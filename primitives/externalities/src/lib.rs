@@ -665,43 +665,43 @@ impl WorkerType {
 			WorkerType::Stateless => (),
 			WorkerType::ReadLastBlock => match kind {
 				WorkerType::ReadLastBlock => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::ReadAtSpawn => match kind {
 				WorkerType::Stateless => (),
 				WorkerType::ReadAtSpawn => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::ReadOptimistic => match kind {
 				WorkerType::Stateless => (),
 				WorkerType::ReadAtSpawn => (),
 				WorkerType::ReadOptimistic => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::ReadDeclarative => match kind {
 				WorkerType::ReadAtSpawn => (),
 				WorkerType::ReadDeclarative => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::WriteAtSpawn => match kind {
 				WorkerType::WriteAtSpawn => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::WriteLightOptimistic => match kind {
 				WorkerType::WriteLightOptimistic => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::WriteLightDeclarative => match kind {
 				WorkerType::WriteLightDeclarative => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::WriteOptimistic => match kind {
 				WorkerType::WriteOptimistic => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 			WorkerType::WriteDeclarative => match kind {
 				WorkerType::WriteDeclarative => (),
-				_ => panic!(INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
 			},
 		}
 	}

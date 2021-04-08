@@ -100,7 +100,7 @@ pub mod pallet {
 		/// It removes participants that are invalid from pending list
 		/// and process the valid ones.
 		#[pallet::weight(0)]
-		pub fn validate_pendings_participants(origin: OriginFor<T>, number: u32)
+		pub fn validate_pendings_participants(_origin: OriginFor<T>, number: u32)
 			-> DispatchResult
 		{
 			validate_pending_participants_parallel::<T>(number as usize);

@@ -17,7 +17,7 @@
 
 //! Common utilities and types for implementing `RuntimeSpawn` trait.
 
-use sp_externalities::{WorkerResult, WorkerDeclaration, Externalities, AsyncExternalities,
+use sp_externalities::{WorkerResult, Externalities, AsyncExternalities,
 	AsyncExternalitiesPostExecution, TaskId};
 use sp_std::sync::Arc;
 use sp_std::boxed::Box;

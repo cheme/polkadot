@@ -30,7 +30,7 @@ use sp_core::storage::ChildInfo;
 use failure::{FailureHandlers, DeclFailureHandling};
 
 /// Worker declaration assertion failure.
-pub const BROKEN_DECLARATION_ACCESS: &'static str = "Key access impossible due to worker access declaration";
+const BROKEN_DECLARATION_ACCESS: &str = "Key access impossible due to worker access declaration";
 
 /// Main filter state.
 #[derive(Debug, Clone)]
@@ -884,7 +884,7 @@ pub(super) mod failure {
 		fn invalid_access(&self) {
 			match self.failure {
 				DeclarationFailureHandling::Panic => {
-					panic!(super::BROKEN_DECLARATION_ACCESS);
+					panic!("{}", super::BROKEN_DECLARATION_ACCESS);
 				},
 				DeclarationFailureHandling::InvalidAtJoin => {
 					self.did_fail.set(true);
