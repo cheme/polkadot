@@ -289,14 +289,15 @@ impl OverlayedChanges {
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be referred
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
-	pub fn storage(&self, key: &[u8]) -> Option<Option<&[u8]>> {
+	pub fn storage(&mut self, key: &[u8]) -> Option<Option<&[u8]>> {
 		self.filters.guard_read(None, key);
 		self.optimistic_logger.log_read(None, key);
+		let stats = &mut self.stats;
 		self.top.get(key).map(|x| {
 			let value = x.value();
 			let size_read = value.map(|x| x.len() as u64).unwrap_or(0);
-			self.stats.tally_read_modified(size_read);
-			value.as_ref().map(AsRef::as_ref)
+			stats.tally_read_modified(size_read);
+			value.map(AsRef::as_ref)
 		})
 	}
 
@@ -316,7 +317,8 @@ impl OverlayedChanges {
 		self.optimistic_logger.log_write(None, key);
 		// we need to log read here as we can read it.
 		self.optimistic_logger.log_read(None, key);
-		let value = self.top.modify(key.to_vec(), init, self.extrinsic_index());
+		let extrinsic_index = self.extrinsic_index();
+		let value = self.top.modify(key.to_vec(), init, extrinsic_index);
 
 		// if the value was deleted initialise it back with an empty vec
 		change_read_value_mut_default(value)
@@ -325,14 +327,14 @@ impl OverlayedChanges {
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be referred
 	/// to the backend); Some(None) if the key has been deleted. Some(Some(...)) for a key whose
 	/// value has been set.
-	pub fn child_storage(&self, child_info: &ChildInfo, key: &[u8]) -> Option<Option<&[u8]>> {
+	pub fn child_storage(&mut self, child_info: &ChildInfo, key: &[u8]) -> Option<Option<&[u8]>> {
 		self.filters.guard_read(Some(child_info), key);
 		self.optimistic_logger.log_read(Some(child_info), key);
-		let map = self.children.get(child_info.storage_key())?;
+		let map = self.children.get_mut(child_info.storage_key())?;
 		let value = map.0.get(key)?.value();
 		let size_read = value.map(|x| x.len() as u64).unwrap_or(0);
 		self.stats.tally_read_modified(size_read);
-		Some(value.as_ref().map(AsRef::as_ref))
+		Some(value.map(AsRef::as_ref))
 	}
 
 	/// Set a new value for the specified key.
@@ -343,7 +345,8 @@ impl OverlayedChanges {
 		self.optimistic_logger.log_write(None, key.as_slice());
 		let size_write = val.as_ref().map(|x| x.len() as u64).unwrap_or(0);
 		self.stats.tally_write_overlay(size_write);
-		self.top.set(key, val.into(), self.extrinsic_index());
+		let extrinsic_index = self.extrinsic_index();
+		self.top.set(key, val.into(), extrinsic_index);
 	}
 
 	/// Set a new value for the specified key and child.
@@ -404,7 +407,8 @@ impl OverlayedChanges {
 	pub(crate) fn clear_prefix(&mut self, prefix: &[u8]) {
 		self.filters.guard_write_prefix(None, prefix);
 		self.optimistic_logger.log_write_prefix(None, prefix);
-		self.top.clear_where(|key, _| key.starts_with(prefix), self.extrinsic_index());
+		let extrinsic_index = self.extrinsic_index();
+		self.top.clear_where(|key, _| key.starts_with(prefix), extrinsic_index);
 	}
 
 	/// Removes all key-value pairs which keys share the given prefix.
@@ -696,20 +700,20 @@ impl OverlayedChanges {
 	}
 
 	/// Get an iterator over all child changes as seen by the current transaction.
-	pub fn children(&self)
-		-> impl Iterator<Item=(impl Iterator<Item=(&StorageKey, &OverlayedValue)>, &ChildInfo)> {
-		self.children.iter().map(|(_, v)| (v.0.changes(), &v.1))
+	pub fn children(&mut self)
+		-> impl Iterator<Item=(impl Iterator<Item=(&StorageKey, &mut OverlayedValue)>, &ChildInfo)> {
+		self.children.iter_mut().map(|(_, v)| (v.0.changes(), &v.1))
 	}
 
 	/// Get an iterator over all top changes as been by the current transaction.
-	pub fn changes(&self) -> impl Iterator<Item=(&StorageKey, &OverlayedValue)> {
+	pub fn changes(&mut self) -> impl Iterator<Item=(&StorageKey, &mut OverlayedValue)> {
 		self.top.changes()
 	}
 
 	/// Get an optional iterator over all child changes stored under the supplied key.
-	pub fn child_changes(&self, key: &[u8])
-		-> Option<(impl Iterator<Item=(&StorageKey, &OverlayedValue)>, &ChildInfo)> {
-		self.children.get(key).map(|(overlay, info)| (overlay.changes(), info))
+	pub fn child_changes(&mut self, key: &[u8])
+		-> Option<(impl Iterator<Item=(&StorageKey, &mut OverlayedValue)>, &ChildInfo)> {
+		self.children.get_mut(key).map(|(overlay, info)| (overlay.changes(), &*info))
 	}
 
 	/// Convert this instance with all changes into a [`StorageChanges`] instance.
@@ -787,7 +791,7 @@ impl OverlayedChanges {
 	/// Inserts storage entry responsible for current extrinsic index.
 	#[cfg(test)]
 	pub(crate) fn set_extrinsic_index(&mut self, extrinsic_index: u32) {
-		self.top.set(EXTRINSIC_INDEX.to_vec(), Some(extrinsic_index.encode()), None);
+		self.top.set(EXTRINSIC_INDEX.to_vec(), Change::Write(extrinsic_index.encode()), None);
 	}
 
 	/// Returns current extrinsic index to use in changes trie construction.
@@ -796,7 +800,7 @@ impl OverlayedChanges {
 	/// set this index before first and unset after last extrinsic is executed.
 	/// Changes that are made outside of extrinsics, are marked with
 	/// `NO_EXTRINSIC_INDEX` index.
-	fn extrinsic_index(&self) -> Option<u32> {
+	fn extrinsic_index(&mut self) -> Option<u32> {
 		match self.collect_extrinsics {
 			true => Some(
 				self.storage(EXTRINSIC_INDEX)
@@ -811,7 +815,7 @@ impl OverlayedChanges {
 	///
 	/// Returns the storage root and caches storage transaction in the given `cache`.
 	pub fn storage_root<H: Hasher, N: BlockNumber, B: Backend<H>>(
-		&self,
+		&mut self,
 		backend: &B,
 		cache: &mut StorageTransactionCache<B::Transaction, H, N>,
 	) -> H::Out
@@ -819,8 +823,8 @@ impl OverlayedChanges {
 	{
 		self.filters.guard_read_all();
 		self.optimistic_logger.log_read_all();
-		let delta = self.changes().map(|(k, v)| (&k[..], v.value().map(|v| &v[..])));
-		let child_delta = self.children()
+		let delta = self.top.changes().map(|(k, v)| (&k[..], v.value().map(|v| &v[..])));
+		let child_delta = self.children.iter_mut().map(|(_, v)| (v.0.changes(), &v.1))
 			.map(|(changes, info)| (info, changes.map(
 				|(k, v)| (&k[..], v.value().map(|v| &v[..]))
 			)));
@@ -842,7 +846,7 @@ impl OverlayedChanges {
 	/// Panics on storage error, when `panic_on_storage_error` is set.
 	#[cfg(feature = "std")]
 	pub fn changes_trie_root<'a, H: Hasher + 'static, N: BlockNumber, B: Backend<H>>(
-		&self,
+		&mut self,
 		backend: &B,
 		changes_trie_state: Option<&'a ChangesTrieState<'a, H, N>>,
 		parent_hash: H::Out,
@@ -866,10 +870,10 @@ impl OverlayedChanges {
 	/// Returns the next (in lexicographic order) storage key in the overlayed alongside its value.
 	/// If no value is next then `None` is returned.
 	pub fn next_storage_key_change(
-		&self,
+		&mut self,
 		key: &[u8],
 		backend_accessed: Option<&Vec<u8>>,
-	) -> Option<(&[u8], &OverlayedValue)> {
+	) -> Option<(&[u8], &mut OverlayedValue)> {
 		self.filters.guard_read_interval(None, key, backend_accessed.map(Vec::as_slice));
 		self.optimistic_logger.log_read_interval(None, key, backend_accessed.map(Vec::as_slice));
 		self.top.next_change(key)
@@ -878,16 +882,16 @@ impl OverlayedChanges {
 	/// Returns the next (in lexicographic order) child storage key in the overlayed alongside its
 	/// value.  If no value is next then `None` is returned.
 	pub fn next_child_storage_key_change(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 		backend_accessed: Option<&Vec<u8>>,
-	) -> Option<(&[u8], &OverlayedValue)> {
+	) -> Option<(&[u8], &mut OverlayedValue)> {
 		self.filters.guard_read_interval(Some(child_info), key, backend_accessed.map(Vec::as_slice));
 		self.optimistic_logger.log_read_interval(Some(child_info), key, backend_accessed.map(Vec::as_slice));
 		let storage_key = child_info.storage_key();
 		self.children
-			.get(storage_key)
+			.get_mut(storage_key)
 			.and_then(|(overlay, _)|
 				overlay.next_change(key)
 			)
@@ -1182,7 +1186,7 @@ mod tests {
 	use std::collections::BTreeMap;
 
 	fn assert_extrinsics(
-		overlay: &OverlayedChangeSet,
+		overlay: &mut OverlayedChangeSet,
 		key: impl AsRef<[u8]>,
 		expected: Vec<u32>,
 	) {
@@ -1333,9 +1337,9 @@ mod tests {
 		overlay.set_extrinsic_index(2);
 		overlay.set_storage(vec![1], Some(vec![6]));
 
-		assert_extrinsics(&overlay.top, vec![1], vec![0, 2]);
-		assert_extrinsics(&overlay.top, vec![3], vec![1]);
-		assert_extrinsics(&overlay.top, vec![100], vec![NO_EXTRINSIC_INDEX]);
+		assert_extrinsics(&mut overlay.top, vec![1], vec![0, 2]);
+		assert_extrinsics(&mut overlay.top, vec![3], vec![1]);
+		assert_extrinsics(&mut overlay.top, vec![100], vec![NO_EXTRINSIC_INDEX]);
 
 		overlay.start_transaction();
 
@@ -1345,15 +1349,15 @@ mod tests {
 		overlay.set_extrinsic_index(4);
 		overlay.set_storage(vec![1], Some(vec![8]));
 
-		assert_extrinsics(&overlay.top, vec![1], vec![0, 2, 4]);
-		assert_extrinsics(&overlay.top, vec![3], vec![1, 3]);
-		assert_extrinsics(&overlay.top, vec![100], vec![NO_EXTRINSIC_INDEX]);
+		assert_extrinsics(&mut overlay.top, vec![1], vec![0, 2, 4]);
+		assert_extrinsics(&mut overlay.top, vec![3], vec![1, 3]);
+		assert_extrinsics(&mut overlay.top, vec![100], vec![NO_EXTRINSIC_INDEX]);
 
 		overlay.rollback_transaction().unwrap();
 
-		assert_extrinsics(&overlay.top, vec![1], vec![0, 2]);
-		assert_extrinsics(&overlay.top, vec![3], vec![1]);
-		assert_extrinsics(&overlay.top, vec![100], vec![NO_EXTRINSIC_INDEX]);
+		assert_extrinsics(&mut overlay.top, vec![1], vec![0, 2]);
+		assert_extrinsics(&mut overlay.top, vec![3], vec![1]);
+		assert_extrinsics(&mut overlay.top, vec![100], vec![NO_EXTRINSIC_INDEX]);
 	}
 
 	#[test]

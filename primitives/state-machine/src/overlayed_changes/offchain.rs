@@ -41,7 +41,7 @@ impl OffchainOverlayedChanges {
 	}
 
 	/// Iterate over all key value pairs by reference.
-	pub fn iter<'a>(&'a self) -> impl Iterator<Item = OffchainOverlayedChangesItem<'a>> {
+	pub fn iter<'a>(&'a mut self) -> impl Iterator<Item = OffchainOverlayedChangesItem<'a>> {
 		self.0.changes().map(|kv| (kv.0, kv.1.value_ref()))
 	}
 
@@ -69,7 +69,7 @@ impl OffchainOverlayedChanges {
 	}
 
 	/// Obtain a associated value to the given key in storage with prefix.
-	pub fn get(&self, prefix: &[u8], key: &[u8]) -> Option<OffchainOverlayedChange> {
+	pub fn get(&mut self, prefix: &[u8], key: &[u8]) -> Option<OffchainOverlayedChange> {
 		let key = (prefix.to_vec(), key.to_vec());
 		self.0.get(&key).map(|entry| entry.value_ref()).cloned()
 	}

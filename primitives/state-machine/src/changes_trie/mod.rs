@@ -234,7 +234,7 @@ pub fn disabled_state<'a, H, Number>() -> Option<State<'a, H, Number>> {
 pub fn build_changes_trie<'a, B: Backend<H>, H: Hasher + 'static, Number: BlockNumber>(
 	backend: &B,
 	state: Option<&'a State<'a, H, Number>>,
-	changes: &OverlayedChanges,
+	changes: &mut OverlayedChanges,
 	parent_hash: H::Out,
 	panic_on_storage_error: bool,
 ) -> Result<Option<(MemoryDB<H>, H::Out, CacheAction<H::Out, Number>)>, ()>

@@ -1302,7 +1302,7 @@ mod tests {
 		}
 		overlay.rollback_transaction().unwrap();
 		{
-			let ext = Ext::new(
+			let mut ext = Ext::new(
 				&mut overlay,
 				&mut cache,
 				backend,
@@ -1393,7 +1393,7 @@ mod tests {
 
 		// Then only initlaization item and second (commited) item should persist.
 		{
-			let ext = Ext::new(
+			let mut ext = Ext::new(
 				&mut overlay,
 				&mut cache,
 				backend,

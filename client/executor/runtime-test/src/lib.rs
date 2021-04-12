@@ -470,7 +470,7 @@ sp_core::wasm_export_functions! {
 			},
 			DeclarationFailureHandling::InvalidAtJoin,
 		));
-		if handle.join().is_some() && handle2.join().is_none() {
+		if handle.join().is_some() && handle_2.join().is_none() {
 			sp_io::storage::set(b"foo", b"bar");
 		}
 	}

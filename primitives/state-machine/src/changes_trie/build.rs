@@ -43,7 +43,7 @@ pub(crate) fn prepare_input<'a, B, H, Number>(
 	backend: &'a B,
 	storage: &'a dyn Storage<H, Number>,
 	config: ConfigurationRange<'a, Number>,
-	overlay: &'a OverlayedChanges,
+	overlay: &'a mut OverlayedChanges,
 	parent: &'a AnchorBlockId<H::Out, Number>,
 ) -> Result<(
 		impl Iterator<Item=InputPair<Number>> + 'a,
@@ -96,7 +96,7 @@ pub(crate) fn prepare_input<'a, B, H, Number>(
 fn prepare_extrinsics_input<'a, B, H, Number>(
 	backend: &'a B,
 	block: &Number,
-	overlay: &'a OverlayedChanges,
+	overlay: &'a mut OverlayedChanges,
 ) -> Result<(
 		impl Iterator<Item=InputPair<Number>> + 'a,
 		BTreeMap<ChildIndex<Number>, impl Iterator<Item=InputPair<Number>> + 'a>,
@@ -108,21 +108,27 @@ fn prepare_extrinsics_input<'a, B, H, Number>(
 {
 	let mut children_result = BTreeMap::new();
 
+	let overlay_unsafe = overlay as *mut OverlayedChanges;
 	for (child_changes, child_info) in overlay.children() {
 		let child_index = ChildIndex::<Number> {
 			block: block.clone(),
 			storage_key: child_info.prefixed_storage_key(),
 		};
 
+		// TODO this unsafe access requires code refactoring to remove:
+		// issue is accessing overlay storage need mut if resolving stuff,
+		// so it is probably the inner function that could be change.
+		// Note that with current code this unsafe double mutable access
+		// is fine (no insert in the overlay that would messed the mutable iterator).
 		let iter = prepare_extrinsics_input_inner(
-			backend, block, overlay,
+			backend, block, unsafe { &mut *overlay_unsafe },
 			Some(child_info.clone()),
 			child_changes,
 		)?;
 		children_result.insert(child_index, iter);
 	}
 
-	let top = prepare_extrinsics_input_inner(backend, block, overlay, None, overlay.changes())?;
+	let top = prepare_extrinsics_input_inner(backend, block, unsafe { &mut *overlay_unsafe }, None, unsafe { &mut *overlay_unsafe }.changes())?;
 
 	Ok((top, children_result))
 }
@@ -130,9 +136,9 @@ fn prepare_extrinsics_input<'a, B, H, Number>(
 fn prepare_extrinsics_input_inner<'a, B, H, Number>(
 	backend: &'a B,
 	block: &Number,
-	overlay: &'a OverlayedChanges,
+	overlay: &'a mut OverlayedChanges,
 	child_info: Option<ChildInfo>,
-	changes: impl Iterator<Item=(&'a StorageKey, &'a OverlayedValue)>
+	changes: impl Iterator<Item=(&'a StorageKey, &'a mut OverlayedValue)>
 ) -> Result<impl Iterator<Item=InputPair<Number>> + 'a, String>
 	where
 		B: Backend<H>,
@@ -459,13 +465,13 @@ mod test {
 		fn test_with_zero(zero: u64) {
 			let child_trie_key1 = ChildInfo::new_default(b"storage_key1").prefixed_storage_key();
 			let child_trie_key2 = ChildInfo::new_default(b"storage_key2").prefixed_storage_key();
-			let (backend, storage, changes, config) = prepare_for_build(zero);
+			let (backend, storage, mut changes, config) = prepare_for_build(zero);
 			let parent = AnchorBlockId { hash: Default::default(), number: zero + 4 };
 			let changes_trie_nodes = prepare_input(
 				&backend,
 				&storage,
 				configuration_range(&config, zero),
-				&changes,
+				&mut changes,
 				&parent,
 			).unwrap();
 			assert_eq!(changes_trie_nodes.0.collect::<Vec<InputPair<u64>>>(), vec![
@@ -497,13 +503,13 @@ mod test {
 		fn test_with_zero(zero: u64) {
 			let child_trie_key1 = ChildInfo::new_default(b"storage_key1").prefixed_storage_key();
 			let child_trie_key2 = ChildInfo::new_default(b"storage_key2").prefixed_storage_key();
-			let (backend, storage, changes, config) = prepare_for_build(zero);
+			let (backend, storage, mut changes, config) = prepare_for_build(zero);
 			let parent = AnchorBlockId { hash: Default::default(), number: zero + 3 };
 			let changes_trie_nodes = prepare_input(
 				&backend,
 				&storage,
 				configuration_range(&config, zero),
-				&changes,
+				&mut changes,
 				&parent,
 			).unwrap();
 			assert_eq!(changes_trie_nodes.0.collect::<Vec<InputPair<u64>>>(), vec![
@@ -544,13 +550,13 @@ mod test {
 		fn test_with_zero(zero: u64) {
 			let child_trie_key1 = ChildInfo::new_default(b"storage_key1").prefixed_storage_key();
 			let child_trie_key2 = ChildInfo::new_default(b"storage_key2").prefixed_storage_key();
-			let (backend, storage, changes, config) = prepare_for_build(zero);
+			let (backend, storage, mut changes, config) = prepare_for_build(zero);
 			let parent = AnchorBlockId { hash: Default::default(), number: zero + 15 };
 			let changes_trie_nodes = prepare_input(
 				&backend,
 				&storage,
 				configuration_range(&config, zero),
-				&changes,
+				&mut changes,
 				&parent,
 			).unwrap();
 			assert_eq!(changes_trie_nodes.0.collect::<Vec<InputPair<u64>>>(), vec![
@@ -587,29 +593,31 @@ mod test {
 	#[test]
 	fn build_changes_trie_nodes_on_skewed_digest_block() {
 		fn test_with_zero(zero: u64) {
-			let (backend, storage, changes, config) = prepare_for_build(zero);
+			let (backend, storage, mut changes, config) = prepare_for_build(zero);
 			let parent = AnchorBlockId { hash: Default::default(), number: zero + 10 };
 
 			let mut configuration_range = configuration_range(&config, zero);
-			let changes_trie_nodes = prepare_input(
-				&backend,
-				&storage,
-				configuration_range.clone(),
-				&changes,
-				&parent,
-			).unwrap();
-			assert_eq!(changes_trie_nodes.0.collect::<Vec<InputPair<u64>>>(), vec![
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 11, key: vec![100] }, vec![0, 2, 3]),
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 11, key: vec![101] }, vec![1]),
-				InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 11, key: vec![103] }, vec![0, 1]),
-			]);
+			{
+				let changes_trie_nodes = prepare_input(
+					&backend,
+					&storage,
+					configuration_range.clone(),
+					&mut changes,
+					&parent,
+				).unwrap();
+				assert_eq!(changes_trie_nodes.0.collect::<Vec<InputPair<u64>>>(), vec![
+					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 11, key: vec![100] }, vec![0, 2, 3]),
+					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 11, key: vec![101] }, vec![1]),
+					InputPair::ExtrinsicIndex(ExtrinsicIndex { block: zero + 11, key: vec![103] }, vec![0, 1]),
+				]);
+			}
 
 			configuration_range.end = Some(zero + 11);
 			let changes_trie_nodes = prepare_input(
 				&backend,
 				&storage,
 				configuration_range,
-				&changes,
+				&mut changes,
 				&parent,
 			).unwrap();
 			assert_eq!(changes_trie_nodes.0.collect::<Vec<InputPair<u64>>>(), vec![
@@ -645,7 +653,7 @@ mod test {
 				&backend,
 				&storage,
 				configuration_range(&config, zero),
-				&changes,
+				&mut changes,
 				&parent,
 			).unwrap();
 			assert_eq!(changes_trie_nodes.0.collect::<Vec<InputPair<u64>>>(), vec![
@@ -686,7 +694,7 @@ mod test {
 	fn cache_is_used_when_changes_trie_is_built() {
 		let child_trie_key1 = ChildInfo::new_default(b"storage_key1").prefixed_storage_key();
 		let child_trie_key2 = ChildInfo::new_default(b"storage_key2").prefixed_storage_key();
-		let (backend, mut storage, changes, config) = prepare_for_build(0);
+		let (backend, mut storage, mut changes, config) = prepare_for_build(0);
 		let parent = AnchorBlockId { hash: Default::default(), number: 15 };
 
 		// override some actual values from storage with values from the cache
@@ -714,7 +722,7 @@ mod test {
 			&backend,
 			&storage,
 			configuration_range(&config, 0),
-			&changes,
+			&mut changes,
 			&parent,
 		).unwrap();
 		assert_eq!(root_changes_trie_nodes.collect::<Vec<InputPair<u64>>>(), vec![

@@ -138,16 +138,16 @@ impl From<BTreeMap<StorageKey, StorageValue>> for BasicExternalities {
 impl Externalities for BasicExternalities {
 	fn set_offchain_storage(&mut self, _key: &[u8], _value: Option<&[u8]>) {}
 
-	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
+	fn storage(&mut self, key: &[u8]) -> Option<StorageValue> {
 		self.inner.top.get(key).cloned()
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Option<Vec<u8>> {
+	fn storage_hash(&mut self, key: &[u8]) -> Option<Vec<u8>> {
 		self.storage(key).map(|v| Blake2Hasher::hash(&v).encode())
 	}
 
 	fn child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageValue> {
@@ -156,20 +156,20 @@ impl Externalities for BasicExternalities {
 	}
 
 	fn child_storage_hash(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<Vec<u8>> {
 		self.child_storage(child_info, key).map(|v| Blake2Hasher::hash(&v).encode())
 	}
 
-	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
+	fn next_storage_key(&mut self, key: &[u8]) -> Option<StorageKey> {
 		let range = (Bound::Excluded(key), Bound::Unbounded);
 		self.inner.top.range::<[u8], _>(range).next().map(|(k, _)| k).cloned()
 	}
 
 	fn next_child_storage_key(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageKey> {

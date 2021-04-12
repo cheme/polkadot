@@ -79,16 +79,16 @@ impl<'a, H: Hasher, B: 'a + Backend<H>> Externalities for ReadOnlyExternalities<
 		panic!("Should not be used in read-only externalities!")
 	}
 
-	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
+	fn storage(&mut self, key: &[u8]) -> Option<StorageValue> {
 		self.backend.storage(key).expect("Backed failed for storage in ReadOnlyExternalities")
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Option<Vec<u8>> {
+	fn storage_hash(&mut self, key: &[u8]) -> Option<Vec<u8>> {
 		self.storage(key).map(|v| Blake2Hasher::hash(&v).encode())
 	}
 
 	fn child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageValue> {
@@ -96,19 +96,19 @@ impl<'a, H: Hasher, B: 'a + Backend<H>> Externalities for ReadOnlyExternalities<
 	}
 
 	fn child_storage_hash(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<Vec<u8>> {
 		self.child_storage(child_info, key).map(|v| Blake2Hasher::hash(&v).encode())
 	}
 
-	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
+	fn next_storage_key(&mut self, key: &[u8]) -> Option<StorageKey> {
 		self.backend.next_storage_key(key).expect("Backed failed for next_storage_key in ReadOnlyExternalities")
 	}
 
 	fn next_child_storage_key(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageKey> {

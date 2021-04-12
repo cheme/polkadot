@@ -140,7 +140,7 @@ impl Externalities for AsyncExt {
 		panic!("`set_offchain_storage`: should not be used in async externalities!")
 	}
 
-	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
+	fn storage(&mut self, key: &[u8]) -> Option<StorageValue> {
 		self.guard_stateless("`storage`: should not be used in async externalities!");
 		let _guard = guard();
 		let result = self.overlay.storage(key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
@@ -153,14 +153,14 @@ impl Externalities for AsyncExt {
 		result
 	}
 
-	fn storage_hash(&self, _key: &[u8]) -> Option<Vec<u8>> {
+	fn storage_hash(&mut self, _key: &[u8]) -> Option<Vec<u8>> {
 		// TODO currently no hash function to avoid having to move the hasher trait
 		// in AsyncExternalities extension.
 		panic!("`storage_hash`: should not be used in async externalities!")
 	}
 
 	fn child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageValue> {
@@ -185,14 +185,14 @@ impl Externalities for AsyncExt {
 	}
 
 	fn child_storage_hash(
-		&self,
+		&mut self,
 		_child_info: &ChildInfo,
 		_key: &[u8],
 	) -> Option<Vec<u8>> {
 		panic!("`child_storage_hash`: should not be used in async externalities!")
 	}
 
-	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
+	fn next_storage_key(&mut self, key: &[u8]) -> Option<StorageKey> {
 		self.guard_stateless("`next_storage_key`: should not be used in async externalities!");
 		let next_backend_key = self.backend.next_storage_key(key);
 		let next_overlay_key_change = self.overlay.next_storage_key_change(key, next_backend_key.as_ref());
@@ -203,13 +203,15 @@ impl Externalities for AsyncExt {
 			(_, Some(overlay_key)) => if overlay_key.1.value().is_some() {
 				Some(overlay_key.0.to_vec())
 			} else {
-				self.next_storage_key(&overlay_key.0[..])
+				// TODO optimize this clone by non recursive.
+				let key = overlay_key.0.to_vec();
+				self.next_storage_key(&key[..])
 			},
 		}
 	}
 
 	fn next_child_storage_key(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageKey> {
@@ -230,9 +232,11 @@ impl Externalities for AsyncExt {
 			(_, Some(overlay_key)) => if overlay_key.1.value().is_some() {
 				Some(overlay_key.0.to_vec())
 			} else {
+				// TODO optimize this clone by non recursive.
+				let key = overlay_key.0.to_vec();
 				self.next_child_storage_key(
 					child_info,
-					&overlay_key.0[..],
+					&key[..],
 				)
 			},
 		}

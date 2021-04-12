@@ -176,7 +176,7 @@ where
 	B: 'a + Backend<H>,
 	N: crate::changes_trie::BlockNumber,
 {
-	pub fn storage_pairs(&self) -> Vec<(StorageKey, StorageValue)> {
+	pub fn storage_pairs(&mut self) -> Vec<(StorageKey, StorageValue)> {
 		use std::collections::HashMap;
 
 		self.backend.pairs().iter()
@@ -200,7 +200,7 @@ where
 		self.overlay.set_offchain_storage(key, value)
 	}
 
-	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
+	fn storage(&mut self, key: &[u8]) -> Option<StorageValue> {
 		let _guard = guard();
 		let result = self.overlay.storage(key).map(|x| x.map(|x| x.to_vec())).unwrap_or_else(||
 			self.backend.storage(key).expect(EXT_NOT_ALLOWED_TO_FAIL));
@@ -212,7 +212,7 @@ where
 		result
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Option<Vec<u8>> {
+	fn storage_hash(&mut self, key: &[u8]) -> Option<Vec<u8>> {
 		let _guard = guard();
 		let result = self.overlay
 			.storage(key)
@@ -228,7 +228,7 @@ where
 	}
 
 	fn child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageValue> {
@@ -252,7 +252,7 @@ where
 	}
 
 	fn child_storage_hash(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<Vec<u8>> {
@@ -275,7 +275,7 @@ where
 		result.map(|r| r.encode())
 	}
 
-	fn exists_storage(&self, key: &[u8]) -> bool {
+	fn exists_storage(&mut self, key: &[u8]) -> bool {
 		let _guard = guard();
 		let result = match self.overlay.storage(key) {
 			Some(x) => x.is_some(),
@@ -292,7 +292,7 @@ where
 	}
 
 	fn exists_child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> bool {
@@ -314,7 +314,7 @@ where
 		result
 	}
 
-	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
+	fn next_storage_key(&mut self, key: &[u8]) -> Option<StorageKey> {
 		let next_backend_key = self.backend.next_storage_key(key).expect(EXT_NOT_ALLOWED_TO_FAIL);
 		let next_overlay_key_change = self.overlay.next_storage_key_change(key, next_backend_key.as_ref());
 
@@ -324,13 +324,15 @@ where
 			(_, Some(overlay_key)) => if overlay_key.1.value().is_some() {
 				Some(overlay_key.0.to_vec())
 			} else {
-				self.next_storage_key(&overlay_key.0[..])
+				// TODO optimize this clone by non recursive.
+				let key = overlay_key.0.to_vec();
+				self.next_storage_key(&key[..])
 			},
 		}
 	}
 
 	fn next_child_storage_key(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Option<StorageKey> {
@@ -349,9 +351,11 @@ where
 			(_, Some(overlay_key)) => if overlay_key.1.value().is_some() {
 				Some(overlay_key.0.to_vec())
 			} else {
+				// TODO optimize this clone by non recursive.
+				let key = overlay_key.0.to_vec();
 				self.next_child_storage_key(
 					child_info,
-					&overlay_key.0[..],
+					&key[..],
 				)
 			},
 		}
@@ -529,7 +533,7 @@ where
 			root.encode()
 		} else {
 			let root = if let Some((changes, info)) = self.overlay.child_changes(storage_key) {
-				let delta = changes.map(|(k, v)| (k.as_ref(), v.value().as_ref().map(AsRef::as_ref)));
+				let delta = changes.map(|(k, v)| (k.as_ref(), v.value().map(AsRef::as_ref)));
 				Some(self.backend.child_storage_root(info, delta))
 			} else {
 				None
@@ -921,7 +925,7 @@ mod tests {
 			children_default: map![]
 		}.into();
 
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut  ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
 		// next_backend < next_overlay
 		assert_eq!(ext.next_storage_key(&[5]), Some(vec![10]));
@@ -937,7 +941,7 @@ mod tests {
 
 		drop(ext);
 		overlay.set_storage(vec![50], Some(vec![50]));
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
 		// next_overlay exist but next_backend doesn't exist
 		assert_eq!(ext.next_storage_key(&[40]), Some(vec![50]));
@@ -966,7 +970,7 @@ mod tests {
 			],
 		}.into();
 
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
 		// next_backend < next_overlay
 		assert_eq!(ext.next_child_storage_key(child_info, &[5]), Some(vec![10]));
@@ -982,7 +986,7 @@ mod tests {
 
 		drop(ext);
 		overlay.set_child_storage(child_info, vec![50], Some(vec![50]));
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
 		// next_overlay exist but next_backend doesn't exist
 		assert_eq!(ext.next_child_storage_key(child_info, &[40]), Some(vec![50]));
@@ -1010,7 +1014,7 @@ mod tests {
 			],
 		}.into();
 
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
 		assert_eq!(ext.child_storage(child_info, &[10]), Some(vec![10]));
 		assert_eq!(
