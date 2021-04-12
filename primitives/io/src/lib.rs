@@ -1360,7 +1360,7 @@ pub trait RuntimeTasks {
 		runtime_spawn.set_capacity(capacity);
 	}
 
-	/// ost function for spawning task.
+	/// Host function for spawning task.
 	///
 	/// This should not be used directly. Use `sp_tasks::spawn` instead.
 	fn spawn(

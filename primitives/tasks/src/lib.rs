@@ -210,7 +210,7 @@ mod tests {
 		let executor = TaskExecutor::new();
 		let mut ext = sp_io::TestExternalities::default();
 		ext.register_extension::<RuntimeSpawnExt>(RuntimeSpawnExt(
-				Box::new(RuntimeInstanceSpawn::new(None, Box::new(executor), 100))
+			Box::new(RuntimeInstanceSpawn::new(None, Box::new(executor), 100))
 		));
 		ext
 	}
