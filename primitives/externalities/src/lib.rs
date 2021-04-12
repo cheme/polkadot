@@ -699,7 +699,7 @@ impl WorkerType {
 	/// on join.
 	/// - optimistic from declarative by runing accesses on join.
 	pub fn guard_compatible_child_workers(&self, kind: WorkerType) {
-		match kind {
+		match self {
 			WorkerType::Stateless => (),
 			WorkerType::ReadLastBlock => match kind {
 				WorkerType::ReadLastBlock => (),

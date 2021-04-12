@@ -441,7 +441,7 @@ sp_core::wasm_export_functions! {
 
 	fn test_declarative_read_conflict_nested() {
 		sp_tasks::set_capacity(2);
-		let handle = sp_tasks::spawn(tasks::read_key_nested, vec![], WorkerDeclaration::ReadDeclarative(
+		let handle = sp_tasks::spawn(tasks::read_key, vec![], WorkerDeclaration::ReadDeclarative(
 			AccessDeclaration {
 				prefixes_lock: vec![b"key".to_vec()],
 				keys_lock: Default::default(),
