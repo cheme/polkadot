@@ -72,6 +72,8 @@ pub(super) struct AccessLogger {
 }
 
 /// Logger for a given trie state.
+/// TODO consider removing refcell and have 
+/// mut access to overlays.
 #[derive(Debug, Clone, Default)]
 struct StateLogger {
 	parent_read_key: RefCell<Vec<Vec<u8>>>,

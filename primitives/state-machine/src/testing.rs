@@ -159,7 +159,7 @@ where
 	/// transactions.
 	fn as_backend(&self) -> InMemoryBackend<H> {
 		let top: Vec<_> = self.overlay.changes()
-			.map(|(k, v)| (k.clone(), v.value().cloned()))
+			.map(|(k, v)| (k.clone(), v.value().clone()))
 			.collect();
 		let mut transaction = vec![(None, top)];
 
@@ -167,7 +167,7 @@ where
 			transaction.push((
 				Some(child_info.clone()),
 				child_changes
-					.map(|(k, v)| (k.clone(), v.value().cloned()))
+					.map(|(k, v)| (k.clone(), v.value().clone()))
 					.collect(),
 			))
 		}

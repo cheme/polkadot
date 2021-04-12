@@ -17,7 +17,7 @@
 
 //! Houses the code that implements the transactional overlay storage.
 
-use super::{StorageKey, StorageValue, Extrinsics};
+use super::{StorageKey, StorageValue, Extrinsics, Change};
 
 #[cfg(feature = "std")]
 use std::collections::HashSet as Set;
@@ -89,10 +89,10 @@ impl<V> Default for OverlayedEntry<V> {
 }
 
 /// History of value, with removal support.
-pub type OverlayedValue = OverlayedEntry<Option<StorageValue>>;
+pub type OverlayedValue = OverlayedEntry<Change>;
 
 /// Change set for basic key value with extrinsics index recording and removal support.
-pub type OverlayedChangeSet = OverlayedMap<StorageKey, Option<StorageValue>>;
+pub type OverlayedChangeSet = OverlayedMap<StorageKey, Change>;
 
 /// Holds a set of changes with the ability modify them using nested transactions.
 #[derive(Debug, Clone)]
@@ -190,6 +190,14 @@ impl OverlayedEntry<Option<StorageValue>> {
 	/// The value as seen by the current transaction.
 	pub fn value(&self) -> Option<&StorageValue> {
 		self.value_ref().as_ref()
+	}
+}
+
+impl OverlayedEntry<Change> {
+	/// The value as seen by the current transaction.
+	/// TODO &mut self returning &StorageValue
+	pub fn value(&self) -> Option<StorageValue> {
+		super::change_read_value(self.value_ref())
 	}
 }
 
@@ -410,7 +418,7 @@ impl OverlayedChangeSet {
 		key: StorageKey,
 		init: impl Fn() -> StorageValue,
 		at_extrinsic: Option<u32>,
-	) -> &mut Option<StorageValue> {
+	) -> &mut Change {
 		let overlayed = self.changes.entry(key.clone()).or_default();
 		let first_write_in_tx = insert_dirty(&mut self.dirty_keys, key);
 		let clone_into_new_tx = if let Some(tx) = overlayed.transactions.last() {
@@ -420,7 +428,7 @@ impl OverlayedChangeSet {
 				None
 			}
 		} else {
-			Some(Some(init()))
+			Some(Change::Write(init()))
 		};
 
 		if let Some(cloned) = clone_into_new_tx {
@@ -438,7 +446,7 @@ impl OverlayedChangeSet {
 		at_extrinsic: Option<u32>,
 	) {
 		for (key, val) in self.changes.iter_mut().filter(|(k, v)| predicate(k, v)) {
-			val.set(None, insert_dirty(&mut self.dirty_keys, key.clone()), at_extrinsic);
+			val.set(Change::Delete, insert_dirty(&mut self.dirty_keys, key.clone()), at_extrinsic);
 		}
 	}
 

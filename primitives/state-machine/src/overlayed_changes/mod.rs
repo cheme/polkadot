@@ -51,7 +51,7 @@ use sp_core::offchain::OffchainOverlayedChange;
 use hash_db::Hasher;
 use crate::DefaultError;
 use sp_externalities::{Extensions, Extension, TaskId, WorkerResult,
-	WorkerDeclaration};
+	WorkerDeclaration, Change};
 
 pub use self::changeset::{OverlayedValue, NoOpenTransaction, AlreadyInRuntime, NotInRuntime};
 
@@ -296,7 +296,7 @@ impl OverlayedChanges {
 			let value = x.value();
 			let size_read = value.map(|x| x.len() as u64).unwrap_or(0);
 			self.stats.tally_read_modified(size_read);
-			value.map(AsRef::as_ref)
+			value.as_ref().map(AsRef::as_ref)
 		})
 	}
 
@@ -319,7 +319,7 @@ impl OverlayedChanges {
 		let value = self.top.modify(key.to_vec(), init, self.extrinsic_index());
 
 		// if the value was deleted initialise it back with an empty vec
-		value.get_or_insert_with(StorageValue::default)
+		change_read_value_mut_default(value)
 	}
 
 	/// Returns a double-Option: None if the key is unknown (i.e. and the query should be referred
@@ -332,7 +332,7 @@ impl OverlayedChanges {
 		let value = map.0.get(key)?.value();
 		let size_read = value.map(|x| x.len() as u64).unwrap_or(0);
 		self.stats.tally_read_modified(size_read);
-		Some(value.map(AsRef::as_ref))
+		Some(value.as_ref().map(AsRef::as_ref))
 	}
 
 	/// Set a new value for the specified key.
@@ -343,7 +343,7 @@ impl OverlayedChanges {
 		self.optimistic_logger.log_write(None, key.as_slice());
 		let size_write = val.as_ref().map(|x| x.len() as u64).unwrap_or(0);
 		self.stats.tally_write_overlay(size_write);
-		self.top.set(key, val, self.extrinsic_index());
+		self.top.set(key, val.into(), self.extrinsic_index());
 	}
 
 	/// Set a new value for the specified key and child.
@@ -372,7 +372,7 @@ impl OverlayedChanges {
 		);
 		let updatable = info.try_update(child_info);
 		debug_assert!(updatable);
-		changeset.set(key, val, extrinsic_index);
+		changeset.set(key, val.into(), extrinsic_index);
 	}
 
 	/// Clear child storage of given storage key.
@@ -645,8 +645,8 @@ impl OverlayedChanges {
 	/// Panics:
 	/// Panics if `transaction_depth() > initial_depth`
 	fn drain_committed_for(&mut self, initial_depth: usize) -> (
-		impl Iterator<Item=(StorageKey, Option<StorageValue>)>,
-		impl Iterator<Item=(StorageKey, (impl Iterator<Item=(StorageKey, Option<StorageValue>)>, ChildInfo))>,
+		impl Iterator<Item=(StorageKey, Change)>,
+		impl Iterator<Item=(StorageKey, (impl Iterator<Item=(StorageKey, Change)>, ChildInfo))>,
 	) {
 		use sp_std::mem::take;
 		(
@@ -672,11 +672,14 @@ impl OverlayedChanges {
 	) {
 		use sp_std::mem::take;
 		(
-			take(&mut self.top).drain_commited(),
+			take(&mut self.top).drain_commited()
+				.map(|(k, change)| (k, change_to_change_set(change))),
 			take(&mut self.children).into_iter()
 				.map(|(key, (val, info))| (
 						key,
-						(val.drain_commited(), info)
+						(val.drain_commited()
+							.map(|(k, change)| (k, change_to_change_set(change))),
+							info)
 					)
 				),
 		)
@@ -907,17 +910,21 @@ impl OverlayedChanges {
 	}
 
 	/// Extract changes from overlay.
+	/// TODO audit cost of this: probably very high when used against externalities.
 	pub fn extract_delta(&mut self) -> sp_externalities::StateDelta {
 		let (top_iter, children_iter) = self.drain_committed_for(self.markers.start_depth());
 		let mut children = Vec::new();
 		for (_, (iter, info)) in children_iter {
 			let mut added = Vec::new();
 			let mut deleted = Vec::new();
+			let mut appended = Vec::new();
+			let mut incremented = Vec::new();
 			for (key, change) in iter {
-				if let Some(value) = change {
-					added.push((key, value));
-				} else {
-					deleted.push(key);
+				match change {
+					Change::Write(value) => added.push((key, value)),
+					Change::Delete => deleted.push(key),
+					Change::Append(value, changes) => appended.push((key, (value, changes))),
+					Change::IncrementCounter(value, increment) => incremented.push((key, (value, increment))),
 				}
 			}
 			// TODO implement extraction of delta for logged append and logged delete prefix
@@ -927,25 +934,30 @@ impl OverlayedChanges {
 			children.push((info, sp_externalities::TrieDelta {
 				added,
 				deleted,
-				appended: Vec::new(),
-				deleted_prefix: Vec::new(),
+				appended,
+				incremented,
+				deleted_prefix: Vec::new(), // TODO
 			}));
 		}
 
 		let mut added = Vec::new();
 		let mut deleted = Vec::new();
+		let mut appended = Vec::new();
+		let mut incremented = Vec::new();
 		for (key, change) in top_iter {
-			if let Some(value) = change {
-				added.push((key, value));
-			} else {
-				deleted.push(key);
+			match change {
+				Change::Write(value) => added.push((key, value)),
+				Change::Delete => deleted.push(key),
+				Change::Append(value, changes) => appended.push((key, (value, changes))),
+				Change::IncrementCounter(value, increment) => incremented.push((key, (value, increment))),
 			}
 		}
 		sp_externalities::StateDelta {
 			top: sp_externalities::TrieDelta {
 				added,
 				deleted,
-				appended: Vec::new(), // TODO
+				appended,
+				incremented,
 				deleted_prefix: Vec::new(), // TODO
 			},
 			children,
@@ -1093,6 +1105,71 @@ pub mod radix_trees {
 
 	/// Write access logs.
 	pub type AccessTreeWriteParent = radix_tree::Tree<Node256NoBackendART<()>>;
+}
+
+fn change_to_change_set(change: Change) -> Option<StorageValue> {
+	match change {
+		Change::Delete => None,
+		Change::Write(value) => Some(value),
+		Change::Append(mut value, mut changes) => {
+			let mut appendable = crate::ext::StorageAppend::new(&mut value);
+			for change in changes.drain(..) {
+				appendable.append(change);
+			}
+			Some(value)
+		},
+		Change::IncrementCounter(mut value, nb) => {
+			for _ in 0..nb {
+				// TODO extract and test counter logic.
+				let mut nb_digit = value.len();
+				if value.last() == Some(&255) {
+					while nb_digit > 0 && value[nb_digit - 1] == 255 {
+						value[nb_digit - 1] = 0;
+						nb_digit -= 1;
+					}
+					if nb_digit == 0 {
+						value.insert(0, 1);
+					} else {
+						value[nb_digit] += 1;
+					}
+				}
+			}
+			Some(value)
+		},
+	}
+}
+
+fn change_read_value(change: &Change) -> Option<StorageValue> {
+	//fn read_value(&mut self) -> Option<&StorageValue> {
+		// TODO consider mut access to overlay so that this function
+		// occurs no overhead by resolving write only operation on read.
+		// TODO this clone is not acceptable !!! (does clone value when not
+		// needed.
+	change_to_change_set(change.clone())
+}
+
+fn change_read_value_mut(change: &mut Change) -> Option<&mut StorageValue> {
+	*change = match change_to_change_set(sp_std::mem::replace(change, Default::default())) {
+		Some(value) => Change::Write(value),
+		None => Change::Delete,
+	};
+	match change {
+		Change::Write(value) => Some(value),
+		Change::Delete => None,
+		_ => unreachable!("Initialized above"),
+	}
+}
+
+fn change_read_value_mut_default(change: &mut Change) -> &mut StorageValue {
+	*change = match change_to_change_set(sp_std::mem::replace(change, Default::default())) {
+		Some(value) => Change::Write(value),
+		// deleted value is intiatialized back to empty value.
+		None => Change::Write(Default::default()),
+	};
+	match change {
+		Change::Write(value) => value,
+		_ => unreachable!("Initialized above"),
+	}
 }
 
 #[cfg(test)]

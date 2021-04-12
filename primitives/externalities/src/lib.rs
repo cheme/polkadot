@@ -382,6 +382,39 @@ pub enum WorkerResult {
 	HardPanic,
 }
 
+type StorageValue = Vec<u8>;
+
+/// Change to a worker value.
+#[derive(Clone, Debug)]
+#[derive(codec::Encode, codec::Decode)]
+pub enum Change {
+	/// Delete value.
+	Delete,
+	/// Write new value.
+	Write(StorageValue),
+	/// Append to existing value, 'join' order.
+	Append(StorageValue, Vec<StorageValue>),
+	/// Increment counter value.
+	/// TODO could also store original storage value.
+	/// TODO could be merge with append (trait +).
+	IncrementCounter(StorageValue, u32),
+}
+
+impl Default for Change {
+	fn default() -> Self {
+		Change::Delete
+	}
+}
+
+impl From<Option<StorageValue>> for Change {
+	fn from(value: Option<Vec<u8>>) -> Self {
+		match value {
+			Some(value) => Change::Write(value),
+			None => Change::Delete,
+		}
+	}
+}
+
 /// Changes to state made by a worker.
 #[derive(codec::Encode, codec::Decode)]
 pub struct StateDelta {
@@ -395,6 +428,7 @@ impl Default for StateDelta {
 			top: TrieDelta {
 				added: Vec::new(),
 				appended: Vec::new(),
+				incremented: Vec::new(),
 				deleted: Vec::new(),
 				deleted_prefix: Vec::new(),
 			},
@@ -415,13 +449,17 @@ impl StateDelta {
 #[derive(codec::Encode, codec::Decode)]
 pub struct TrieDelta {
 	/// Key values added or modified.
-	pub added: Vec<(Vec<u8>, Vec<u8>)>,
+	pub added: Vec<(Vec<u8>, StorageValue)>,
 	/// Values appended at a given key location.
 	/// TODO feeding this force use to maintain an
 	/// append log, but seems worth it as size
 	/// of trie delta will be way lower (unimplemented
 	/// at this point).
-	pub appended: Vec<(Vec<u8>, Vec<Vec<u8>>)>,
+	/// TODO do we need base storage value: problably not.
+	pub appended: Vec<(Vec<u8>, (StorageValue, Vec<StorageValue>))>,
+	/// Counter incremented.
+	/// TODO do we need base storage value: problably not.
+	pub incremented: Vec<(Vec<u8>, (StorageValue, u32))>,
 	/// Keys deleted.
 	pub deleted: Vec<Vec<u8>>,
 	/// Key prefix deleted and subsequent.

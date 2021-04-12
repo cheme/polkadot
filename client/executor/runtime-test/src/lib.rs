@@ -454,6 +454,28 @@ sp_core::wasm_export_functions! {
 		}
 	}
 
+	fn test_incompatible_declarative_conflict() {
+		sp_tasks::set_capacity(2);
+		let handle = sp_tasks::spawn(tasks::read_key_nested, vec![], WorkerDeclaration::ReadDeclarative(
+			AccessDeclaration {
+				prefixes_lock: vec![b"key".to_vec()],
+				keys_lock: Default::default(),
+			},
+			DeclarationFailureHandling::Panic,
+		));
+		let handle_2 = sp_tasks::spawn(tasks::read_key_nested, vec![], WorkerDeclaration::ReadDeclarative(
+			AccessDeclaration {
+				prefixes_lock: vec![b"key".to_vec()],
+				keys_lock: Default::default(),
+			},
+			DeclarationFailureHandling::InvalidAtJoin,
+		));
+		if handle.join().is_some() && handle2.join().is_none() {
+			sp_io::storage::set(b"foo", b"bar");
+		}
+	}
+
+
 	fn test_optimistic_write_success() {
 		sp_tasks::set_capacity(1);
 		let handle = sp_tasks::spawn(tasks::write_key, vec![], WorkerDeclaration::WriteLightOptimistic);
