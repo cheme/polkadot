@@ -300,7 +300,6 @@ impl Filters {
 	// Declaring a child write access, we ensure access is allowed in the first place.
 	// We also check that we do not have sibling declaration with write access.
 	pub(super) fn guard_child_filter_write(&mut self, filter: &AccessDeclaration) -> bool {
-		unimplemented!("TODO sibling declaration");
 		for top_prefix in filter.prefixes_lock.iter() {
 			if !self.guard_write_prefix_inner(None, top_prefix, true) {
 				return false;
@@ -757,9 +756,9 @@ impl Filters {
 		false
 	}
 
-	fn guard_read_prefix(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+/*	fn guard_read_prefix(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
 		let _ = self.guard_read_prefix_inner(child_info, key, false);
-	}
+	}*/
 
 	fn guard_read_prefix_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_read_forbid_prefix(&self.filters_forbid, child_info, key);

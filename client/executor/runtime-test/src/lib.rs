@@ -461,14 +461,14 @@ sp_core::wasm_export_functions! {
 
 	fn test_incompatible_declarative_conflict() {
 		sp_tasks::set_capacity(2);
-		let handle = sp_tasks::spawn(tasks::read_key, vec![], WorkerDeclaration::ReadDeclarative(
+		let handle = sp_tasks::spawn(tasks::read_key, vec![], WorkerDeclaration::WriteLightDeclarative(
 			AccessDeclaration {
 				prefixes_lock: vec![b"key".to_vec()],
 				keys_lock: Default::default(),
 			},
 			DeclarationFailureHandling::Panic,
 		));
-		let handle_2 = sp_tasks::spawn(tasks::read_key, vec![], WorkerDeclaration::ReadDeclarative(
+		let handle_2 = sp_tasks::spawn(tasks::read_key, vec![], WorkerDeclaration::WriteLightDeclarative(
 			AccessDeclaration {
 				prefixes_lock: vec![b"key".to_vec()],
 				keys_lock: Default::default(),
