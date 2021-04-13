@@ -56,12 +56,15 @@ impl<H: Hasher, B: Backend<H>> InspectState<H, B> for B {
 #[derive(Debug)]
 pub struct ReadOnlyExternalities<'a, H: Hasher, B: 'a + Backend<H>> {
 	backend: &'a B,
+	// Note that overlay is only here to manage worker declaration
+	// and will never contain changes.
+	overlay: crate::overlayed_changes::OverlayedChanges,
 	_phantom: PhantomData<H>,
 }
 
 impl<'a, H: Hasher, B: 'a + Backend<H>> From<&'a B> for ReadOnlyExternalities<'a, H, B> {
 	fn from(backend: &'a B) -> Self {
-		ReadOnlyExternalities { backend, _phantom: PhantomData }
+		ReadOnlyExternalities { backend, overlay: Default::default(), _phantom: PhantomData }
 	}
 }
 
@@ -210,12 +213,15 @@ impl<'a, H: Hasher, B: 'a + Backend<H>> Externalities for ReadOnlyExternalities<
 		declaration: WorkerDeclaration,
 	) -> Option<Box<dyn AsyncExternalities>> {
 		let async_backend = self.backend.async_backend();
-		Some(Box::new(crate::async_ext::new_child_worker_async_ext(
+		if let Some(result) = crate::async_ext::new_child_worker_async_ext(
 			worker_id,
 			declaration,
 			async_backend,
-			None, // No current overlay state since read only.
-		)))
+			&mut self.overlay, // No current overlay state since read only.
+		) {
+			return Some(Box::new(result));
+		}
+		None
 	}
 
 	fn resolve_worker_result(&mut self, state_update: WorkerResult) -> Option<Vec<u8>> {

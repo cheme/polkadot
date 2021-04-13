@@ -283,23 +283,35 @@ impl Filters {
 	}
 
 	// Declaring a child read access, we ensure access is allowed in the first place.
-	pub(super) fn guard_child_filter_read(&mut self, filter: &AccessDeclaration) {
+	pub(super) fn guard_child_filter_read(&mut self, filter: &AccessDeclaration) -> bool {
 		for top_prefix in filter.prefixes_lock.iter() {
-			self.guard_read_prefix(None, top_prefix);
+			if !self.guard_read_prefix_inner(None, top_prefix, true) {
+				return false;
+			}
 		}
 		for top_key in filter.keys_lock.iter() {
-			self.guard_read(None, top_key);
+			if !self.guard_read_inner(None, top_key, true) {
+				return false;
+			}
 		}
+		true
 	}
 
 	// Declaring a child write access, we ensure access is allowed in the first place.
-	pub(super) fn guard_child_filter_write(&mut self, filter: &AccessDeclaration) {
+	// We also check that we do not have sibling declaration with write access.
+	pub(super) fn guard_child_filter_write(&mut self, filter: &AccessDeclaration) -> bool {
+		unimplemented!("TODO sibling declaration");
 		for top_prefix in filter.prefixes_lock.iter() {
-			self.guard_write_prefix(None, top_prefix);
+			if !self.guard_write_prefix_inner(None, top_prefix, true) {
+				return false;
+			}
 		}
 		for top_key in filter.keys_lock.iter() {
-			self.guard_write(None, top_key);
+			if !self.guard_write_inner(None, top_key, true) {
+				return false;
+			}
 		}
+		true
 	}
 
 	pub(super) fn on_worker_result(&mut self, result: &WorkerResult) -> bool {
@@ -381,28 +393,50 @@ impl Filters {
 */
 	/// Guard invalid access for reading a key.
 	pub(super) fn guard_read(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+		let _ = self.guard_read_inner(child_info, key, false);
+	}
+
+	fn guard_read_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_read_forbid(&self.filters_forbid, child_info, key);
 		for origin in blocked {
+			if ret_result {
+				return false;
+			}
 			self.failure_handlers.invalid_accesses(origin);
 		}
 		if self.allow_write_active || self.allow_read_active {
 			if !Self::guard_read_allow(&self.filters_allow, child_info, key) {
+				if ret_result {
+					return false;
+				}
 				self.failure_handlers.invalid_allowed_access();
 			}
 		}
+		true
 	}
 
 	/// Guard invalid access for writing a key.
 	pub(super) fn guard_write(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+		let _ = self.guard_write_inner(child_info, key, false);
+	}
+
+	fn guard_write_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_write_forbid(&self.filters_forbid, child_info, key);
 		for origin in blocked {
+			if ret_result {
+				return false;
+			}
 			self.failure_handlers.invalid_accesses(origin);
 		}
 		if self.allow_write_active {
 			if !Self::guard_write_allow(&self.filters_allow, child_info, key) {
+				if ret_result {
+					return false;
+				}
 				self.failure_handlers.invalid_allowed_access();
 			}
 		}
+		true
 	}
 
 	fn key_write_forbid<'a>(
@@ -724,27 +758,49 @@ impl Filters {
 	}
 
 	fn guard_read_prefix(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+		let _ = self.guard_read_prefix_inner(child_info, key, false);
+	}
+
+	fn guard_read_prefix_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_read_forbid_prefix(&self.filters_forbid, child_info, key);
 		for origin in blocked {
+			if ret_result {
+				return false;
+			}
 			self.failure_handlers.invalid_accesses(origin);
 		}
 		if self.allow_write_active {
 			if !Self::guard_read_allow_prefix(&self.filters_allow, child_info, key) {
+				if ret_result {
+					return false;
+				}
 				self.failure_handlers.invalid_allowed_access();
 			}
 		}
+		true
 	}
 
 	pub(super) fn guard_write_prefix(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+		let _ = self.guard_write_prefix_inner(child_info, key, false);
+	}
+
+	fn guard_write_prefix_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_write_forbid_prefix(&self.filters_forbid, child_info, key);
 		for origin in blocked {
+			if ret_result {
+				return false;
+			}
 			self.failure_handlers.invalid_accesses(origin);
 		}
 		if self.allow_write_active {
 			if !Self::guard_write_allow_prefix(&self.filters_allow, child_info, key) {
+				if ret_result {
+					return false;
+				}
 				self.failure_handlers.invalid_allowed_access();
 			}
 		}
+		true
 	}
 
 	pub(super) fn guard_read_interval(

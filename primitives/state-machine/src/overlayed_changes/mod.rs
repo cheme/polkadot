@@ -125,7 +125,11 @@ impl OverlayedChanges {
 	/// An overlay that can be use for child worker.
 	/// It contains the overlay changes and ensure
 	/// we do not commit or rollback them.
-	pub fn child_worker_overlay(&self) -> Self {
+	/// Return None if cannot be spawn from parent.
+	pub fn child_worker_overlay(&mut self, worker_id: TaskId, declaration: WorkerDeclaration) -> Option<Self> {
+		if !self.declare_child_worker(worker_id, declaration.clone()) {
+			return None;
+		}
 		let mut result = OverlayedChanges::default();
 		result.top = self.top.clone();
 		result.children = self.children.clone();
@@ -133,7 +137,11 @@ impl OverlayedChanges {
 		result.start_transaction();
 		let transaction_offset = result.top.transaction_depth();
 		result.markers = markers::Markers::from_start_depth(transaction_offset);
-		result
+
+
+		result.set_worker_declaration(declaration);
+
+		Some(result)
 	}
 }
 
@@ -448,8 +456,10 @@ impl OverlayedChanges {
 	///
 	/// For worker declaration it also guard child declaration on parent, resulting in failure when
 	/// child declaration allows more than current parent allowed access.
-	pub fn declare_child_worker(&mut self, child_marker: TaskId, declaration: WorkerDeclaration) {
-		self.markers.set_marker(child_marker);
+	///
+	/// Return false if the declaration is incompatible with current parent worker accesses.
+	/// TODO check if we can &WorkerDeclaration
+	pub fn declare_child_worker(&mut self, child_marker: TaskId, declaration: WorkerDeclaration) -> bool {
 		match declaration {
 			WorkerDeclaration::Stateless
 			| WorkerDeclaration::ReadLastBlock
@@ -466,20 +476,25 @@ impl OverlayedChanges {
 				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
 			WorkerDeclaration::ReadDeclarative(filter, failure) => {
-				self.filters.guard_child_filter_read(&filter);
 				self.filters.set_failure_handler(Some(child_marker), failure);
+				unimplemented!("filters.can_read against sibling and early return false, actually can_read against sibling is useless, can_write is not");
+				self.filters.guard_child_filter_read(&filter); // TODO return bool on guard!!
 				// TODO consider merging add_change and forbid_writes (or even the full block).
 				self.filters.add_change(WorkerDeclaration::ReadDeclarative(filter.clone(), failure), child_marker);
 				self.filters.forbid_writes(filter, child_marker);
 			},
 			WorkerDeclaration::WriteLightDeclarative(filter, failure) => {
-				self.filters.guard_child_filter_write(&filter);
 				self.filters.set_failure_handler(Some(child_marker), failure);
+				unimplemented!("filters.can_write");
+				self.filters.guard_child_filter_write(&filter);
 				// TODO see if possible to only push worker type??
 				self.filters.add_change(WorkerDeclaration::WriteLightDeclarative(filter.clone(), failure), child_marker);
 				self.filters.forbid_writes(filter, child_marker);
 			},
 			WorkerDeclaration::WriteDeclarative(filters, failure) => {
+				self.filters.set_failure_handler(Some(child_marker), failure);
+				unimplemented!("filters.can_read");
+				unimplemented!("filters.can_read_write");
 				self.filters.guard_child_filter_read(&filters.read_only);
 				self.filters.guard_child_filter_write(&filters.read_write);
 				// TODO return a bool and on error spawn a noops async_ext that always return invalid.
@@ -488,6 +503,8 @@ impl OverlayedChanges {
 				self.filters.forbid_writes(filters.read_only, child_marker);
 			},
 		}
+		self.markers.set_marker(child_marker);
+		true
 	}
 
 	/// Set access declaration in the child worker.

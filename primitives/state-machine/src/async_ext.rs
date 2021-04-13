@@ -56,24 +56,24 @@ pub fn new_child_worker_async_ext(
 	worker_id: u64,
 	declaration: WorkerDeclaration,
 	backend: Box<dyn AsyncBackend>,
-	parent_overlay: Option<&mut OverlayedChanges>,
-) -> AsyncExt {
+	parent_overlay: &mut OverlayedChanges,
+) -> Option<AsyncExt> {
 	let mut result = match &declaration {
 		WorkerDeclaration::Stateless => {
-			return AsyncExt {
+			return Some(AsyncExt {
 				kind: WorkerType::Stateless,
 				overlay: Default::default(),
 				spawn_id: worker_id,
 				backend: Box::new(()),
-			}
+			})
 		},
 		WorkerDeclaration::ReadLastBlock => {
-			return AsyncExt {
+			return Some(AsyncExt {
 				kind: declaration.get_type(),
 				overlay: Default::default(),
 				spawn_id: worker_id,
 				backend,
-			}
+			})
 		},
 		_ => {
 			AsyncExt {
@@ -84,12 +84,10 @@ pub fn new_child_worker_async_ext(
 			}
 		},
 	};
-	parent_overlay.map(|overlay| {
-		result.overlay = overlay.child_worker_overlay();
-		overlay.declare_child_worker(worker_id, declaration.clone());
-	});
-	result.overlay.set_worker_declaration(declaration);
-	result
+	parent_overlay.child_worker_overlay(worker_id, declaration).map(move |overlay| {
+		result.overlay = overlay;
+		result
+	})
 }
 
 impl AsyncExt {
@@ -352,15 +350,16 @@ impl Externalities for AsyncExt {
 	) -> Option<Box<dyn AsyncExternalities>> {
 		let backend = self.backend.async_backend();
 		if self.kind.guard_compatible_child_workers(declaration.get_type()) {
-			Some(Box::new(crate::async_ext::new_child_worker_async_ext(
+			if let Some(result) = crate::async_ext::new_child_worker_async_ext(
 				worker_id,
 				declaration,
 				backend,
-				Some(&mut self.overlay),
-			)))
-		} else {
-			None
+				&mut self.overlay,
+			) {
+				return Some(Box::new(result));
+			}
 		}
+		None
 	}
 	
 	fn resolve_worker_result(&mut self, state_update: WorkerResult) -> Option<Vec<u8>> {
