@@ -397,13 +397,14 @@ impl RuntimeInstanceSpawn {
 		task: Task,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> TaskId {
+	) -> Option<TaskId> {
 		let handle = self.counter.fetch_add(1, Ordering::Relaxed);
-		let ext = calling_ext.get_worker_externalities(handle, declaration);
-
-		self.insert(handle, task, ext);
-
-		handle
+		if let Some(ext) = calling_ext.get_worker_externalities(handle, declaration) {
+			self.insert(handle, task, ext);
+			Some(handle)
+		} else {
+			None
+		}
 	}
 }
 
@@ -414,7 +415,7 @@ impl RuntimeSpawn for RuntimeInstanceSpawn {
 		data: Vec<u8>,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> TaskId {
+	) -> Option<TaskId> {
 		let task = Task::Native(NativeTask { func, data });
 		self.spawn_call_inner(task, declaration, calling_ext)
 	}
@@ -426,7 +427,7 @@ impl RuntimeSpawn for RuntimeInstanceSpawn {
 		data: Vec<u8>,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> TaskId {
+	) -> Option<TaskId> {
 		let task = Task::Wasm(WasmTask { dispatcher_ref, func, data });
 		self.spawn_call_inner(task, declaration, calling_ext)
 	}

@@ -338,7 +338,7 @@ impl Externalities for BasicExternalities {
 		&mut self,
 		_worker_id: TaskId,
 		_declaration: WorkerDeclaration,
-	) -> Box<dyn AsyncExternalities> {
+	) -> Option<Box<dyn AsyncExternalities>> {
 		unimplemented!("Workers are not supported by BasicExternalities");
 	}
 

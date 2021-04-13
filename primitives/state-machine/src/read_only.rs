@@ -208,14 +208,14 @@ impl<'a, H: Hasher, B: 'a + Backend<H>> Externalities for ReadOnlyExternalities<
 		&mut self,
 		worker_id: u64,
 		declaration: WorkerDeclaration,
-	) -> Box<dyn AsyncExternalities> {
+	) -> Option<Box<dyn AsyncExternalities>> {
 		let async_backend = self.backend.async_backend();
-		Box::new(crate::async_ext::new_child_worker_async_ext(
+		Some(Box::new(crate::async_ext::new_child_worker_async_ext(
 			worker_id,
 			declaration,
 			async_backend,
 			None, // No current overlay state since read only.
-		))
+		)))
 	}
 
 	fn resolve_worker_result(&mut self, state_update: WorkerResult) -> Option<Vec<u8>> {

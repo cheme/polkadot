@@ -129,7 +129,7 @@ mod inner {
 		entry_point: fn(Vec<u8>) -> Vec<u8>,
 		data: Vec<u8>,
 		declaration: WorkerDeclaration, // TODO consider splitting spawn
-	) -> DataJoinHandle {
+	) -> Option<DataJoinHandle> {
 		let handle = sp_externalities::with_externalities_and_extension::<RuntimeSpawnExt, _, _>(|ext, runtime_spawn| {
 			let result = runtime_spawn.spawn_call_native(entry_point, data, declaration, ext);
 			// Not necessary (same lifetime as runtime_spawn), but shows intent to keep
@@ -138,7 +138,7 @@ mod inner {
 			result
 		}).expect("Cannot spawn without dynamic runtime dispatcher (RuntimeSpawnExt), or outside of externalities context.");
 
-		DataJoinHandle { handle }
+		handle.map(|handle| DataJoinHandle { handle })
 	}
 }
 
@@ -174,7 +174,7 @@ mod inner {
 		entry_point: fn(Vec<u8>) -> Vec<u8>,
 		payload: Vec<u8>,
 		declaration: WorkerDeclaration,
-	) -> DataJoinHandle {
+	) -> Option<DataJoinHandle> {
 		let func_ptr: usize = unsafe { mem::transmute(entry_point) };
 
 		let handle = sp_io::runtime_tasks::spawn(
@@ -183,7 +183,7 @@ mod inner {
 			payload,
 			sp_io::task_declaration(declaration),
 		);
-		DataJoinHandle { handle }
+		handle.map(|handle| DataJoinHandle { handle })
 	}
 }
 

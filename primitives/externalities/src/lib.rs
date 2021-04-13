@@ -37,8 +37,6 @@ pub use extensions::{Extension, Extensions, ExtensionStore};
 mod extensions;
 mod scope_limited;
 
-const INCOMPATIBLE_CHILD_WORKER_TYPE: &str = "Incompatible child worker type";
-
 /// Externalities error.
 #[derive(Debug)]
 pub enum Error {
@@ -302,7 +300,7 @@ pub trait Externalities: ExtensionStore {
 		&mut self,
 		worker_id: TaskId,
 		declaration: WorkerDeclaration,
-	) -> Box<dyn AsyncExternalities>;
+	) -> Option<Box<dyn AsyncExternalities>>;
 
 	/// Resolve worker result does update externality state
 	/// and also apply rules relative to the exernality state.
@@ -693,55 +691,56 @@ impl WorkerType {
 		}
 	}
 
-	/// Panic if spawning a child worker of a given type is not possible.
+	/// Return false if spawning a child worker of a given type is not possible.
 	/// TODO there is way to have more compatibility
 	/// eg : - declarative from a optimistic by logging declarative accesses
 	/// on join.
 	/// - optimistic from declarative by runing accesses on join.
-	pub fn guard_compatible_child_workers(&self, kind: WorkerType) {
+	pub fn guard_compatible_child_workers(&self, kind: WorkerType) -> bool {
 		match self {
 			WorkerType::Stateless => (),
 			WorkerType::ReadLastBlock => match kind {
 				WorkerType::ReadLastBlock => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::ReadAtSpawn => match kind {
 				WorkerType::Stateless => (),
 				WorkerType::ReadAtSpawn => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::ReadOptimistic => match kind {
 				WorkerType::Stateless => (),
 				WorkerType::ReadAtSpawn => (),
 				WorkerType::ReadOptimistic => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::ReadDeclarative => match kind {
 				WorkerType::ReadAtSpawn => (),
 				WorkerType::ReadDeclarative => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::WriteAtSpawn => match kind {
 				WorkerType::WriteAtSpawn => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::WriteLightOptimistic => match kind {
 				WorkerType::WriteLightOptimistic => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::WriteLightDeclarative => match kind {
 				WorkerType::WriteLightDeclarative => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::WriteOptimistic => match kind {
 				WorkerType::WriteOptimistic => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 			WorkerType::WriteDeclarative => match kind {
 				WorkerType::WriteDeclarative => (),
-				_ => panic!("{}", INCOMPATIBLE_CHILD_WORKER_TYPE),
+				_ => return false,
 			},
 		}
+		true
 	}
 }
 

@@ -164,14 +164,15 @@ impl RuntimeInstanceSpawn {
 		task: Task,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> TaskId {
+	) -> Option<TaskId> {
 		let handle = self.counter;
 		self.counter += 1;
-		let ext = calling_ext.get_worker_externalities(handle, declaration);
-
-		self.tasks.insert(handle, PendingTask {task, ext});
-
-		handle
+		if let Some(ext) = calling_ext.get_worker_externalities(handle, declaration) {
+			self.tasks.insert(handle, PendingTask {task, ext});
+			Some(handle)
+		} else {
+			None
+		}
 	}
 
 	/// Base implementation for `RuntimeSpawn` method.
@@ -181,7 +182,7 @@ impl RuntimeInstanceSpawn {
 		data: Vec<u8>,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> TaskId {
+	) -> Option<TaskId> {
 		let task = Task::Native(NativeTask { func, data });
 		self.spawn_call_inner(task, declaration, calling_ext)
 	}
@@ -194,7 +195,7 @@ impl RuntimeInstanceSpawn {
 		data: Vec<u8>,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> TaskId {
+	) -> Option<TaskId> {
 		let task = Task::Wasm(WasmTask { dispatcher_ref, func, data });
 		self.spawn_call_inner(task, declaration, calling_ext)
 	}
@@ -234,7 +235,7 @@ pub mod hosted_runtime {
 			data: Vec<u8>,
 			declaration: WorkerDeclaration,
 			calling_ext: &mut dyn Externalities,
-		) -> TaskId {
+		) -> Option<TaskId> {
 			self.0.borrow_mut().spawn_call_native(func, data, declaration, calling_ext)
 		}
 
@@ -245,7 +246,7 @@ pub mod hosted_runtime {
 			data: Vec<u8>,
 			declaration: WorkerDeclaration,
 			calling_ext: &mut dyn Externalities,
-		) -> TaskId {
+		) -> Option<TaskId> {
 			self.0.borrow_mut().spawn_call(dispatcher_ref, func, data, declaration, calling_ext)
 		}
 
@@ -325,7 +326,7 @@ pub mod hosted_runtime {
 		entry: u32,
 		payload: Vec<u8>,
 		declaration: Crossing<WorkerDeclaration>,
-	) -> TaskId {
+	) -> Option<TaskId> {
 		sp_externalities::with_externalities_and_extension::<RuntimeSpawnExt, _, _>(|ext, runtime_spawn| {
 			runtime_spawn.spawn_call(dispatcher_ref, entry, payload, declaration.into_inner(), ext)
 		}).unwrap()

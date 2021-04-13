@@ -725,14 +725,16 @@ where
 		&mut self,
 		worker_id: TaskId,
 		declaration: WorkerDeclaration,
-	) -> Box<dyn AsyncExternalities> {
+	) -> Option<Box<dyn AsyncExternalities>> {
 		let backend = self.backend.async_backend();
-		Box::new(crate::async_ext::new_child_worker_async_ext(
+		// all child worker are not compatible TODO block declarative
+		// when other runing sibling with declarative exists.
+		Some(Box::new(crate::async_ext::new_child_worker_async_ext(
 			worker_id,
 			declaration,
 			backend,
 			Some(&mut self.overlay),
-		))
+		)))
 	}
 
 	fn resolve_worker_result(&mut self, state_update: WorkerResult) -> Option<Vec<u8>> {

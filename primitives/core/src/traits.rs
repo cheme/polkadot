@@ -204,17 +204,21 @@ pub trait RuntimeSpawn: Send {
 	/// Run a call as native.
 	///
 	/// Returns handle of the spawned task.
+	/// Returns `None` if precondition for this worker
+	/// declaration fail.
 	fn spawn_call_native(
 		&self,
 		func: fn(Vec<u8>) -> Vec<u8>,
 		data: Vec<u8>,
 		declaration: WorkerDeclaration,
 		calling_ext: &mut dyn Externalities,
-	) -> TaskId;
+	) -> Option<TaskId>;
 
 	/// Create new runtime instance and use dynamic dispatch to invoke with specified payload.
 	///
 	/// Returns handle of the spawned task.
+	/// Returns `None` if precondition for this worker
+	/// declaration fail.
 	///
 	/// Function pointers (`dispatcher_ref`, `func`) are WASM pointer types.
 	fn spawn_call(&self,
@@ -223,7 +227,7 @@ pub trait RuntimeSpawn: Send {
 		payload: Vec<u8>,
 		declaration: WorkerDeclaration,
 		ext: &mut dyn Externalities,
-	) -> TaskId;
+	) -> Option<TaskId>;
 
 	/// Join the result of previously created runtime instance invocation.
 	fn join(&self, handle: TaskId, calling_ext: &mut dyn Externalities) -> Option<Vec<u8>>;

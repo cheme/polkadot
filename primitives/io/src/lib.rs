@@ -1369,7 +1369,7 @@ pub trait RuntimeTasks {
 		entry: u32,
 		payload: Vec<u8>,
 		declaration: Crossing<WorkerDeclaration>,
-	) -> u64 {
+	) -> Option<u64> {
 		sp_externalities::externalities_and_extension::<RuntimeSpawnExt, _, _>(*self, |ext, spawn| {
 			spawn.spawn_call(dispatcher_ref, entry, payload, declaration.into_inner(), ext)
 		}).expect("Cannot spawn without dynamic runtime dispatcher (RuntimeSpawnExt)")

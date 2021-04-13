@@ -1297,7 +1297,7 @@ fn test_witness(proof: StorageProof, root: crate::Hash) {
 		let handle = sp_tasks::spawn(worker_test, Vec::new(), WorkerDeclaration::ReadAtSpawn);
 		sp_io::storage::set(b"xyz", b"test");
 		assert!(sp_io::storage::get(b"xyz").is_some());
-		let res = handle.join().expect("expected result for task");
+		let res = handle.unwrap().join().expect("expected result for task");
 		assert!(res.get(0) == Some(&42));
 	});
 }
@@ -1312,31 +1312,31 @@ fn test_tasks() {
 		result
 	}
 	let handle = sp_tasks::spawn(todo, Vec::new(), WorkerDeclaration::ReadAtSpawn);
-	let res = handle.join().expect("expected result for task");
+	let res = handle.unwrap().join().expect("expected result for task");
 	assert!(res.get(0) == Some(&42));
 
 	fn tokill(_inp: Vec<u8>) -> Vec<u8> {
 		loop { }
 	}
 	let handle = sp_tasks::spawn(tokill, Vec::new(), WorkerDeclaration::ReadAtSpawn);
-	handle.dismiss();
+	handle.unwrap().dismiss();
 	fn do_panic(_inp: Vec<u8>) -> Vec<u8> {
 		panic!("Expected test panic.");
 	}
 	let handle = sp_tasks::spawn(do_panic, Vec::new(), WorkerDeclaration::ReadAtSpawn);
 	// Dismiss don't panic
-	handle.dismiss();
+	handle.unwrap().dismiss();
 
 	sp_io::storage::start_transaction();
 	let handle = sp_tasks::spawn(todo, Vec::new(), WorkerDeclaration::ReadAtSpawn);
 	// invalidate state for handle
 	sp_io::storage::rollback_transaction();
-	assert!(handle.join().is_none());
+	assert!(handle.unwrap().join().is_none());
 	sp_io::storage::start_transaction();
 	let handle = sp_tasks::spawn(todo, Vec::new(), WorkerDeclaration::ReadLastBlock);
 	sp_io::storage::rollback_transaction();
 	// state stay correct for last block
-	assert!(handle.join().is_some());
+	assert!(handle.unwrap().join().is_some());
 	
 	// TODO	unimplemented!("join, kill and consort");
 }
