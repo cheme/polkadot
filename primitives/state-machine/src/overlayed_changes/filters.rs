@@ -336,10 +336,10 @@ impl Filters {
 	}
 
 	// TODO case where we allow all (forbid all on the other side) really need to be tested.
-	pub(super) fn guard_read_all(&self) {
-		Self::guard_read_all_internal_forbid(&self.failure_handlers, &self.filters_forbid.top);
+	pub(super) fn guard_read_all(&mut self) {
+		Self::guard_read_all_internal_forbid(&mut self.failure_handlers, &self.filters_forbid.top);
 		for (_storage_key, child) in self.filters_forbid.children.iter() {
-			Self::guard_read_all_internal_forbid(&self.failure_handlers, child);
+			Self::guard_read_all_internal_forbid(&mut self.failure_handlers, child);
 		}
 		// Note that we consider there is no full read access (with child trie it is difficult),
 		// generally one shall never use full filter: it should be a stand alone mode.
@@ -349,7 +349,7 @@ impl Filters {
 	}
 
 	fn guard_read_all_internal_forbid(
-		failure_handlers: &FailureHandlers,
+		failure_handlers: &mut FailureHandlers,
 		filters_forbid: &FilterTree<FilterOrigin>,
 	) {
 		// check not forbid write or forbid read filter.
@@ -391,11 +391,11 @@ impl Filters {
 	}
 */
 	/// Guard invalid access for reading a key.
-	pub(super) fn guard_read(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+	pub(super) fn guard_read(&mut self, child_info: Option<&ChildInfo>, key: &[u8]) {
 		let _ = self.guard_read_inner(child_info, key, false);
 	}
 
-	fn guard_read_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
+	fn guard_read_inner(&mut self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_read_forbid(&self.filters_forbid, child_info, key);
 		for origin in blocked {
 			if ret_result {
@@ -415,11 +415,11 @@ impl Filters {
 	}
 
 	/// Guard invalid access for writing a key.
-	pub(super) fn guard_write(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+	pub(super) fn guard_write(&mut self, child_info: Option<&ChildInfo>, key: &[u8]) {
 		let _ = self.guard_write_inner(child_info, key, false);
 	}
 
-	fn guard_write_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
+	fn guard_write_inner(&mut self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_write_forbid(&self.filters_forbid, child_info, key);
 		for origin in blocked {
 			if ret_result {
@@ -760,7 +760,7 @@ impl Filters {
 		let _ = self.guard_read_prefix_inner(child_info, key, false);
 	}*/
 
-	fn guard_read_prefix_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
+	fn guard_read_prefix_inner(&mut self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_read_forbid_prefix(&self.filters_forbid, child_info, key);
 		for origin in blocked {
 			if ret_result {
@@ -779,11 +779,11 @@ impl Filters {
 		true
 	}
 
-	pub(super) fn guard_write_prefix(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+	pub(super) fn guard_write_prefix(&mut self, child_info: Option<&ChildInfo>, key: &[u8]) {
 		let _ = self.guard_write_prefix_inner(child_info, key, false);
 	}
 
-	fn guard_write_prefix_inner(&self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
+	fn guard_write_prefix_inner(&mut self, child_info: Option<&ChildInfo>, key: &[u8], ret_result: bool) -> bool {
 		let blocked = Self::key_write_forbid_prefix(&self.filters_forbid, child_info, key);
 		for origin in blocked {
 			if ret_result {
@@ -803,7 +803,7 @@ impl Filters {
 	}
 
 	pub(super) fn guard_read_interval(
-		&self,
+		&mut self,
 		child_info: Option<&ChildInfo>,
 		key: &[u8],
 		key_end: Option<&[u8]>,
@@ -915,7 +915,6 @@ impl FilterOrigin {
 }
 
 pub(super) mod failure {
-	use sp_std::cell::Cell;
 	use sp_externalities::{TaskId, DeclarationFailureHandling};
 	use sp_std::collections::btree_map::BTreeMap;
 
@@ -925,7 +924,7 @@ pub(super) mod failure {
 		/// When failure handling is not panic this is set to `true` on
 		/// error.
 		/// When this is true the worker result will be resolved to invalid.
-		did_fail: Cell<bool>,
+		did_fail: bool,
 
 		/// How to handle worker broken assumption (panic or invalid result).
 		failure: DeclarationFailureHandling,
@@ -933,16 +932,16 @@ pub(super) mod failure {
 
 	impl DeclFailureHandling {
 		pub(super) fn did_fail(&self) -> bool {
-			self.did_fail.get()
+			self.did_fail
 		}
 
-		fn invalid_access(&self) {
+		fn invalid_access(&mut self) {
 			match self.failure {
 				DeclarationFailureHandling::Panic => {
 					panic!("{}", super::BROKEN_DECLARATION_ACCESS);
 				},
 				DeclarationFailureHandling::InvalidAtJoin => {
-					self.did_fail.set(true);
+					self.did_fail = true;
 				},
 			}
 		}
@@ -961,12 +960,12 @@ pub(super) mod failure {
 
 	impl FailureHandlers {
 		// TODO rename to invalid parent access?
-		pub(super) fn invalid_allowed_access(&self) {
+		pub(super) fn invalid_allowed_access(&mut self) {
 			self.parent_failure_handler.invalid_access();
 		}
 
 		// TODO rename to invalid child access?
-		pub(super) fn invalid_accesses(&self, origin: &super::FilterOrigin) {
+		pub(super) fn invalid_accesses(&mut self, origin: &super::FilterOrigin) {
 			if let Some(children) = origin.children.as_ref() {
 				for child in children.iter() {
 					self.invalid_access(*child);
@@ -974,8 +973,8 @@ pub(super) mod failure {
 			}
 		}
 
-		fn invalid_access(&self, from_child: TaskId) {
-			self.children_failure_handler.get(&from_child).expect("TODO").invalid_access()
+		fn invalid_access(&mut self, from_child: TaskId) {
+			self.children_failure_handler.get_mut(&from_child).expect("TODO").invalid_access()
 		}
 
 		pub(super) fn set_failure_handler(&mut self, from_child: Option<TaskId>, failure: DeclarationFailureHandling) {
@@ -996,11 +995,11 @@ pub(super) mod failure {
 
 		// TODO this does not make much sense, should be specific to a child marker
 		pub(super) fn did_fail(&self) -> bool {
-			if self.parent_failure_handler.did_fail.get() {
+			if self.parent_failure_handler.did_fail {
 				return true;
 			}
 			for (_id, handler) in self.children_failure_handler.iter() {
-				if handler.did_fail.get() {
+				if handler.did_fail {
 					return true;
 				}
 			}

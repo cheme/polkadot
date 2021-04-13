@@ -32,7 +32,6 @@ use sp_std::collections::btree_set::BTreeSet;
 use std::collections::HashMap as Map;
 #[cfg(not(feature = "std"))]
 use sp_std::collections::btree_map::BTreeMap as Map;
-use sp_std::cell::{Cell, RefCell};
 use crate::overlayed_changes::radix_trees::{AccessTreeWrite, AccessTreeWriteParent};
 use sp_core::storage::ChildInfo;
 use super::{StorageKey, retain_map};
@@ -59,14 +58,14 @@ pub(super) struct AccessLogger {
 	/// logged access.
 	log_write: OriginLog,
 	/// Log that we access all key in read mode (usually by calling storage root).
-	parent_read_all: Cell<bool>,
+	parent_read_all: bool,
 	/// Log that we access all key in read mode (usually by calling storage root),
 	/// with some child workers running.
-	children_read_all: RefCell<OriginLog>,
+	children_read_all: OriginLog,
 	/// Access logger for top trie.
 	top_logger: StateLogger,
 	/// Access logger for children trie.
-	children_logger: RefCell<Map<StorageKey, StateLogger>>,
+	children_logger: Map<StorageKey, StateLogger>,
 	// TODO unused except in test.
 	eager_clean: bool,
 }
@@ -76,11 +75,11 @@ pub(super) struct AccessLogger {
 /// mut access to overlays.
 #[derive(Debug, Clone, Default)]
 struct StateLogger {
-	parent_read_key: RefCell<Vec<Vec<u8>>>,
-	children_read_key: RefCell<Map<Vec<u8>, OriginLog>>,
+	parent_read_key: Vec<Vec<u8>>,
+	children_read_key: Map<Vec<u8>, OriginLog>,
 	// Intervals are inclusive for start and end.
-	parent_read_intervals: RefCell<Vec<(Vec<u8>, Option<Vec<u8>>)>>,
-	children_read_intervals: RefCell<Map<(Vec<u8>, Option<Vec<u8>>), OriginLog>>,
+	parent_read_intervals: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+	children_read_intervals: Map<(Vec<u8>, Option<Vec<u8>>), OriginLog>,
 	parent_write_key: Vec<Vec<u8>>,
 	children_write_key: Map<Vec<u8>, OriginLog>,
 	// this is roughly clear prefix.
@@ -89,14 +88,14 @@ struct StateLogger {
 }
 
 impl StateLogger {
-	fn remove_parent_read_logs(&self) {
-		self.parent_read_key.borrow_mut().clear();
-		self.parent_read_intervals.borrow_mut().clear();
+	fn remove_parent_read_logs(&mut self) {
+		self.parent_read_key.clear();
+		self.parent_read_intervals.clear();
 	}
 
 	fn remove_all_children_read_logs(&mut self) {
-		self.children_read_key.get_mut().clear();
-		self.children_read_intervals.get_mut().clear();
+		self.children_read_key.clear();
+		self.children_read_intervals.clear();
 	}
 
 	fn remove_all_children_write_logs(&mut self) {
@@ -105,11 +104,11 @@ impl StateLogger {
 	}
 
 	fn remove_children_read_logs(&mut self, marker: TaskId) {
-		retain_map(self.children_read_key.get_mut(), |_key, value| {
+		retain_map(&mut self.children_read_key, |_key, value| {
 			value.remove(&marker);
 			!value.is_empty()
 		});
-		retain_map(self.children_read_intervals.get_mut(), |_key, value| {
+		retain_map(&mut self.children_read_intervals, |_key, value| {
 			value.remove(&marker);
 			!value.is_empty()
 		});
@@ -133,12 +132,12 @@ impl StateLogger {
 	}
 
 	fn is_children_read_empty(&self, marker: TaskId) -> bool {
-		for (_, ids) in self.children_read_key.borrow().iter() {
+		for (_, ids) in self.children_read_key.iter() {
 			if ids.contains(&marker) {
 				return false;
 			}
 		}
-		for (_, ids) in self.children_read_intervals.borrow().iter() {
+		for (_, ids) in self.children_read_intervals.iter() {
 			if ids.contains(&marker) {
 				return false;
 			}
@@ -221,13 +220,13 @@ impl StateLogger {
 	}
 
 	fn check_key_against_read(&self, write_key: &Vec<u8>, marker: TaskId) -> bool {
-		if let Some(ids) = self.children_read_key.borrow().get(write_key) {
+		if let Some(ids) = self.children_read_key.get(write_key) {
 			if ids.contains(&marker) {
 				return false;
 			}
 		}
 		// TODO this needs proper children_read_intervals structure.
-		for ((start, end), ids) in self.children_read_intervals.borrow().iter() {
+		for ((start, end), ids) in self.children_read_intervals.iter() {
 			if write_key >= start && end.as_ref().map(|end| write_key <= end).unwrap_or(true) {
 				if ids.contains(&marker) {
 					return false;
@@ -268,7 +267,7 @@ impl StateLogger {
 	fn check_prefix_against_read(&self, prefix: &Vec<u8>, marker: TaskId) -> bool {
 		// TODO here could benefit from a seek then iter.
 		let mut first = false;
-		for (key, ids) in self.children_read_key.borrow().iter() {
+		for (key, ids) in self.children_read_key.iter() {
 			if key.starts_with(prefix) {
 				if ids.contains(&marker) {
 					return false;
@@ -280,7 +279,7 @@ impl StateLogger {
 			}
 		}
 		// TODO this needs proper children_read_intervals structure.
-		for ((start, end), ids) in self.children_read_intervals.borrow().iter() {
+		for ((start, end), ids) in self.children_read_intervals.iter() {
 			if prefix.len() == 0
 				|| start.starts_with(prefix)
 				|| end.as_ref().map(|end| end.starts_with(prefix)).unwrap_or(false)
@@ -335,7 +334,7 @@ impl AccessLogger {
 		if !self.top_logger.is_children_read_empty(marker) {
 			return false;
 		}
-		for child_logger in self.children_logger.borrow().iter() {
+		for child_logger in self.children_logger.iter() {
 			if !child_logger.1.is_children_read_empty(marker) {
 				return false;
 			}
@@ -348,7 +347,7 @@ impl AccessLogger {
 		if !self.top_logger.is_children_write_empty(marker) {
 			return false;
 		}
-		for child_logger in self.children_logger.borrow().iter() {
+		for child_logger in self.children_logger.iter() {
 			if !child_logger.1.is_children_write_empty(marker) {
 				return false;
 			}
@@ -397,7 +396,7 @@ impl AccessLogger {
 								return false;
 							}
 							for (storage_key, child_logger) in accesses.children_logger.iter() {
-								if let Some(access_logger) = self.children_logger.get_mut().get(storage_key) {
+								if let Some(access_logger) = self.children_logger.get(storage_key) {
 									if !access_logger.check_write_read(child_logger, *marker) {
 										return false;
 									}
@@ -411,7 +410,7 @@ impl AccessLogger {
 								return false;
 							}
 							for (storage_key, child_logger) in accesses.children_logger.iter() {
-								if let Some(access_logger) = self.children_logger.get_mut().get(storage_key) {
+								if let Some(access_logger) = self.children_logger.get(storage_key) {
 									if !access_logger.check_write_write(child_logger, *marker) {
 										return false;
 									}
@@ -419,14 +418,14 @@ impl AccessLogger {
 							}
 						}
 						if has_read_parent {
-							if self.parent_read_all.get() {
+							if self.parent_read_all {
 								return false;
 							}
 							if !self.top_logger.check_read_write(&accesses.top_logger, *marker) {
 								return false;
 							}
 							for (storage_key, child_logger) in accesses.children_logger.iter() {
-								if let Some(access_logger) = self.children_logger.get_mut().get(storage_key) {
+								if let Some(access_logger) = self.children_logger.get(storage_key) {
 									if !access_logger.check_read_write(child_logger, *marker) {
 										return false;
 									}
@@ -504,14 +503,14 @@ impl AccessLogger {
 		// to just clear.
 		if self.log_write.is_empty() {
 			self.top_logger.remove_all_children_write_logs();
-			for child_logger in self.children_logger.get_mut().iter_mut() {
+			for child_logger in self.children_logger.iter_mut() {
 				child_logger.1.remove_all_children_write_logs();
 			}
 		}
 		self.log_read.remove(&worker);
 		if self.log_read.is_empty() {
 			self.top_logger.remove_all_children_read_logs();
-			for child_logger in self.children_logger.get_mut().iter_mut() {
+			for child_logger in self.children_logger.iter_mut() {
 				child_logger.1.remove_all_children_read_logs();
 			}
 		}
@@ -521,12 +520,12 @@ impl AccessLogger {
 		if self.log_write.remove(&worker) {
 			if self.log_write.is_empty() {
 				self.top_logger.remove_all_children_write_logs();
-				for child_logger in self.children_logger.get_mut().iter_mut() {
+				for child_logger in self.children_logger.iter_mut() {
 					child_logger.1.remove_all_children_write_logs();
 				}
 			} else {
 				self.top_logger.remove_children_write_logs(worker);
-				for child_logger in self.children_logger.get_mut().iter_mut() {
+				for child_logger in self.children_logger.iter_mut() {
 					child_logger.1.remove_children_write_logs(worker);
 				}
 			}
@@ -534,85 +533,81 @@ impl AccessLogger {
 		if self.log_read.remove(&worker) {
 			if self.log_read.is_empty() {
 				self.top_logger.remove_all_children_read_logs();
-				for child_logger in self.children_logger.get_mut().iter_mut() {
+				for child_logger in self.children_logger.iter_mut() {
 					child_logger.1.remove_all_children_read_logs();
 				}
 			} else {
 				self.top_logger.remove_children_read_logs(worker);
-				for child_logger in self.children_logger.get_mut().iter_mut() {
+				for child_logger in self.children_logger.iter_mut() {
 					child_logger.1.remove_children_read_logs(worker);
 				}
 			}
 		}
 	}
 
-	pub(super) fn log_read_all(&self) {
-		if self.parent_log_read && !self.parent_read_all.get() {
-			self.parent_read_all.set(true);
+	pub(super) fn log_read_all(&mut self) {
+		if self.parent_log_read && !self.parent_read_all {
+			self.parent_read_all = true;
 			self.top_logger.remove_parent_read_logs();
-			for child_logger in self.children_logger.borrow_mut().iter_mut() {
+			for child_logger in self.children_logger.iter_mut() {
 				child_logger.1.remove_parent_read_logs();
 			}
 		}
 		if !self.log_read.is_empty() {
-			self.children_read_all.borrow_mut().extend(self.log_read.iter().cloned());
+			self.children_read_all.extend(self.log_read.iter().cloned());
 			// Here we could remove children read logs, not sure if useful (need iter and filtering).
 		}
 	}
 
 	fn logger_mut<'a>(
 		top_logger: &'a mut StateLogger,
-		children_logger: &'a mut RefCell<Map<StorageKey, StateLogger>>,
+		children_logger: &'a mut Map<StorageKey, StateLogger>,
 		storage_key: Option<&[u8]>,
 	) -> &'a mut StateLogger {
 		if let Some(storage_key) = storage_key {
-			children_logger.get_mut().entry(storage_key.to_vec()).or_insert_with(Default::default)
+			children_logger.entry(storage_key.to_vec()).or_insert_with(Default::default)
 		} else {
 			top_logger
 		}
 	}
 
-	pub(super) fn log_read(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+	pub(super) fn log_read(&mut self, child_info: Option<&ChildInfo>, key: &[u8]) {
 		self.log_read_storage_key(child_info.map(|child_info| child_info.storage_key()), key)
 	}
 
-	fn log_read_storage_key(&self, storage_key: Option<&[u8]>, key: &[u8]) {
-		let mut ref_children;
-		if self.parent_log_read && !self.parent_read_all.get() {
+	fn log_read_storage_key(&mut self, storage_key: Option<&[u8]>, key: &[u8]) {
+		if self.parent_log_read && !self.parent_read_all {
 			let logger = if let Some(storage_key) = storage_key {
-				if !self.children_logger.borrow().contains_key(storage_key) {
-					self.children_logger.borrow_mut().insert(storage_key.to_vec(), Default::default());
+				if !self.children_logger.contains_key(storage_key) {
+					self.children_logger.insert(storage_key.to_vec(), Default::default());
 				}
-				ref_children = self.children_logger.borrow();
-				ref_children.get(storage_key).expect("lazy init above")
+				self.children_logger.get_mut(storage_key).expect("lazy init above")
 			} else {
-				&self.top_logger
+				&mut self.top_logger
 			};
 			// TODO consider map
-			logger.parent_read_key.borrow_mut().push(key.to_vec());
+			logger.parent_read_key.push(key.to_vec());
 		}
 		if !self.log_read.is_empty() {
-			let children_read_all = self.children_read_all.borrow();
-			let mut children = self.log_read.difference(&children_read_all);
+			let mut children = self.log_read.difference(&self.children_read_all);
 			if !children.next().is_none() {
 				let logger = if let Some(storage_key) = storage_key {
-					if !self.children_logger.borrow().contains_key(storage_key) {
-						self.children_logger.borrow_mut().insert(storage_key.to_vec(), Default::default());
+					if !self.children_logger.contains_key(storage_key) {
+						self.children_logger.insert(storage_key.to_vec(), Default::default());
 					}
-					ref_children = self.children_logger.borrow();
-					ref_children.get(storage_key).expect("lazy init above")
+					self.children_logger.get_mut(storage_key).expect("lazy init above")
 				} else {
-					&self.top_logger
+					&mut self.top_logger
 				};
-				let children = self.log_read.difference(&children_read_all);
-				logger.children_read_key.borrow_mut().entry(key.to_vec())
+				let children = self.log_read.difference(&self.children_read_all);
+				logger.children_read_key.entry(key.to_vec())
 					.or_default().extend(children.cloned());
 			}
 		}
 	}
 
 	pub(super) fn log_read_interval(
-		&self,
+		&mut self,
 		child_info: Option<&ChildInfo>,
 		key: &[u8],
 		key_end: Option<&[u8]>,
@@ -621,40 +616,36 @@ impl AccessLogger {
 	}
 
 	fn log_read_interval_storage_key(
-		&self,
+		&mut self,
 		storage_key: Option<&[u8]>,
 		key: &[u8],
 		key_end: Option<&[u8]>,
 	) {
-		let mut ref_children;
-		if self.parent_log_read && !self.parent_read_all.get() {
+		if self.parent_log_read && !self.parent_read_all {
 			let logger = if let Some(storage_key) = storage_key {
-				if !self.children_logger.borrow().contains_key(storage_key) {
-					self.children_logger.borrow_mut().insert(storage_key.to_vec(), Default::default());
+				if !self.children_logger.contains_key(storage_key) {
+					self.children_logger.insert(storage_key.to_vec(), Default::default());
 				}
-				ref_children = self.children_logger.borrow();
-				ref_children.get(storage_key).expect("lazy init above")
+				self.children_logger.get_mut(storage_key).expect("lazy init above")
 			} else {
-				&self.top_logger
+				&mut self.top_logger
 			};
 			// TODO consider map
-			logger.parent_read_intervals.borrow_mut().push((key.to_vec(), key_end.map(|end| end.to_vec())));
+			logger.parent_read_intervals.push((key.to_vec(), key_end.map(|end| end.to_vec())));
 		}
 		if !self.log_read.is_empty() {
-			let children_read_all = self.children_read_all.borrow();
-			let mut children = self.log_read.difference(&children_read_all);
+			let mut children = self.log_read.difference(&self.children_read_all);
 			if !children.next().is_none() {
 				let logger = if let Some(storage_key) = storage_key {
-					if !self.children_logger.borrow().contains_key(storage_key) {
-						self.children_logger.borrow_mut().insert(storage_key.to_vec(), Default::default());
+					if !self.children_logger.contains_key(storage_key) {
+						self.children_logger.insert(storage_key.to_vec(), Default::default());
 					}
-					ref_children = self.children_logger.borrow();
-					ref_children.get(storage_key).expect("lazy init above")
+					self.children_logger.get_mut(storage_key).expect("lazy init above")
 				} else {
-					&self.top_logger
+					&mut self.top_logger
 				};
-				let children = self.log_read.difference(&children_read_all);
-				logger.children_read_intervals.borrow_mut().entry((key.to_vec(), key_end.map(|end| end.to_vec())))
+				let children = self.log_read.difference(&self.children_read_all);
+				logger.children_read_intervals.entry((key.to_vec(), key_end.map(|end| end.to_vec())))
 					.or_default().extend(children.cloned());
 			}
 		}
@@ -704,26 +695,26 @@ impl AccessLogger {
 		}
 
 		let mut result = sp_externalities::AccessLog::default();
-		if self.parent_read_all.get() {
+		if self.parent_read_all {
 			// Resetting state is not strictly needed, extract read should only happen
 			// on end of lifetime of the overlay (at worker return).
 			// But writing it for having explicitly a clean read state.
-			self.parent_read_all.set(false);
+			self.parent_read_all = false;
 			result.read_all = true;
 		}
 		if !result.read_all {
-			result.top_logger.read_keys = sp_std::mem::take(self.top_logger.parent_read_key.get_mut());
-			result.top_logger.read_intervals = sp_std::mem::take(self.top_logger.parent_read_intervals.get_mut());
+			result.top_logger.read_keys = sp_std::mem::take(&mut self.top_logger.parent_read_key);
+			result.top_logger.read_intervals = sp_std::mem::take(&mut self.top_logger.parent_read_intervals);
 		}
 		result.top_logger.read_write_keys = sp_std::mem::take(&mut self.top_logger.parent_write_key);
 		result.top_logger.read_write_prefix = sp_std::mem::take(&mut self.top_logger.parent_write_prefix)
 			.iter().value_iter().map(|(key, _)| key).collect();
-		result.children_logger = self.children_logger.get_mut().iter_mut()
+		result.children_logger = self.children_logger.iter_mut()
 			.map(|(storage_key, logger)| {
 			let mut log = StateLog::default();
 			if !result.read_all {
-				log.read_keys = sp_std::mem::take(logger.parent_read_key.get_mut());
-				log.read_intervals = sp_std::mem::take(logger.parent_read_intervals.get_mut());
+				log.read_keys = sp_std::mem::take(&mut logger.parent_read_key);
+				log.read_intervals = sp_std::mem::take(&mut logger.parent_read_intervals);
 			}
 			log.read_write_keys = sp_std::mem::take(&mut logger.parent_write_key);
 			log.read_write_prefix = sp_std::mem::take(&mut logger.parent_write_prefix)
