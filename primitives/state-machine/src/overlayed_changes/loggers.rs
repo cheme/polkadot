@@ -103,6 +103,7 @@ impl StateLogger {
 		self.children_write_prefix.clear();
 	}
 
+	// TODO this seems costy, check usage.
 	fn remove_children_read_logs(&mut self, marker: TaskId) {
 		retain_map(&mut self.children_read_key, |_key, value| {
 			value.remove(&marker);
@@ -114,6 +115,7 @@ impl StateLogger {
 		});
 	}
 
+	// TODO this seems costy, check usage.
 	fn remove_children_write_logs(&mut self, marker: TaskId) {
 		retain_map(&mut self.children_write_key, |_key, value| {
 			value.remove(&marker);
@@ -189,6 +191,7 @@ impl StateLogger {
 		}
 		true
 	}
+
 	// compare write from parent (`self`) against write from child (`access`).
 	fn check_write_write(&self, access: &StateLog, marker: TaskId) -> bool {
 		for key in access.read_write_keys.iter() {

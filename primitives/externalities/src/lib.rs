@@ -611,7 +611,7 @@ pub enum WorkerType {
 	ReadOptimistic = 3,
 
 	/// Same as `ReadOptimistic`, but we do not check conflict on join.
-	/// Instead we declare child workre read accesses and check during processing
+	/// Instead we declare child worker read accesses and check during processing
 	/// that there is no invalid access.
 	///
 	/// As for all declarative types, depending on failure access declaration
