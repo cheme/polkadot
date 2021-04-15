@@ -523,13 +523,16 @@ pub struct StateLog {
 	/// Read only access to a key.
 	pub read_keys: Vec<Vec<u8>>,
 	/// Key write with no read access.
-	/// Include append operations.
-	pub write_only_key: Vec<Vec<u8>>,
-	/// Read and write access to a key.
-	pub read_write_keys: Vec<Vec<u8>>,
+	pub write_key: Vec<Vec<u8>>,
+	/// Append operations are append where
+	/// order of insertion do not matter (or
+	/// stick to 'join' order),
+	/// or even writes where conflicts child
+	/// latest join child worker value prevails.
+	pub append_keys: Vec<Vec<u8>>,
 	/// Read and write access to a whole prefix (eg key removal
 	/// by prefix).
-	pub read_write_prefix: Vec<Vec<u8>>,
+	pub write_prefix: Vec<Vec<u8>>,
 	/// Worker did iterate over a given interval.
 	/// Interval is a pair of inclusive start and end key.
 	pub read_intervals: Vec<(Vec<u8>, Option<Vec<u8>>)>,
@@ -646,12 +649,23 @@ pub enum WorkerType {
 	///
 	/// So write from child exclude read from parent and write from parent exclude read
 	/// from child.
+	///
+	/// The following access between a parent and a child are blocked:
+	/// - Read against Write or Append.
+	/// - Write against Any access.
+	/// - Append against Read or Write.
+	///
 	WriteOptimistic = 8,
 
 	/// Same as `WriteOptimistic`, but conflict are detected depending on access
 	/// declaration.
 	/// We declare allowed write access for child worker and allowed read only access
 	/// (no need to declare read access for already declared write access).
+	///
+	/// The following rules apply:
+	/// - child allow read -> parent forbid Write and append
+	/// - child allow write -> parent forbid any access
+	/// - child allow append -> parent forbid read or write
 	WriteDeclarative = 9,
 }
 
@@ -836,13 +850,14 @@ impl WorkerDeclaration {
 pub struct AccessDeclarations {
 	/// Read access, depending on mode, this should exclude a concurrent write access.
 	pub read_only: AccessDeclaration,
-	/// A write only access to appendable content.
-	/// The change get added on worker 'join' into the parent worker.
-	pub write_only: AccessDeclaration,
-	/// Read and write access, depending on mode, this should exclude a concurrent read
-	/// or write access.
-	/// It is same as definining both read_only and write_only but more compact.
-	pub read_write: AccessDeclaration,
+	/// A write access, it implies read access.
+	pub write: AccessDeclaration,
+	/// Append access, when value is modified without reading and
+	/// any modification order is fine with logic.
+	/// Eg: counter, list of value with order of insertion resolved
+	/// by child join value, or even modification where final value
+	/// is latest child 'join' value.
+	pub append: AccessDeclaration,
 }
 
 /// Access filter on storage.
