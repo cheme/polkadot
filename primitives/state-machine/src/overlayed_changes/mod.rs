@@ -960,8 +960,8 @@ impl OverlayedChanges {
 					Change::IncrementCounter(value, increment) => incremented.push((key, (value, increment))),
 				}
 			}
-			// TODO implement extraction of delta for logged append and logged delete prefix
-			// actually having append and delete prefix as first state component of state machine
+			// TODO implement extraction of delta for logged delete prefix
+			// actually having delete prefix as first state component of state machine
 			// would be more straight forward and better for all but https://github.com/paritytech/substrate/pull/5280
 			// did not have support (delete prefix as first state citizen).
 			children.push((info, sp_externalities::TrieDelta {
@@ -969,7 +969,7 @@ impl OverlayedChanges {
 				deleted,
 				appended,
 				incremented,
-				deleted_prefix: Vec::new(), // TODO
+				deleted_prefix: Vec::new(), // TODO deleted prefix optimization
 			}));
 		}
 
@@ -1011,7 +1011,7 @@ impl OverlayedChanges {
 		self.transaction_index_ops.push(op)
 	}
 
-	// TODO doc and check usage
+	/// Inject successful child worker delta to our parent state.
 	fn inject_worker_delta(&mut self, delta: sp_externalities::StateDelta) {
 		for (key, value) in delta.top.added.into_iter() {
 			self.set_storage(key, Some(value));
@@ -1019,12 +1019,30 @@ impl OverlayedChanges {
 		for key in delta.top.deleted.into_iter() {
 			self.set_storage(key, None);
 		}
+		for (key, _change) in delta.top.appended.into_iter() {
+			unimplemented!("Delta appended");
+		}
+		for (key, _change) in delta.top.incremented.into_iter() {
+			unimplemented!("Delta increment");
+		}
+		for key in delta.top.deleted_prefix.into_iter() {
+			unimplemented!("Deleted prefix delta optimisation.");
+		}
 		for (child_info, delta) in delta.children.into_iter() {
 			for (key, value) in delta.added.into_iter() {
 				self.set_child_storage(&child_info, key, Some(value));
 			}
 			for key in delta.deleted.into_iter() {
 				self.set_child_storage(&child_info, key, None);
+			}
+			for (key, _change) in delta.appended.into_iter() {
+				unimplemented!("Delta appended");
+			}
+			for (key, _change) in delta.incremented.into_iter() {
+				unimplemented!("Delta increment");
+			}
+			for key in delta.deleted_prefix.into_iter() {
+				unimplemented!("Deleted prefix delta optimisation.");
 			}
 		}
 	}
