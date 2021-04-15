@@ -503,13 +503,27 @@ impl AccessLog {
 		}
 		false
 	}
+
 	/// Return true if a write related information was logged.
-	pub fn has_read_write(&self) -> bool {
-		if self.top_logger.has_read_write() {
+	pub fn has_write(&self) -> bool {
+		if self.top_logger.has_write() {
 			return true;
 		}
 		for (_key, logger) in self.children_logger.iter() {
-			if logger.has_read_write() {
+			if logger.has_write() {
+				return true;
+			}
+		}
+		false
+	}
+
+	/// Return true if a append related information was logged.
+	pub fn has_append(&self) -> bool {
+		if self.top_logger.has_append() {
+			return true;
+		}
+		for (_key, logger) in self.children_logger.iter() {
+			if logger.has_append() {
 				return true;
 			}
 		}
@@ -523,14 +537,14 @@ pub struct StateLog {
 	/// Read only access to a key.
 	pub read_keys: Vec<Vec<u8>>,
 	/// Key write with no read access.
-	pub write_key: Vec<Vec<u8>>,
+	pub write_keys: Vec<Vec<u8>>,
 	/// Append operations are append where
 	/// order of insertion do not matter (or
 	/// stick to 'join' order),
 	/// or even writes where conflicts child
 	/// latest join child worker value prevails.
 	pub append_keys: Vec<Vec<u8>>,
-	/// Read and write access to a whole prefix (eg key removal
+	/// Write access to a whole prefix (eg key removal
 	/// by prefix).
 	pub write_prefix: Vec<Vec<u8>>,
 	/// Worker did iterate over a given interval.
@@ -539,21 +553,17 @@ pub struct StateLog {
 }
 
 impl StateLog {
-	/// Check that no incompatible access are done.
-	/// TODO debug assert call it where relevant: only for test or double check
-	pub fn validate(&self) -> bool {
-		if !self.write_only_key.is_empty() {
-			unimplemented!()
-		}
-		true
-	}
 	/// Return true if a read related information was logged.
 	pub fn has_read(&self) -> bool {
 		!self.read_keys.is_empty() || !self.read_intervals.is_empty()
 	}
 	/// Return true if a write related information was logged.
-	pub fn has_read_write(&self) -> bool {
-		!self.read_write_keys.is_empty() || !self.read_write_prefix.is_empty()
+	pub fn has_write(&self) -> bool {
+		!self.write_keys.is_empty() || !self.write_prefix.is_empty()
+	}
+	/// Return true if a append related information was logged.
+	pub fn has_append(&self) -> bool {
+		!self.append_keys.is_empty()
 	}
 }
 
