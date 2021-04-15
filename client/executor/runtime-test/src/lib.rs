@@ -580,7 +580,7 @@ sp_core::wasm_export_functions! {
 		}
 		sp_io::storage::commit_transaction();
 	}
-	
+
 	fn test_unclose_parent_transaction() {
 		sp_tasks::set_capacity(1);
 		sp_io::storage::start_transaction();

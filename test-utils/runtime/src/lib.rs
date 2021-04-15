@@ -1361,7 +1361,7 @@ fn test_tasks() {
 	sp_io::storage::rollback_transaction();
 	// state stay correct for last block
 	assert!(handle.unwrap().join().is_some());
-	
+
 	// TODO	unimplemented!("join, kill and consort");
 }
 

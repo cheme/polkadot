@@ -22,7 +22,7 @@
 //!
 //! It is plugged in the overlay by commodity, but could be at a higher level.
 //!
-//! TODO checks method should be rewrite by zip iterating on all sorted components, 
+//! TODO checks method should be rewrite by zip iterating on all sorted components,
 //! and maintaining a streaming state machine,
 //! this would also require a 'jump_to' instruction on tree iterator.
 
@@ -71,7 +71,7 @@ pub(super) struct AccessLogger {
 }
 
 /// Logger for a given trie state.
-/// TODO consider removing refcell and have 
+/// TODO consider removing refcell and have
 /// mut access to overlays.
 #[derive(Debug, Clone, Default)]
 struct StateLogger {
@@ -261,7 +261,7 @@ impl StateLogger {
 				return false;
 			}
 		}
-		true	
+		true
 	}
 
 	fn check_prefix_against_read(&self, prefix: &Vec<u8>, marker: TaskId) -> bool {
@@ -289,7 +289,7 @@ impl StateLogger {
 				}
 			}
 		}
-		true	
+		true
 	}
 
 	fn check_interval_against_write(
@@ -853,7 +853,7 @@ mod test {
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"{_in_end_interval"[..]);
 		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
-	
+
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b""[..]);
 		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));

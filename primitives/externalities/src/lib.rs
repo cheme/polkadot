@@ -524,7 +524,7 @@ pub struct StateLog {
 	pub read_keys: Vec<Vec<u8>>,
 	/// Key write with no read access.
 	/// Include append operations.
-	pub write_only_key: Vec<Vec<u8>>, 
+	pub write_only_key: Vec<Vec<u8>>,
 	/// Read and write access to a key.
 	pub read_write_keys: Vec<Vec<u8>>,
 	/// Read and write access to a whole prefix (eg key removal

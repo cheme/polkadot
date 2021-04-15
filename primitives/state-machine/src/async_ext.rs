@@ -361,7 +361,7 @@ impl Externalities for AsyncExt {
 		}
 		None
 	}
-	
+
 	fn resolve_worker_result(&mut self, state_update: WorkerResult) -> Option<Vec<u8>> {
 		self.overlay.resolve_worker_result(state_update)
 	}

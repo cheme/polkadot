@@ -536,7 +536,7 @@ impl OverlayedChanges {
 				self.optimistic_logger.log_writes_against(None);
 			},
 			WorkerDeclarationKind::ReadDeclarative(filter, failure) => {
-				self.filters.set_failure_handler(None, failure); 
+				self.filters.set_failure_handler(None, failure);
 				self.filters.allow_reads(filter);
 			},
 			WorkerDeclarationKind::WriteLightDeclarative(filter, failure) => {

@@ -225,7 +225,7 @@ impl<K: Ord + Hash + Clone, V> OverlayedMap<K, V> {
 	pub fn get<Q>(&mut self, key: &Q) -> Option<&mut OverlayedEntry<V>>
 		where
 			K: sp_std::borrow::Borrow<Q>,
-			Q: Ord + ?Sized, 
+			Q: Ord + ?Sized,
 	{
 		self.changes.get_mut(key)
 	}
