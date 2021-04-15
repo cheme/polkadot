@@ -514,7 +514,7 @@ impl OverlayedChanges {
 				self.filters.add_change(WorkerDeclarationKind::WriteDeclarative(filters.clone(), failure), child_marker);
 				self.filters.forbid_reads(filters.write_only, child_marker);
 				self.filters.forbid_writes(filters.read_only, child_marker);
-				self.filters.forbid_reads(filters.read_write, child_marker);
+				self.filters.forbid_read_writes(filters.read_write, child_marker);
 			},
 		}
 		self.markers.set_marker(child_marker);
