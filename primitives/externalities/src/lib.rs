@@ -837,8 +837,12 @@ impl WorkerDeclaration {
 pub struct AccessDeclarations {
 	/// Read access, depending on mode, this should exclude a concurrent write access.
 	pub read_only: AccessDeclaration,
+	/// A write only access to appendable content.
+	/// The change get added on worker 'join' into the parent worker.
+	pub write_only: AccessDeclaration,
 	/// Read and write access, depending on mode, this should exclude a concurrent read
 	/// or write access.
+	/// It is same as definining both read_only and write_only but more compact.
 	pub read_write: AccessDeclaration,
 }
 

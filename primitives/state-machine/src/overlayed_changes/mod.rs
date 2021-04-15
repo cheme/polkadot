@@ -500,13 +500,17 @@ impl OverlayedChanges {
 				if !self.filters.guard_child_filter_read(&filters.read_only) {
 					return false;
 				}
+				if !self.filters.guard_child_filter_write_only(&filters.write_only) {
+					return false;
+				}
 				if !self.filters.guard_child_filter_write(&filters.read_write) {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
 				self.filters.add_change(WorkerDeclarationKind::WriteDeclarative(filters.clone(), failure), child_marker);
-				self.filters.forbid_reads(filters.read_write, child_marker);
+				self.filters.forbid_reads(filters.write_only, child_marker);
 				self.filters.forbid_writes(filters.read_only, child_marker);
+				self.filters.forbid_reads(filters.read_write, child_marker);
 			},
 		}
 		self.markers.set_marker(child_marker);
@@ -542,6 +546,7 @@ impl OverlayedChanges {
 			WorkerDeclarationKind::WriteDeclarative(filters, failure) => {
 				self.filters.set_failure_handler(None, failure);
 				self.filters.allow_reads(filters.read_only);
+				self.filters.allow_writes_only(filters.write_only);
 				self.filters.allow_writes(filters.read_write);
 			},
 		}

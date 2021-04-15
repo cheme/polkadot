@@ -38,6 +38,7 @@ pub(super) struct Filters {
 	failure_handlers: FailureHandlers,
 	allow_read_active: bool,
 	allow_write_active: bool,
+	allow_write_only_active: bool,
 	filters_allow: FilterTrees<bool>, // TODO what is bool for??
 	filters_forbid: FilterTrees<FilterOrigin>,
 	/// keeping history to remove constraint on join or dismiss.
@@ -55,6 +56,7 @@ impl Default for Filters {
 			},
 			allow_read_active: Default::default(),
 			allow_write_active: Default::default(),
+			allow_write_only_active: Default::default(),
 			filters_allow: Default::default(),
 			filters_forbid: Default::default(),
 			changes: BTreeMap::new(),
@@ -216,6 +218,15 @@ impl Filters {
 		}
 	}
 
+	pub(super) fn allow_writes_only(
+		&mut self,
+		filter: AccessDeclaration,
+	) {
+		self.allow_write_only_active = true;
+		unimplemented!();
+//		Self::set_filter_allow(&mut self.filters_allow, filter, true);
+	}
+
 	pub(super) fn allow_writes(
 		&mut self,
 		filter: AccessDeclaration,
@@ -278,6 +289,10 @@ impl Filters {
 			}
 		}
 		true
+	}
+
+	pub(super) fn guard_child_filter_write_only(&mut self, filter: &AccessDeclaration) -> bool {
+		unimplemented!()
 	}
 
 	// Declaring a child write access, we ensure access is allowed in the first place.
