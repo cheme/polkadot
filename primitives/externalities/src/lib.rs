@@ -522,6 +522,9 @@ impl AccessLog {
 pub struct StateLog {
 	/// Read only access to a key.
 	pub read_keys: Vec<Vec<u8>>,
+	/// Key write with no read access.
+	/// Include append operations.
+	pub write_only_key: Vec<Vec<u8>>, 
 	/// Read and write access to a key.
 	pub read_write_keys: Vec<Vec<u8>>,
 	/// Read and write access to a whole prefix (eg key removal
@@ -530,17 +533,13 @@ pub struct StateLog {
 	/// Worker did iterate over a given interval.
 	/// Interval is a pair of inclusive start and end key.
 	pub read_intervals: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-	/// Key write with no read access.
-	pub write_only_key: Vec<Vec<u8>>, 
-	/// Append operation in write only mode.
-	pub write_only_append_key: Vec<Vec<u8>>, 
 }
 
 impl StateLog {
 	/// Check that no incompatible access are done.
 	/// TODO debug assert call it where relevant: only for test or double check
 	pub fn validate(&self) -> bool {
-		if !self.write_only_key.is_empty() || !self.write_only_append_key.is_empty() {
+		if !self.write_only_key.is_empty() {
 			unimplemented!()
 		}
 		true
