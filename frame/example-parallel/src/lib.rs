@@ -174,7 +174,7 @@ fn validate_participants_parallel(event_id: &[u8], participants: &[EnlistedParti
 	let handle = sp_tasks::spawn(
 		spawn_verify,
 		async_payload,
-		sp_tasks::WorkerDeclaration::Stateless,
+		sp_tasks::WorkerDeclaration::stateless(),
 	).expect("Worker run as stateless");
 	let mut result = true;
 
@@ -223,7 +223,7 @@ fn validate_pending_participants_parallel<T: Config>(number: usize) {
 	let handle = sp_tasks::spawn(
 		spawn_verify::<T>,
 		async_payload,
-		sp_tasks::WorkerDeclaration::ReadAtSpawn,
+		sp_tasks::WorkerDeclarationKind::ReadAtSpawn.into(),
 	).expect("Declaration incompatible with other running workers.");
 
 	for participant in &participants[split..number] {

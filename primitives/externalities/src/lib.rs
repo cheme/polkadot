@@ -743,10 +743,42 @@ impl WorkerType {
 		true
 	}
 }
+/// Access filter on storage when spawning worker.
+#[derive(Debug, Clone, codec::Encode, codec::Decode)]
+pub struct WorkerDeclaration {
+	/// Kind of worker to use and specific declaration.
+	pub kind: WorkerDeclarationKind,
+
+	/// Area of storage that is local to worker: changes
+	/// are allowed but dropped at the end of the worker
+	/// execution.
+	/// Read access in local_scope stay subject to concurency
+	/// failure.
+	pub write_local_scope: Option<AccessDeclaration>,
+}
+
+impl WorkerDeclaration {
+	/// Declaration for a stateless worker.
+	pub fn stateless() -> Self {
+		WorkerDeclaration {
+			kind: WorkerDeclarationKind::Stateless,
+			write_local_scope: None,
+		}
+	}
+}
+
+impl From<WorkerDeclarationKind> for WorkerDeclaration {
+	fn from(kind: WorkerDeclarationKind) -> Self {
+		WorkerDeclaration {
+			kind,
+			write_local_scope: None,
+		}
+	}
+}
 
 /// Access filter on storage when spawning worker.
 #[derive(Debug, Clone, codec::Encode, codec::Decode)]
-pub enum WorkerDeclaration {
+pub enum WorkerDeclarationKind {
 	/// Declaration for `WorkerType::Stateless`, no content.
 	Stateless,
 
@@ -784,17 +816,17 @@ pub enum WorkerDeclaration {
 impl WorkerDeclaration {
 	/// Extract type from declaration.
 	pub fn get_type(&self) -> WorkerType {
-		match self {
-			WorkerDeclaration::Stateless => WorkerType::Stateless,
-			WorkerDeclaration::ReadLastBlock => WorkerType::ReadLastBlock,
-			WorkerDeclaration::ReadAtSpawn => WorkerType::ReadAtSpawn,
-			WorkerDeclaration::ReadOptimistic => WorkerType::ReadOptimistic,
-			WorkerDeclaration::ReadDeclarative(..) => WorkerType::ReadDeclarative,
-			WorkerDeclaration::WriteAtSpawn => WorkerType::WriteAtSpawn,
-			WorkerDeclaration::WriteLightOptimistic => WorkerType::WriteLightOptimistic,
-			WorkerDeclaration::WriteLightDeclarative(..) => WorkerType::WriteLightDeclarative,
-			WorkerDeclaration::WriteOptimistic => WorkerType::WriteOptimistic,
-			WorkerDeclaration::WriteDeclarative(..) => WorkerType::WriteDeclarative,
+		match self.kind {
+			WorkerDeclarationKind::Stateless => WorkerType::Stateless,
+			WorkerDeclarationKind::ReadLastBlock => WorkerType::ReadLastBlock,
+			WorkerDeclarationKind::ReadAtSpawn => WorkerType::ReadAtSpawn,
+			WorkerDeclarationKind::ReadOptimistic => WorkerType::ReadOptimistic,
+			WorkerDeclarationKind::ReadDeclarative(..) => WorkerType::ReadDeclarative,
+			WorkerDeclarationKind::WriteAtSpawn => WorkerType::WriteAtSpawn,
+			WorkerDeclarationKind::WriteLightOptimistic => WorkerType::WriteLightOptimistic,
+			WorkerDeclarationKind::WriteLightDeclarative(..) => WorkerType::WriteLightDeclarative,
+			WorkerDeclarationKind::WriteOptimistic => WorkerType::WriteOptimistic,
+			WorkerDeclarationKind::WriteDeclarative(..) => WorkerType::WriteDeclarative,
 		}
 	}
 }

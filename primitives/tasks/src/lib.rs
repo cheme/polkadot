@@ -29,7 +29,7 @@
 //!    }
 //!    fn test(dynamic_variable: i32) {
 //!       for _ in 0..dynamic_variable {
-//!					sp_tasks::spawn(my_parallel_computator, vec![], WorkerDeclaration::Stateless);
+//!					sp_tasks::spawn(my_parallel_computator, vec![], WorkerDeclaration::stateless());
 //!				}
 //!    }
 //! ```
@@ -48,7 +48,7 @@
 //!        let parallel_tasks = (0..STATIC_VARIABLE).map(|idx| sp_tasks::spawn(
 //!            my_parallel_computator,
 //!            computation_payload.chunks(10).nth(idx as _).encode(),
-//!            WorkerDeclaration::Stateless,
+//!            WorkerDeclaration::stateless(),
 //!        ));
 //!    }
 //! ```
@@ -87,7 +87,8 @@ pub use async_externalities::new_async_externalities;
 #[cfg(feature = "std")]
 pub use crate::common::with_externalities_safe;
 pub use async_externalities::{new_inline_only_externalities, AsyncExternalities};
-pub use sp_externalities::{WorkerResult, WorkerDeclaration, AccessDeclaration, DeclarationFailureHandling};
+pub use sp_externalities::{WorkerResult, WorkerDeclaration, WorkerDeclarationKind,
+	AccessDeclaration, DeclarationFailureHandling};
 pub use sp_io::Crossing;
 use sp_std::vec::Vec;
 
@@ -218,7 +219,7 @@ mod tests {
 	#[test]
 	fn basic() {
 		test_externalities().execute_with(|| {
-			let a1 = spawn(async_runner, vec![5, 2, 1], WorkerDeclaration::Stateless)
+			let a1 = spawn(async_runner, vec![5, 2, 1], WorkerDeclaration::stateless())
 				.join();
 			assert_eq!(a1, Some(vec![1, 2, 5]));
 		})
@@ -227,7 +228,7 @@ mod tests {
 	#[test]
 	fn panicking() {
 		let res = test_externalities().execute_with_safe(||{
-			spawn(async_panicker, vec![5, 2, 1], WorkerDeclaration::Stateless)
+			spawn(async_panicker, vec![5, 2, 1], WorkerDeclaration::stateless())
 				.join();
 		});
 
@@ -248,7 +249,7 @@ mod tests {
 						3 * running_val + 1
 					};
 					data.push(running_val as u8);
-					(spawn(async_runner, data.clone(), WorkerDeclaration::Stateless), data.clone())
+					(spawn(async_runner, data.clone(), WorkerDeclaration::stateless()), data.clone())
 				}
 			).collect::<Vec<_>>();
 

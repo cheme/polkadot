@@ -22,9 +22,9 @@
 use sp_std::{vec, vec::Vec, fmt::Debug};
 use sp_std::collections::btree_map::BTreeMap;
 use sp_std::collections::btree_set::BTreeSet;
-use super::radix_trees::FilterTree;
+use super::radix_trees::{FilterTree, FilterTrees};
 use sp_externalities::{TaskId, WorkerResult,
-	AccessDeclaration, WorkerDeclaration, DeclarationFailureHandling};
+	AccessDeclaration, WorkerDeclarationKind, DeclarationFailureHandling};
 use super::StorageKey;
 use sp_core::storage::ChildInfo;
 use failure::{FailureHandlers, DeclFailureHandling};
@@ -38,29 +38,12 @@ pub(super) struct Filters {
 	failure_handlers: FailureHandlers,
 	allow_read_active: bool,
 	allow_write_active: bool,
-	filters_allow: FilterTrees<bool>,
+	filters_allow: FilterTrees<bool>, // TODO what is bool for??
 	filters_forbid: FilterTrees<FilterOrigin>,
 	/// keeping history to remove constraint on join or dismiss.
 	/// It contains constraint for the parent (child do not need
 	/// to remove contraint), indexed by its relative child id.
-	changes: BTreeMap<TaskId, Vec<(Option<StorageKey>, WorkerDeclaration)>>,
-}
-
-/// A tree of filter rules.
-#[derive(Debug, Clone, Default)]
-struct FilterTrees<F: Debug + Clone + Default> {
-	top: FilterTree<F>,
-	children: BTreeMap<StorageKey, FilterTree<F>>,
-}
-
-impl<F: Debug + Clone + Default> FilterTrees<F> {
-	fn filter(&self, child_info: Option<&ChildInfo>) -> Option<&FilterTree<F>> {
-		if let Some(child_info) = child_info {
-			self.children.get(child_info.storage_key())
-		} else {
-			Some(&self.top)
-		}
-	}
+	changes: BTreeMap<TaskId, Vec<(Option<StorageKey>, WorkerDeclarationKind)>>,
 }
 
 impl Default for Filters {
@@ -251,7 +234,7 @@ impl Filters {
 
 	pub(super) fn add_change(
 		&mut self,
-		decl: WorkerDeclaration,
+		decl: WorkerDeclarationKind,
 		from_child: TaskId,
 	) {
 		// TODO is there something else than None variant bellow?
@@ -823,23 +806,23 @@ impl Filters {
 		if let Some(decl) = self.changes.remove(&task_id) {
 			for (_child_storage, declaration) in decl.into_iter() {
 				match declaration {
-					WorkerDeclaration::Stateless
-					| WorkerDeclaration::ReadLastBlock
-					| WorkerDeclaration::ReadAtSpawn
-					| WorkerDeclaration::WriteAtSpawn => (),
-					WorkerDeclaration::ReadOptimistic => (),
-					WorkerDeclaration::WriteLightOptimistic => (),
-					WorkerDeclaration::WriteOptimistic => (),
-					WorkerDeclaration::ReadDeclarative(filter, _failure) => {
+					WorkerDeclarationKind::Stateless
+					| WorkerDeclarationKind::ReadLastBlock
+					| WorkerDeclarationKind::ReadAtSpawn
+					| WorkerDeclarationKind::WriteAtSpawn => (),
+					WorkerDeclarationKind::ReadOptimistic => (),
+					WorkerDeclarationKind::WriteLightOptimistic => (),
+					WorkerDeclarationKind::WriteOptimistic => (),
+					WorkerDeclarationKind::ReadDeclarative(filter, _failure) => {
 						// undo a `set_parent_declaration` call.
 						self.failure_handlers.remove(task_id);
 						self.remove_forbid_writes(filter, task_id);
 					},
-					WorkerDeclaration::WriteLightDeclarative(filter, _failure) => {
+					WorkerDeclarationKind::WriteLightDeclarative(filter, _failure) => {
 						self.failure_handlers.remove(task_id);
 						self.remove_forbid_writes(filter, task_id);
 					},
-					WorkerDeclaration::WriteDeclarative(filters, _failure) => {
+					WorkerDeclarationKind::WriteDeclarative(filters, _failure) => {
 						self.failure_handlers.remove(task_id);
 						self.remove_forbid_writes(filters.read_write, task_id);
 						self.remove_forbid_writes(filters.read_only, task_id);

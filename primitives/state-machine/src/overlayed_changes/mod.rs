@@ -22,6 +22,7 @@ mod offchain;
 mod filters;
 mod markers;
 mod loggers;
+mod local_scope;
 
 pub use offchain::OffchainOverlayedChanges;
 use crate::{
@@ -51,7 +52,7 @@ use sp_core::offchain::OffchainOverlayedChange;
 use hash_db::Hasher;
 use crate::DefaultError;
 use sp_externalities::{Extensions, Extension, TaskId, WorkerResult,
-	WorkerDeclaration, Change};
+	WorkerDeclaration, WorkerDeclarationKind, Change};
 
 pub use self::changeset::{OverlayedValue, NoOpenTransaction, AlreadyInRuntime, NotInRuntime};
 
@@ -119,6 +120,8 @@ pub struct OverlayedChanges {
 	filters: filters::Filters,
 	/// Logger for optimistic workers.
 	optimistic_logger: loggers::AccessLogger,
+	/// Local write scope.
+	write_local_scope: local_scope::WriteLocalScope,
 }
 
 impl OverlayedChanges {
@@ -127,7 +130,7 @@ impl OverlayedChanges {
 	/// we do not commit or rollback them.
 	/// Return None if cannot be spawn from parent.
 	pub fn child_worker_overlay(&mut self, worker_id: TaskId, declaration: WorkerDeclaration) -> Option<Self> {
-		if !self.declare_child_worker(worker_id, declaration.clone()) {
+		if !self.declare_child_worker(worker_id, declaration.kind.clone()) {
 			return None;
 		}
 		let mut result = OverlayedChanges::default();
@@ -459,41 +462,41 @@ impl OverlayedChanges {
 	///
 	/// Return false if the declaration is incompatible with current parent worker accesses.
 	/// TODO check if we can &WorkerDeclaration
-	pub fn declare_child_worker(&mut self, child_marker: TaskId, declaration: WorkerDeclaration) -> bool {
+	pub fn declare_child_worker(&mut self, child_marker: TaskId, declaration: WorkerDeclarationKind) -> bool {
 		match declaration {
-			WorkerDeclaration::Stateless
-			| WorkerDeclaration::ReadLastBlock
-			| WorkerDeclaration::ReadAtSpawn
-			| WorkerDeclaration::WriteAtSpawn => (),
-			WorkerDeclaration::ReadOptimistic => {
+			WorkerDeclarationKind::Stateless
+			| WorkerDeclarationKind::ReadLastBlock
+			| WorkerDeclarationKind::ReadAtSpawn
+			| WorkerDeclarationKind::WriteAtSpawn => (),
+			WorkerDeclarationKind::ReadOptimistic => {
 				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
-			WorkerDeclaration::WriteLightOptimistic => {
+			WorkerDeclarationKind::WriteLightOptimistic => {
 				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
-			WorkerDeclaration::WriteOptimistic => {
+			WorkerDeclarationKind::WriteOptimistic => {
 				self.optimistic_logger.log_reads_against(Some(child_marker));
 				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
-			WorkerDeclaration::ReadDeclarative(filter, failure) => {
+			WorkerDeclarationKind::ReadDeclarative(filter, failure) => {
 				if !self.filters.guard_child_filter_read(&filter) {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
 				// TODO consider merging add_change and forbid_writes (or even the full block).
-				self.filters.add_change(WorkerDeclaration::ReadDeclarative(filter.clone(), failure), child_marker);
+				self.filters.add_change(WorkerDeclarationKind::ReadDeclarative(filter.clone(), failure), child_marker);
 				self.filters.forbid_writes(filter, child_marker);
 			},
-			WorkerDeclaration::WriteLightDeclarative(filter, failure) => {
+			WorkerDeclarationKind::WriteLightDeclarative(filter, failure) => {
 				if !self.filters.guard_child_filter_write(&filter) {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
 				// TODO see if possible to only push worker type??
-				self.filters.add_change(WorkerDeclaration::WriteLightDeclarative(filter.clone(), failure), child_marker);
+				self.filters.add_change(WorkerDeclarationKind::WriteLightDeclarative(filter.clone(), failure), child_marker);
 				self.filters.forbid_writes(filter, child_marker);
 			},
-			WorkerDeclaration::WriteDeclarative(filters, failure) => {
+			WorkerDeclarationKind::WriteDeclarative(filters, failure) => {
 				if !self.filters.guard_child_filter_read(&filters.read_only) {
 					return false;
 				}
@@ -501,7 +504,7 @@ impl OverlayedChanges {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
-				self.filters.add_change(WorkerDeclaration::WriteDeclarative(filters.clone(), failure), child_marker);
+				self.filters.add_change(WorkerDeclarationKind::WriteDeclarative(filters.clone(), failure), child_marker);
 				self.filters.forbid_reads(filters.read_write, child_marker);
 				self.filters.forbid_writes(filters.read_only, child_marker);
 			},
@@ -512,30 +515,31 @@ impl OverlayedChanges {
 
 	/// Set access declaration in the child worker.
 	pub fn set_worker_declaration(&mut self, declaration: WorkerDeclaration) {
-		match declaration {
-			WorkerDeclaration::Stateless
-			| WorkerDeclaration::ReadLastBlock
-			| WorkerDeclaration::ReadAtSpawn
-			| WorkerDeclaration::WriteAtSpawn => (),
-			WorkerDeclaration::ReadOptimistic => {
+		self.write_local_scope.set_write_local_scope(declaration.write_local_scope);
+		match declaration.kind {
+			WorkerDeclarationKind::Stateless
+			| WorkerDeclarationKind::ReadLastBlock
+			| WorkerDeclarationKind::ReadAtSpawn
+			| WorkerDeclarationKind::WriteAtSpawn => (),
+			WorkerDeclarationKind::ReadOptimistic => {
 				self.optimistic_logger.log_reads_against(None);
 			},
-			WorkerDeclaration::WriteLightOptimistic => {
+			WorkerDeclarationKind::WriteLightOptimistic => {
 				self.optimistic_logger.log_writes_against(None);
 			},
-			WorkerDeclaration::WriteOptimistic => {
+			WorkerDeclarationKind::WriteOptimistic => {
 				self.optimistic_logger.log_reads_against(None);
 				self.optimistic_logger.log_writes_against(None);
 			},
-			WorkerDeclaration::ReadDeclarative(filter, failure) => {
+			WorkerDeclarationKind::ReadDeclarative(filter, failure) => {
 				self.filters.set_failure_handler(None, failure); 
 				self.filters.allow_reads(filter);
 			},
-			WorkerDeclaration::WriteLightDeclarative(filter, failure) => {
+			WorkerDeclarationKind::WriteLightDeclarative(filter, failure) => {
 				self.filters.set_failure_handler(None, failure);
 				self.filters.allow_writes(filter);
 			},
-			WorkerDeclaration::WriteDeclarative(filters, failure) => {
+			WorkerDeclarationKind::WriteDeclarative(filters, failure) => {
 				self.filters.set_failure_handler(None, failure);
 				self.filters.allow_reads(filters.read_only);
 				self.filters.allow_writes(filters.read_write);
@@ -1111,6 +1115,9 @@ pub mod radix_trees {
 	use super::filters::Filter;
 	use sp_std::boxed::Box;
 	use core::fmt::Debug;
+	use super::StorageKey;
+	use sp_core::storage::ChildInfo;
+	use sp_std::collections::btree_map::BTreeMap;
 
 	radix_tree::flatten_children!(
 		Children256FlattenART,
@@ -1129,6 +1136,23 @@ pub mod radix_trees {
 
 	/// Write access logs.
 	pub type AccessTreeWriteParent = radix_tree::Tree<Node256NoBackendART<()>>;
+
+	/// A tree of filter rules.
+	#[derive(Debug, Clone, Default)]
+	pub(super) struct FilterTrees<F: Debug + Clone + Default> {
+		pub(super) top: FilterTree<F>,
+		pub(super) children: BTreeMap<StorageKey, FilterTree<F>>,
+	}
+
+	impl<F: Debug + Clone + Default> FilterTrees<F> {
+		pub(super) fn filter(&self, child_info: Option<&ChildInfo>) -> Option<&FilterTree<F>> {
+			if let Some(child_info) = child_info {
+				self.children.get(child_info.storage_key())
+			} else {
+				Some(&self.top)
+			}
+		}
+	}
 }
 
 fn change_to_change_set(change: Change) -> Option<StorageValue> {

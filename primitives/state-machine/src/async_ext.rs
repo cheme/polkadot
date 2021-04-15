@@ -27,8 +27,8 @@ use sp_std::{
 use sp_core::{
 	storage::{ChildInfo, TrackedStorageKey},
 };
-use sp_externalities::{Externalities, TaskId, WorkerState,
-	WorkerResult, WorkerDeclaration, WorkerType, AsyncExternalities};
+use sp_externalities::{Externalities, TaskId, WorkerState, WorkerResult,
+	WorkerDeclaration, WorkerDeclarationKind, WorkerType, AsyncExternalities};
 use sp_core::hexdisplay::HexDisplay;
 use crate::ext::guard;
 use crate::{StorageValue, StorageKey, AsyncBackend, trace};
@@ -58,8 +58,8 @@ pub fn new_child_worker_async_ext(
 	backend: Box<dyn AsyncBackend>,
 	parent_overlay: &mut OverlayedChanges,
 ) -> Option<AsyncExt> {
-	let mut result = match &declaration {
-		WorkerDeclaration::Stateless => {
+	let mut result = match &declaration.kind {
+		WorkerDeclarationKind::Stateless => {
 			return Some(AsyncExt {
 				kind: WorkerType::Stateless,
 				overlay: Default::default(),
@@ -67,7 +67,7 @@ pub fn new_child_worker_async_ext(
 				backend: Box::new(()),
 			})
 		},
-		WorkerDeclaration::ReadLastBlock => {
+		WorkerDeclarationKind::ReadLastBlock => {
 			return Some(AsyncExt {
 				kind: declaration.get_type(),
 				overlay: Default::default(),
