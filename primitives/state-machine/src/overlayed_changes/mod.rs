@@ -323,7 +323,7 @@ impl OverlayedChanges {
 		key: &[u8],
 		init: impl Fn() -> StorageValue,
 	) -> &mut StorageValue {
-		self.filters.guard_write(None, key);
+		self.filters.guard_read_write(None, key);
 		// no guard read as write supersed it.
 		self.optimistic_logger.log_write(None, key);
 		// we need to log read here as we can read it.
@@ -396,7 +396,11 @@ impl OverlayedChanges {
 		&mut self,
 		child_info: &ChildInfo,
 	) {
-		self.filters.guard_write_prefix(Some(child_info), &[]);
+		// clear is reading value, this is not idealy, still guarding
+		// read_write (would not be needed with special clear prefix
+		// optimization).
+		// This apply to all clear.
+		self.filters.guard_read_write_prefix(Some(child_info), &[]);
 		self.optimistic_logger.log_write_prefix(Some(child_info), &[]);
 		let extrinsic_index = self.extrinsic_index();
 		let storage_key = child_info.storage_key().to_vec();
@@ -416,7 +420,7 @@ impl OverlayedChanges {
 	///
 	/// Can be rolled back or committed when called inside a transaction.
 	pub(crate) fn clear_prefix(&mut self, prefix: &[u8]) {
-		self.filters.guard_write_prefix(None, prefix);
+		self.filters.guard_read_write_prefix(None, prefix);
 		self.optimistic_logger.log_write_prefix(None, prefix);
 		let extrinsic_index = self.extrinsic_index();
 		self.top.clear_where(|key, _| key.starts_with(prefix), extrinsic_index);
@@ -430,7 +434,7 @@ impl OverlayedChanges {
 		child_info: &ChildInfo,
 		prefix: &[u8],
 	) {
-		self.filters.guard_write_prefix(Some(child_info), prefix);
+		self.filters.guard_read_write_prefix(Some(child_info), prefix);
 		self.optimistic_logger.log_write_prefix(Some(child_info), prefix);
 		let extrinsic_index = self.extrinsic_index();
 		let storage_key = child_info.storage_key().to_vec();
@@ -479,7 +483,7 @@ impl OverlayedChanges {
 				self.optimistic_logger.log_writes_against(Some(child_marker));
 			},
 			WorkerDeclarationKind::ReadDeclarative(filter, failure) => {
-				if !self.filters.guard_child_filter_read(&filter) {
+				if !self.filters.guard_declare_child_filter_read(&filter) {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
@@ -488,7 +492,7 @@ impl OverlayedChanges {
 				self.filters.forbid_writes(filter, child_marker);
 			},
 			WorkerDeclarationKind::WriteLightDeclarative(filter, failure) => {
-				if !self.filters.guard_child_filter_write(&filter) {
+				if !self.filters.guard_declare_child_filter_write(&filter) {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
@@ -497,13 +501,13 @@ impl OverlayedChanges {
 				self.filters.forbid_writes(filter, child_marker);
 			},
 			WorkerDeclarationKind::WriteDeclarative(filters, failure) => {
-				if !self.filters.guard_child_filter_read(&filters.read_only) {
+				if !self.filters.guard_declare_child_filter_read(&filters.read_only) {
 					return false;
 				}
-				if !self.filters.guard_child_filter_write_only(&filters.write_only) {
+				if !self.filters.guard_declare_child_filter_write(&filters.write_only) {
 					return false;
 				}
-				if !self.filters.guard_child_filter_write(&filters.read_write) {
+				if !self.filters.guard_declare_child_filter_read_write(&filters.read_write) {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
@@ -546,8 +550,8 @@ impl OverlayedChanges {
 			WorkerDeclarationKind::WriteDeclarative(filters, failure) => {
 				self.filters.set_failure_handler(None, failure);
 				self.filters.allow_reads(filters.read_only);
-				self.filters.allow_writes_only(filters.write_only);
-				self.filters.allow_writes(filters.read_write);
+				self.filters.allow_writes(filters.write_only);
+				self.filters.allow_read_writes(filters.read_write);
 			},
 		}
 	}
@@ -1135,7 +1139,6 @@ impl<'a> OverlayedExtensions<'a> {
 pub mod radix_trees {
 	use radix_tree::{Derivative, radix::{RadixConf, impls::Radix256Conf},
 		children::{Children, ART48_256}, Value, TreeConf, Node};
-	use super::filters::Filter;
 	use sp_std::boxed::Box;
 	use core::fmt::Debug;
 	use super::StorageKey;
@@ -1152,7 +1155,7 @@ pub mod radix_trees {
 	);
 
 	/// Radix tree internally use for filtering key accesses.
-	pub type FilterTree<F> = radix_tree::Tree<Node256NoBackendART<Filter<F>>>;
+	pub type FilterTree<F> = radix_tree::Tree<Node256NoBackendART<F>>;
 
 	/// Write access logs with children origin.
 	pub type AccessTreeWrite = radix_tree::Tree<Node256NoBackendART<super::loggers::OriginLog>>;
