@@ -32,7 +32,7 @@ use sp_std::collections::btree_set::BTreeSet;
 use std::collections::HashMap as Map;
 #[cfg(not(feature = "std"))]
 use sp_std::collections::btree_map::BTreeMap as Map;
-use crate::overlayed_changes::radix_trees::{AccessTreeWrite, AccessTreeWriteParent};
+use crate::overlayed_changes::radix_trees::AccessTreeWrite;
 use sp_core::storage::ChildInfo;
 use super::{StorageKey, retain_map};
 use sp_std::vec::Vec;
@@ -41,27 +41,51 @@ use sp_std::vec::Vec;
 /// None when the log is for the lifetime of the worker or
 /// a children running id when this is related to a children
 /// worker.
-pub(crate) type OriginLog = BTreeSet<TaskId>;
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OriginLog {
+	// required for received children comparison.
+	pub children: BTreeSet<TaskId>,
+	// required to send to parent worker.
+	pub parent: bool,
+}
+
+impl OriginLog {
+	fn insert(&mut self, task: Option<TaskId>) {
+		if let Some(task) = task {
+			self.children.insert(task);
+		} else {
+			self.parent = true;
+		}
+	}
+
+	fn remove(&mut self, task: TaskId) -> bool {
+		self.children.remove(&task)
+	}
+
+	fn contains(&self, task: TaskId) -> bool {
+		self.children.contains(&task)
+	}
+
+	fn is_empty(&self) -> bool {
+		!self.parent && self.children.is_empty()
+	}
+}
+
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct AccessLogger {
-	/// True when logging read is needed in order
-	/// to send and compare the log to the parent worker.
-	parent_log_read: bool,
-	/// True when logging write is needed in order
-	/// to send and compare the log to the parent worker.
-	parent_log_write: bool,
+	/// Log that we access all key in read mode (usually by calling storage root).
+	/// TODO this should be implied by parent_log_read??
+	read_all: OriginLog,
 	/// Keep trace of read logging required to compare with children
 	/// logged access.
 	log_read: OriginLog,
 	/// Keep trace of write logging required to compare with children
 	/// logged access.
 	log_write: OriginLog,
-	/// Log that we access all key in read mode (usually by calling storage root).
-	parent_read_all: bool,
-	/// Log that we access all key in read mode (usually by calling storage root),
-	/// with some child workers running.
-	children_read_all: OriginLog,
+	/// Keep trace of append logging required to compare with children
+	/// logged access.
+	log_append: OriginLog,
 	/// Access logger for top trie.
 	top_logger: StateLogger,
 	/// Access logger for children trie.
@@ -71,76 +95,80 @@ pub(super) struct AccessLogger {
 }
 
 /// Logger for a given trie state.
-/// TODO consider removing refcell and have
-/// mut access to overlays.
 #[derive(Debug, Clone, Default)]
 struct StateLogger {
-	parent_read_key: Vec<Vec<u8>>,
-	children_read_key: Map<Vec<u8>, OriginLog>,
+	read_keys: Map<Vec<u8>, OriginLog>,
 	// Intervals are inclusive for start and end.
-	parent_read_intervals: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-	children_read_intervals: Map<(Vec<u8>, Option<Vec<u8>>), OriginLog>,
-	parent_write_key: Vec<Vec<u8>>,
-	children_write_key: Map<Vec<u8>, OriginLog>,
+	read_intervals: Map<(Vec<u8>, Option<Vec<u8>>), OriginLog>,
+	write_keys: Map<Vec<u8>, OriginLog>,
 	// this is roughly clear prefix.
-	parent_write_prefix: AccessTreeWriteParent,
-	children_write_prefix: AccessTreeWrite,
+	write_prefixes: AccessTreeWrite,
+	// could be same container as write
+	append_keys: Map<Vec<u8>, OriginLog>,
 }
 
 impl StateLogger {
-	fn remove_parent_read_logs(&mut self) {
-		self.parent_read_key.clear();
-		self.parent_read_intervals.clear();
+	fn remove_all_read_logs(&mut self) {
+		self.read_keys.clear();
+		self.read_intervals.clear();
 	}
 
-	fn remove_all_children_read_logs(&mut self) {
-		self.children_read_key.clear();
-		self.children_read_intervals.clear();
+	fn remove_all_write_logs(&mut self) {
+		self.write_keys.clear();
+		self.write_prefixes.clear();
 	}
 
-	fn remove_all_children_write_logs(&mut self) {
-		self.children_write_key.clear();
-		self.children_write_prefix.clear();
+	fn remove_all_append_logs(&mut self) {
+		self.append_keys.clear();
 	}
 
 	// TODO this seems costy, check usage.
 	fn remove_children_read_logs(&mut self, marker: TaskId) {
-		retain_map(&mut self.children_read_key, |_key, value| {
-			value.remove(&marker);
+		retain_map(&mut self.read_keys, |_key, value| {
+			value.remove(marker);
 			!value.is_empty()
 		});
-		retain_map(&mut self.children_read_intervals, |_key, value| {
-			value.remove(&marker);
+		retain_map(&mut self.read_intervals, |_key, value| {
+			value.remove(marker);
 			!value.is_empty()
 		});
 	}
 
 	// TODO this seems costy, check usage.
 	fn remove_children_write_logs(&mut self, marker: TaskId) {
-		retain_map(&mut self.children_write_key, |_key, value| {
-			value.remove(&marker);
+		retain_map(&mut self.write_keys, |_key, value| {
+			value.remove(marker);
 			!value.is_empty()
 		});
 		let mut to_remove = Vec::new();
-		for (key, value) in self.children_write_prefix.iter_mut().value_iter() {
-			value.remove(&marker);
+		for (key, value) in self.write_prefixes.iter_mut().value_iter() {
+			value.remove(marker);
 			if value.is_empty() {
 				to_remove.push(key.to_vec())
 			}
 		}
 		for key in to_remove.into_iter() {
-			self.children_write_prefix.remove(&key);
+			self.write_prefixes.remove(&key);
 		}
 	}
 
+	fn remove_children_append_logs(&mut self, marker: TaskId) {
+		retain_map(&mut self.append_keys, |_key, value| {
+			value.remove(marker);
+			!value.is_empty()
+		});
+	}
+
+	// TODO is it of any use: involve full iter if empty so
+	// doing it is as good?
 	fn is_children_read_empty(&self, marker: TaskId) -> bool {
-		for (_, ids) in self.children_read_key.iter() {
-			if ids.contains(&marker) {
+		for (_, ids) in self.read_keys.iter() {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
-		for (_, ids) in self.children_read_intervals.iter() {
-			if ids.contains(&marker) {
+		for (_, ids) in self.read_intervals.iter() {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
@@ -148,23 +176,35 @@ impl StateLogger {
 	}
 
 	fn is_children_write_empty(&self, marker: TaskId) -> bool {
-		for (_, ids) in self.children_write_key.iter() {
-			if ids.contains(&marker) {
+		for (_, ids) in self.write_keys.iter() {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
-		for (_, ids) in self.children_write_prefix.iter().value_iter() {
-			if ids.contains(&marker) {
+		for (_, ids) in self.write_prefixes.iter().value_iter() {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
 		true
 	}
 
-	// compare write from parent (`self`) against read from child (`access`).
-	fn check_write_read(&self, access: &StateLog, marker: TaskId) -> bool {
+	fn is_children_append_empty(&self, marker: TaskId) -> bool {
+		for (_, ids) in self.append_keys.iter() {
+			if ids.contains(marker) {
+				return false;
+			}
+		}
+		true
+	}
+
+	// compare write/append from parent (`self`) against read from child (`access`).
+	fn check_child_read(&self, access: &StateLog, marker: TaskId) -> bool {
 		for key in access.read_keys.iter() {
 			if !self.check_key_against_write(key, marker) {
+				return false;
+			}
+			if !self.check_key_against_append(key, marker) {
 				return false;
 			}
 		}
@@ -172,36 +212,57 @@ impl StateLogger {
 			if !self.check_interval_against_write(interval, marker) {
 				return false;
 			}
+			if !self.check_interval_against_append(interval, marker) {
+				return false;
+			}
 		}
 		true
 	}
 
-	// compare read from parent (`self`) against write from child (`access`).
-	fn check_read_write(&self, access: &StateLog, marker: TaskId) -> bool {
-		for key in access.read_write_keys.iter() {
+	// compare any access from parent (`self`) against write from child (`access`).
+	fn check_child_write(&self, access: &StateLog, marker: TaskId) -> bool {
+		for key in access.write_keys.iter() {
 			if !self.check_key_against_read(key, marker) {
+				return false;
+			}
+			if !self.check_key_against_write(key, marker) {
+				return false;
+			}
+			if !self.check_key_against_append(key, marker) {
 				return false;
 			}
 		}
 		// Here ordering prefix could be use to optimize check (skiping child of a given prefix).
-		for prefix in access.read_write_prefix.iter() {
+		for prefix in access.write_prefix.iter() {
 			if !self.check_prefix_against_read(prefix, marker) {
+				return false;
+			}
+			if !self.check_prefix_against_write(prefix, marker) {
+				return false;
+			}
+			if !self.check_prefix_against_append(prefix, marker) {
 				return false;
 			}
 		}
 		true
 	}
 
-	// compare write from parent (`self`) against write from child (`access`).
-	fn check_write_write(&self, access: &StateLog, marker: TaskId) -> bool {
-		for key in access.read_write_keys.iter() {
+	// compare read or write from parent (`self`) against append from child (`access`).
+	fn check_child_append(&self, access: &StateLog, marker: TaskId) -> bool {
+		for key in access.append_keys.iter() {
+			if !self.check_key_against_read(key, marker) {
+				return false;
+			}
 			if !self.check_key_against_write(key, marker) {
 				return false;
 			}
 		}
-		// Here ordering prefix could be use to optimize check (skiping child of a given prefix).
-		for prefix in access.read_write_prefix.iter() {
-			if !self.check_prefix_against_write(prefix, marker) {
+		true
+	}
+
+	fn check_key_against_append(&self, read_key: &Vec<u8>, marker: TaskId) -> bool {
+		if let Some(ids) = self.append_keys.get(read_key) {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
@@ -209,13 +270,13 @@ impl StateLogger {
 	}
 
 	fn check_key_against_write(&self, read_key: &Vec<u8>, marker: TaskId) -> bool {
-		if let Some(ids) = self.children_write_key.get(read_key) {
-			if ids.contains(&marker) {
+		if let Some(ids) = self.write_keys.get(read_key) {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
-		for (_prefix, ids) in self.children_write_prefix.seek_iter(read_key.as_slice()).value_iter() {
-			if ids.contains(&marker) {
+		for (_prefix, ids) in self.write_prefixes.seek_iter(read_key.as_slice()).value_iter() {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
@@ -223,15 +284,15 @@ impl StateLogger {
 	}
 
 	fn check_key_against_read(&self, write_key: &Vec<u8>, marker: TaskId) -> bool {
-		if let Some(ids) = self.children_read_key.get(write_key) {
-			if ids.contains(&marker) {
+		if let Some(ids) = self.read_keys.get(write_key) {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
 		// TODO this needs proper children_read_intervals structure.
-		for ((start, end), ids) in self.children_read_intervals.iter() {
+		for ((start, end), ids) in self.read_intervals.iter() {
 			if write_key >= start && end.as_ref().map(|end| write_key <= end).unwrap_or(true) {
-				if ids.contains(&marker) {
+				if ids.contains(marker) {
 					return false;
 				}
 			}
@@ -239,12 +300,12 @@ impl StateLogger {
 		true
 	}
 
-	fn check_prefix_against_write(&self, prefix: &Vec<u8>, marker: TaskId) -> bool {
+	fn check_prefix_against_append(&self, prefix: &Vec<u8>, marker: TaskId) -> bool {
 		// TODO here could benefit from a seek then iter.
 		let mut first = false;
-		for (key, ids) in self.children_write_key.iter() {
+		for (key, ids) in self.append_keys.iter() {
 			if key.starts_with(prefix) {
-				if ids.contains(&marker) {
+				if ids.contains(marker) {
 					return false;
 				} else {
 					first = true;
@@ -253,14 +314,31 @@ impl StateLogger {
 				break;
 			}
 		}
-		let mut iter = self.children_write_prefix.seek_iter(prefix).value_iter();
+		true
+	}
+
+	fn check_prefix_against_write(&self, prefix: &Vec<u8>, marker: TaskId) -> bool {
+		// TODO here could benefit from a seek then iter.
+		let mut first = false;
+		for (key, ids) in self.write_keys.iter() {
+			if key.starts_with(prefix) {
+				if ids.contains(marker) {
+					return false;
+				} else {
+					first = true;
+				}
+			} else if first {
+				break;
+			}
+		}
+		let mut iter = self.write_prefixes.seek_iter(prefix).value_iter();
 		while let Some((_prefix, ids)) = iter.next() {
-			if ids.contains(&marker) {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
 		for (_key, ids) in iter.node_iter().iter_prefix().value_iter() {
-			if ids.contains(&marker) {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
@@ -270,9 +348,9 @@ impl StateLogger {
 	fn check_prefix_against_read(&self, prefix: &Vec<u8>, marker: TaskId) -> bool {
 		// TODO here could benefit from a seek then iter.
 		let mut first = false;
-		for (key, ids) in self.children_read_key.iter() {
+		for (key, ids) in self.read_keys.iter() {
 			if key.starts_with(prefix) {
-				if ids.contains(&marker) {
+				if ids.contains(marker) {
 					return false;
 				} else {
 					first = true;
@@ -282,12 +360,12 @@ impl StateLogger {
 			}
 		}
 		// TODO this needs proper children_read_intervals structure.
-		for ((start, end), ids) in self.children_read_intervals.iter() {
+		for ((start, end), ids) in self.read_intervals.iter() {
 			if prefix.len() == 0
 				|| start.starts_with(prefix)
 				|| end.as_ref().map(|end| end.starts_with(prefix)).unwrap_or(false)
 				|| (prefix >= start && end.as_ref().map(|end| prefix <= end).unwrap_or(true)) {
-				if ids.contains(&marker) {
+				if ids.contains(marker) {
 					return false;
 				}
 			}
@@ -295,6 +373,25 @@ impl StateLogger {
 		true
 	}
 
+	fn check_interval_against_append(
+		&self,
+		interval: &(Vec<u8>, Option<Vec<u8>>),
+		marker: TaskId,
+	) -> bool {
+		// Could use a seek to start here, but this
+		// (check read access on write) is a marginal use case
+		// so not switching write_key to radix_tree at the time.
+		for (key, ids) in self.write_keys.iter() {
+			if interval.1.as_ref().map(|end| key > end).unwrap_or(false) {
+				break;
+			}
+			if key >= &interval.0 && ids.contains(marker) {
+				return false;
+			}
+		}
+		true
+	}
+	
 	fn check_interval_against_write(
 		&self,
 		interval: &(Vec<u8>, Option<Vec<u8>>),
@@ -303,17 +400,17 @@ impl StateLogger {
 		// Could use a seek to start here, but this
 		// (check read access on write) is a marginal use case
 		// so not switching write_key to radix_tree at the time.
-		for (key, ids) in self.children_write_key.iter() {
+		for (key, ids) in self.write_keys.iter() {
 			if interval.1.as_ref().map(|end| key > end).unwrap_or(false) {
 				break;
 			}
-			if key >= &interval.0 && ids.contains(&marker) {
+			if key >= &interval.0 && ids.contains(marker) {
 				return false;
 			}
 		}
-		let mut iter = self.children_write_prefix.seek_iter(interval.0.as_slice()).value_iter();
+		let mut iter = self.write_prefixes.seek_iter(interval.0.as_slice()).value_iter();
 		while let Some((_prefix, ids)) = iter.next() {
-			if ids.contains(&marker) {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
@@ -324,7 +421,7 @@ impl StateLogger {
 			}
 			// This is can do some check twice (all write prefix that are contained
 			// by start, as they also where in seek iter)
-			if ids.contains(&marker) {
+			if ids.contains(marker) {
 				return false;
 			}
 		}
@@ -359,20 +456,29 @@ impl AccessLogger {
 		true
 	}
 
-	pub(super) fn log_writes_against(&mut self, children: Option<TaskId>) {
-		if let Some(worker) = children {
-			self.log_write.insert(worker);
-		} else {
-			self.parent_log_write = true;
+	fn is_children_append_empty(&self, marker: TaskId) -> bool {
+		if !self.top_logger.is_children_append_empty(marker) {
+			return false;
 		}
+		for child_logger in self.children_logger.iter() {
+			if !child_logger.1.is_children_append_empty(marker) {
+				return false;
+			}
+		}
+
+		true
+	}
+
+	pub(super) fn log_writes_against(&mut self, children: Option<TaskId>) {
+		self.log_write.insert(children);
+	}
+
+	pub(super) fn log_appends_against(&mut self, children: Option<TaskId>) {
+		self.log_append.insert(children);
 	}
 
 	pub(super) fn log_reads_against(&mut self, children: Option<TaskId>) {
-		if let Some(worker) = children {
-			self.log_read.insert(worker);
-		} else {
-			self.parent_log_read = true;
-		}
+		self.log_read.insert(children);
 	}
 
 	pub(super) fn on_worker_result(&mut self, result: &WorkerResult) -> bool {
@@ -385,82 +491,99 @@ impl AccessLogger {
 			WorkerResult::Optimistic(_result, _delta, marker, accesses) => {
 				let result = || -> bool {
 					let has_read_child = accesses.has_read();
-					let has_read_write_child = accesses.has_read_write();
-					let has_read_parent = !self.is_children_read_empty(*marker);
-					let has_write_parent = !self.is_children_write_empty(*marker);
+					let has_write_child = accesses.has_write();
+					let has_append_child = accesses.has_append();
+//					let has_append_parent = !self.is_children_append_empty(*marker);
 
 					if has_read_child {
 						if accesses.read_all {
-							if has_write_parent {
+							if !self.is_children_write_empty(*marker) {
 								return false;
 							}
-						} else if has_write_parent {
-							if !self.top_logger.check_write_read(&accesses.top_logger, *marker) {
+							if !self.is_children_append_empty(*marker) {
+								return false;
+							}
+						} else {
+							if !self.top_logger.check_child_read(&accesses.top_logger, *marker) {
 								return false;
 							}
 							for (storage_key, child_logger) in accesses.children_logger.iter() {
 								if let Some(access_logger) = self.children_logger.get(storage_key) {
-									if !access_logger.check_write_read(child_logger, *marker) {
+									if !access_logger.check_child_read(child_logger, *marker) {
 										return false;
 									}
 								}
 							}
 						}
 					}
-					if has_read_write_child {
-						if has_write_parent {
-							if !self.top_logger.check_write_write(&accesses.top_logger, *marker) {
-								return false;
-							}
-							for (storage_key, child_logger) in accesses.children_logger.iter() {
-								if let Some(access_logger) = self.children_logger.get(storage_key) {
-									if !access_logger.check_write_write(child_logger, *marker) {
-										return false;
-									}
-								}
-							}
+					if has_write_child {
+						if self.read_all.parent {
+							return false;
 						}
-						if has_read_parent {
-							if self.parent_read_all {
-								return false;
-							}
-							if !self.top_logger.check_read_write(&accesses.top_logger, *marker) {
-								return false;
-							}
-							for (storage_key, child_logger) in accesses.children_logger.iter() {
-								if let Some(access_logger) = self.children_logger.get(storage_key) {
-									if !access_logger.check_read_write(child_logger, *marker) {
-										return false;
-									}
+						if !self.top_logger.check_child_write(&accesses.top_logger, *marker) {
+							return false;
+						}
+						for (storage_key, child_logger) in accesses.children_logger.iter() {
+							if let Some(access_logger) = self.children_logger.get(storage_key) {
+								if !access_logger.check_child_write(child_logger, *marker) {
+									return false;
 								}
 							}
 						}
 					}
+					if has_append_child {
+						if self.read_all.parent {
+							return false;
+						}
+						if !self.top_logger.check_child_append(&accesses.top_logger, *marker) {
+							return false;
+						}
+						for (storage_key, child_logger) in accesses.children_logger.iter() {
+							if let Some(access_logger) = self.children_logger.get(storage_key) {
+								if !access_logger.check_child_append(child_logger, *marker) {
+									return false;
+								}
+							}
+						}
+					}
+
 					// merge accesses with parent if needed
-					if self.parent_log_write && has_read_write_child {
+					if self.log_write.parent {
 						// relative to the current three configs when write is logged for child, it is also for
 						// parent.
-						for key in accesses.top_logger.read_write_keys.iter() {
+						for key in accesses.top_logger.write_keys.iter() {
 							self.log_write(None, key.as_slice());
 						}
-						for key in accesses.top_logger.read_write_prefix.iter() {
+						for key in accesses.top_logger.write_prefix.iter() {
 							self.log_write_prefix(None, key.as_slice());
 						}
 						for (storage_key, child_logger) in accesses.children_logger.iter() {
-							for key in child_logger.read_write_keys.iter() {
+							for key in child_logger.write_keys.iter() {
 								self.log_write_storage_key(Some(storage_key.as_slice()), key.as_slice());
 							}
-							for key in child_logger.read_write_prefix.iter() {
+							for key in child_logger.write_prefix.iter() {
 								self.log_write_prefix_storage_key(Some(storage_key.as_slice()), key.as_slice());
 							}
 						}
-
 					}
-					if self.parent_log_read && accesses.read_all {
+					if self.log_append.parent {
+						// relative to the current three configs when write is logged for child, it is also for
+						// parent.
+						for key in accesses.top_logger.append_keys.iter() {
+							self.log_append(None, key.as_slice());
+						}
+						for (storage_key, child_logger) in accesses.children_logger.iter() {
+							for key in child_logger.append_keys.iter() {
+								self.log_append_storage_key(Some(storage_key.as_slice()), key.as_slice());
+							}
+						}
+					}
+
+					if self.log_read.parent && accesses.read_all {
 						// relative to the current three configs when read is logged for child, it is also for
 						// parent.
 						self.log_read_all();
-					} else if self.parent_log_read && has_read_child {
+					} else if self.log_read.parent {
 						for key in accesses.top_logger.read_keys.iter() {
 							self.log_read(None, key.as_slice());
 						}
@@ -501,30 +624,37 @@ impl AccessLogger {
 		if self.eager_clean {
 			return self.remove_worker_eager(worker);
 		}
-		self.log_write.remove(&worker);
+		self.log_write.remove(worker);
 		// we could remove all occurence, but we only do when no runing thread
 		// to just clear.
 		if self.log_write.is_empty() {
-			self.top_logger.remove_all_children_write_logs();
+			self.top_logger.remove_all_write_logs();
 			for child_logger in self.children_logger.iter_mut() {
-				child_logger.1.remove_all_children_write_logs();
+				child_logger.1.remove_all_write_logs();
 			}
 		}
-		self.log_read.remove(&worker);
-		if self.log_read.is_empty() {
-			self.top_logger.remove_all_children_read_logs();
+		self.log_append.remove(worker);
+		if self.log_append.is_empty() {
+			self.top_logger.remove_all_append_logs();
 			for child_logger in self.children_logger.iter_mut() {
-				child_logger.1.remove_all_children_read_logs();
+				child_logger.1.remove_all_append_logs();
+			}
+		}
+		self.log_read.remove(worker);
+		if self.log_read.is_empty() {
+			self.top_logger.remove_all_read_logs();
+			for child_logger in self.children_logger.iter_mut() {
+				child_logger.1.remove_all_read_logs();
 			}
 		}
 	}
 
 	fn remove_worker_eager(&mut self, worker: TaskId) {
-		if self.log_write.remove(&worker) {
+		if self.log_write.remove(worker) {
 			if self.log_write.is_empty() {
-				self.top_logger.remove_all_children_write_logs();
+				self.top_logger.remove_all_write_logs();
 				for child_logger in self.children_logger.iter_mut() {
-					child_logger.1.remove_all_children_write_logs();
+					child_logger.1.remove_all_write_logs();
 				}
 			} else {
 				self.top_logger.remove_children_write_logs(worker);
@@ -533,11 +663,25 @@ impl AccessLogger {
 				}
 			}
 		}
-		if self.log_read.remove(&worker) {
-			if self.log_read.is_empty() {
-				self.top_logger.remove_all_children_read_logs();
+		if self.log_append.remove(worker) {
+			if self.log_append.is_empty() {
+				self.top_logger.remove_all_append_logs();
 				for child_logger in self.children_logger.iter_mut() {
-					child_logger.1.remove_all_children_read_logs();
+					child_logger.1.remove_all_append_logs();
+				}
+			} else {
+				self.top_logger.remove_children_append_logs(worker);
+				for child_logger in self.children_logger.iter_mut() {
+					child_logger.1.remove_children_append_logs(worker);
+				}
+			}
+		}
+
+		if self.log_read.remove(worker) {
+			if self.log_read.is_empty() {
+				self.top_logger.remove_all_read_logs();
+				for child_logger in self.children_logger.iter_mut() {
+					child_logger.1.remove_all_read_logs();
 				}
 			} else {
 				self.top_logger.remove_children_read_logs(worker);
@@ -549,17 +693,13 @@ impl AccessLogger {
 	}
 
 	pub(super) fn log_read_all(&mut self) {
-		if self.parent_log_read && !self.parent_read_all {
-			self.parent_read_all = true;
-			self.top_logger.remove_parent_read_logs();
-			for child_logger in self.children_logger.iter_mut() {
-				child_logger.1.remove_parent_read_logs();
-			}
+		if self.log_read.parent && !self.read_all.parent {
+			self.read_all.parent = true;
+			// TODO could clean logs from parent.
+			// or also check this for further logging and when doing is_empty.
 		}
-		if !self.log_read.is_empty() {
-			self.children_read_all.extend(self.log_read.iter().cloned());
-			// Here we could remove children read logs, not sure if useful (need iter and filtering).
-		}
+		self.read_all.children.extend(self.log_read.children.iter().cloned());
+		// Here we could remove children read logs, not sure if useful (need iter and filtering).
 	}
 
 	fn logger_mut<'a>(
@@ -579,7 +719,7 @@ impl AccessLogger {
 	}
 
 	fn log_read_storage_key(&mut self, storage_key: Option<&[u8]>, key: &[u8]) {
-		if self.parent_log_read && !self.parent_read_all {
+		if !self.log_read.is_empty() {
 			let logger = if let Some(storage_key) = storage_key {
 				if !self.children_logger.contains_key(storage_key) {
 					self.children_logger.insert(storage_key.to_vec(), Default::default());
@@ -588,23 +728,13 @@ impl AccessLogger {
 			} else {
 				&mut self.top_logger
 			};
-			// TODO consider map
-			logger.parent_read_key.push(key.to_vec());
-		}
-		if !self.log_read.is_empty() {
-			let mut children = self.log_read.difference(&self.children_read_all);
-			if !children.next().is_none() {
-				let logger = if let Some(storage_key) = storage_key {
-					if !self.children_logger.contains_key(storage_key) {
-						self.children_logger.insert(storage_key.to_vec(), Default::default());
-					}
-					self.children_logger.get_mut(storage_key).expect("lazy init above")
-				} else {
-					&mut self.top_logger
-				};
-				let children = self.log_read.difference(&self.children_read_all);
-				logger.children_read_key.entry(key.to_vec())
-					.or_default().extend(children.cloned());
+			let mut children = sp_std::iter::Iterator::peekable(self.log_read.children.difference(&self.read_all.children));
+			let parent = self.log_read.parent;
+			if children.peek().is_some() || parent {
+				let mut entry = logger.read_keys.entry(key.to_vec())
+					.or_default();
+				entry.children.extend(children.cloned());
+				entry.parent = parent;
 			}
 		}
 	}
@@ -624,7 +754,7 @@ impl AccessLogger {
 		key: &[u8],
 		key_end: Option<&[u8]>,
 	) {
-		if self.parent_log_read && !self.parent_read_all {
+		if !self.log_read.is_empty() {
 			let logger = if let Some(storage_key) = storage_key {
 				if !self.children_logger.contains_key(storage_key) {
 					self.children_logger.insert(storage_key.to_vec(), Default::default());
@@ -633,23 +763,13 @@ impl AccessLogger {
 			} else {
 				&mut self.top_logger
 			};
-			// TODO consider map
-			logger.parent_read_intervals.push((key.to_vec(), key_end.map(|end| end.to_vec())));
-		}
-		if !self.log_read.is_empty() {
-			let mut children = self.log_read.difference(&self.children_read_all);
-			if !children.next().is_none() {
-				let logger = if let Some(storage_key) = storage_key {
-					if !self.children_logger.contains_key(storage_key) {
-						self.children_logger.insert(storage_key.to_vec(), Default::default());
-					}
-					self.children_logger.get_mut(storage_key).expect("lazy init above")
-				} else {
-					&mut self.top_logger
-				};
-				let children = self.log_read.difference(&self.children_read_all);
-				logger.children_read_intervals.entry((key.to_vec(), key_end.map(|end| end.to_vec())))
-					.or_default().extend(children.cloned());
+			let mut children = sp_std::iter::Iterator::peekable(self.log_read.children.difference(&self.read_all.children));
+			let mut parent = self.log_read.parent;
+			if children.peek().is_some() || parent {
+				let mut entry = logger.read_intervals.entry((key.to_vec(), key_end.map(|end| end.to_vec())))
+					.or_default();
+				entry.children.extend(children.cloned());
+				entry.parent = parent;
 			}
 		}
 	}
@@ -660,14 +780,26 @@ impl AccessLogger {
 	}
 
 	fn log_write_storage_key(&mut self, storage_key: Option<&[u8]>, key: &[u8]) {
-		if self.parent_log_write {
-			let logger = Self::logger_mut(&mut self.top_logger, &mut self.children_logger, storage_key);
-			logger.parent_write_key.push(key.to_vec())
-		}
 		if !self.log_write.is_empty() {
 			let logger = Self::logger_mut(&mut self.top_logger, &mut self.children_logger, storage_key);
-			logger.children_write_key.entry(key.to_vec())
-				.or_default().extend(self.log_write.iter());
+			let mut entry = logger.write_keys.entry(key.to_vec())
+				.or_default();
+			entry.children.extend(self.log_write.children.iter());
+			entry.parent = self.log_write.parent;
+		}
+	}
+
+	pub(super) fn log_append(&mut self, child_info: Option<&ChildInfo>, key: &[u8]) {
+		self.log_append_storage_key(child_info.map(|child_info| child_info.storage_key()), key)
+	}
+
+	fn log_append_storage_key(&mut self, storage_key: Option<&[u8]>, key: &[u8]) {
+		if !self.log_append.is_empty() {
+			let logger = Self::logger_mut(&mut self.top_logger, &mut self.children_logger, storage_key);
+			let mut entry = logger.append_keys.entry(key.to_vec())
+				.or_default();
+			entry.children.extend(self.log_append.children.iter());
+			entry.parent = self.log_append.parent;
 		}
 	}
 
@@ -677,51 +809,76 @@ impl AccessLogger {
 	}
 
 	fn log_write_prefix_storage_key(&mut self, storage_key: Option<&[u8]>, key: &[u8]) {
-		if self.parent_log_write {
-			let logger = Self::logger_mut(&mut self.top_logger, &mut self.children_logger, storage_key);
-			logger.parent_write_prefix.insert(key, ());
-		}
 		if !self.log_write.is_empty() {
 			let logger = Self::logger_mut(&mut self.top_logger, &mut self.children_logger, storage_key);
 			// TODO a 'entry' api in radix_tree would be nice.
-			if let Some(entry) = logger.children_write_prefix.get_mut(key) {
-				entry.extend(self.log_write.iter());
+			if let Some(entry) = logger.write_prefixes.get_mut(key) {
+				entry.children.extend(self.log_write.children.iter());
+				entry.parent = self.log_write.parent;
 			} else {
-				logger.children_write_prefix.insert(key, self.log_write.clone());
+				logger.write_prefixes.insert(key, self.log_write.clone());
 			}
 		}
 	}
 
 	pub(super) fn extract_parent_log(&mut self) -> Option<sp_externalities::AccessLog> {
-		if !self.parent_log_read && !self.parent_log_write {
+		if !self.log_read.parent && !self.log_write.parent && !self.log_append.parent {
 			return None;
 		}
 
 		let mut result = sp_externalities::AccessLog::default();
-		if self.parent_read_all {
-			// Resetting state is not strictly needed, extract read should only happen
-			// on end of lifetime of the overlay (at worker return).
-			// But writing it for having explicitly a clean read state.
-			self.parent_read_all = false;
-			result.read_all = true;
+
+		result.read_all = self.read_all.parent;
+
+		if !result.read_all && self.log_read.parent {
+			result.top_logger.read_keys = sp_std::mem::take(&mut self.top_logger.read_keys).into_iter()
+				.map(|(key, access)| {
+					debug_assert!(access.parent);
+					key
+				}).collect();
+			result.top_logger.read_intervals = sp_std::mem::take(&mut self.top_logger.read_intervals).into_iter()
+				.map(|(key, access)| {
+					debug_assert!(access.parent);
+					key
+				}).collect();
 		}
-		if !result.read_all {
-			result.top_logger.read_keys = sp_std::mem::take(&mut self.top_logger.parent_read_key);
-			result.top_logger.read_intervals = sp_std::mem::take(&mut self.top_logger.parent_read_intervals);
+		if self.log_append.parent {
+			result.top_logger.append_keys = sp_std::mem::take(&mut self.top_logger.append_keys).into_iter()
+				.map(|(key, access)| {
+					debug_assert!(access.parent);
+					key
+				}).collect();
 		}
-		result.top_logger.read_write_keys = sp_std::mem::take(&mut self.top_logger.parent_write_key);
-		result.top_logger.read_write_prefix = sp_std::mem::take(&mut self.top_logger.parent_write_prefix)
-			.iter().value_iter().map(|(key, _)| key).collect();
-		result.children_logger = self.children_logger.iter_mut()
+		if self.log_write.parent {
+			result.top_logger.write_keys = sp_std::mem::take(&mut self.top_logger.write_keys).into_iter()
+				.map(|(key, access)| {
+					debug_assert!(access.parent);
+					key
+				}).collect();
+
+			result.top_logger.write_prefix = self.top_logger.write_prefixes.iter().value_iter()
+				.map(|(key, _)| key).collect();
+		}
+		result.children_logger = sp_std::mem::take(&mut self.children_logger).into_iter()
 			.map(|(storage_key, logger)| {
 			let mut log = StateLog::default();
-			if !result.read_all {
-				log.read_keys = sp_std::mem::take(&mut logger.parent_read_key);
-				log.read_intervals = sp_std::mem::take(&mut logger.parent_read_intervals);
+			if !result.read_all && self.log_read.parent {
+				log.read_keys = logger.read_keys.into_iter()
+					.map(|(key, _)| key).collect();
+				log.read_intervals = logger.read_intervals.into_iter()
+					.map(|(key, _)| key).collect();
 			}
-			log.read_write_keys = sp_std::mem::take(&mut logger.parent_write_key);
-			log.read_write_prefix = sp_std::mem::take(&mut logger.parent_write_prefix)
-				.iter().value_iter().map(|(key, _)| key).collect();
+			if self.log_append.parent {
+				log.append_keys = logger.append_keys.into_iter()
+					.map(|(key, _)| key).collect();
+			}
+			if self.log_write.parent {
+				log.write_keys = logger.write_keys.into_iter()
+					.map(|(key, _)| key).collect();
+				log.write_prefix = logger.write_prefixes.iter().value_iter()
+					.map(|(key, _)| key).collect();
+			}
+
 			(storage_key.clone(), log)
 		}).collect();
 
@@ -802,7 +959,7 @@ mod test {
 	}
 
 	#[test]
-	fn test_check_write_read() {
+	fn test_check_child_read() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		parent_access_base.log_writes_against(Some(task1));
@@ -817,7 +974,7 @@ mod test {
 		child_access.read_intervals.push((b"st_int".to_vec(), Some(b"w".to_vec())));
 		child_access.read_intervals.push((b"z_int".to_vec(), Some(b"z_inter".to_vec())));
 		child_access.read_intervals.push((b"z_z".to_vec(), None));
-		assert!(parent_access_base.top_logger.check_write_read(&child_access, task1));
+		assert!(parent_access_base.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"keyw"[..]);
@@ -828,11 +985,11 @@ mod test {
 		parent_access.log_write(None, &b"prefixy"[..]);
 		parent_access.log_write(None, &b"st_in"[..]);
 		parent_access.log_write(None, &b"w0"[..]);
-		assert!(parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"keyr"[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"keyw"[..]);
@@ -843,39 +1000,39 @@ mod test {
 		parent_access.log_write_prefix(None, &b"prefixwed"[..]);
 		// Note that these logical conflict (log write involve a read) are done by
 		// check_write_write when write is enabled.
-		// (we rely on the fact that check_write_read is only for read only.
-		assert!(parent_access.top_logger.check_write_read(&child_access, task1));
+		// (we rely on the fact that check_child_read is only for read only.
+		assert!(parent_access.top_logger.check_child_read(&child_access, task1));
 
 		parent_access.log_write(None, &b"keyr"[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"t_in_interval"[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"{_in_end_interval"[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b""[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"t_in_interval"[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"key"[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"t"[..]);
-		assert!(!parent_access.top_logger.check_write_read(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 	}
 
 	#[test]
-	fn test_check_read_write() {
+	fn test_check_child_write() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		parent_access_base.log_writes_against(Some(task1));
@@ -890,7 +1047,7 @@ mod test {
 		child_access.read_intervals.push((b"st_int".to_vec(), Some(b"w".to_vec())));
 		child_access.read_intervals.push((b"z_int".to_vec(), Some(b"z_inter".to_vec())));
 		child_access.read_intervals.push((b"z_z".to_vec(), None));
-		assert!(parent_access_base.top_logger.check_read_write(&child_access, task1));
+		assert!(parent_access_base.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"st_int"[..]);
@@ -906,25 +1063,25 @@ mod test {
 		parent_access.log_write_prefix(None, &b"z_inti"[..]);
 		parent_access.log_write(None, &b"keyw"[..]);
 		parent_access.log_write(None, &b"prefixx"[..]);
-		assert!(parent_access.top_logger.check_read_write(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_write(&child_access, task1));
 
 		parent_access.log_read(None, &b"keyw"[..]);
-		assert!(!parent_access.top_logger.check_read_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"prefixx"[..]);
-		assert!(!parent_access.top_logger.check_read_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"prefixxa"[..]);
-		assert!(!parent_access.top_logger.check_read_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let parent_access = parent_access_base.clone();
 		parent_access.log_read_interval(None, &b"pre"[..], Some(&b"prefixx"[..]));
-		assert!(!parent_access.top_logger.check_read_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let parent_access = parent_access_base.clone();
 		parent_access.log_read_interval(None, &b"pre"[..], None);
-		assert!(!parent_access.top_logger.check_read_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 	}
 }

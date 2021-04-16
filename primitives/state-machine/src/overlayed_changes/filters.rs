@@ -409,12 +409,16 @@ impl Filters {
 
 	pub(super) fn guard_read_all(&mut self) {
 		self.guard_read_prefix(None, &[]);
-		for (storage_key, child) in self.filters_forbid.children.iter() {
+		// costy alloc for mutable reference question, could be optimize.
+		let children: Vec<_> = self.filters_forbid.children.iter().map(|(storage_key, _child)| {
 			let prefixed_key = PrefixedStorageKey::new_ref(storage_key);
-			let child_info = match ChildType::from_prefixed_key(prefixed_key) {
+			match ChildType::from_prefixed_key(prefixed_key) {
 				Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
 				None => panic!("Unsupported child key"), // actually should be unreachable.
-			};
+			}
+		}).collect();
+
+		for child_info in children.into_iter() {
 			self.guard_read_prefix(Some(&child_info), &[]);
 		}
 	}
@@ -880,7 +884,7 @@ impl Filters {
 		false
 	}
 
-	fn guard_read_prefix(&self, child_info: Option<&ChildInfo>, key: &[u8]) {
+	fn guard_read_prefix(&mut self, child_info: Option<&ChildInfo>, key: &[u8]) {
 		let _ = self.guard_read_prefix_inner(child_info, key, false);
 	}
 

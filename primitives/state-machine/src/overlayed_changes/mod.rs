@@ -324,10 +324,7 @@ impl OverlayedChanges {
 		init: impl Fn() -> StorageValue,
 	) -> &mut StorageValue {
 		self.filters.guard_write(None, key);
-		// no guard read as write supersed it.
 		self.optimistic_logger.log_write(None, key);
-		// we need to log read here as we can read it.
-		self.optimistic_logger.log_read(None, key);
 		let extrinsic_index = self.extrinsic_index();
 		let value = self.top.modify(key.to_vec(), init, extrinsic_index);
 
@@ -474,6 +471,7 @@ impl OverlayedChanges {
 			| WorkerDeclarationKind::WriteAtSpawn => (),
 			WorkerDeclarationKind::ReadOptimistic => {
 				self.optimistic_logger.log_writes_against(Some(child_marker));
+				self.optimistic_logger.log_appends_against(Some(child_marker));
 			},
 			WorkerDeclarationKind::WriteLightOptimistic => {
 				self.optimistic_logger.log_writes_against(Some(child_marker));
@@ -481,6 +479,7 @@ impl OverlayedChanges {
 			WorkerDeclarationKind::WriteOptimistic => {
 				self.optimistic_logger.log_reads_against(Some(child_marker));
 				self.optimistic_logger.log_writes_against(Some(child_marker));
+				self.optimistic_logger.log_appends_against(Some(child_marker));
 			},
 			WorkerDeclarationKind::ReadDeclarative(filter, failure) => {
 				if !self.filters.guard_declare_child_filter_read(&filter) {
@@ -534,10 +533,12 @@ impl OverlayedChanges {
 			},
 			WorkerDeclarationKind::WriteLightOptimistic => {
 				self.optimistic_logger.log_writes_against(None);
+				self.optimistic_logger.log_appends_against(None);
 			},
 			WorkerDeclarationKind::WriteOptimistic => {
 				self.optimistic_logger.log_reads_against(None);
 				self.optimistic_logger.log_writes_against(None);
+				self.optimistic_logger.log_appends_against(None);
 			},
 			WorkerDeclarationKind::ReadDeclarative(filter, failure) => {
 				self.filters.set_failure_handler(None, failure);
@@ -1158,10 +1159,7 @@ pub mod radix_trees {
 	pub type FilterTree<F> = radix_tree::Tree<Node256NoBackendART<F>>;
 
 	/// Write access logs with children origin.
-	pub type AccessTreeWrite = radix_tree::Tree<Node256NoBackendART<super::loggers::OriginLog>>;
-
-	/// Write access logs.
-	pub type AccessTreeWriteParent = radix_tree::Tree<Node256NoBackendART<()>>;
+	pub(crate) type AccessTreeWrite = radix_tree::Tree<Node256NoBackendART<super::loggers::OriginLog>>;
 
 	/// A tree of filter rules.
 	#[derive(Debug, Clone, Default)]
