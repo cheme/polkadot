@@ -323,7 +323,7 @@ impl OverlayedChanges {
 		key: &[u8],
 		init: impl Fn() -> StorageValue,
 	) -> &mut StorageValue {
-		self.filters.guard_read_write(None, key);
+		self.filters.guard_write(None, key);
 		// no guard read as write supersed it.
 		self.optimistic_logger.log_write(None, key);
 		// we need to log read here as we can read it.
@@ -400,7 +400,7 @@ impl OverlayedChanges {
 		// read_write (would not be needed with special clear prefix
 		// optimization).
 		// This apply to all clear.
-		self.filters.guard_read_write_prefix(Some(child_info), &[]);
+		self.filters.guard_write_prefix(Some(child_info), &[]);
 		self.optimistic_logger.log_write_prefix(Some(child_info), &[]);
 		let extrinsic_index = self.extrinsic_index();
 		let storage_key = child_info.storage_key().to_vec();
@@ -420,7 +420,7 @@ impl OverlayedChanges {
 	///
 	/// Can be rolled back or committed when called inside a transaction.
 	pub(crate) fn clear_prefix(&mut self, prefix: &[u8]) {
-		self.filters.guard_read_write_prefix(None, prefix);
+		self.filters.guard_write_prefix(None, prefix);
 		self.optimistic_logger.log_write_prefix(None, prefix);
 		let extrinsic_index = self.extrinsic_index();
 		self.top.clear_where(|key, _| key.starts_with(prefix), extrinsic_index);
@@ -434,7 +434,7 @@ impl OverlayedChanges {
 		child_info: &ChildInfo,
 		prefix: &[u8],
 	) {
-		self.filters.guard_read_write_prefix(Some(child_info), prefix);
+		self.filters.guard_write_prefix(Some(child_info), prefix);
 		self.optimistic_logger.log_write_prefix(Some(child_info), prefix);
 		let extrinsic_index = self.extrinsic_index();
 		let storage_key = child_info.storage_key().to_vec();
@@ -489,7 +489,7 @@ impl OverlayedChanges {
 				self.filters.set_failure_handler(Some(child_marker), failure);
 				// TODO consider merging add_change and forbid_writes (or even the full block).
 				self.filters.add_change(WorkerDeclarationKind::ReadDeclarative(filter.clone(), failure), child_marker);
-				self.filters.forbid_writes(filter, child_marker);
+				self.filters.forbid_write_appends(filter, child_marker);
 			},
 			WorkerDeclarationKind::WriteLightDeclarative(filter, failure) => {
 				if !self.filters.guard_declare_child_filter_write(&filter) {
@@ -498,23 +498,23 @@ impl OverlayedChanges {
 				self.filters.set_failure_handler(Some(child_marker), failure);
 				// TODO see if possible to only push worker type??
 				self.filters.add_change(WorkerDeclarationKind::WriteLightDeclarative(filter.clone(), failure), child_marker);
-				self.filters.forbid_writes(filter, child_marker);
+				self.filters.forbid_all(filter, child_marker);
 			},
 			WorkerDeclarationKind::WriteDeclarative(filters, failure) => {
 				if !self.filters.guard_declare_child_filter_read(&filters.read_only) {
 					return false;
 				}
-				if !self.filters.guard_declare_child_filter_write(&filters.write_only) {
+				if !self.filters.guard_declare_child_filter_write(&filters.write) {
 					return false;
 				}
-				if !self.filters.guard_declare_child_filter_read_write(&filters.read_write) {
+				if !self.filters.guard_declare_child_filter_append(&filters.append) {
 					return false;
 				}
 				self.filters.set_failure_handler(Some(child_marker), failure);
 				self.filters.add_change(WorkerDeclarationKind::WriteDeclarative(filters.clone(), failure), child_marker);
-				self.filters.forbid_reads(filters.write_only, child_marker);
-				self.filters.forbid_writes(filters.read_only, child_marker);
-				self.filters.forbid_read_writes(filters.read_write, child_marker);
+				self.filters.forbid_all(filters.write, child_marker);
+				self.filters.forbid_write_appends(filters.read_only, child_marker);
+				self.filters.forbid_read_writes(filters.append, child_marker);
 			},
 		}
 		self.markers.set_marker(child_marker);
@@ -550,8 +550,8 @@ impl OverlayedChanges {
 			WorkerDeclarationKind::WriteDeclarative(filters, failure) => {
 				self.filters.set_failure_handler(None, failure);
 				self.filters.allow_reads(filters.read_only);
-				self.filters.allow_writes(filters.write_only);
-				self.filters.allow_read_writes(filters.read_write);
+				self.filters.allow_writes(filters.write);
+				self.filters.allow_appends(filters.append);
 			},
 		}
 	}
