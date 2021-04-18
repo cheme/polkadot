@@ -22,7 +22,10 @@ mod offchain;
 mod filters;
 mod markers;
 mod loggers;
-mod local_scope;
+mod local_scope {
+	#[derive(Debug, Default, Clone)]
+	pub(crate) struct WriteLocalScope;
+}
 
 pub use offchain::OffchainOverlayedChanges;
 use crate::{
@@ -522,7 +525,7 @@ impl OverlayedChanges {
 
 	/// Set access declaration in the child worker.
 	pub fn set_worker_declaration(&mut self, declaration: WorkerDeclaration) {
-		self.write_local_scope.set_write_local_scope(declaration.write_local_scope);
+		// TODO restore self.write_local_scope.set_write_local_scope(declaration.write_local_scope);
 		match declaration.kind {
 			WorkerDeclarationKind::Stateless
 			| WorkerDeclarationKind::ReadLastBlock
