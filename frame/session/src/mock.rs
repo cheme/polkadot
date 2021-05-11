@@ -204,11 +204,12 @@ pub fn reset_before_session_end_called() {
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
+	let layout = sp_trie::Layout::default();
 	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
 	let keys: Vec<_> = NEXT_VALIDATORS.with(|l|
 		l.borrow().iter().cloned().map(|i| (i, i, UintAuthorityId(i).into())).collect()
 	);
-	BasicExternalities::execute_with_storage(&mut t, || {
+	BasicExternalities::execute_with_storage(&mut t, layout, || {
 		for (ref k, ..) in &keys {
 			frame_system::Pallet::<Test>::inc_providers(k);
 		}

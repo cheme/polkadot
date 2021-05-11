@@ -160,9 +160,10 @@ impl GenesisConfig {
 	/// Direct implementation of `GenesisBuild::assimilate_storage`.
 	pub fn assimilate_storage<T: Config>(
 		&self,
-		storage: &mut sp_runtime::Storage
+		storage: &mut sp_runtime::Storage,
+		layout: sp_runtime::StateLayout,
 	) -> Result<(), String> {
-		<Self as GenesisBuild<T>>::assimilate_storage(self, storage)
+		<Self as GenesisBuild<T>>::assimilate_storage(self, storage, layout)
 	}
 }
 

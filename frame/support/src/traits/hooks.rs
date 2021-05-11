@@ -288,15 +288,19 @@ pub trait GenesisBuild<T, I=()>: Default + MaybeSerializeDeserialize {
 	fn build(&self);
 
 	/// Build the storage using `build` inside default storage.
-	fn build_storage(&self) -> Result<sp_runtime::Storage, String> {
+	fn build_storage(&self, layout: sp_core::StateLayout) -> Result<sp_runtime::Storage, String> {
 		let mut storage = Default::default();
-		self.assimilate_storage(&mut storage)?;
+		self.assimilate_storage(&mut storage, layout)?;
 		Ok(storage)
 	}
 
 	/// Assimilate the storage for this module into pre-existing overlays.
-	fn assimilate_storage(&self, storage: &mut sp_runtime::Storage) -> Result<(), String> {
-		sp_state_machine::BasicExternalities::execute_with_storage(storage, || {
+	fn assimilate_storage(
+		&self,
+		storage: &mut sp_runtime::Storage,
+		layout: sp_core::StateLayout,
+	) -> Result<(), String> {
+		sp_state_machine::BasicExternalities::execute_with_storage(storage, layout, || {
 			self.build();
 			Ok(())
 		})

@@ -936,18 +936,19 @@ mod tests {
 
 	#[test]
 	fn next_storage_key_works() {
+		let layout = sp_trie::Layout::default();
 		let mut cache = StorageTransactionCache::default();
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_storage(vec![20], None);
 		overlay.set_storage(vec![30], Some(vec![31]));
-		let backend = Storage {
+		let backend = (Storage {
 			top: map![
 				vec![10] => vec![10],
 				vec![20] => vec![20],
 				vec![40] => vec![40]
 			],
 			children_default: map![]
-		}.into();
+		}, layout).into();
 
 		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
@@ -973,6 +974,7 @@ mod tests {
 
 	#[test]
 	fn next_child_storage_key_works() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"Child1");
 		let child_info = &child_info;
 
@@ -980,7 +982,7 @@ mod tests {
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_child_storage(child_info, vec![20], None);
 		overlay.set_child_storage(child_info, vec![30], Some(vec![31]));
-		let backend = Storage {
+		let backend = (Storage {
 			top: map![],
 			children_default: map![
 				child_info.storage_key().to_vec() => StorageChild {
@@ -992,7 +994,7 @@ mod tests {
 					child_info: child_info.to_owned(),
 				}
 			],
-		}.into();
+		}, layout).into();
 
 		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
@@ -1018,13 +1020,14 @@ mod tests {
 
 	#[test]
 	fn child_storage_works() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"Child1");
 		let child_info = &child_info;
 		let mut cache = StorageTransactionCache::default();
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_child_storage(child_info, vec![20], None);
 		overlay.set_child_storage(child_info, vec![30], Some(vec![31]));
-		let backend = Storage {
+		let backend = (Storage {
 			top: map![],
 			children_default: map![
 				child_info.storage_key().to_vec() => StorageChild {
@@ -1036,7 +1039,7 @@ mod tests {
 					child_info: child_info.to_owned(),
 				}
 			],
-		}.into();
+		}, layout).into();
 
 		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
@@ -1061,11 +1064,12 @@ mod tests {
 
 	#[test]
 	fn clear_prefix_cannot_delete_a_child_root() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"Child1");
 		let child_info = &child_info;
 		let mut cache = StorageTransactionCache::default();
 		let mut overlay = OverlayedChanges::default();
-		let backend = Storage {
+		let backend = (Storage {
 			top: map![],
 			children_default: map![
 				child_info.storage_key().to_vec() => StorageChild {
@@ -1075,7 +1079,7 @@ mod tests {
 					child_info: child_info.to_owned(),
 				}
 			],
-		}.into();
+		}, layout).into();
 
 		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 

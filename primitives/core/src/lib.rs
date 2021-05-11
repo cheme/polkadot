@@ -447,3 +447,10 @@ macro_rules! impl_maybe_marker {
 		)+
 	}
 }
+
+/// Possible layout for trie state.
+#[derive(Clone, Copy)]
+pub enum StateLayout {
+	/// New layout.
+	V1,
+}

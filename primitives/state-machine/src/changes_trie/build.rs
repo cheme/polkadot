@@ -277,6 +277,7 @@ fn prepare_digest_input<'a, H, Number>(
 				let trie_storage = TrieBackendEssence::<_, H>::new(
 					crate::changes_trie::TrieBackendStorageAdapter(storage),
 					trie_root,
+					Default::default(), // TODO own layout?
 				);
 
 				trie_storage.for_key_values_with_prefix(&child_prefix, |key, value|
@@ -309,6 +310,7 @@ fn prepare_digest_input<'a, H, Number>(
 				let trie_storage = TrieBackendEssence::<_, H>::new(
 					crate::changes_trie::TrieBackendStorageAdapter(storage),
 					trie_root,
+					Default::default(),
 				);
 				trie_storage.for_keys_with_prefix(&extrinsic_prefix, |key|
 					if let Ok(InputKey::ExtrinsicIndex::<Number>(trie_key)) = Decode::decode(&mut &key[..]) {
@@ -344,16 +346,17 @@ mod test {
 		OverlayedChanges,
 		Configuration,
 	) {
+		let layout = sp_trie::Layout::default(); // TODO old layout
 		let child_info_1 = ChildInfo::new_default(b"storage_key1");
 		let child_info_2 = ChildInfo::new_default(b"storage_key2");
-		let backend: InMemoryBackend<_> = vec![
+		let backend: InMemoryBackend<_> = (vec![
 			(vec![100], vec![255]),
 			(vec![101], vec![255]),
 			(vec![102], vec![255]),
 			(vec![103], vec![255]),
 			(vec![104], vec![255]),
 			(vec![105], vec![255]),
-		].into_iter().collect::<std::collections::BTreeMap<_, _>>().into();
+		].into_iter().collect::<std::collections::BTreeMap<_, _>>(), layout).into();
 		let prefixed_child_trie_key1 = child_info_1.prefixed_storage_key();
 		let storage = InMemoryStorage::with_inputs(vec![
 			(zero + 1, vec![

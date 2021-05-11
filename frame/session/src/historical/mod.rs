@@ -196,7 +196,8 @@ impl<T: Config> ProvingTrie<T> {
 		let mut root = Default::default();
 
 		{
-			let mut trie = TrieDBMut::new(&mut db, &mut root);
+			let layout = Default::default(); // TODO keep using old layout.
+			let mut trie = TrieDBMut::new_with_layout(&mut db, &mut root, layout);
 			for (i, (validator, full_id)) in validators.into_iter().enumerate() {
 				let i = i as u32;
 				let keys = match <SessionModule<T>>::load_keys(&validator) {
@@ -244,7 +245,8 @@ impl<T: Config> ProvingTrie<T> {
 
 	/// Prove the full verification data for a given key and key ID.
 	pub fn prove(&self, key_id: KeyTypeId, key_data: &[u8]) -> Option<Vec<Vec<u8>>> {
-		let trie = TrieDB::new(&self.db, &self.root).ok()?;
+		let layout = Default::default(); // TODO keep using old layout.
+		let trie = TrieDB::new_with_layout(&self.db, &self.root, layout).ok()?;
 		let mut recorder = Recorder::new();
 		let val_idx = (key_id, key_data).using_encoded(|s| {
 			trie.get_with(s, &mut recorder)
@@ -269,7 +271,8 @@ impl<T: Config> ProvingTrie<T> {
 	// Check a proof contained within the current memory-db. Returns `None` if the
 	// nodes within the current `MemoryDB` are insufficient to query the item.
 	fn query(&self, key_id: KeyTypeId, key_data: &[u8]) -> Option<IdentificationTuple<T>> {
-		let trie = TrieDB::new(&self.db, &self.root).ok()?;
+		let layout = Default::default(); // TODO keep using old layout.
+		let trie = TrieDB::new_with_layout(&self.db, &self.root, layout).ok()?;
 		let val_idx = (key_id, key_data).using_encoded(|s| trie.get(s))
 			.ok()?
 			.and_then(|raw| u32::decode(&mut &*raw).ok())?;
@@ -352,11 +355,12 @@ pub(crate) mod tests {
 	type Historical = Module<Test>;
 
 	pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
+		let layout = sp_state_machine::Layout::V1;
 		let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
 		let keys: Vec<_> = NEXT_VALIDATORS.with(|l|
 			l.borrow().iter().cloned().map(|i| (i, i, UintAuthorityId(i).into())).collect()
 		);
-		BasicExternalities::execute_with_storage(&mut t, || {
+		BasicExternalities::execute_with_storage(&mut t, layout, || {
 			for (ref k, ..) in &keys {
 				frame_system::Pallet::<Test>::inc_providers(k);
 			}

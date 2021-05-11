@@ -93,6 +93,7 @@ macro_rules! impl_outer_config {
 				fn assimilate_storage(
 					&self,
 					storage: &mut $crate::sp_runtime::Storage,
+					layout: $crate::sp_runtime::StateLayout,
 				) -> std::result::Result<(), String> {
 					$(
 						$crate::impl_outer_config! {
@@ -102,10 +103,11 @@ macro_rules! impl_outer_config {
 							$( $instance )?;
 							&self.[< $snake $(_ $instance )? >];
 							storage;
+							layout;
 						}
 					)*
 
-					$crate::BasicExternalities::execute_with_storage(storage, || {
+					$crate::BasicExternalities::execute_with_storage(storage, layout, || {
 						<$all_pallets_with_system as $crate::traits::OnGenesis>::on_genesis();
 					});
 
@@ -120,10 +122,12 @@ macro_rules! impl_outer_config {
 		$instance:ident;
 		$extra:expr;
 		$storage:ident;
+		$layout:ident;
 	) => {
 		$crate::sp_runtime::BuildModuleGenesisStorage::<$runtime, $module::$instance>::build_module_genesis_storage(
 			$extra,
 			$storage,
+			$layout,
 		)?;
 	};
 	(@CALL_FN
@@ -132,11 +136,13 @@ macro_rules! impl_outer_config {
 		;
 		$extra:expr;
 		$storage:ident;
+		$layout:ident;
 	) => {
 		$crate::sp_runtime::BuildModuleGenesisStorage::
 			<$runtime, $module::__InherentHiddenInstance>::build_module_genesis_storage(
 				$extra,
 				$storage,
+				$layout,
 			)?;
 	}
 }

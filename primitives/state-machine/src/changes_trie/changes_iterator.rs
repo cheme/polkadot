@@ -325,7 +325,8 @@ impl<'a, H: Hasher, Number: BlockNumber> Iterator for DrilldownIterator<'a, H, N
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.essence.next(|storage, root, key|
-			TrieBackendEssence::<_, H>::new(TrieBackendAdapter::new(storage), root).storage(key))
+			TrieBackendEssence::<_, H>::new(TrieBackendAdapter::new(storage), root, Default::default())
+				.storage(key))
 	}
 }
 
@@ -369,7 +370,7 @@ impl<'a, H, Number> Iterator for ProvingDrilldownIterator<'a, H, Number>
 			.expect("only fails when already borrowed; storage() is non-reentrant; qed");
 		self.essence.next(|storage, root, key|
 			ProvingBackendRecorder::<_, H> {
-				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root),
+				backend: &TrieBackendEssence::new(TrieBackendAdapter::new(storage), root, Default::default()),
 				proof_recorder,
 			}.storage(key))
 	}

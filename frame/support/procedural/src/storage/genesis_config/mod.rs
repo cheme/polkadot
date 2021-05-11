@@ -142,12 +142,12 @@ fn impl_build_storage(
 		#[cfg(feature = "std")]
 		impl#genesis_impl GenesisConfig#genesis_struct #genesis_where_clause {
 			/// Build the storage for this module.
-			pub fn build_storage #fn_generic (&self) -> std::result::Result<
+			pub fn build_storage #fn_generic (&self, layout: #scrate::StateLayout) -> std::result::Result<
 				#scrate::sp_runtime::Storage,
-				String
+				String,
 			> #fn_where_clause {
 				let mut storage = Default::default();
-				self.assimilate_storage::<#fn_traitinstance>(&mut storage)?;
+				self.assimilate_storage::<#fn_traitinstance>(&mut storage, layout)?;
 				Ok(storage)
 			}
 
@@ -155,8 +155,9 @@ fn impl_build_storage(
 			pub fn assimilate_storage #fn_generic (
 				&self,
 				storage: &mut #scrate::sp_runtime::Storage,
+				layout: #scrate::StateLayout,
 			) -> std::result::Result<(), String> #fn_where_clause {
-				#scrate::BasicExternalities::execute_with_storage(storage, || {
+				#scrate::BasicExternalities::execute_with_storage(storage, layout, || {
 					#( #builder_blocks )*
 					Ok(())
 				})
@@ -170,8 +171,9 @@ fn impl_build_storage(
 			fn build_module_genesis_storage(
 				&self,
 				storage: &mut #scrate::sp_runtime::Storage,
+				layout: #scrate::StateLayout,
 			) -> std::result::Result<(), String> {
-				self.assimilate_storage::<#fn_traitinstance> (storage)
+				self.assimilate_storage::<#fn_traitinstance> (storage, layout)
 			}
 		}
 	}

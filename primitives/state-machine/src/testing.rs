@@ -111,13 +111,14 @@ where
 
 		let offchain_db = TestPersistentOffchainDB::new();
 
+		let layout = sp_trie::Layout::<H>::default();
 		TestExternalities {
 			overlay,
 			offchain_db,
 			changes_trie_config,
 			extensions,
 			changes_trie_storage: ChangesTrieInMemoryStorage::new(),
-			backend: storage.into(),
+			backend: (storage, layout).into(),
 			storage_transaction_cache: Default::default(),
 		}
 	}

@@ -69,6 +69,7 @@ pub struct ImportOperation<Block: BlockT, S> {
 	set_head: Option<BlockId<Block>>,
 	storage_update: Option<InMemoryBackend<HashFor<Block>>>,
 	changes_trie_config_update: Option<Option<ChangesTrieConfiguration>>,
+	layout: Option<sp_core::StateLayout>,
 	_phantom: std::marker::PhantomData<S>,
 }
 
@@ -134,6 +135,7 @@ impl<S, Block> ClientBackend<Block> for Backend<S, HashFor<Block>>
 			set_head: None,
 			storage_update: None,
 			changes_trie_config_update: None,
+			layout: None,
 			_phantom: Default::default(),
 		})
 	}
@@ -345,7 +347,9 @@ impl<S, Block> BlockImportOperation<Block> for ImportOperation<Block, S>
 			storage.insert(Some(storage_child.child_info), storage_child.data);
 		}
 
-		let storage_update = InMemoryBackend::from(storage);
+		self.layout = Some(sp_core::StateLayout::V1); // TODO get from chain spec.
+		let layout = sp_state_machine::layout::<HashFor<Block>>(self.layout.expect("Just stored."));
+		let storage_update = InMemoryBackend::from((storage, layout));
 		let (storage_root, _) = storage_update.full_storage_root(std::iter::empty(), child_delta);
 		self.storage_update = Some(storage_update);
 

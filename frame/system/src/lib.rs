@@ -692,8 +692,8 @@ impl GenesisConfig {
 	/// Direct implementation of `GenesisBuild::build_storage`.
 	///
 	/// Kept in order not to break dependency.
-	pub fn build_storage<T: Config>(&self) -> Result<sp_runtime::Storage, String> {
-		<Self as GenesisBuild<T>>::build_storage(self)
+	pub fn build_storage<T: Config>(&self, layout: sp_core::StateLayout) -> Result<sp_runtime::Storage, String> {
+		<Self as GenesisBuild<T>>::build_storage(self, layout)
 	}
 
 	/// Direct implementation of `GenesisBuild::assimilate_storage`.
@@ -701,9 +701,10 @@ impl GenesisConfig {
 	/// Kept in order not to break dependency.
 	pub fn assimilate_storage<T: Config>(
 		&self,
-		storage: &mut sp_runtime::Storage
+		storage: &mut sp_runtime::Storage,
+		layout: sp_core::StateLayout,
 	) -> Result<(), String> {
-		<Self as GenesisBuild<T>>::assimilate_storage(self, storage)
+		<Self as GenesisBuild<T>>::assimilate_storage(self, storage, layout)
 	}
 }
 

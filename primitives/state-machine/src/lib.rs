@@ -646,6 +646,7 @@ mod execution {
 	pub fn execution_proof_check<H, N, Exec, Spawn>(
 		root: H::Out,
 		proof: StorageProof,
+		layout: sp_trie::Layout<H>, 
 		overlay: &mut OverlayedChanges,
 		exec: &Exec,
 		spawn_handle: Spawn,
@@ -660,7 +661,7 @@ mod execution {
 		N: crate::changes_trie::BlockNumber,
 		Spawn: SpawnNamed + Send + 'static,
 	{
-		let trie_backend = create_proof_check_backend::<H>(root.into(), proof)?;
+		let trie_backend = create_proof_check_backend::<H>(root.into(), proof, layout)?;
 		execution_proof_check_on_trie_backend::<_, N, _, _>(
 			&trie_backend,
 			overlay,
@@ -791,6 +792,7 @@ mod execution {
 	pub fn read_proof_check<H, I>(
 		root: H::Out,
 		proof: StorageProof,
+		layout: sp_trie::Layout<H>,
 		keys: I,
 	) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, Box<dyn Error>>
 	where
@@ -799,7 +801,7 @@ mod execution {
 		I: IntoIterator,
 		I::Item: AsRef<[u8]>,
 	{
-		let proving_backend = create_proof_check_backend::<H>(root, proof)?;
+		let proving_backend = create_proof_check_backend::<H>(root, proof, layout)?;
 		let mut result = HashMap::new();
 		for key in keys.into_iter() {
 			let value = read_proof_check_on_proving_backend(&proving_backend, key.as_ref())?;
@@ -812,6 +814,7 @@ mod execution {
 	pub fn read_child_proof_check<H, I>(
 		root: H::Out,
 		proof: StorageProof,
+		layout: sp_trie::Layout<H>,
 		child_info: &ChildInfo,
 		keys: I,
 	) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, Box<dyn Error>>
@@ -821,7 +824,7 @@ mod execution {
 		I: IntoIterator,
 		I::Item: AsRef<[u8]>,
 	{
-		let proving_backend = create_proof_check_backend::<H>(root, proof)?;
+		let proving_backend = create_proof_check_backend::<H>(root, proof, layout)?;
 		let mut result = HashMap::new();
 		for key in keys.into_iter() {
 			let value = read_child_proof_check_on_proving_backend(
@@ -858,6 +861,14 @@ mod execution {
 	{
 		proving_backend.child_storage(child_info, key)
 			.map_err(|e| Box::new(e) as Box<dyn Error>)
+	}
+}
+
+#[cfg(feature = "std")]
+/// Obtain trie backend layout for a given `StateLayout`.
+pub fn layout<H>(layout: sp_core::StateLayout) -> sp_trie::Layout<H>{
+	match layout {
+		sp_core::StateLayout::V1 => Layout::<H>::default(),
 	}
 }
 
@@ -1051,6 +1062,7 @@ mod tests {
 
 	#[test]
 	fn prove_execution_and_proof_check_works() {
+		let layout = sp_trie::Layout::default();
 		let executor = DummyCodeExecutor {
 			change_changes_trie_config: false,
 			native_available: true,
@@ -1075,6 +1087,7 @@ mod tests {
 		let local_result = execution_proof_check::<BlakeTwo256, u64, _, _>(
 			remote_root,
 			remote_proof,
+			layout,
 			&mut Default::default(),
 			&executor,
 			TaskExecutor::new(),
@@ -1090,13 +1103,14 @@ mod tests {
 
 	#[test]
 	fn clear_prefix_in_ext_works() {
+		let layout = sp_trie::Layout::default();
 		let initial: BTreeMap<_, _> = map![
 			b"aaa".to_vec() => b"0".to_vec(),
 			b"abb".to_vec() => b"1".to_vec(),
 			b"abc".to_vec() => b"2".to_vec(),
 			b"bbb".to_vec() => b"3".to_vec()
 		];
-		let mut state = InMemoryBackend::<BlakeTwo256>::from(initial);
+		let mut state = InMemoryBackend::<BlakeTwo256>::from((initial, layout));
 		let backend = state.as_trie_backend().unwrap();
 
 		let mut overlay = OverlayedChanges::default();
@@ -1136,6 +1150,7 @@ mod tests {
 
 	#[test]
 	fn limited_child_kill_works() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"sub1");
 		let initial: HashMap<_, BTreeMap<_, _>> = map![
 			Some(child_info.clone()) => map![
@@ -1145,7 +1160,7 @@ mod tests {
 				b"d".to_vec() => b"3".to_vec()
 			],
 		];
-		let backend = InMemoryBackend::<BlakeTwo256>::from(initial);
+		let backend = InMemoryBackend::<BlakeTwo256>::from((initial, layout));
 
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_child_storage(&child_info, b"1".to_vec(), Some(b"1312".to_vec()));
@@ -1183,6 +1198,7 @@ mod tests {
 
 	#[test]
 	fn limited_child_kill_off_by_one_works() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"sub1");
 		let initial: HashMap<_, BTreeMap<_, _>> = map![
 			Some(child_info.clone()) => map![
@@ -1192,7 +1208,7 @@ mod tests {
 				b"d".to_vec() => b"3".to_vec()
 			],
 		];
-		let backend = InMemoryBackend::<BlakeTwo256>::from(initial);
+		let backend = InMemoryBackend::<BlakeTwo256>::from((initial, layout));
 		let mut overlay = OverlayedChanges::default();
 		let mut cache = StorageTransactionCache::default();
 		let mut ext = Ext::new(
@@ -1214,9 +1230,10 @@ mod tests {
 
 	#[test]
 	fn set_child_storage_works() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"sub1");
 		let child_info = &child_info;
-		let mut state = new_in_mem::<BlakeTwo256>();
+		let mut state = new_in_mem::<BlakeTwo256>(layout);
 		let backend = state.as_trie_backend().unwrap();
 		let mut overlay = OverlayedChanges::default();
 		let mut cache = StorageTransactionCache::default();
@@ -1255,6 +1272,7 @@ mod tests {
 
 	#[test]
 	fn append_storage_works() {
+		let layout = sp_trie::Layout::default();
 		let reference_data = vec![
 			b"data1".to_vec(),
 			b"2".to_vec(),
@@ -1262,7 +1280,7 @@ mod tests {
 			b"d4".to_vec(),
 		];
 		let key = b"key".to_vec();
-		let mut state = new_in_mem::<BlakeTwo256>();
+		let mut state = new_in_mem::<BlakeTwo256>(layout);
 		let backend = state.as_trie_backend().unwrap();
 		let mut overlay = OverlayedChanges::default();
 		let mut cache = StorageTransactionCache::default();
@@ -1317,13 +1335,14 @@ mod tests {
 
 	#[test]
 	fn remove_with_append_then_rollback_appended_then_append_again() {
+		let layout = sp_trie::Layout::default();
 
 		#[derive(codec::Encode, codec::Decode)]
 		enum Item { InitializationItem, DiscardedItem, CommitedItem }
 
 		let key = b"events".to_vec();
 		let mut cache = StorageTransactionCache::default();
-		let mut state = new_in_mem::<BlakeTwo256>();
+		let mut state = new_in_mem::<BlakeTwo256>(layout);
 		let backend = state.as_trie_backend().unwrap();
 		let mut overlay = OverlayedChanges::default();
 
@@ -1408,6 +1427,7 @@ mod tests {
 
 	#[test]
 	fn prove_read_and_proof_check_works() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"sub1");
 		let child_info = &child_info;
 		// fetch read proof from 'remote' full node
@@ -1418,11 +1438,13 @@ mod tests {
 		let local_result1 = read_proof_check::<BlakeTwo256, _>(
 			remote_root,
 			remote_proof.clone(),
+			layout.clone(),
 			&[b"value2"],
 		).unwrap();
 		let local_result2 = read_proof_check::<BlakeTwo256, _>(
 			remote_root,
 			remote_proof.clone(),
+			layout.clone(),
 			&[&[0xff]],
 		).is_ok();
  		// check that results are correct
@@ -1442,12 +1464,14 @@ mod tests {
 		let local_result1 = read_child_proof_check::<BlakeTwo256, _>(
 			remote_root,
 			remote_proof.clone(),
+			layout.clone(),
 			child_info,
 			&[b"value3"],
 		).unwrap();
 		let local_result2 = read_child_proof_check::<BlakeTwo256, _>(
 			remote_root,
 			remote_proof.clone(),
+			layout.clone(),
 			child_info,
 			&[b"value2"],
 		).unwrap();
@@ -1498,11 +1522,12 @@ mod tests {
 
 	#[test]
 	fn set_storage_empty_allowed() {
+		let layout = sp_trie::Layout::default();
 		let initial: BTreeMap<_, _> = map![
 			b"aaa".to_vec() => b"0".to_vec(),
 			b"bbb".to_vec() => b"".to_vec()
 		];
-		let mut state = InMemoryBackend::<BlakeTwo256>::from(initial);
+		let mut state = InMemoryBackend::<BlakeTwo256>::from((initial, layout));
 		let backend = state.as_trie_backend().unwrap();
 
 		let mut overlay = OverlayedChanges::default();

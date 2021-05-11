@@ -223,6 +223,7 @@ pub fn check_execution_proof<Header, E, H>(
 	spawn_handle: Box<dyn SpawnNamed>,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: StorageProof,
+	layout: sp_runtime::StateLayout,
 ) -> ClientResult<Vec<u8>>
 	where
 		Header: HeaderT,
@@ -235,6 +236,7 @@ pub fn check_execution_proof<Header, E, H>(
 		spawn_handle,
 		request,
 		remote_proof,
+		layout,
 		|header| <Header as HeaderT>::new(
 			*header.number() + One::one(),
 			Default::default(),
@@ -254,6 +256,7 @@ pub fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader>(
 	spawn_handle: Box<dyn SpawnNamed>,
 	request: &RemoteCallRequest<Header>,
 	remote_proof: StorageProof,
+	layout: sp_runtime::StateLayout,
 	make_next_header: MakeNextHeader,
 ) -> ClientResult<Vec<u8>>
 	where
@@ -264,11 +267,12 @@ pub fn check_execution_proof_with_make_header<Header, E, H, MakeNextHeader>(
 		MakeNextHeader: Fn(&Header) -> Header,
 {
 	let local_state_root = request.header.state_root();
+	let layout = sp_state_machine::layout::<H>(layout);
 	let root: H::Out = convert_hash(&local_state_root);
 
 	// prepare execution environment + check preparation proof
 	let mut changes = OverlayedChanges::default();
-	let trie_backend = create_proof_check_backend(root, remote_proof)?;
+	let trie_backend = create_proof_check_backend(root, remote_proof, layout)?;
 	let next_header = make_next_header(&request.header);
 
 	// TODO: Remove when solved: https://github.com/paritytech/substrate/issues/5047

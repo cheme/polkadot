@@ -24,7 +24,7 @@ use log::debug;
 use hash_db::{Hasher, HashDB, EMPTY_PREFIX, Prefix};
 use sp_trie::{
 	MemoryDB, empty_child_trie_root, read_trie_value_with, read_child_trie_value_with,
-	record_all_keys, StorageProof,
+	record_all_keys, StorageProof, TrieMeta,
 };
 pub use sp_trie::{Recorder, trie_types::{Layout, TrieError}};
 use crate::trie_backend::TrieBackend;
@@ -54,7 +54,8 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_trie_value_with::<Layout<H>, _, Ephemeral<S, H>>(
+		read_trie_value_with(
+			self.backend.layout().clone(),
 			&eph,
 			self.backend.root(),
 			key,
@@ -81,7 +82,8 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
-		read_child_trie_value_with::<Layout<H>, _, _>(
+		read_child_trie_value_with(
+			self.backend.layout().clone(),
 			child_info.keyspace(),
 			&eph,
 			&root.as_ref(),
@@ -100,7 +102,12 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 
 		let mut iter = move || -> Result<(), Box<TrieError<H::Out>>> {
 			let root = self.backend.root();
-			record_all_keys::<Layout<H>, _>(&eph, root, &mut *self.proof_recorder)
+			record_all_keys::<Layout<H>, _>(
+				self.backend.layout().clone(),
+				&eph,
+				root,
+				&mut *self.proof_recorder,
+			)
 		};
 
 		if let Err(e) = iter() {
@@ -112,7 +119,7 @@ impl<'a, S, H> ProvingBackendRecorder<'a, S, H>
 #[derive(Default)]
 struct ProofRecorderInner<Hash> {
 	/// All the records that we have stored so far.
-	records: HashMap<Hash, Option<DBValue>>,
+	records: HashMap<Hash, Option<(DBValue, TrieMeta)>>,
 	/// The encoded size of all recorded values.
 	encoded_size: usize,
 }
@@ -125,7 +132,7 @@ pub struct ProofRecorder<Hash> {
 
 impl<Hash: std::hash::Hash + Eq> ProofRecorder<Hash> {
 	/// Record the given `key` => `val` combination.
-	pub fn record(&self, key: Hash, val: Option<DBValue>) {
+	pub fn record(&self, key: Hash, val: Option<(DBValue, TrieMeta)>) {
 		let mut inner = self.inner.write();
 		let encoded_size = if let Entry::Vacant(entry) = inner.records.entry(key) {
 			let encoded_size = val.as_ref().map(Encode::encoded_size).unwrap_or(0);
@@ -140,7 +147,7 @@ impl<Hash: std::hash::Hash + Eq> ProofRecorder<Hash> {
 	}
 
 	/// Returns the value at the given `key`.
-	pub fn get(&self, key: &Hash) -> Option<Option<DBValue>> {
+	pub fn get(&self, key: &Hash) -> Option<Option<(DBValue, TrieMeta)>> {
 		self.inner.read().records.get(key).cloned()
 	}
 
@@ -159,7 +166,7 @@ impl<Hash: std::hash::Hash + Eq> ProofRecorder<Hash> {
 		let trie_nodes = self.inner.read()
 			.records
 			.iter()
-			.filter_map(|(_k, v)| v.as_ref().map(|v| v.to_vec()))
+			.filter_map(|(_k, v)| v.as_ref().map(|v| v.0.to_vec()))
 			.collect();
 
 		StorageProof::new(trie_nodes)
@@ -200,12 +207,13 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> ProvingBackend<'a, S, H>
 		proof_recorder: ProofRecorder<H::Out>,
 	) -> Self {
 		let essence = backend.essence();
+		let layout = essence.layout().clone();
 		let root = essence.root().clone();
 		let recorder = ProofRecorderBackend {
 			backend: essence.backend_storage(),
 			proof_recorder,
 		};
-		ProvingBackend(TrieBackend::new(recorder, root))
+		ProvingBackend(TrieBackend::new(recorder, root, layout))
 	}
 
 	/// Extracting the gathered unordered proof.
@@ -219,7 +227,7 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> TrieBackendStorage<H>
 {
 	type Overlay = S::Overlay;
 
-	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<DBValue>, String> {
+	fn get(&self, key: &H::Out, prefix: Prefix) -> Result<Option<(DBValue, TrieMeta)>, String> {
 		if let Some(v) = self.proof_recorder.get(key) {
 			return Ok(v);
 		}
@@ -227,6 +235,10 @@ impl<'a, S: 'a + TrieBackendStorage<H>, H: 'a + Hasher> TrieBackendStorage<H>
 		let backend_value = self.backend.get(key, prefix)?;
 		self.proof_recorder.record(key.clone(), backend_value.clone());
 		Ok(backend_value)
+	}
+
+	fn access_from(&self, _key: &H::Out) {
+		// access_from is mainly for proof recorder, not forwarding it.
 	}
 }
 
@@ -339,6 +351,7 @@ impl<'a, S, H> Backend<H> for ProvingBackend<'a, S, H>
 pub fn create_proof_check_backend<H>(
 	root: H::Out,
 	proof: StorageProof,
+	layout: sp_trie::Layout<H>,
 ) -> Result<TrieBackend<MemoryDB<H>, H>, Box<dyn Error>>
 where
 	H: Hasher,
@@ -347,7 +360,7 @@ where
 	let db = proof.into_memory_db();
 
 	if db.contains(&root, EMPTY_PREFIX) {
-		Ok(TrieBackend::new(db, root))
+		Ok(TrieBackend::new(db, root, layout))
 	} else {
 		Err(Box::new(ExecutionError::InvalidProof))
 	}
@@ -385,9 +398,12 @@ mod tests {
 	#[test]
 	fn proof_is_invalid_when_does_not_contains_root() {
 		use sp_core::H256;
+		// TODO test with different layout
+		let layout = sp_trie::Layout::default();
 		let result = create_proof_check_backend::<BlakeTwo256>(
 			H256::from_low_u64_be(1),
-			StorageProof::empty()
+			StorageProof::empty(),
+			layout,
 		);
 		assert!(result.is_err());
 	}
@@ -407,6 +423,8 @@ mod tests {
 
 	#[test]
 	fn proof_recorded_and_checked() {
+		// TODO test with different layout
+		let layout = sp_trie::Layout::default();
 		let contents = (0..64).map(|i| (vec![i], Some(vec![i]))).collect::<Vec<_>>();
 		let in_memory = InMemoryBackend::<BlakeTwo256>::default();
 		let mut in_memory = in_memory.update(vec![(None, contents)]);
@@ -423,12 +441,18 @@ mod tests {
 
 		let proof = proving.extract_proof();
 
-		let proof_check = create_proof_check_backend::<BlakeTwo256>(in_memory_root.into(), proof).unwrap();
+		let proof_check = create_proof_check_backend::<BlakeTwo256>(
+			in_memory_root.into(),
+			proof,
+			layout.clone(),
+		).unwrap();
 		assert_eq!(proof_check.storage(&[42]).unwrap().unwrap(), vec![42]);
 	}
 
 	#[test]
 	fn proof_recorded_and_checked_with_child() {
+		// TODO test with different layout
+		let layout = sp_trie::Layout::default();
 		let child_info_1 = ChildInfo::new_default(b"sub1");
 		let child_info_2 = ChildInfo::new_default(b"sub2");
 		let child_info_1 = &child_info_1;
@@ -475,7 +499,8 @@ mod tests {
 
 		let proof_check = create_proof_check_backend::<BlakeTwo256>(
 			in_memory_root.into(),
-			proof
+			proof,
+			layout.clone(),
 		).unwrap();
 		assert!(proof_check.storage(&[0]).is_err());
 		assert_eq!(proof_check.storage(&[42]).unwrap().unwrap(), vec![42]);
@@ -489,7 +514,8 @@ mod tests {
 		let proof = proving.extract_proof();
 		let proof_check = create_proof_check_backend::<BlakeTwo256>(
 			in_memory_root.into(),
-			proof
+			proof,
+			layout.clone(),
 		).unwrap();
 		assert_eq!(
 			proof_check.child_storage(child_info_1, &[64]).unwrap().unwrap(),

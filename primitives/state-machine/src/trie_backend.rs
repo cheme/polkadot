@@ -36,9 +36,9 @@ pub struct TrieBackend<S: TrieBackendStorage<H>, H: Hasher> {
 
 impl<S: TrieBackendStorage<H>, H: Hasher> TrieBackend<S, H> where H::Out: Codec {
 	/// Create new trie-based backend.
-	pub fn new(storage: S, root: H::Out) -> Self {
+	pub fn new(storage: S, root: H::Out, layout: sp_trie::Layout<H>) -> Self {
 		TrieBackend {
-			essence: TrieBackendEssence::new(storage, root),
+			essence: TrieBackendEssence::new(storage, root, layout),
 		}
 	}
 
@@ -132,7 +132,11 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 	fn pairs(&self) -> Vec<(StorageKey, StorageValue)> {
 		let collect_all = || -> Result<_, Box<TrieError<H::Out>>> {
-			let trie = TrieDB::<H>::new(self.essence(), self.essence.root())?;
+			let trie = TrieDB::<H>::new_with_layout(
+				self.essence(),
+				self.essence.root(),
+				self.essence.layout().clone(),
+			)?;
 			let mut v = Vec::new();
 			for x in trie.iter()? {
 				let (key, value) = x?;
@@ -153,7 +157,11 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 
 	fn keys(&self, prefix: &[u8]) -> Vec<StorageKey> {
 		let collect_all = || -> Result<_, Box<TrieError<H::Out>>> {
-			let trie = TrieDB::<H>::new(self.essence(), self.essence.root())?;
+			let trie = TrieDB::<H>::new_with_layout(
+				self.essence(),
+				self.essence.root(),
+				self.essence.layout().clone(),
+			)?;
 			let mut v = Vec::new();
 			for x in trie.iter()? {
 				let (key, _) = x?;
@@ -181,7 +189,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				&mut write_overlay,
 			);
 
-			match delta_trie_root::<Layout<H>, _, _, _, _, _>(&mut eph, root, delta) {
+			match delta_trie_root(self.essence.layout().clone(), &mut eph, root, delta) {
 				Ok(ret) => root = ret,
 				Err(e) => warn!(target: "trie", "Failed to write to trie: {}", e),
 			}
@@ -216,7 +224,8 @@ impl<S: TrieBackendStorage<H>, H: Hasher> Backend<H> for TrieBackend<S, H> where
 				&mut write_overlay,
 			);
 
-			match child_delta_trie_root::<Layout<H>, _, _, _, _, _, _>(
+			match child_delta_trie_root(
+				self.essence.layout().clone(),
 				child_info.keyspace(),
 				&mut eph,
 				root,
@@ -264,6 +273,7 @@ pub mod tests {
 		let mut mdb = PrefixedMemoryDB::<BlakeTwo256>::default();
 		{
 			let mut mdb = KeySpacedDBMut::new(&mut mdb, child_info.keyspace());
+			// TODO test all layout states?
 			let mut trie = TrieDBMut::new(&mut mdb, &mut root);
 			trie.insert(b"value3", &[142]).expect("insert failed");
 			trie.insert(b"value4", &[124]).expect("insert failed");
@@ -272,6 +282,7 @@ pub mod tests {
 		{
 			let mut sub_root = Vec::new();
 			root.encode_to(&mut sub_root);
+			// TODO test all layout states?
 			let mut trie = TrieDBMut::new(&mut mdb, &mut root);
 			trie.insert(child_info.prefixed_storage_key().as_slice(), &sub_root[..])
 				.expect("insert failed");
@@ -288,7 +299,7 @@ pub mod tests {
 
 	pub(crate) fn test_trie() -> TrieBackend<PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256> {
 		let (mdb, root) = test_db();
-		TrieBackend::new(mdb, root)
+		TrieBackend::new(mdb, root, sp_trie::Layout::default())
 	}
 
 	#[test]
@@ -320,6 +331,7 @@ pub mod tests {
 		assert!(TrieBackend::<PrefixedMemoryDB<BlakeTwo256>, BlakeTwo256>::new(
 			PrefixedMemoryDB::default(),
 			Default::default(),
+			sp_trie::Layout::default(),
 		).pairs().is_empty());
 	}
 

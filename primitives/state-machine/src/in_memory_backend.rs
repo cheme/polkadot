@@ -27,12 +27,12 @@ use codec::Codec;
 use sp_core::storage::{ChildInfo, Storage};
 
 /// Create a new empty instance of in-memory backend.
-pub fn new_in_mem<H: Hasher>() -> TrieBackend<MemoryDB<H>, H>
+pub fn new_in_mem<H: Hasher>(layout: sp_trie::Layout<H>) -> TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
 {
 	let db = MemoryDB::default();
-	TrieBackend::new(db, empty_trie_root::<Layout<H>>())
+	TrieBackend::new(db, empty_trie_root::<Layout<H>>(), layout)
 }
 
 impl<H: Hasher> TrieBackend<MemoryDB<H>, H>
@@ -74,7 +74,7 @@ where
 	pub fn update_backend(&self, root: H::Out, changes: MemoryDB<H>) -> Self {
 		let mut clone = self.backend_storage().clone();
 		clone.consolidate(changes);
-		Self::new(clone, root)
+		Self::new(clone, root, self.essence.layout().clone())
 	}
 
 	/// Apply the given transaction to this backend and set the root to the given value.
@@ -94,7 +94,11 @@ where
 	H::Out: Codec + Ord,
 {
 	fn clone(&self) -> Self {
-		TrieBackend::new(self.backend_storage().clone(), self.root().clone())
+		TrieBackend::new(
+			self.backend_storage().clone(),
+			self.root().clone(),
+			self.essence.layout().clone(),
+		)
 	}
 }
 
@@ -102,59 +106,61 @@ impl<H: Hasher> Default for TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
 {
+	// TODO check it is not use where a specific layout should be use
+	// TODO consider removal
 	fn default() -> Self {
-		new_in_mem()
+		new_in_mem(Default::default())
 	}
 }
 
-impl<H: Hasher> From<HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>>
+impl<H: Hasher> From<(HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>, sp_trie::Layout<H>)>
 	for TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
 {
-	fn from(inner: HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>) -> Self {
-		let mut backend = new_in_mem();
+	fn from(inner: (HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>, sp_trie::Layout<H>)) -> Self {
+		let mut backend = new_in_mem(inner.1);
 		backend.insert(
-			inner.into_iter().map(|(k, m)| (k, m.into_iter().map(|(k, v)| (k, Some(v))).collect())),
+			inner.0.into_iter().map(|(k, m)| (k, m.into_iter().map(|(k, v)| (k, Some(v))).collect())),
 		);
 		backend
 	}
 }
 
-impl<H: Hasher> From<Storage> for TrieBackend<MemoryDB<H>, H>
+impl<H: Hasher> From<(Storage, sp_trie::Layout<H>)> for TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
 {
-	fn from(inners: Storage) -> Self {
+	fn from(inners: (Storage, sp_trie::Layout<H>)) -> Self {
 		let mut inner: HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>
-			= inners.children_default.into_iter().map(|(_k, c)| (Some(c.child_info), c.data)).collect();
-		inner.insert(None, inners.top);
-		inner.into()
+			= inners.0.children_default.into_iter().map(|(_k, c)| (Some(c.child_info), c.data)).collect();
+		inner.insert(None, inners.0.top);
+		(inner, inners.1).into()
 	}
 }
 
-impl<H: Hasher> From<BTreeMap<StorageKey, StorageValue>> for TrieBackend<MemoryDB<H>, H>
+impl<H: Hasher> From<(BTreeMap<StorageKey, StorageValue>, sp_trie::Layout<H>)> for TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
 {
-	fn from(inner: BTreeMap<StorageKey, StorageValue>) -> Self {
+	fn from(inner: (BTreeMap<StorageKey, StorageValue>, sp_trie::Layout<H>)) -> Self {
 		let mut expanded = HashMap::new();
-		expanded.insert(None, inner);
-		expanded.into()
+		expanded.insert(None, inner.0);
+		(expanded, inner.1).into()
 	}
 }
 
-impl<H: Hasher> From<Vec<(Option<ChildInfo>, StorageCollection)>>
+impl<H: Hasher> From<(Vec<(Option<ChildInfo>, StorageCollection)>, sp_trie::Layout<H>)>
 	for TrieBackend<MemoryDB<H>, H>
 where
 	H::Out: Codec + Ord,
 {
 	fn from(
-		inner: Vec<(Option<ChildInfo>, StorageCollection)>,
+		inner: (Vec<(Option<ChildInfo>, StorageCollection)>, sp_trie::Layout<H>),
 	) -> Self {
 		let mut expanded: HashMap<Option<ChildInfo>, BTreeMap<StorageKey, StorageValue>>
 			= HashMap::new();
-		for (child_info, key_values) in inner {
+		for (child_info, key_values) in inner.0 {
 			let entry = expanded.entry(child_info).or_default();
 			for (key, value) in key_values {
 				if let Some(value) = value {
@@ -162,7 +168,7 @@ where
 				}
 			}
 		}
-		expanded.into()
+		(expanded, inner.1).into()
 	}
 }
 
@@ -175,7 +181,8 @@ mod tests {
 	/// Assert in memory backend with only child trie keys works as trie backend.
 	#[test]
 	fn in_memory_with_child_trie_only() {
-		let storage = new_in_mem::<BlakeTwo256>();
+		let layout = sp_trie::Layout::default();
+		let storage = new_in_mem::<BlakeTwo256>(layout);
 		let child_info = ChildInfo::new_default(b"1");
 		let child_info = &child_info;
 		let mut storage = storage.update(
@@ -193,7 +200,8 @@ mod tests {
 
 	#[test]
 	fn insert_multiple_times_child_data_works() {
-		let mut storage = new_in_mem::<BlakeTwo256>();
+		let layout = sp_trie::Layout::default();
+		let mut storage = new_in_mem::<BlakeTwo256>(layout);
 		let child_info = ChildInfo::new_default(b"1");
 
 		storage.insert(vec![(Some(child_info.clone()), vec![(b"2".to_vec(), Some(b"3".to_vec()))])]);

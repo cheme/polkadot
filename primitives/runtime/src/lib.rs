@@ -40,6 +40,7 @@ pub use sp_application_crypto as app_crypto;
 
 #[cfg(feature = "std")]
 pub use sp_core::storage::{Storage, StorageChild};
+pub use sp_core::StateLayout;
 
 use sp_std::prelude::*;
 use sp_std::convert::TryFrom;
@@ -166,15 +167,16 @@ use crate::traits::IdentifyAccount;
 #[cfg(feature = "std")]
 pub trait BuildStorage {
 	/// Build the storage out of this builder.
-	fn build_storage(&self) -> Result<sp_core::storage::Storage, String> {
+	fn build_storage(&self, layout: sp_core::StateLayout) -> Result<sp_core::storage::Storage, String> {
 		let mut storage = Default::default();
-		self.assimilate_storage(&mut storage)?;
+		self.assimilate_storage(&mut storage, layout)?;
 		Ok(storage)
 	}
 	/// Assimilate the storage for this module into pre-existing overlays.
 	fn assimilate_storage(
 		&self,
 		storage: &mut sp_core::storage::Storage,
+		layout: sp_core::StateLayout,
 	) -> Result<(), String>;
 }
 
@@ -185,6 +187,7 @@ pub trait BuildModuleGenesisStorage<T, I>: Sized {
 	fn build_module_genesis_storage(
 		&self,
 		storage: &mut sp_core::storage::Storage,
+		layout: sp_core::StateLayout,
 	) -> Result<(), String>;
 }
 
@@ -193,6 +196,7 @@ impl BuildStorage for sp_core::storage::Storage {
 	fn assimilate_storage(
 		&self,
 		storage: &mut sp_core::storage::Storage,
+		_layout: sp_core::StateLayout,
 	)-> Result<(), String> {
 		storage.top.extend(self.top.iter().map(|(k, v)| (k.clone(), v.clone())));
 		for (k, other_map) in self.children_default.iter() {
@@ -215,6 +219,7 @@ impl BuildStorage for () {
 	fn assimilate_storage(
 		&self,
 		_: &mut sp_core::storage::Storage,
+		_: sp_core::StateLayout,
 	) -> Result<(), String> {
 		Err("`assimilate_storage` not implemented for `()`".into())
 	}

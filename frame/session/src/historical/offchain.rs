@@ -158,6 +158,7 @@ mod tests {
 	type Historical = Module<Test>;
 
 	pub fn new_test_ext() -> sp_io::TestExternalities {
+		let layout = sp_state_machine::Layout::V1;
 		let mut t = frame_system::GenesisConfig::default()
 			.build_storage::<Test>()
 			.expect("Failed to create test externalities.");
@@ -165,7 +166,7 @@ mod tests {
 		let keys: Vec<_> = NEXT_VALIDATORS.with(|l|
 			l.borrow().iter().cloned().map(|i| (i, i, UintAuthorityId(i).into())).collect()
 		);
-		BasicExternalities::execute_with_storage(&mut t, || {
+		BasicExternalities::execute_with_storage(&mut t, layout, || {
 			for (ref k, ..) in &keys {
 				frame_system::Pallet::<Test>::inc_providers(k);
 			}

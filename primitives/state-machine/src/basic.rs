@@ -40,17 +40,18 @@ use sp_externalities::{Extensions, Extension};
 pub struct BasicExternalities {
 	inner: Storage,
 	extensions: Extensions,
+	layout: sp_trie::Layout<Blake2Hasher>,
 }
 
 impl BasicExternalities {
 	/// Create a new instance of `BasicExternalities`
-	pub fn new(inner: Storage) -> Self {
-		BasicExternalities { inner, extensions: Default::default() }
+	pub fn new(inner: Storage, layout: Layout<Blake2Hasher>) -> Self {
+		BasicExternalities { inner, extensions: Default::default(), layout }
 	}
 
 	/// New basic externalities with empty storage.
-	pub fn new_empty() -> Self {
-		Self::new(Storage::default())
+	pub fn new_empty(layout: Layout<Blake2Hasher>) -> Self {
+		Self::new(Storage::default(), layout)
 	}
 
 	/// Insert key/value
@@ -68,14 +69,16 @@ impl BasicExternalities {
 	/// Returns the result of the closure and updates `storage` with all changes.
 	pub fn execute_with_storage<R>(
 		storage: &mut sp_core::storage::Storage,
+		layout: sp_core::StateLayout,
 		f: impl FnOnce() -> R,
 	) -> R {
-		let mut ext = Self {
+		let layout = crate::layout(layout);		let mut ext = Self {
 			inner: Storage {
 				top: std::mem::take(&mut storage.top),
 				children_default: std::mem::take(&mut storage.children_default),
 			},
 			extensions: Default::default(),
+			layout,
 		};
 
 		let r = ext.execute_with(f);
@@ -119,17 +122,20 @@ impl FromIterator<(StorageKey, StorageValue)> for BasicExternalities {
 }
 
 impl Default for BasicExternalities {
-	fn default() -> Self { Self::new(Default::default()) }
+	// TODO double check if default layout is correct everywhere it is used.
+	// Consider removal.
+	fn default() -> Self { Self::new(Default::default(), Default::default()) }
 }
 
-impl From<BTreeMap<StorageKey, StorageValue>> for BasicExternalities {
-	fn from(hashmap: BTreeMap<StorageKey, StorageValue>) -> Self {
+impl From<(BTreeMap<StorageKey, StorageValue>, Layout<Blake2Hasher>)> for BasicExternalities {
+	fn from(hashmap: (BTreeMap<StorageKey, StorageValue>, Layout<Blake2Hasher>)) -> Self {
 		BasicExternalities {
 			inner: Storage {
-				top: hashmap,
+				top: hashmap.0,
 				children_default: Default::default(),
 			},
 			extensions: Default::default(),
+			layout: hashmap.1,
 		}
 	}
 }
@@ -281,7 +287,7 @@ impl Externalities for BasicExternalities {
 			}
 		}
 
-		Layout::<Blake2Hasher>::trie_root(self.inner.top.clone()).as_ref().into()
+		self.layout.trie_root(self.inner.top.clone()).as_ref().into()
 	}
 
 	fn child_storage_root(
@@ -290,7 +296,7 @@ impl Externalities for BasicExternalities {
 	) -> Vec<u8> {
 		if let Some(child) = self.inner.children_default.get(child_info.storage_key()) {
 			let delta = child.data.iter().map(|(k, v)| (k.as_ref(), Some(v.as_ref())));
-			crate::in_memory_backend::new_in_mem::<Blake2Hasher>()
+			crate::in_memory_backend::new_in_mem::<Blake2Hasher>(self.layout.clone())
 				.child_storage_root(&child.child_info, delta).0
 		} else {
 			empty_child_trie_root::<Layout<Blake2Hasher>>()
@@ -387,6 +393,7 @@ mod tests {
 
 	#[test]
 	fn children_works() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"storage_key");
 		let child_info = &child_info;
 		let mut ext = BasicExternalities::new(Storage {
@@ -397,7 +404,7 @@ mod tests {
 					child_info: child_info.to_owned(),
 				}
 			]
-		});
+		}, layout);
 
 		assert_eq!(ext.child_storage(child_info, b"doe"), Some(b"reindeer".to_vec()));
 
@@ -413,6 +420,7 @@ mod tests {
 
 	#[test]
 	fn kill_child_storage_returns_num_elements_removed() {
+		let layout = sp_trie::Layout::default();
 		let child_info = ChildInfo::new_default(b"storage_key");
 		let child_info = &child_info;
 		let mut ext = BasicExternalities::new(Storage {
@@ -427,7 +435,7 @@ mod tests {
 					child_info: child_info.to_owned(),
 				}
 			]
-		});
+		}, layout);
 
 
 		let res = ext.kill_child_storage(child_info, None);
@@ -436,8 +444,9 @@ mod tests {
 
 	#[test]
 	fn basic_externalities_is_empty() {
+		let layout = sp_trie::Layout::default();
 		// Make sure no values are set by default in `BasicExternalities`.
-		let storage = BasicExternalities::new_empty().into_storages();
+		let storage = BasicExternalities::new_empty(layout).into_storages();
 		assert!(storage.top.is_empty());
 		assert!(storage.children_default.is_empty());
 	}

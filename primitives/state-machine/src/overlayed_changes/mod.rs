@@ -902,13 +902,14 @@ mod tests {
 
 	#[test]
 	fn overlayed_storage_root_works() {
+		let layout = sp_trie::Layout::default();
 		let initial: BTreeMap<_, _> = vec![
 			(b"doe".to_vec(), b"reindeer".to_vec()),
 			(b"dog".to_vec(), b"puppyXXX".to_vec()),
 			(b"dogglesworth".to_vec(), b"catXXX".to_vec()),
 			(b"doug".to_vec(), b"notadog".to_vec()),
 		].into_iter().collect();
-		let backend = InMemoryBackend::<Blake2Hasher>::from(initial);
+		let backend = InMemoryBackend::<Blake2Hasher>::from((initial, layout));
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_collect_extrinsics(false);
 

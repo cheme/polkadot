@@ -187,7 +187,9 @@ impl<E, H, B: BlockT, S: BlockchainStorage<B>> LightDataChecker<E, H, B, S> {
 				}
 
 				// check proof for single changes trie root
-				let proving_backend = TrieBackend::new(storage, cht_root);
+				// TODO use old version.
+				let layout = sp_state_machine::layout(sp_runtime::StateLayout::V1);
+				let proving_backend = TrieBackend::new(storage, cht_root, layout);
 				let remote_changes_trie_root = remote_roots[&block];
 				cht::check_proof_on_proving_backend::<B::Header, H>(
 					local_cht_root,
@@ -235,9 +237,12 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 		request: &RemoteReadRequest<Block::Header>,
 		remote_proof: StorageProof,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
+		// TODO get version from block number!!
+		let layout = sp_state_machine::layout(sp_runtime::StateLayout::V1);
 		read_proof_check::<H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
+			layout,
 			request.keys.iter(),
 		).map_err(|e| ClientError::from(e))
 	}
@@ -247,6 +252,8 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 		request: &RemoteReadChildRequest<Block::Header>,
 		remote_proof: StorageProof,
 	) -> ClientResult<HashMap<Vec<u8>, Option<Vec<u8>>>> {
+		// TODO get version from block number!!
+		let layout = sp_state_machine::layout(sp_runtime::StateLayout::V1);
 		let child_info = match ChildType::from_prefixed_key(&request.storage_key) {
 			Some((ChildType::ParentKeyId, storage_key)) => ChildInfo::new_default(storage_key),
 			None => return Err(ClientError::InvalidChildType),
@@ -255,6 +262,7 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 			convert_hash(request.header.state_root()),
 			remote_proof,
 			&child_info,
+			layout,
 			request.keys.iter(),
 		).map_err(|e| ClientError::from(e))
 	}
@@ -264,11 +272,14 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 		request: &RemoteCallRequest<Block::Header>,
 		remote_proof: StorageProof,
 	) -> ClientResult<Vec<u8>> {
+		// TODO get version from block number!!
+		let layout = sp_runtime::StateLayout::V1;
 		check_execution_proof::<_, _, H>(
 			&self.executor,
 			self.spawn_handle.clone(),
 			request,
 			remote_proof,
+			layout,
 		)
 	}
 

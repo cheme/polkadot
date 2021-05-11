@@ -40,6 +40,7 @@ pub use paste;
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub use sp_state_machine::BasicExternalities;
+pub use sp_core::StateLayout;
 #[doc(hidden)]
 pub use sp_io::{storage::root as storage_root, self};
 #[doc(hidden)]

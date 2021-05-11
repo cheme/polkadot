@@ -93,7 +93,8 @@ pub fn compute_root<Header, Hasher, I>(
 		I: IntoIterator<Item=ClientResult<Option<Header::Hash>>>,
 {
 	use sp_trie::TrieConfiguration;
-	Ok(sp_trie::trie_types::Layout::<Hasher>::trie_root(
+	// TODO use Old layout here.
+	Ok(sp_trie::trie_types::Layout::<Hasher>::default().trie_root(
 		build_pairs::<Header, I>(cht_size, cht_num, hashes)?
 	))
 }
@@ -137,6 +138,8 @@ pub fn check_proof<Header, Hasher>(
 		Hasher: hash_db::Hasher,
 		Hasher::Out: Ord + codec::Codec,
 {
+	// TODO switch with old layout.
+	let layout = sp_trie::trie_types::Layout::<Hasher>::default();
 	do_check_proof::<Header, Hasher, _>(
 		local_root,
 		local_number,
@@ -145,6 +148,7 @@ pub fn check_proof<Header, Hasher>(
 			read_proof_check::<Hasher, _>(
 				local_root,
 				remote_proof,
+				layout,
 				::std::iter::once(local_cht_key),
 			)
 			.map(|mut map| map
