@@ -440,7 +440,7 @@ impl ExtBuilder {
 	pub fn build(self) -> sp_io::TestExternalities {
 		sp_tracing::try_init_simple();
 		let mut storage =
-			frame_system::GenesisConfig::default().build_storage::<Runtime>().unwrap();
+			frame_system::GenesisConfig::default().build_storage::<Runtime>(sp_runtime::LATEST_LAYOUT).unwrap();
 
 		let _ = pallet_balances::GenesisConfig::<Runtime> {
 			balances: vec![
@@ -450,7 +450,7 @@ impl ExtBuilder {
 				(9999, 100),
 			],
 		}
-		.assimilate_storage(&mut storage);
+		.assimilate_storage(&mut storage, sp_runtime::LATEST_LAYOUT);
 
 		sp_io::TestExternalities::from(storage)
 	}

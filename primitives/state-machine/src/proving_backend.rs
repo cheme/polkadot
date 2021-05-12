@@ -137,6 +137,8 @@ impl<Hash: std::hash::Hash + Eq> ProofRecorder<Hash> {
 		let encoded_size = if let Entry::Vacant(entry) = inner.records.entry(key) {
 			let encoded_size = val.as_ref().map(Encode::encoded_size).unwrap_or(0);
 
+// TODO with new meta
+// val.as_mut().map(|val| val.1.set_accessed_value(false));
 			entry.insert(val);
 			encoded_size
 		} else {
@@ -144,6 +146,13 @@ impl<Hash: std::hash::Hash + Eq> ProofRecorder<Hash> {
 		};
 
 		inner.encoded_size += encoded_size;
+	}
+
+	/// Record actual trie level value access.
+	pub fn access_from(&self, _key: &Hash) {
+// TODO with new meta
+//		self.inner.write().entry(key[..].to_vec())
+//			.and_modify(|entry| entry.1.set_accessed_value(true));
 	}
 
 	/// Returns the value at the given `key`.

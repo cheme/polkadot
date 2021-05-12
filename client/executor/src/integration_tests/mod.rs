@@ -452,6 +452,7 @@ fn sr25519_verify_should_work(wasm_method: WasmExecutionMethod) {
 test_wasm_execution!(ordered_trie_root_should_work);
 fn ordered_trie_root_should_work(wasm_method: WasmExecutionMethod) {
 	let mut ext = TestExternalities::default();
+	let layout = Layout::<BlakeTwo256>::default(); // TODO test with different posisble layout state.
 	let trie_input = vec![b"zero".to_vec(), b"one".to_vec(), b"two".to_vec()];
 	assert_eq!(
 		call_in_wasm(
@@ -460,7 +461,7 @@ fn ordered_trie_root_should_work(wasm_method: WasmExecutionMethod) {
 			wasm_method,
 			&mut ext.ext(),
 		).unwrap(),
-		Layout::<BlakeTwo256>::ordered_trie_root(trie_input.iter()).as_bytes().encode(),
+		layout.ordered_trie_root(trie_input.iter()).as_bytes().encode(),
 	);
 }
 

@@ -565,12 +565,14 @@ mod tests {
 	}
 
 	pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
-		let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+		let mut t = frame_system::GenesisConfig::default()
+			.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+			.unwrap();
 		// We use default for brevity, but you can configure as desired if needed.
 		pallet_membership::GenesisConfig::<Test>{
 			members: vec![10, 20, 30],
 			.. Default::default()
-		}.assimilate_storage(&mut t).unwrap();
+		}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 		t.into()
 	}
 

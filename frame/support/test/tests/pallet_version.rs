@@ -253,7 +253,9 @@ fn on_runtime_upgrade_overwrites_old_version() {
 
 #[test]
 fn genesis_init_puts_pallet_version_into_storage() {
-	let storage = GenesisConfig::default().build_storage().expect("Builds genesis storage");
+	let storage = GenesisConfig::default()
+		.build_storage(sp_runtime::LATEST_LAYOUT)
+		.expect("Builds genesis storage");
 
 	sp_io::TestExternalities::new(storage).execute_with(|| {
 		check_pallet_version("Module1");

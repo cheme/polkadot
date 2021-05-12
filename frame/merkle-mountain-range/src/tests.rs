@@ -29,7 +29,9 @@ use sp_core::{
 use pallet_mmr_primitives::{Proof, Compact};
 
 pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
-	frame_system::GenesisConfig::default().build_storage::<Test>().unwrap().into()
+	frame_system::GenesisConfig::default()
+		.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+		.unwrap().into()
 }
 
 fn register_offchain_ext(ext: &mut sp_io::TestExternalities) {

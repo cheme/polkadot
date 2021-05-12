@@ -131,9 +131,11 @@ pub fn executor_call<
 }
 
 pub fn new_test_ext(code: &[u8], support_changes_trie: bool) -> TestExternalities<BlakeTwo256> {
+	// TODO support multiple state of layout?
+	let layout = sp_runtime::LATEST_LAYOUT;
 	let mut ext = TestExternalities::new_with_code(
 		code,
-		node_testing::genesis::config(support_changes_trie, Some(code)).build_storage().unwrap(),
+		node_testing::genesis::config(support_changes_trie, Some(code)).build_storage(layout).unwrap(),
 	);
 	ext.changes_trie_storage().insert(0, GENESIS_HASH.into(), Default::default());
 	ext
@@ -155,9 +157,11 @@ pub fn construct_block(
 	// sign extrinsics.
 	let extrinsics = extrinsics.into_iter().map(sign).collect::<Vec<_>>();
 
+	// TODO support multiple state of layout?
+	let layout = Layout::<BlakeTwo256>::default();
 	// calculate the header fields that we can.
 	let extrinsics_root =
-		Layout::<BlakeTwo256>::ordered_trie_root(extrinsics.iter().map(Encode::encode))
+		layout.ordered_trie_root(extrinsics.iter().map(Encode::encode))
 			.to_fixed_bytes()
 			.into();
 

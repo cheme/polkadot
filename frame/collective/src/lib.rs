@@ -1068,7 +1068,7 @@ mod tests {
 				phantom: Default::default(),
 			},
 			collective: Default::default(),
-		}.build_storage().unwrap().into();
+		}.build_storage(sp_runtime::LATEST_LAYOUT).unwrap().into();
 		ext.execute_with(|| System::set_block_number(1));
 		ext
 	}

@@ -608,6 +608,9 @@ pub trait Block: Clone + Send + Sync + Codec + Eq + MaybeSerialize + Debug + May
 	type Hash: Member + MaybeSerializeDeserialize + Debug + sp_std::hash::Hash + Ord
 		+ Copy + MaybeDisplay + Default + SimpleBitOps + Codec + AsRef<[u8]> + AsMut<[u8]>
 		+ MaybeMallocSizeOf;
+//	/// State hasher and meta management.
+//	type MetaHasher: Member
+//		+ MetaHasher<HashFor<Self>, Vec<u8>>;
 
 	/// Returns a reference to the header.
 	fn header(&self) -> &Self::Header;
@@ -663,6 +666,8 @@ pub trait ExtrinsicMetadata {
 
 /// Extract the hashing type for a block.
 pub type HashFor<B> = <<B as Block>::Header as Header>::Hashing;
+// /// Extract the state meta for a block.
+// pub type MetaFor<B> = <<B as Block>::MetaHasher as MetaHasher<HashFor<B>, Vec<u8>>>::Meta;
 /// Extract the number type for a block.
 pub type NumberFor<B> = <<B as Block>::Header as Header>::Number;
 /// Extract the digest type for a block.

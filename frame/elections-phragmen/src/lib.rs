@@ -1319,7 +1319,7 @@ mod tests {
 				elections_phragmen: elections_phragmen::GenesisConfig::<Test> {
 					members: self.genesis_members
 				},
-			}.build_storage().unwrap().into();
+			}.build_storage(sp_runtime::LATEST_LAYOUT).unwrap().into();
 			ext.execute_with(pre_conditions);
 			ext.execute_with(test);
 			ext.execute_with(post_conditions)

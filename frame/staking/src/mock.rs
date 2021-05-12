@@ -362,7 +362,7 @@ impl ExtBuilder {
 	pub fn build(self) -> sp_io::TestExternalities {
 		sp_tracing::try_init_simple();
 		let mut storage = frame_system::GenesisConfig::default()
-			.build_storage::<Test>()
+			.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
 			.unwrap();
 		let balance_factor = if ExistentialDeposit::get() > 1 {
 			256
@@ -404,7 +404,7 @@ impl ExtBuilder {
 				// This allows us to have a total_payout different from 0.
 				(999, 1_000_000_000_000),
 			],
-		}.assimilate_storage(&mut storage);
+		}.assimilate_storage(&mut storage, sp_runtime::LATEST_LAYOUT);
 
 		let mut stakers = vec![];
 		if self.has_stakers {
@@ -434,7 +434,7 @@ impl ExtBuilder {
 			slash_reward_fraction: Perbill::from_percent(10),
 			..Default::default()
 		}
-		.assimilate_storage(&mut storage);
+		.assimilate_storage(&mut storage, sp_runtime::LATEST_LAYOUT);
 
 		let _ = pallet_session::GenesisConfig::<Test> {
 			keys: validators.iter().map(|x| (
@@ -442,7 +442,7 @@ impl ExtBuilder {
 				*x,
 				SessionKeys { other: UintAuthorityId(*x as u64) }
 			)).collect(),
-		}.assimilate_storage(&mut storage);
+		}.assimilate_storage(&mut storage, sp_runtime::LATEST_LAYOUT);
 
 		let mut ext = sp_io::TestExternalities::from(storage);
 		ext.execute_with(|| {

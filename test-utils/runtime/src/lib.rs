@@ -1288,10 +1288,13 @@ mod tests {
 
 	#[test]
 	fn witness_backend_works() {
+		// TODO test multiple layout states.
+		let layout = sp_trie::Layout::default();
 		let (db, root) = witness_backend();
 		let backend = sp_state_machine::TrieBackend::<_, crate::Hashing>::new(
 			db,
 			root,
+			layout,
 		);
 		let proof = sp_state_machine::prove_read(backend, vec![b"value3"]).unwrap();
 		let client = TestClientBuilder::new()

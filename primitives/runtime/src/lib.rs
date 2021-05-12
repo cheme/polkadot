@@ -40,7 +40,7 @@ pub use sp_application_crypto as app_crypto;
 
 #[cfg(feature = "std")]
 pub use sp_core::storage::{Storage, StorageChild};
-pub use sp_core::StateLayout;
+pub use sp_core::{StateLayout, LATEST_LAYOUT};
 
 use sp_std::prelude::*;
 use sp_std::convert::TryFrom;

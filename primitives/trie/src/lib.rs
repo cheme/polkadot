@@ -26,7 +26,7 @@ mod storage_proof;
 mod trie_stream;
 
 use sp_std::{boxed::Box, marker::PhantomData, vec::Vec, borrow::Borrow, fmt};
-use hash_db::{Hasher, Prefix, NoMeta};
+use hash_db::{Hasher, Prefix};
 //use trie_db::proof::{generate_proof, verify_proof};
 pub use trie_db::proof::VerifyError;
 /// Our `NodeCodec`-specific error.
@@ -45,8 +45,11 @@ pub use trie_db::{
 pub use memory_db::KeyFunction;
 pub use memory_db::prefixed_key;
 /// Various re-exports from the `hash-db` crate.
-pub use hash_db::{HashDB as HashDBT, EMPTY_PREFIX};
+pub use hash_db::{HashDB as HashDBT, EMPTY_PREFIX, MetaHasher};
+pub use hash_db::NoMeta;
 
+/// Meta use by trie state.
+pub type TrieMeta = ();
 /// substrate trie layout
 pub struct Layout<H>(sp_std::marker::PhantomData<H>);
 
@@ -73,14 +76,47 @@ impl<H: Hasher> TrieLayout for Layout<H> {
 	const ALLOW_EMPTY: bool = true;
 	type Hash = H;
 	type Codec = NodeCodec<Self::Hash>;
-	type MetaHasher = NoMeta;
-	type Meta = ();
+	type MetaHasher = StateHasher;
+	type Meta = TrieMeta;
 
 	fn metainput_for_new_node(&self) -> <Self::Meta as Meta>::MetaInput {
 		()
 	}
 	fn metainput_for_stored_inline_node(&self) -> <Self::Meta as Meta>::MetaInput {
 		()
+	}
+}
+
+/// Reimplement `NoMeta` `MetaHasher` with
+/// additional constraint.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StateHasher;
+
+impl<H, T> MetaHasher<H, T> for StateHasher
+	where
+		H: Hasher,
+		T: for<'a> From<&'a [u8]>,
+{
+	type Meta = TrieMeta;
+
+	fn hash(value: &[u8], _meta: &Self::Meta) -> H::Out {
+		H::hash(value)
+	}
+
+	fn stored_value(value: &[u8], _meta: Self::Meta) -> T {
+		value.into()
+	}
+
+	fn stored_value_owned(value: T, _meta: Self::Meta) -> T {
+		value
+	}
+
+	fn extract_value(stored: &[u8]) -> (&[u8], Self::Meta) {
+		(stored, ())
+	}
+
+	fn extract_value_owned(stored: T) -> (T, Self::Meta) {
+		(stored, ())
 	}
 }
 
@@ -122,13 +158,13 @@ pub type HashDB<'a, H, M> = dyn hash_db::HashDB<H, trie_db::DBValue, M> + 'a;
 /// This uses a `KeyFunction` for prefixing keys internally (avoiding
 /// key conflict for non random keys).
 pub type PrefixedMemoryDB<H> = memory_db::MemoryDB<
-	H, memory_db::PrefixedKey<H>, trie_db::DBValue, NoMeta, MemTracker
+	H, memory_db::PrefixedKey<H>, trie_db::DBValue, StateHasher, MemTracker
 >;
 /// Reexport from `hash_db`, with genericity set for `Hasher` trait.
 /// This uses a noops `KeyFunction` (key addressing must be hashed or using
 /// an encoding scheme that avoid key conflict).
 pub type MemoryDB<H> = memory_db::MemoryDB<
-	H, memory_db::HashKey<H>, trie_db::DBValue, NoMeta, MemTracker,
+	H, memory_db::HashKey<H>, trie_db::DBValue, StateHasher, MemTracker,
 >;
 /// MemoryDB with specific meta hasher.
 pub type MemoryDBMeta<H, M> = memory_db::MemoryDB<
@@ -137,7 +173,7 @@ pub type MemoryDBMeta<H, M> = memory_db::MemoryDB<
 
 /// Reexport from `hash_db`, with genericity set for `Hasher` trait.
 pub type GenericMemoryDB<H, KF> = memory_db::MemoryDB<
-	H, KF, trie_db::DBValue, NoMeta, MemTracker
+	H, KF, trie_db::DBValue, StateHasher, MemTracker
 >;
 
 /// Persistent trie database read-access interface for the a given hasher.
@@ -148,10 +184,6 @@ pub type TrieDBMut<'a, L> = trie_db::TrieDBMut<'a, L>;
 pub type Lookup<'a, L, Q> = trie_db::Lookup<'a, L, Q>;
 /// Hash type for a trie layout.
 pub type TrieHash<L> = <<L as TrieLayout>::Hash as Hasher>::Out;
-/// Reexport meta for trie.
-pub type TrieMeta = ();
-/// Reexport hasher meta for trie.
-pub type TrieHasherMeta = NoMeta;
 /// This module is for non generic definition of trie type.
 /// Only the `Hasher` trait is generic in this case.
 pub mod trie_types {

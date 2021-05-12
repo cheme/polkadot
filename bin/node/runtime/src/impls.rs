@@ -89,7 +89,9 @@ mod multiplier_tests {
 
 	fn run_with_system_weight<F>(w: Weight, assertions: F) where F: Fn() -> () {
 		let mut t: sp_io::TestExternalities =
-			frame_system::GenesisConfig::default().build_storage::<Runtime>().unwrap().into();
+			frame_system::GenesisConfig::default().build_storage::<Runtime>(sp_runtime::LATEST_LAYOUT)
+				.unwrap()
+				.into();
 		t.execute_with(|| {
 			System::set_block_consumed_resources(w, 0);
 			assertions()

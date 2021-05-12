@@ -821,7 +821,7 @@ pub mod tests {
 	}
 
 	fn new_test_ext() -> TestExternalities {
-		GenesisConfig::default().build_storage().unwrap().into()
+		GenesisConfig::default().build_storage(sp_runtime::LATEST_LAYOUT).unwrap().into()
 	}
 
 	type Map = Data;

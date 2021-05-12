@@ -301,7 +301,9 @@ mod tests {
 	use sp_runtime::{traits::{BlakeTwo256, IdentityLookup}, testing::Header};
 
 	pub fn new_test_ext() -> TestExternalities {
-		let t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+		let t = frame_system::GenesisConfig::default()
+			.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+			.unwrap();
 		TestExternalities::new(t)
 	}
 

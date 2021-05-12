@@ -793,10 +793,12 @@ mod tests {
 
 	#[test]
 	fn balance_transfer_dispatch_works() {
-		let mut t = frame_system::GenesisConfig::default().build_storage::<Runtime>().unwrap();
+		let mut t = frame_system::GenesisConfig::default()
+			.build_storage::<Runtime>(sp_runtime::LATEST_LAYOUT)
+			.unwrap();
 		pallet_balances::GenesisConfig::<Runtime> {
 			balances: vec![(1, 211)],
-		}.assimilate_storage(&mut t).unwrap();
+		}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 		let xt = TestXt::new(Call::Balances(BalancesCall::transfer(2, 69)), sign_extra(1, 0, 0));
 		let weight = xt.get_dispatch_info().weight +
 			<Runtime as frame_system::Config>::BlockWeights::get().get(DispatchClass::Normal).base_extrinsic;
@@ -819,10 +821,12 @@ mod tests {
 	}
 
 	fn new_test_ext(balance_factor: Balance) -> sp_io::TestExternalities {
-		let mut t = frame_system::GenesisConfig::default().build_storage::<Runtime>().unwrap();
+		let mut t = frame_system::GenesisConfig::default()
+			.build_storage::<Runtime>(sp_runtime::LATEST_LAYOUT)
+			.unwrap();
 		pallet_balances::GenesisConfig::<Runtime> {
 			balances: vec![(1, 111 * balance_factor)],
-		}.assimilate_storage(&mut t).unwrap();
+		}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 		t.into()
 	}
 

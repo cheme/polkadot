@@ -311,7 +311,9 @@ impl<B, E, Block, RA> Client<B, E, Block, RA> where
 		config: ClientConfig,
 	) -> sp_blockchain::Result<Self> {
 		if backend.blockchain().header(BlockId::Number(Zero::zero()))?.is_none() {
-			let genesis_storage = build_genesis_storage.build_storage()
+			// TODO calculate layout from block height (rules from chainspec)
+			let layout = sp_runtime::StateLayout::V1;
+			let genesis_storage = build_genesis_storage.build_storage(layout)
 				.map_err(sp_blockchain::Error::Storage)?;
 			let mut op = backend.begin_operation()?;
 			backend.begin_state_operation(&mut op, BlockId::Hash(Default::default()))?;

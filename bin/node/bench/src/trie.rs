@@ -24,7 +24,7 @@ use lazy_static::lazy_static;
 use rand::Rng;
 use hash_db::Prefix;
 use sp_state_machine::Backend as _;
-use sp_trie::{trie_types::TrieDBMut, TrieMut as _};
+use sp_trie::{trie_types::TrieDBMut, TrieMut as _, TrieMeta, MetaHasher, StateHasher};
 
 use node_primitives::Hash;
 
@@ -169,9 +169,15 @@ impl core::BenchmarkDescription for TrieReadBenchmarkDescription {
 struct Storage(Arc<dyn KeyValueDB>);
 
 impl sp_state_machine::Storage<sp_core::Blake2Hasher> for Storage {
-	fn get(&self, key: &Hash, prefix: Prefix) -> Result<Option<Vec<u8>>, String> {
+	fn get(&self, key: &Hash, prefix: Prefix) -> Result<Option<(Vec<u8>, TrieMeta)>, String> {
 		let key = sp_trie::prefixed_key::<sp_core::Blake2Hasher>(key, prefix);
 		self.0.get(0, &key).map_err(|e| format!("Database backend error: {:?}", e))
+			.map(|result| result
+				.map(|value| <StateHasher as MetaHasher<sp_core::Blake2Hasher, _>>::extract_value_owned(value))
+			)
+	}
+
+	fn access_from(&self, _key: &Hash) {
 	}
 }
 
@@ -181,10 +187,13 @@ impl core::Benchmark for TrieReadBenchmark {
 
 		let storage: Arc<dyn sp_state_machine::Storage<sp_core::Blake2Hasher>> =
 			Arc::new(Storage(db.open(self.database_type)));
-
+		let layout = sp_runtime::LATEST_LAYOUT;
+		let layout = sp_state_machine::layout(layout);
+	
 		let trie_backend = sp_state_machine::TrieBackend::new(
 			storage,
 			self.root,
+			layout,
 		);
 		for (warmup_key, warmup_value) in self.warmup_keys.iter() {
 			let value = trie_backend.storage(&warmup_key[..])

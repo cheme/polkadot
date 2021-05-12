@@ -171,9 +171,10 @@ pub type LoggerCall = logger::Call<Test>;
 
 // Build test environment by setting the root `key` for the Genesis.
 pub fn new_test_ext(root_key: u64) -> sp_io::TestExternalities {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let layout = sp_runtime::LATEST_LAYOUT;
+	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(layout).unwrap();
 	sudo::GenesisConfig::<Test>{
 		key: root_key,
-	}.assimilate_storage(&mut t).unwrap();
+	}.assimilate_storage(&mut t, layout).unwrap();
 	t.into()
 }

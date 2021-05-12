@@ -128,7 +128,9 @@ impl TryRuntimeCmd {
 		ExecDispatch: NativeExecutionDispatch + 'static,
 	{
 		let spec = config.chain_spec;
-		let genesis_storage = spec.build_storage()?;
+		// TODO layout from spec
+		let layout = sp_runtime::StateLayout::V1;
+		let genesis_storage = spec.build_storage(layout)?;
 
 		let code = StorageData(
 			genesis_storage

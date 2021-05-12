@@ -187,6 +187,6 @@ impl pallet_staking::Config for Test {
 impl crate::Config for Test {}
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let t = frame_system::GenesisConfig::default().build_storage::<Test>(sp_runtime::LATEST_LAYOUT).unwrap();
 	sp_io::TestExternalities::new(t)
 }

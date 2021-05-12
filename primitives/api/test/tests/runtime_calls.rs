@@ -158,7 +158,8 @@ fn record_proof_works() {
 	let (client, longest_chain) = TestClientBuilder::new()
 		.set_execution_strategy(ExecutionStrategy::Both)
 		.build_with_longest_chain();
-
+	// TODO this need test for all possible layout state.
+	let layout = sp_state_machine::layout(sp_runtime::LATEST_LAYOUT);
 	let block_id = BlockId::Number(client.chain_info().best_number);
 	let storage_root = longest_chain.best_chain().unwrap().state_root().clone();
 
@@ -185,6 +186,7 @@ fn record_proof_works() {
 	let backend = create_proof_check_backend::<HashFor<Block>>(
 		storage_root,
 		proof.expect("Proof was generated"),
+		layout,
 	).expect("Creates proof backend.");
 
 	// Use the proof backend to execute `execute_block`.

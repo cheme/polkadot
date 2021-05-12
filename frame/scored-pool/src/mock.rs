@@ -132,7 +132,7 @@ impl Config for Test {
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(sp_runtime::LATEST_LAYOUT).unwrap();
 	pallet_balances::GenesisConfig::<Test> {
 		balances: vec![
 			(5, 500_000),
@@ -143,7 +143,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 			(40, 500_000),
 			(99, 1),
 		],
-	}.assimilate_storage(&mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 	pallet_scored_pool::GenesisConfig::<Test>{
 		pool: vec![
 			(5, None),
@@ -154,7 +154,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		],
 		member_count: 2,
 		.. Default::default()
-	}.assimilate_storage(&mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 	t.into()
 }
 

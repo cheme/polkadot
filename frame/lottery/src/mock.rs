@@ -118,10 +118,10 @@ pub type SystemCall = frame_system::Call<Test>;
 pub type BalancesCall = pallet_balances::Call<Test>;
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(sp_runtime::LATEST_LAYOUT).unwrap();
 	pallet_balances::GenesisConfig::<Test> {
 		balances: vec![(1, 100), (2, 100), (3, 100), (4, 100), (5, 100)],
-	}.assimilate_storage(&mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 	t.into()
 }
 

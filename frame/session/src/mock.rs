@@ -204,8 +204,10 @@ pub fn reset_before_session_end_called() {
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let layout = sp_trie::Layout::default();
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let layout = sp_runtime::LATEST_LAYOUT;
+	let mut t = frame_system::GenesisConfig::default()
+		.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+		.unwrap();
 	let keys: Vec<_> = NEXT_VALIDATORS.with(|l|
 		l.borrow().iter().cloned().map(|i| (i, i, UintAuthorityId(i).into())).collect()
 	);
@@ -217,7 +219,8 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		// An additional identity that we use.
 		frame_system::Pallet::<Test>::inc_providers(&69);
 	});
-	pallet_session::GenesisConfig::<Test> { keys }.assimilate_storage(&mut t).unwrap();
+	pallet_session::GenesisConfig::<Test> { keys }
+		.assimilate_storage(&mut t, layout).unwrap();
 	sp_io::TestExternalities::new(t)
 }
 

@@ -122,12 +122,12 @@ impl Config for Test {
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(sp_runtime::LATEST_LAYOUT).unwrap();
 	pallet_balances::GenesisConfig::<Test>{
 		// Total issuance will be 200 with treasury account initialized at ED.
 		balances: vec![(0, 100), (1, 98), (2, 1)],
-	}.assimilate_storage(&mut t).unwrap();
-	treasury::GenesisConfig::default().assimilate_storage::<Test, _>(&mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
+	treasury::GenesisConfig::default().assimilate_storage::<Test, _>(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 	t.into()
 }
 
@@ -315,10 +315,10 @@ fn treasury_account_doesnt_get_deleted() {
 // This is useful for chain that will just update runtime.
 #[test]
 fn inexistent_account_works() {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(sp_runtime::LATEST_LAYOUT).unwrap();
 	pallet_balances::GenesisConfig::<Test>{
 		balances: vec![(0, 100), (1, 99), (2, 1)],
-	}.assimilate_storage(&mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 	// Treasury genesis config is not build thus treasury account does not exist
 	let mut t: sp_io::TestExternalities = t.into();
 
@@ -347,13 +347,17 @@ fn inexistent_account_works() {
 
 #[test]
 fn genesis_funding_works() {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let mut t = frame_system::GenesisConfig::default()
+		.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+		.unwrap();
 	let initial_funding = 100;
 	pallet_balances::GenesisConfig::<Test>{
 		// Total issuance will be 200 with treasury account initialized with 100.
 		balances: vec![(0, 100), (Treasury::account_id(), initial_funding)],
-	}.assimilate_storage(&mut t).unwrap();
-	treasury::GenesisConfig::default().assimilate_storage::<Test, _>(&mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
+	treasury::GenesisConfig::default()
+		.assimilate_storage::<Test, _>(&mut t, sp_runtime::LATEST_LAYOUT)
+		.unwrap();
 	let mut t: sp_io::TestExternalities = t.into();
 
 	t.execute_with(|| {

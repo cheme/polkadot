@@ -374,7 +374,7 @@ pub fn new_test_ext_with_pairs(authorities_len: usize) -> (Vec<AuthorityPair>, s
 
 pub fn new_test_ext_raw_authorities(authorities: Vec<AuthorityId>) -> sp_io::TestExternalities {
 	let mut t = frame_system::GenesisConfig::default()
-		.build_storage::<Test>()
+		.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
 		.unwrap();
 
 	let balances: Vec<_> = (0..authorities.len())
@@ -382,7 +382,7 @@ pub fn new_test_ext_raw_authorities(authorities: Vec<AuthorityId>) -> sp_io::Tes
 		.collect();
 
 	pallet_balances::GenesisConfig::<Test> { balances }
-		.assimilate_storage(&mut t)
+		.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT)
 		.unwrap();
 
 	// stashes are the index.
@@ -403,7 +403,7 @@ pub fn new_test_ext_raw_authorities(authorities: Vec<AuthorityId>) -> sp_io::Tes
 	// NOTE: this will initialize the babe authorities
 	// through OneSessionHandler::on_genesis_session
 	pallet_session::GenesisConfig::<Test> { keys: session_keys }
-		.assimilate_storage(&mut t)
+		.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT)
 		.unwrap();
 
 	// controllers are the index + 1000
@@ -427,7 +427,7 @@ pub fn new_test_ext_raw_authorities(authorities: Vec<AuthorityId>) -> sp_io::Tes
 		..Default::default()
 	};
 
-	staking_config.assimilate_storage(&mut t).unwrap();
+	staking_config.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 
 	t.into()
 }

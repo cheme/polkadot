@@ -79,7 +79,7 @@ pub use changes_trie::{ChangesTrieConfiguration, ChangesTrieConfigurationRange};
 #[cfg(feature = "full_crypto")]
 pub use crypto::{DeriveJunction, Pair, Public};
 
-pub use hash_db::Hasher;
+pub use hash_db::{Hasher, MetaHasher};
 #[cfg(feature = "std")]
 pub use self::hasher::blake2::Blake2Hasher;
 #[cfg(feature = "std")]
@@ -454,3 +454,9 @@ pub enum StateLayout {
 	/// New layout.
 	V1,
 }
+
+// TODO switch to new layout
+/// Latest defined state layout,
+/// Only for usage when switching is unconstrained
+/// eg for test.
+pub const LATEST_LAYOUT: StateLayout = StateLayout::V1;

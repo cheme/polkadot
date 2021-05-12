@@ -225,6 +225,7 @@ impl<Xt: 'static + Codec + Sized + Send + Sync + Serialize + Clone + Eq + Debug 
 	type Extrinsic = Xt;
 	type Header = Header;
 	type Hash = <Header as traits::Header>::Hash;
+	//type MetaHasher = sp_trie::StateHasher;
 
 	fn header(&self) -> &Self::Header {
 		&self.header

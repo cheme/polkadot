@@ -85,6 +85,7 @@ where
 	type Extrinsic = Extrinsic;
 	type Header = Header;
 	type Hash = <Self::Header as traits::Header>::Hash;
+	//type MetaHasher = sp_trie::StateHasher;
 
 	fn header(&self) -> &Self::Header {
 		&self.header

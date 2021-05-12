@@ -319,7 +319,7 @@ fn new_test_ext() -> sp_io::TestExternalities {
 		},
 		module2_Instance2: Default::default(),
 		module2_Instance3: Default::default(),
-	}.build_storage().unwrap().into()
+	}.build_storage(sp_runtime::LATEST_LAYOUT).unwrap().into()
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn storage_instance_independence() {
 		top: std::collections::BTreeMap::new(),
 		children_default: std::collections::HashMap::new()
 	};
-	sp_state_machine::BasicExternalities::execute_with_storage(&mut storage, || {
+	sp_state_machine::BasicExternalities::execute_with_storage(&mut storage, sp_runtime::LATEST_LAYOUT, || {
 		module2::Value::<Runtime>::put(0);
 		module2::Value::<Runtime, module2::Instance1>::put(0);
 		module2::Value::<Runtime, module2::Instance2>::put(0);

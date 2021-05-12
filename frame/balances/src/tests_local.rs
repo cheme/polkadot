@@ -135,7 +135,9 @@ impl ExtBuilder {
 	}
 	pub fn build(self) -> sp_io::TestExternalities {
 		self.set_associated_consts();
-		let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+		let mut t = frame_system::GenesisConfig::default()
+			.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+			.unwrap();
 		pallet_balances::GenesisConfig::<Test> {
 			balances: if self.monied {
 				vec![
@@ -148,7 +150,7 @@ impl ExtBuilder {
 			} else {
 				vec![]
 			},
-		}.assimilate_storage(&mut t).unwrap();
+		}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 
 		let mut ext = sp_io::TestExternalities::new(t);
 		ext.execute_with(|| System::set_block_number(1));

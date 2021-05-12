@@ -65,7 +65,8 @@ use sp_blockchain::{
 };
 use codec::{Decode, Encode};
 use hash_db::Prefix;
-use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key};
+use sp_trie::{MemoryDB, PrefixedMemoryDB, prefixed_key, StateHasher, TrieMeta,
+	MetaHasher};
 use sp_database::Transaction;
 use sp_core::{Hasher, ChangesTrieConfiguration};
 use sp_core::offchain::OffchainOverlayedChange;
@@ -73,7 +74,8 @@ use sp_core::storage::{well_known_keys, ChildInfo};
 use sp_arithmetic::traits::Saturating;
 use sp_runtime::{generic::{DigestItem, BlockId}, Justification, Justifications, Storage};
 use sp_runtime::traits::{
-	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion, HashFor,
+	Block as BlockT, Header as HeaderT, NumberFor, Zero, One, SaturatedConversion,
+	HashFor,
 };
 use sp_state_machine::{
 	DBValue, ChangesTrieTransaction, ChangesTrieCacheAction, UsageInfo as StateUsageInfo,
@@ -858,14 +860,18 @@ struct StorageDb<Block: BlockT> {
 }
 
 impl<Block: BlockT> sp_state_machine::Storage<HashFor<Block>> for StorageDb<Block> {
-	fn get(&self, key: &Block::Hash, prefix: Prefix) -> Result<Option<DBValue>, String> {
+	fn get(&self, key: &Block::Hash, prefix: Prefix) -> Result<Option<(DBValue, TrieMeta)>, String> {
 		if self.prefix_keys {
 			let key = prefixed_key::<HashFor<Block>>(key, prefix);
 			self.state_db.get(&key, self)
 		} else {
 			self.state_db.get(key.as_ref(), self)
 		}
+		.map(|result| result.map(|value| <StateHasher as MetaHasher<HashFor<Block>, _>>::extract_value_owned(value)))
 		.map_err(|e| format!("Database backend error: {:?}", e))
+	}
+
+	fn access_from(&self, _key: &Block::Hash) {
 	}
 }
 
@@ -890,8 +896,10 @@ impl<Block: BlockT> DbGenesisStorage<Block> {
 }
 
 impl<Block: BlockT> sp_state_machine::Storage<HashFor<Block>> for DbGenesisStorage<Block> {
-	fn get(&self, _key: &Block::Hash, _prefix: Prefix) -> Result<Option<DBValue>, String> {
+	fn get(&self, _key: &Block::Hash, _prefix: Prefix) -> Result<Option<(DBValue, TrieMeta)>, String> {
 		Ok(None)
+	}
+	fn access_from(&self, _key: &Block::Hash) {
 	}
 }
 
@@ -2033,12 +2041,15 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 	fn state_at(&self, block: BlockId<Block>) -> ClientResult<Self::State> {
 		use sc_client_api::blockchain::HeaderBackend as BcHeaderBackend;
 
+		// TODO calculate layout from block height (rules from chainspec)
+		let layout = sp_runtime::StateLayout::V1;
+		let layout = sp_state_machine::layout(layout);
 		// special case for genesis initialization
 		match block {
 			BlockId::Hash(h) if h == Default::default() => {
 				let genesis_storage = DbGenesisStorage::<Block>::new();
 				let root = genesis_storage.0.clone();
-				let db_state = DbState::<Block>::new(Arc::new(genesis_storage), root);
+				let db_state = DbState::<Block>::new(Arc::new(genesis_storage), root, layout);
 				let state = RefTrackingState::new(db_state, self.storage.clone(), None);
 				let caching_state = CachingState::new(
 					state,
@@ -2073,7 +2084,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				}
 				if let Ok(()) = self.storage.state_db.pin(&hash) {
 					let root = hdr.state_root;
-					let db_state = DbState::<Block>::new(self.storage.clone(), root);
+					let db_state = DbState::<Block>::new(self.storage.clone(), root, layout);
 					let state = RefTrackingState::new(
 						db_state,
 						self.storage.clone(),

@@ -22,7 +22,7 @@
 use std::{borrow::Cow, fs::File, path::PathBuf, sync::Arc, collections::HashMap};
 use serde::{Serialize, Deserialize};
 use sp_core::storage::{StorageKey, StorageData, ChildInfo, Storage, StorageChild};
-use sp_runtime::BuildStorage;
+use sp_runtime::{BuildStorage, StateLayout};
 use serde_json as json;
 use crate::{RuntimeGenesis, ChainType, extension::GetExtension, Properties};
 use sc_network::config::MultiaddrWithPeerId;
@@ -94,9 +94,9 @@ impl<G: RuntimeGenesis> GenesisSource<G> {
 }
 
 impl<G: RuntimeGenesis, E> BuildStorage for ChainSpec<G, E> {
-	fn build_storage(&self) -> Result<Storage, String> {
+	fn build_storage(&self, layout: StateLayout) -> Result<Storage, String> {
 		match self.genesis.resolve()? {
-			Genesis::Runtime(gc) => gc.build_storage(),
+			Genesis::Runtime(gc) => gc.build_storage(layout),
 			Genesis::Raw(RawGenesis { top: map, children_default: children_map }) => Ok(Storage {
 				top: map.into_iter().map(|(k, v)| (k.0, v.0)).collect(),
 				children_default: children_map.into_iter().map(|(storage_key, child_content)| {
@@ -116,6 +116,7 @@ impl<G: RuntimeGenesis, E> BuildStorage for ChainSpec<G, E> {
 	fn assimilate_storage(
 		&self,
 		_: &mut Storage,
+		_: StateLayout,
 	) -> Result<(), String> {
 		Err("`assimilate_storage` not implemented for `ChainSpec`.".into())
 	}
@@ -304,7 +305,8 @@ impl<G: RuntimeGenesis, E: serde::Serialize + Clone + 'static> ChainSpec<G, E> {
 	fn json_container(&self, raw: bool) -> Result<JsonContainer<G, E>, String> {
 		let genesis = match (raw, self.genesis.resolve()?) {
 			(true, Genesis::Runtime(g)) => {
-				let storage = g.build_storage()?;
+				let layout = StateLayout::V1; // TODO read from spec!!!
+				let storage = g.build_storage(layout)?;
 				let top = storage.top.into_iter()
 					.map(|(k, v)| (StorageKey(k), StorageData(v)))
 					.collect();
@@ -461,6 +463,7 @@ mod tests {
 		fn assimilate_storage(
 			&self,
 			storage: &mut Storage,
+			_layout: sp_runtime::StateLayout,
 		) -> Result<(), String> {
 			storage.top.extend(
 				self.0.iter().map(|(a, b)| (a.clone().into_bytes(), b.clone().into_bytes()))

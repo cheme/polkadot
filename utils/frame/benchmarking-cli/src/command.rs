@@ -60,7 +60,9 @@ impl BenchmarkCmd {
 		let wasm_method = self.wasm_method.into();
 		let strategy = self.execution.unwrap_or(ExecutionStrategy::Native);
 
-		let genesis_storage = spec.build_storage()?;
+		// TODO layout from spec
+		let layout = sp_runtime::StateLayout::V1;
+		let genesis_storage = spec.build_storage(layout)?;
 		let mut changes = Default::default();
 		let cache_size = Some(self.database_cache_size as usize);
 		let state = BenchmarkingState::<BB>::new(genesis_storage, cache_size, self.record_proof)?;

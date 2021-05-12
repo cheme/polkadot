@@ -507,7 +507,7 @@ mod tests {
 		}
 		pub fn build(self) -> sp_io::TestExternalities {
 			EXISTENTIAL_DEPOSIT.with(|v| *v.borrow_mut() = self.existential_deposit);
-			let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+			let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(sp_runtime::LATEST_LAYOUT).unwrap();
 			pallet_balances::GenesisConfig::<Test> {
 				balances: vec![
 					(1, 10 * self.existential_deposit),
@@ -516,14 +516,14 @@ mod tests {
 					(4, 40 * self.existential_deposit),
 					(12, 10 * self.existential_deposit)
 				],
-			}.assimilate_storage(&mut t).unwrap();
+			}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 			pallet_vesting::GenesisConfig::<Test> {
 				vesting: vec![
 					(1, 0, 10, 5 * self.existential_deposit),
 					(2, 10, 20, 0),
 					(12, 10, 20, 5 * self.existential_deposit)
 				],
-			}.assimilate_storage(&mut t).unwrap();
+			}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 			let mut ext = sp_io::TestExternalities::new(t);
 			ext.execute_with(|| System::set_block_number(1));
 			ext

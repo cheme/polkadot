@@ -467,16 +467,19 @@ pub(crate) mod tests {
 
 	#[test]
 	fn test_create_development_chain_spec() {
-		development_config().build_storage().unwrap();
+		let layout = sp_runtime::LATEST_LAYOUT; // TODO should probably be read from config
+		development_config().build_storage(layout).unwrap();
 	}
 
 	#[test]
 	fn test_create_local_testnet_chain_spec() {
-		local_testnet_config().build_storage().unwrap();
+		let layout = sp_runtime::LATEST_LAYOUT; // TODO should probably be read from config
+		local_testnet_config().build_storage(layout).unwrap();
 	}
 
 	#[test]
 	fn test_staging_test_net_chain_spec() {
-		staging_testnet_config().build_storage().unwrap();
+		let layout = sp_runtime::LATEST_LAYOUT; // TODO should probably be read from config
+		staging_testnet_config().build_storage(layout).unwrap();
 	}
 }

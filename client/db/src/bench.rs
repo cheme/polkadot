@@ -23,7 +23,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use hash_db::{Prefix, Hasher};
-use sp_trie::{MemoryDB, prefixed_key};
+use sp_trie::{MemoryDB, prefixed_key, StateHasher, TrieMeta, MetaHasher};
 use sp_core::{
 	storage::{ChildInfo, TrackedStorageKey},
 	hexdisplay::HexDisplay
@@ -49,19 +49,26 @@ struct StorageDb<Block: BlockT> {
 }
 
 impl<Block: BlockT> sp_state_machine::Storage<HashFor<Block>> for StorageDb<Block> {
-	fn get(&self, key: &Block::Hash, prefix: Prefix) -> Result<Option<DBValue>, String> {
+	fn get(&self, key: &Block::Hash, prefix: Prefix) -> Result<Option<(DBValue, TrieMeta)>, String> {
 		let prefixed_key = prefixed_key::<HashFor<Block>>(key, prefix);
 		if let Some(recorder) = &self.proof_recorder {
 			if let Some(v) = recorder.get(&key) {
 				return Ok(v.clone());
 			}
 			let backend_value = self.db.get(0, &prefixed_key)
+				.map(|result| result.map(|value| <StateHasher as MetaHasher<HashFor<Block>, _>>::extract_value_owned(value)))
 				.map_err(|e| format!("Database backend error: {:?}", e))?;
 			recorder.record(key.clone(), backend_value.clone());
 			Ok(backend_value)
 		} else {
 			self.db.get(0, &prefixed_key)
+				.map(|result| result.map(|value| <StateHasher as MetaHasher<HashFor<Block>, _>>::extract_value_owned(value)))
 				.map_err(|e| format!("Database backend error: {:?}", e))
+		}
+	}
+	fn access_from(&self, key: &Block::Hash) {
+		if let Some(recorder) = &self.proof_recorder {
+			recorder.access_from(key);
 		}
 	}
 }
@@ -172,8 +179,12 @@ impl<B: BlockT> BenchmarkingState<B> {
 			proof_recorder: self.proof_recorder.clone(),
 			_block: Default::default()
 		});
+		// TODO specify layout in benchmarking state.
+		let layout = sp_runtime::StateLayout::V1;
+		let layout = sp_state_machine::layout(layout);
+	
 		*self.state.borrow_mut() = Some(State::new(
-			DbState::<B>::new(storage_db, self.root.get()),
+			DbState::<B>::new(storage_db, self.root.get(), layout),
 			self.shared_cache.clone(),
 			None
 		));

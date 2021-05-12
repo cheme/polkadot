@@ -99,9 +99,10 @@ pub fn test_node(id: u8) -> PeerId {
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let layout = sp_runtime::LATEST_LAYOUT;
+	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(layout).unwrap();
 	pallet_node_authorization::GenesisConfig::<Test> {
 		nodes: vec![(test_node(10), 10), (test_node(20), 20), (test_node(30), 30)],
-	}.assimilate_storage(&mut t).unwrap();
+	}.assimilate_storage(&mut t, layout).unwrap();
 	t.into()
 }

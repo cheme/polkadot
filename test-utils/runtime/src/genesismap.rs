@@ -78,7 +78,10 @@ impl GenesisConfig {
 		let mut storage = Storage { top: map, children_default: self.extra_storage.children_default.clone()};
 		let mut config = system::GenesisConfig::default();
 		config.authorities = self.authorities.clone();
-		config.assimilate_storage(&mut storage).expect("Adding `system::GensisConfig` to the genesis");
+
+		// TODO layout from spec
+		let layout = sp_runtime::StateLayout::V1;
+		config.assimilate_storage(&mut storage, layout).expect("Adding `system::GensisConfig` to the genesis");
 
 		storage
 	}

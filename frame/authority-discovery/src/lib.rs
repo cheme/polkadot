@@ -307,13 +307,13 @@ mod tests {
 
 		// Build genesis.
 		let mut t = frame_system::GenesisConfig::default()
-			.build_storage::<Test>()
+			.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
 			.unwrap();
 
 		pallet_authority_discovery::GenesisConfig {
 			keys: vec![],
 		}
-		.assimilate_storage::<Test>(&mut t)
+		.assimilate_storage::<Test>(&mut t, sp_runtime::LATEST_LAYOUT)
 		.unwrap();
 
 		// Create externalities.

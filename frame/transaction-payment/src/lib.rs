@@ -767,7 +767,9 @@ mod tests {
 		}
 		pub fn build(self) -> sp_io::TestExternalities {
 			self.set_constants();
-			let mut t = frame_system::GenesisConfig::default().build_storage::<Runtime>().unwrap();
+			let mut t = frame_system::GenesisConfig::default()
+				.build_storage::<Runtime>(sp_runtime::LATEST_LAYOUT)
+				.unwrap();
 			pallet_balances::GenesisConfig::<Runtime> {
 				balances: if self.balance_factor > 0 {
 					vec![
@@ -781,7 +783,7 @@ mod tests {
 				} else {
 					vec![]
 				},
-			}.assimilate_storage(&mut t).unwrap();
+			}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 			t.into()
 		}
 	}

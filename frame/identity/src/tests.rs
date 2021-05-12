@@ -123,7 +123,9 @@ impl pallet_identity::Config for Test {
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let mut t = frame_system::GenesisConfig::default()
+		.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+		.unwrap();
 	pallet_balances::GenesisConfig::<Test> {
 		balances: vec![
 			(1, 10),
@@ -133,7 +135,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 			(20, 100),
 			(30, 100),
 		],
-	}.assimilate_storage(&mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 	t.into()
 }
 

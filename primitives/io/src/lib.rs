@@ -1444,6 +1444,7 @@ mod tests {
 
 	#[test]
 	fn storage_works() {
+		let layout = sp_trie::Layout::default();
 		let mut t = BasicExternalities::default();
 		t.execute_with(|| {
 			assert_eq!(storage::get(b"hello"), None);
@@ -1456,7 +1457,7 @@ mod tests {
 		t = BasicExternalities::new(Storage {
 			top: map![b"foo".to_vec() => b"bar".to_vec()],
 			children_default: map![],
-		});
+		}, layout);
 
 		t.execute_with(|| {
 			assert_eq!(storage::get(b"hello"), None);
@@ -1466,11 +1467,12 @@ mod tests {
 
 	#[test]
 	fn read_storage_works() {
+		let layout = sp_trie::Layout::default();
 		let value = b"\x0b\0\0\0Hello world".to_vec();
 		let mut t = BasicExternalities::new(Storage {
 			top: map![b":test".to_vec() => value.clone()],
 			children_default: map![],
-		});
+		}, layout);
 
 		t.execute_with(|| {
 			let mut v = [0u8; 4];
@@ -1484,6 +1486,7 @@ mod tests {
 
 	#[test]
 	fn clear_prefix_works() {
+		let layout = sp_trie::Layout::default();
 		let mut t = BasicExternalities::new(Storage {
 			top: map![
 				b":a".to_vec() => b"\x0b\0\0\0Hello world".to_vec(),
@@ -1492,7 +1495,7 @@ mod tests {
 				b":abdd".to_vec() => b"\x0b\0\0\0Hello world".to_vec()
 			],
 			children_default: map![],
-		});
+		}, layout);
 
 		t.execute_with(|| {
 			storage::clear_prefix(b":abc");

@@ -156,7 +156,8 @@ fn construct_block(
 	let transactions = txs.into_iter().map(|tx| tx.into_signed_tx()).collect::<Vec<_>>();
 
 	let iter = transactions.iter().map(Encode::encode);
-	let extrinsics_root = Layout::<BlakeTwo256>::ordered_trie_root(iter).into();
+	let layout = Layout::<BlakeTwo256>::default(); // TODO test multiple layout state?
+	let extrinsics_root = layout.ordered_trie_root(iter).into();
 
 	let mut header = Header {
 		parent_hash,
@@ -246,7 +247,8 @@ fn construct_genesis_should_work_with_native() {
 	).genesis_map();
 	let genesis_hash = insert_genesis_block(&mut storage);
 
-	let backend = InMemoryBackend::from(storage);
+	let layout = Layout::<BlakeTwo256>::default(); // TODO test multiple layout state?
+	let backend = InMemoryBackend::from((storage, layout));
 	let (b1data, _b1hash) = block1(genesis_hash, &backend);
 	let backend_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&backend);
 	let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
@@ -280,7 +282,8 @@ fn construct_genesis_should_work_with_wasm() {
 	).genesis_map();
 	let genesis_hash = insert_genesis_block(&mut storage);
 
-	let backend = InMemoryBackend::from(storage);
+	let layout = Layout::<BlakeTwo256>::default();
+	let backend = InMemoryBackend::from((storage, layout));
 	let (b1data, _b1hash) = block1(genesis_hash, &backend);
 	let backend_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&backend);
 	let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");
@@ -314,7 +317,8 @@ fn construct_genesis_with_bad_transaction_should_panic() {
 	).genesis_map();
 	let genesis_hash = insert_genesis_block(&mut storage);
 
-	let backend = InMemoryBackend::from(storage);
+	let layout = Layout::<BlakeTwo256>::default();
+	let backend = InMemoryBackend::from((storage, layout));
 	let (b1data, _b1hash) = block1(genesis_hash, &backend);
 	let backend_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(&backend);
 	let runtime_code = backend_runtime_code.runtime_code().expect("Code is part of the backend");

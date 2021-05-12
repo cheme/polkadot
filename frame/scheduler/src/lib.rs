@@ -860,7 +860,9 @@ mod tests {
 	}
 
 	pub fn new_test_ext() -> sp_io::TestExternalities {
-		let t = system::GenesisConfig::default().build_storage::<Test>().unwrap();
+		let t = system::GenesisConfig::default()
+			.build_storage::<Test>(sp_runtime::LATEST_LAYOUT)
+			.unwrap();
 		t.into()
 	}
 

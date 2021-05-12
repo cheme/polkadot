@@ -158,9 +158,9 @@ mod tests {
 	type Historical = Module<Test>;
 
 	pub fn new_test_ext() -> sp_io::TestExternalities {
-		let layout = sp_state_machine::Layout::V1;
+		let layout = sp_runtime::LATEST_LAYOUT;
 		let mut t = frame_system::GenesisConfig::default()
-			.build_storage::<Test>()
+			.build_storage::<Test>(layout)
 			.expect("Failed to create test externalities.");
 
 		let keys: Vec<_> = NEXT_VALIDATORS.with(|l|
@@ -172,7 +172,7 @@ mod tests {
 			}
 		});
 
-		crate::GenesisConfig::<Test>{ keys }.assimilate_storage(&mut t).unwrap();
+		crate::GenesisConfig::<Test>{ keys }.assimilate_storage(&mut t, layout).unwrap();
 
 		let mut ext = sp_io::TestExternalities::new(t);
 

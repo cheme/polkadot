@@ -71,9 +71,11 @@ pub fn default_config(task_executor: TaskExecutor, mut chain_spec: Box<dyn Chain
 	let base_path = base_path();
 	let root_path = base_path.path().to_path_buf().join("chains").join(chain_spec.id());
 
+	// TODO use latest layout, and maybe test for old layout too.
+	let layout = sp_runtime::StateLayout::V1;
 	let storage = chain_spec
 		.as_storage_builder()
-		.build_storage()
+		.build_storage(layout)
 		.expect("could not build storage");
 
 	chain_spec.set_storage(storage);

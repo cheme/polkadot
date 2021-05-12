@@ -122,11 +122,11 @@ impl pallet_gilt::Config for Test {
 // This function basically just builds a genesis storage key/value store according to
 // our desired mockup.
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+	let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(sp_runtime::LATEST_LAYOUT).unwrap();
 	pallet_balances::GenesisConfig::<Test>{
 		balances: vec![(1, 100), (2, 100), (3, 100), (4, 100)],
-	}.assimilate_storage(&mut t).unwrap();
-	GenesisBuild::<Test>::assimilate_storage(&crate::GenesisConfig, &mut t).unwrap();
+	}.assimilate_storage(&mut t, sp_runtime::LATEST_LAYOUT).unwrap();
+	GenesisBuild::<Test>::assimilate_storage(&crate::GenesisConfig, &mut t, sp_runtime::LATEST_LAYOUT).unwrap();
 	t.into()
 }
 

@@ -211,7 +211,7 @@ impl ExtBuilder {
 				presentation_duration: 2,
 				term_duration: 5,
 			},
-		}.build_storage().unwrap().into();
+		}.build_storage(sp_runtime::LATEST_LAYOUT).unwrap().into();
 		ext.execute_with(|| System::set_block_number(1));
 		ext
 	}

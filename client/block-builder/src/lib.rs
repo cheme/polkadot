@@ -316,9 +316,12 @@ mod tests {
 
 		let proof = block.proof.expect("Proof is build on request");
 
+		// TODO need to run test on all possible layout state.
+		let layout = sp_state_machine::layout(sp_runtime::LATEST_LAYOUT);
 		let backend = sp_state_machine::create_proof_check_backend::<Blake2Hasher>(
 			block.storage_changes.transaction_storage_root,
 			proof,
+			layout,
 		).unwrap();
 
 		assert!(

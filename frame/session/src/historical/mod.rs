@@ -355,8 +355,8 @@ pub(crate) mod tests {
 	type Historical = Module<Test>;
 
 	pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
-		let layout = sp_state_machine::Layout::V1;
-		let mut t = frame_system::GenesisConfig::default().build_storage::<Test>().unwrap();
+		let layout = sp_runtime::LATEST_LAYOUT;
+		let mut t = frame_system::GenesisConfig::default().build_storage::<Test>(layout).unwrap();
 		let keys: Vec<_> = NEXT_VALIDATORS.with(|l|
 			l.borrow().iter().cloned().map(|i| (i, i, UintAuthorityId(i).into())).collect()
 		);
@@ -365,7 +365,7 @@ pub(crate) mod tests {
 				frame_system::Pallet::<Test>::inc_providers(k);
 			}
 		});
-		crate::GenesisConfig::<Test> { keys }.assimilate_storage(&mut t).unwrap();
+		crate::GenesisConfig::<Test> { keys }.assimilate_storage(&mut t, layout).unwrap();
 		sp_io::TestExternalities::new(t)
 	}
 

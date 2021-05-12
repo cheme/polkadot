@@ -261,8 +261,8 @@ impl<E, Block, H, S> FetchChecker<Block> for LightDataChecker<E, H, Block, S>
 		read_child_proof_check::<H, _>(
 			convert_hash(request.header.state_root()),
 			remote_proof,
-			&child_info,
 			layout,
+			&child_info,
 			request.keys.iter(),
 		).map_err(|e| ClientError::from(e))
 	}

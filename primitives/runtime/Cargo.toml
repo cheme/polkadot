@@ -21,6 +21,7 @@ sp-core = { version = "3.0.0", default-features = false, path = "../core" }
 sp-application-crypto = { version = "3.0.0", default-features = false, path = "../application-crypto" }
 sp-arithmetic = { version = "3.0.0", default-features = false, path = "../arithmetic" }
 sp-std = { version = "3.0.0", default-features = false, path = "../std" }
+# sp-trie = { version = "3.0.0", default-features = false, path = "../../primitives/trie" }
 sp-io = { version = "3.0.0", default-features = false, path = "../io" }
 log = { version = "0.4.14", default-features = false }
 paste = "1.0"
@@ -50,6 +51,7 @@ std = [
 	"sp-core/std",
 	"rand",
 	"sp-std/std",
+#	"sp-trie/std",
 	"sp-io/std",
 	"serde",
 	"parity-util-mem/std",

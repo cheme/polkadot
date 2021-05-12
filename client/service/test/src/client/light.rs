@@ -308,6 +308,8 @@ fn execution_proof_is_generated_and_checked() {
 	fn execute(remote_client: &TestClient, at: u64, method: &'static str) -> (Vec<u8>, Vec<u8>) {
 		let remote_block_id = BlockId::Number(at);
 		let remote_header = remote_client.header(&remote_block_id).unwrap().unwrap();
+		let layout = sp_runtime::LATEST_LAYOUT; // TODO test client with different state
+		// and then layout from client at block.
 
 		// 'fetch' execution proof from remote node
 		let (remote_result, remote_execution_proof) = remote_client.execution_proof(
@@ -328,6 +330,7 @@ fn execution_proof_is_generated_and_checked() {
 				retry_count: None,
 			},
 			remote_execution_proof,
+			layout,
 		).unwrap();
 
 		(remote_result, local_result)
@@ -336,6 +339,8 @@ fn execution_proof_is_generated_and_checked() {
 	fn execute_with_proof_failure(remote_client: &TestClient, at: u64, method: &'static str) {
 		let remote_block_id = BlockId::Number(at);
 		let remote_header = remote_client.header(&remote_block_id).unwrap().unwrap();
+		let layout = sp_runtime::LATEST_LAYOUT; // TODO test client with different state
+		// and then layout from client at block.
 
 		// 'fetch' execution proof from remote node
 		let (_, remote_execution_proof) = remote_client.execution_proof(
@@ -356,6 +361,7 @@ fn execution_proof_is_generated_and_checked() {
 				retry_count: None,
 			},
 			remote_execution_proof,
+			layout,
 			|header| <Header as HeaderT>::new(
 				at + 1,
 				Default::default(),
@@ -568,7 +574,8 @@ fn prepare_for_header_proof_check(insert_cht: bool) -> (TestChecker, Hash, Heade
 fn header_with_computed_extrinsics_root(extrinsics: Vec<Extrinsic>) -> Header {
 	use sp_trie::{TrieConfiguration, trie_types::Layout};
 	let iter = extrinsics.iter().map(Encode::encode);
-	let extrinsics_root = Layout::<BlakeTwo256>::ordered_trie_root(iter);
+	let layout = Layout::<BlakeTwo256>::default();
+	let extrinsics_root = layout.ordered_trie_root(iter);
 
 	// only care about `extrinsics_root`
 	Header::new(0, extrinsics_root, H256::zero(), H256::zero(), Default::default())

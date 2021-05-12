@@ -113,7 +113,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 			bar: vec![(1, 2), (2, 3)],
 			foo: 24,
 		},
-	}.build_storage().unwrap();
+	}.build_storage(sp_runtime::LATEST_LAYOUT).unwrap();
 	t.into()
 }
 
