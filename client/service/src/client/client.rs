@@ -66,7 +66,7 @@ use sp_blockchain::{
 	well_known_cache_keys::Id as CacheKeyId,
 	HeaderMetadata, CachedHeaderMetadata,
 };
-use sp_trie::StorageProof;
+use sp_trie::{CompactProof, StorageProof};
 use sp_api::{
 	CallApiAt, ConstructRuntimeApi, Core as CoreApi, ApiExt, ApiRef, ProvideRuntimeApi,
 	CallApiAtParams,
@@ -1354,15 +1354,23 @@ impl<B, E, Block, RA> ProofProvider<Block> for Client<B, E, Block, RA> where
 		id: &BlockId<Block>,
 		start_key: &[u8],
 		size_limit: usize,
-	) -> sp_blockchain::Result<(StorageProof, u32)> {
+	) -> sp_blockchain::Result<(CompactProof, u32)> {
 		let state = self.state_at(id)?;
-		Ok(prove_range_read_with_size::<_, HashFor<Block>>(
+		let root = state.storage_root(std::iter::empty()).0;
+		let (proof, size) = prove_range_read_with_size::<_, HashFor<Block>>(
 				state,
 				None,
 				None,
 				size_limit,
 				Some(start_key)
-		)?)
+		)?;
+
+		let proof = sp_state_machine::encode_compact::<
+			sp_state_machine::Layout<HashFor<Block>>
+		>(proof, root)
+			.map_err(|e| sp_blockchain::Error::from_state(Box::new(e)))?;
+
+		Ok((proof, size))
 	}
 
 	fn storage_collection(
@@ -1398,9 +1406,24 @@ impl<B, E, Block, RA> ProofProvider<Block> for Client<B, E, Block, RA> where
 	fn verify_range_proof(
 		&self,
 		root: Block::Hash,
-		proof: StorageProof,
+		proof: CompactProof,
 		start_key: &[u8],
 	) -> sp_blockchain::Result<(Vec<(Vec<u8>, Vec<u8>)>, bool)> {
+		let mut db = sp_state_machine::MemoryDB::<HashFor<Block>>::new(&[]);
+		let _ = sp_trie::decode_compact::<sp_state_machine::Layout<HashFor<Block>>, _, _>(
+			&mut db,
+			proof.iter_compact_encoded_nodes(),
+			Some(&root),
+		).map_err(|e| sp_blockchain::Error::from_state(Box::new(e)))?;
+		// TODO could use db to check directly instead of loading a storage proof here.
+		let proof =	StorageProof::new(db.drain().into_iter().filter_map(|kv|
+			if (kv.1).1 > 0 {
+				Some((kv.1).0)
+			} else {
+				None
+			}
+		).collect());
+
 		Ok(read_range_proof_check::<HashFor<Block>>(
 				root,
 				proof,

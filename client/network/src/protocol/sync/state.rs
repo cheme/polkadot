@@ -19,7 +19,7 @@
 use std::sync::Arc;
 use codec::Encode;
 use sp_runtime::traits::{Block as BlockT, Header, NumberFor};
-use sc_client_api::StorageProof;
+use sc_client_api::CompactProof;
 use crate::schema::v1::{StateRequest, StateResponse, StateEntry};
 use crate::chain::{Client, ImportedState};
 
@@ -90,7 +90,7 @@ impl<B: BlockT> StateSync<B> {
 			let proof_size = response.proof.iter().map(|v| v.len()).sum::<usize>() as u64;
 			let (values, complete) = match self.client.verify_range_proof(
 				self.target_root,
-				StorageProof::new(response.proof),
+				CompactProof::new(response.proof),
 				&self.last_key
 			) {
 				Err(e) => {

@@ -31,6 +31,12 @@ pub struct StorageProof {
 	trie_nodes: Vec<Vec<u8>>,
 }
 
+/// Storage proof in compact form.
+#[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
+pub struct CompactProof {
+	pub encoded_nodes: Vec<Vec<u8>>,
+}
+
 impl StorageProof {
 	/// Constructs a storage proof from a subset of encoded trie nodes in a storage backend.
 	pub fn new(trie_nodes: Vec<Vec<u8>>) -> Self {
@@ -79,6 +85,45 @@ impl StorageProof {
 			.collect();
 
 		Self { trie_nodes }
+	}
+}
+
+impl CompactProof {
+	/// Constructs a storage proof from a subset of encoded trie nodes in a storage backend.
+	pub fn new(encoded_nodes: Vec<Vec<u8>>) -> Self {
+		CompactProof { encoded_nodes }
+	}
+
+
+	/// Convert into plain node vector.
+	pub fn into_nodes(self) -> Vec<Vec<u8>> {
+		self.encoded_nodes
+	}
+
+
+	/// Return an iterator on the compact encoded nodes.
+	pub fn iter_compact_encoded_nodes(&self) -> impl Iterator<Item = &[u8]> {
+		self.encoded_nodes.iter().map(Vec::as_slice)
+	}
+
+	/// Returns the estimated encoded size of the compact proof.
+	///
+	/// Runing this operation is a slow operation (build the whole compact proof) and should only be
+	/// in non sensitive path.
+	/// Return `None` on error.
+	pub fn encoded_compact_size<H: Hasher>(
+		proof: StorageProof,
+		root: H::Out,
+	) -> Option<usize> {
+		let compact_proof = crate::encode_compact::<crate::Layout<H>>(
+			proof,
+			root,
+		);
+		if let Ok(proof) = compact_proof {
+			Some(proof.encoded_size())
+		} else {
+			None
+		}
 	}
 }
 
