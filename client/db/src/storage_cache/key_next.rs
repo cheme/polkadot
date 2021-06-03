@@ -920,20 +920,20 @@ mod tests {
 			Self::from_random_bytes(&buff[..])
 		}
 		fn from_random_bytes(bytes: &[u8]) -> Self {
-			let initial_number_of_key = usize_param(bytes, 0, 0) % 50;
+			let initial_number_of_key = 5 + usize_param(bytes, 0, 0) % 50;
 			CheckScenario {
 				initial_number_of_key,
 				initial_key_length: 5 + usize_param(bytes, 0, 6) % 5,
 				value_len: 5 + usize_param(bytes, 1, 0) % 5,
 				lru_limit_size: (usize_param(bytes, 2, 0) % 100) * initial_number_of_key / 100,
-				nb_random_query: usize_param(bytes, 3, 0) % initial_number_of_key / 10,
+				nb_random_query: usize_param(bytes, 3, 0) % (initial_number_of_key / 5),
 				random_query_offset: usize_param(bytes, 4, 0) % initial_number_of_key,
 				random_query_number: 1 + usize_param(bytes, 5, 0) % 10,
 				nb_change_blocks: usize_param(bytes, 5, 4) % 5,
-				nb_value_add: usize_param(bytes, 6, 0) % initial_number_of_key / 10,
+				nb_value_add: usize_param(bytes, 6, 0) % (initial_number_of_key / 5),
 				value_add_key_len: 5 + usize_param(bytes, 7, 0) % 5,
 				random_value_add_offset: usize_param(bytes, 8, 0) % initial_number_of_key,
-				nb_value_remove: usize_param(bytes, 9, 0) % initial_number_of_key / 10,
+				nb_value_remove: usize_param(bytes, 9, 0) % (initial_number_of_key / 5),
 			}
 		}
 	}
@@ -1024,15 +1024,15 @@ mod tests {
 			state.cache.sync_cache(
 				&[],
 				&[],
-				collection,
+				collection.clone(),
 				vec![],
 				Some(block_hashes[i].clone()),
 				Some(i as u64 + 1),
 				true,
 			);
+			state.state().insert(vec![(None, collection)]);
 
 			if i == reorg_ix {
-				println!("reorg_ix {}", reorg_ix);
 				backend_reorg = backend.clone();
 			}
 			// between each do the fix query.
@@ -1069,6 +1069,7 @@ mod tests {
 
 
 		backend_reorg.insert(vec![(None, collection.clone())]);
+		*state.state() = backend_reorg.clone();
 		let reverted_hashes: Vec<_> = (0..(scenario.nb_change_blocks / 2)).map(|i| {
 			block_hashes[i + 1].clone()
 		}).collect(); // TODO not sure about order, may need to reverse iter before collect.
@@ -1082,7 +1083,6 @@ mod tests {
 			true,
 		);
 
-		println!("{:?}", (reorg_ix, reverted_hashes.len(), reverted_hashes.len(), scenario.nb_change_blocks));
 		query_range(vec![128u8], 5, &state, &backend_reorg);
 		// round of random query
 		let mut start_key = value_pool[scenario.random_query_offset].0.clone();

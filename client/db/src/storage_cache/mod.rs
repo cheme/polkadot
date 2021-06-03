@@ -634,6 +634,11 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> CachingState<S, B> {
 		}
 		false
 	}
+
+	#[cfg(test)]
+	fn state(&mut self) -> &mut S {
+		&mut self.state
+	}
 }
 
 impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for CachingState<S, B> {
