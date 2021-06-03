@@ -862,4 +862,244 @@ mod tests {
 		assert_eq!(None, cache.next_storage_key(&15, Some(&child_2)));
 		assert_eq!(Some(None), cache.next_storage_key(&15, Some(&child_0)));
 	}
+
+	use sp_runtime::{
+		traits::BlakeTwo256,
+		testing::{H256, Block as RawBlock, ExtrinsicWrapper},
+	};
+	use sp_state_machine::{InMemoryBackend, StorageCollection};
+	use crate::storage_cache::CachingState;
+	use crate::{CacheRatios};
+
+	type Block = RawBlock<ExtrinsicWrapper<u32>>;
+
+
+	const MAX_INITIAL_KEYS: usize = 50;
+	const MAX_INITIAL_KEY_LENGTH: usize = 10;
+	const MAX_VALUE_LEN: usize = 10;
+	const MAX_BLOCKS: usize = 5;
+	struct CheckScenario {
+		initial_number_of_key: usize, // 0 - 50
+		initial_key_length: usize, // 5 - 10
+		value_len: usize, // 5 - 10
+		lru_limit_size: usize, // 0 - 100 * initial_number_of_key / 100
+		nb_random_query: usize, // 0 - initial_number_of_key / 10
+		random_query_offset: usize, // 0 - initial_number_of_key
+		random_query_number: usize, // 10 - always start at 0
+		nb_change_blocks: usize, // 0 - 5
+		nb_value_add: usize, // 0 - initial_number_of_key / 10
+		value_add_key_len: usize, // 0 - initial_number_of_key / 10
+		random_value_add_offset: usize, // 0 - initial_number_of_key
+		nb_value_remove: usize, // 0 - initial_number_of_key / 10
+	}
+
+	fn usize_param(b: &[u8], ix: usize, bit_offset: usize) -> usize {
+		(b[ix] >> bit_offset) as usize
+	}
+
+	impl CheckScenario {
+		fn initiate_value_pool(random_seed: u64) -> Vec<(Vec<u8>, Vec<u8>)> {
+			use rand::{SeedableRng, Rng};
+			let mut rng = rand::rngs::SmallRng::seed_from_u64(random_seed);
+
+			let max_number_key = MAX_INITIAL_KEYS
+				+ ((MAX_BLOCKS + 2) * (MAX_INITIAL_KEYS / 10));
+			(0..max_number_key).map(|_| {
+				let mut key = vec![0; MAX_INITIAL_KEY_LENGTH];
+				let mut value = vec![0; MAX_VALUE_LEN];
+				rng.fill(&mut key[..]);
+				rng.fill(&mut value[..]);
+				(key, value)
+			}).collect()
+		}
+		fn random(seed: u64) -> Self {
+			use rand::{SeedableRng, Rng};
+			let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+			let mut buff = [0u8; 10];
+			rng.fill(&mut buff);
+			Self::from_random_bytes(&buff[..])
+		}
+		fn from_random_bytes(bytes: &[u8]) -> Self {
+			let initial_number_of_key = usize_param(bytes, 0, 0) % 50;
+			CheckScenario {
+				initial_number_of_key,
+				initial_key_length: 5 + usize_param(bytes, 0, 6) % 5,
+				value_len: 5 + usize_param(bytes, 1, 0) % 5,
+				lru_limit_size: (usize_param(bytes, 2, 0) % 100) * initial_number_of_key / 100,
+				nb_random_query: usize_param(bytes, 3, 0) % initial_number_of_key / 10,
+				random_query_offset: usize_param(bytes, 4, 0) % initial_number_of_key,
+				random_query_number: 1 + usize_param(bytes, 5, 0) % 10,
+				nb_change_blocks: usize_param(bytes, 5, 4) % 5,
+				nb_value_add: usize_param(bytes, 6, 0) % initial_number_of_key / 10,
+				value_add_key_len: 5 + usize_param(bytes, 7, 0) % 5,
+				random_value_add_offset: usize_param(bytes, 8, 0) % initial_number_of_key,
+				nb_value_remove: usize_param(bytes, 9, 0) % initial_number_of_key / 10,
+			}
+		}
+	}
+
+	fn quick_check(scenario: CheckScenario, value_pool: &Vec<(Vec<u8>, Vec<u8>)>) {
+		use sp_state_machine::backend::Backend as StateBackend;
+
+		let block_hashes: Vec<_> = (0..15).map(|_| H256::random()).collect();
+
+		let mut backend = InMemoryBackend::<BlakeTwo256>::default();
+		let mut backend_reorg = InMemoryBackend::<BlakeTwo256>::default();
+		let reorg_ix = scenario.nb_change_blocks - (scenario.nb_change_blocks / 2);
+		let mut collection = StorageCollection::default();
+
+		// write some random key content: 0 - 50 value + 10 val in two cht
+		(0..scenario.initial_number_of_key).for_each(|ix| {
+			let key = value_pool[ix].0[..scenario.initial_key_length].to_vec();
+			let value = value_pool[ix].1[..scenario.value_len].to_vec();
+			collection.push((key, Some(value)));
+		});
+
+		backend.insert(vec![(None, collection)]);
+		let shared = crate::storage_cache::new_shared_cache::<Block>(scenario.lru_limit_size, CacheRatios {
+			values_top: 0,
+			values_children: 0,
+			ordered_keys: 1,
+		});
+
+		let mut state = CachingState::new(
+			backend.clone(),
+			shared.clone(),
+			Some(block_hashes[0]),
+		);
+
+		let query_range = |
+			mut query: Vec<u8>,
+			nb: usize,
+			state: &CachingState<InMemoryBackend<BlakeTwo256>, Block>,
+			backend: &InMemoryBackend<BlakeTwo256>,
+		| {
+			for _ in 0..nb {
+				let state_result = state.next_storage_key(query.as_slice()).unwrap();
+				let no_cache = backend.next_storage_key(query.as_slice()).unwrap();
+				assert_eq!(state_result, no_cache);
+				if let Some(state_result) = no_cache {
+					query = state_result;
+				} else {
+					break;
+				}
+			}
+		};
+
+		// Do some 10 random query of 0 to size / 10 content: to feed local cache (use storage key).
+		let mut start_key = value_pool[scenario.random_query_offset].0.clone();
+		if scenario.nb_random_query > 0 {
+			let query_interval = (255u8 - start_key[0]) / scenario.nb_random_query as u8;
+			for _ in 0..scenario.nb_random_query {
+				query_range(start_key.clone(), scenario.random_query_number, &state, &backend);
+				start_key[0] += query_interval;
+			}
+		}
+
+		// Do a fix query of 5 consecutive keys
+		query_range(vec![128u8], 5, &state, &backend);
+
+		let mut offset = scenario.initial_number_of_key;
+		let mut offset_remove = scenario.random_value_add_offset;
+		// new block with ~ 10 new value Repeat X time with x from 0 to 5
+		for i in 0..scenario.nb_change_blocks {
+			let mut collection = Vec::new();
+			(0..scenario.nb_value_add).for_each(|ix| {
+				let key = value_pool[offset + ix].0[..scenario.value_add_key_len].to_vec();
+				let value = value_pool[offset + ix].1[..scenario.value_len].to_vec();
+					collection.push((key, Some(value)));
+			});
+			// only remove existing value
+			if offset_remove + scenario.nb_value_remove < offset {
+				(0..scenario.nb_value_remove).for_each(|ix| {
+					let key = value_pool[offset + ix].0[..scenario.initial_key_length].to_vec();
+						collection.push((key, None));
+				});
+			}
+			offset += scenario.nb_value_add;
+			offset_remove += scenario.nb_value_remove;
+
+
+			backend.insert(vec![(None, collection.clone())]);
+			state.cache.sync_cache(
+				&[],
+				&[],
+				collection,
+				vec![],
+				Some(block_hashes[i].clone()),
+				Some(i as u64 + 1),
+				true,
+			);
+
+			if i == reorg_ix {
+				println!("reorg_ix {}", reorg_ix);
+				backend_reorg = backend.clone();
+			}
+			// between each do the fix query.
+			query_range(vec![128u8], 5, &state, &backend);
+
+		}
+
+		// round of random query
+		let mut start_key = value_pool[scenario.random_query_offset].0.clone();
+		if scenario.nb_random_query > 0 {
+			let query_interval = (255u8 - start_key[0]) / scenario.nb_random_query as u8;
+			for _ in 0..scenario.nb_random_query {
+				query_range(start_key.clone(), scenario.random_query_number, &state, &backend);
+				start_key[0] += query_interval;
+			}
+		}
+
+		// reorg to max_nb_block / 2.
+		let offset = scenario.initial_number_of_key;
+		let offset_remove = scenario.random_value_add_offset;
+		let mut collection = Vec::new();
+		(0..scenario.nb_value_add).for_each(|ix| {
+			let key = value_pool[offset + ix].0[..scenario.initial_key_length].to_vec();
+			let value = value_pool[offset + ix].1[..scenario.value_len].to_vec();
+				collection.push((key, Some(value)));
+		});
+		// only remove existing value
+		if offset_remove + scenario.nb_value_remove < offset {
+			(0..scenario.nb_value_remove).for_each(|ix| {
+				let key = value_pool[offset + ix].0[..scenario.initial_key_length].to_vec();
+					collection.push((key, None));
+			});
+		}
+
+
+		backend_reorg.insert(vec![(None, collection.clone())]);
+		let reverted_hashes: Vec<_> = (0..(scenario.nb_change_blocks / 2)).map(|i| {
+			block_hashes[i + 1].clone()
+		}).collect(); // TODO not sure about order, may need to reverse iter before collect.
+		state.cache.sync_cache(
+			&[],
+			&reverted_hashes[..],
+			collection,
+			vec![],
+			Some(block_hashes[reorg_ix].clone()),
+			Some(reorg_ix as u64 + 1),
+			true,
+		);
+
+		println!("{:?}", (reorg_ix, reverted_hashes.len(), reverted_hashes.len(), scenario.nb_change_blocks));
+		query_range(vec![128u8], 5, &state, &backend_reorg);
+		// round of random query
+		let mut start_key = value_pool[scenario.random_query_offset].0.clone();
+		if scenario.nb_random_query > 0 {
+			let query_interval = (255u8 - start_key[0]) / scenario.nb_random_query as u8;
+			for _ in 0..scenario.nb_random_query {
+				query_range(start_key.clone(), scenario.random_query_number, &state, &backend_reorg);
+				start_key[0] += query_interval;
+			}
+		}
+	}
+
+	#[test]
+	fn simple_fuzz_check() {
+		let pool = CheckScenario::initiate_value_pool(0);
+		for i in 0u64..50 {
+			quick_check(CheckScenario::random(i), &pool);
+		}
+	}
 }
