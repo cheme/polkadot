@@ -1009,19 +1009,17 @@ mod test {
 		assert!(parent_access_base.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
+
+		parent_access.log_append(None, &b"appendkey"[..]);
 		parent_access.log_read(None, &b"st_int"[..]);
 		parent_access.log_read(None, &b"keyr"[..]);
 		parent_access.log_read(None, &b"prefix"[..]);
 		parent_access.log_read(None, &b"prefixy"[..]);
 		parent_access.log_read(None, &b"keywa"[..]);
-		parent_access.log_read_interval(None, &b"z_i"[..], Some(&b"z_inta"[..]));
-		parent_access.log_read_interval(None, &b"z_i"[..], Some(&b"z_j"[..]));
-		parent_access.log_read_interval(None, &b"z_int"[..], None);
 		parent_access.log_read_interval(None, &b"pre"[..], Some(&b"prefix"[..]));
-		parent_access.log_write_prefix(None, &b""[..]);
-		parent_access.log_write_prefix(None, &b"z_inti"[..]);
-		parent_access.log_write(None, &b"keyw"[..]);
-		parent_access.log_write(None, &b"prefixx"[..]);
+		parent_access.log_write(None, &b"key"[..]);
+		parent_access.log_write_prefix(None, &b"z_intf"[..]);
+		parent_access.log_write_prefix(None, &b"z_intera"[..]);
 		assert!(parent_access.top_logger.check_child_write(&child_access, task1));
 
 		parent_access.log_read(None, &b"keyw"[..]);
@@ -1041,6 +1039,14 @@ mod test {
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read_interval(None, &b"pre"[..], None);
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
+
+		let mut parent_access = parent_access_base.clone();
+		parent_access.log_read_interval(None, &b"key"[..], Some(&b"keyz"[..]));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
+
+		let mut parent_access = parent_access_base.clone();
+		parent_access.log_write_prefix(None, &b"keyw"[..]);
 		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 	}
 }
