@@ -246,6 +246,12 @@ impl StateLogger {
 			if !self.check_key_against(key, marker, true, true, false) {
 				return false;
 			}
+			if !self.check_key_against_write_prefixes(key, marker) {
+				return false;
+			}
+			if !self.check_key_against_read_intervals(key, marker) {
+				return false;
+			}
 		}
 		true
 	}
@@ -847,71 +853,55 @@ mod test {
 	use super::*;
 
 	#[test]
-	fn test_check_child_insert() {
+	fn test_check_child_append() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		let task2 = 2u64;
+		parent_access_base.log_appends_against(Some(task1));
+		parent_access_base.log_appends_against(Some(task2));
+		parent_access_base.log_writes_against(Some(task2));
 		parent_access_base.log_writes_against(Some(task1));
 		parent_access_base.log_writes_against(Some(task2));
 		// log read should not interfere
 		parent_access_base.log_reads_against(Some(task1));
 		parent_access_base.log_reads_against(Some(task2));
 		let mut child_access = StateLog::default();
-		child_access.write_keys.push(b"key1".to_vec());
-		child_access.write_prefix.push(b"prefix".to_vec());
-		assert!(parent_access_base.top_logger.check_child_write(&child_access, task1));
-		assert!(parent_access_base.top_logger.check_child_write(&child_access, task2));
+		child_access.append_keys.push(b"key1".to_vec());
+		child_access.append_keys.push(b"prefix".to_vec());
+		assert!(parent_access_base.top_logger.check_child_append(&child_access, task1));
+		assert!(parent_access_base.top_logger.check_child_append(&child_access, task2));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"key1"[..]);
-		parent_access.log_read_interval(None, &b""[..], None);
-		assert!(parent_access.top_logger.check_child_write(&child_access, task1));
-		assert!(parent_access.top_logger.check_child_write(&child_access, task2));
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task2));
 
+		let mut parent_access = parent_access_base.clone();
+		parent_access.log_read_interval(None, &b"key1_"[..], Some(&b"prefiw"[..]));
+		assert!(parent_access.top_logger.check_child_append(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_append(&child_access, task2));
+
+		let mut parent_access = parent_access_base.clone();
+		parent_access.log_read_interval(None, &b"prefix"[..], None);
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task2));
+
+		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"key1"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task2));
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task2));
 
 		parent_access.remove_worker_eager(task2);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
-		assert!(parent_access.top_logger.check_child_write(&child_access, task2));
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_append(&child_access, task2));
 
 		let mut parent_access = parent_access_base.clone();
-		parent_access.log_write(None, &b"key12"[..]);
-		parent_access.log_write(None, &b"key2"[..]);
-		parent_access.log_write(None, &b"k"[..]);
-		parent_access.log_write(None, &b""[..]);
-		parent_access.log_write(None, &b"prefi"[..]);
-		parent_access.log_write_prefix(None, &b"a"[..]);
 		parent_access.log_write_prefix(None, &b"key10"[..]);
-		assert!(parent_access.top_logger.check_child_write(&child_access, task1));
-
-		parent_access.log_write(None, &b"prefixed"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_append(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
-		parent_access.log_write(None, &b"prefix"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
-
-		let mut parent_access = parent_access_base.clone();
-		parent_access.log_write_prefix(None, &b"key1"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
-
-		let mut parent_access = parent_access_base.clone();
-		parent_access.log_write_prefix(None, &b"ke"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
-
-		let mut parent_access = parent_access_base.clone();
-		parent_access.log_write_prefix(None, &b"pre"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
-
-		let mut parent_access = parent_access_base.clone();
-		parent_access.log_write_prefix(None, &b"prefix"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
-
-		let mut parent_access = parent_access_base.clone();
-		parent_access.log_write_prefix(None, &b"prefixed"[..]);
-		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
+		parent_access.log_write_prefix(None, &b"k"[..]);
+		assert!(!parent_access.top_logger.check_child_append(&child_access, task1));
 	}
 
 	#[test]
@@ -921,6 +911,7 @@ mod test {
 		parent_access_base.log_writes_against(Some(task1));
 		// log read in parent should not interfere
 		parent_access_base.log_reads_against(Some(task1));
+		parent_access_base.log_appends_against(Some(task1));
 		let mut child_access = StateLog::default();
 		child_access.append_keys.push(b"appendkey".to_vec());
 		child_access.write_keys.push(b"keyw".to_vec());
@@ -996,6 +987,7 @@ mod test {
 		parent_access_base.log_writes_against(Some(task1));
 		// log read in parent should not interfere
 		parent_access_base.log_reads_against(Some(task1));
+		parent_access_base.log_appends_against(Some(task1));
 		let mut child_access = StateLog::default();
 		child_access.append_keys.push(b"appendkey".to_vec());
 		child_access.write_keys.push(b"keyw".to_vec());
