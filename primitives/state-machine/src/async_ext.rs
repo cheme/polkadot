@@ -23,6 +23,7 @@ use sp_std::{
 	boxed::Box,
 	any::{TypeId, Any},
 	vec::Vec,
+	cmp::Ordering,
 };
 use sp_core::{
 	storage::{ChildInfo, TrackedStorageKey},
@@ -192,20 +193,49 @@ impl Externalities for AsyncExt {
 
 	fn next_storage_key(&mut self, key: &[u8]) -> Option<StorageKey> {
 		self.guard_stateless("`next_storage_key`: should not be used in async externalities!");
-		let next_backend_key = self.backend.next_storage_key(key);
-		let next_overlay_key_change = self.overlay.next_storage_key_change(key, next_backend_key.as_ref());
 
-		match (next_backend_key, next_overlay_key_change) {
-			(Some(backend_key), Some(overlay_key)) if &backend_key[..] < overlay_key.0 => Some(backend_key),
-			(backend_key, None) => backend_key,
-			(_, Some(overlay_key)) => if overlay_key.1.value().is_some() {
-				Some(overlay_key.0.to_vec())
-			} else {
-				// TODO optimize this clone by non recursive.
-				let key = overlay_key.0.to_vec();
-				self.next_storage_key(&key[..])
-			},
-		}
+		let mut next_backend_key = self.backend.next_storage_key(key);
+		let next_backend_key = &mut next_backend_key;
+		let backend = &mut self.backend;
+		let overlay = &mut self.overlay;
+		let result = || -> Option<StorageKey> {
+			let mut overlay_changes = overlay.iter_after(
+				key,
+			).peekable();
+
+			match (&next_backend_key, overlay_changes.peek()) {
+				(_, None) => next_backend_key.clone(),
+				(Some(_), Some(_)) => {
+					while let Some(overlay_key) = overlay_changes.next() {
+						let cmp = next_backend_key.as_deref().map(|v| v.cmp(&overlay_key.0));
+
+						// If `backend_key` is less than the `overlay_key`, we found out next key.
+						if cmp == Some(Ordering::Less) {
+							return next_backend_key.clone()
+						} else if overlay_key.1.value().is_some() {
+							// If there exists a value for the `overlay_key` in the overlay
+							// (aka the key is still valid), it means we have found our next key.
+							return Some(overlay_key.0.to_vec())
+						} else if cmp == Some(Ordering::Equal) {
+							// If the `backend_key` and `overlay_key` are equal, it means that we need
+							// to search for the next backend key, because the overlay has overwritten
+							// this key.
+							*next_backend_key = backend.next_storage_key(
+								&overlay_key.0,
+							);
+						}
+					}
+
+					next_backend_key.clone()
+				},
+				(None, Some(_)) => {
+					// Find the next overlay key that has a value attached.
+					overlay_changes.find_map(|k| k.1.value().is_some().then(|| k.0.to_vec()))
+				},
+			}
+		}();
+		self.overlay.log_backend_interval(None, key, next_backend_key.as_ref());
+		result
 	}
 
 	fn next_child_storage_key(
@@ -216,28 +246,51 @@ impl Externalities for AsyncExt {
 		self.guard_stateless(
 			"`next_child_storage_key`: should not be used in async externalities!",
 		);
-		let next_backend_key = self.backend
+		let mut next_backend_key = self.backend
 			.next_child_storage_key(child_info, key);
-		let next_overlay_key_change = self.overlay.next_child_storage_key_change(
-			&child_info,
-			key,
-			next_backend_key.as_ref(),
-		);
+		let next_backend_key = &mut next_backend_key;
+		let backend = &mut self.backend;
+		let overlay = &mut self.overlay;
+		let result = || -> Option<StorageKey> {
+			let mut overlay_changes = overlay.child_iter_after(
+				child_info.storage_key(),
+				key,
+			).peekable();
 
-		match (next_backend_key, next_overlay_key_change) {
-			(Some(backend_key), Some(overlay_key)) if &backend_key[..] < overlay_key.0 => Some(backend_key),
-			(backend_key, None) => backend_key,
-			(_, Some(overlay_key)) => if overlay_key.1.value().is_some() {
-				Some(overlay_key.0.to_vec())
-			} else {
-				// TODO optimize this clone by non recursive.
-				let key = overlay_key.0.to_vec();
-				self.next_child_storage_key(
-					child_info,
-					&key[..],
-				)
-			},
-		}
+			match (&next_backend_key, overlay_changes.peek()) {
+				(_, None) => next_backend_key.clone(),
+				(Some(_), Some(_)) => {
+					while let Some(overlay_key) = overlay_changes.next() {
+						let cmp = next_backend_key.as_deref().map(|v| v.cmp(&overlay_key.0));
+
+						// If `backend_key` is less than the `overlay_key`, we found out next key.
+						if cmp == Some(Ordering::Less) {
+							return next_backend_key.clone()
+						} else if overlay_key.1.value().is_some() {
+							// If there exists a value for the `overlay_key` in the overlay
+							// (aka the key is still valid), it means we have found our next key.
+							return Some(overlay_key.0.to_vec())
+						} else if cmp == Some(Ordering::Equal) {
+							// If the `backend_key` and `overlay_key` are equal, it means that we need
+							// to search for the next backend key, because the overlay has overwritten
+							// this key.
+							*next_backend_key = backend.next_child_storage_key(
+								child_info,
+								&overlay_key.0,
+							);
+						}
+					}
+
+					next_backend_key.clone()
+				},
+				(None, Some(_)) => {
+					// Find the next overlay key that has a value attached.
+					overlay_changes.find_map(|k| k.1.value().is_some().then(|| k.0.to_vec()))
+				},
+			}
+		}();
+		self.overlay.log_backend_interval(Some(child_info), key, next_backend_key.as_ref());
+		result
 	}
 
 	fn place_storage(&mut self, key: StorageKey, maybe_value: Option<StorageValue>) {
@@ -263,7 +316,7 @@ impl Externalities for AsyncExt {
 		panic!("`kill_child_storage`: should not be used in read only worker externalities!");
 	}
 
-	fn clear_prefix(&mut self, _prefix: &[u8]) {
+	fn clear_prefix(&mut self, _prefix: &[u8], _limit: Option<u32>) -> (bool, u32) {
 		panic!("`clear_prefix`: should not be used in read only worker externalities!");
 	}
 
@@ -271,7 +324,8 @@ impl Externalities for AsyncExt {
 		&mut self,
 		_child_info: &ChildInfo,
 		_prefix: &[u8],
-	) {
+		_limit: Option<u32>,
+	) -> (bool, u32) {
 		panic!("`clear_child_prefix`: should not be used in read only worker externalities!");
 	}
 

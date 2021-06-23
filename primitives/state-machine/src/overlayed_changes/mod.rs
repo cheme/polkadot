@@ -155,8 +155,10 @@ pub enum IndexOperation {
 	Insert {
 		/// Extrinsic index in the current block.
 		extrinsic: u32,
-		/// Data offset in the extrinsic.
-		offset: u32,
+		/// Data content hash.
+		hash: Vec<u8>,
+		/// Indexed data size.
+		size: u32,
 	},
 	/// Renew existing transaction storage.
 	Renew {
@@ -164,8 +166,6 @@ pub enum IndexOperation {
 		extrinsic: u32,
 		/// Referenced index hash.
 		hash: Vec<u8>,
-		/// Expected data size.
-		size: u32,
 	}
 }
 
@@ -750,6 +750,11 @@ impl OverlayedChanges {
 		self.children.get_mut(key).map(|(overlay, info)| (overlay.changes(), &*info))
 	}
 
+	/// Get an list of all index operations.
+	pub fn transaction_index_ops(&self) -> &[IndexOperation] {
+		&self.transaction_index_ops
+	}
+
 	/// Convert this instance with all changes into a [`StorageChanges`] instance.
 	#[cfg(feature = "std")]
 	pub fn into_storage_changes<
@@ -901,34 +906,35 @@ impl OverlayedChanges {
 		})
 	}
 
-	/// Returns the next (in lexicographic order) storage key in the overlayed alongside its value.
-	/// If no value is next then `None` is returned.
-	pub fn next_storage_key_change(
+	/// Log backend interval accessed.
+	pub fn log_backend_interval(
 		&mut self,
+		child_info: Option<&ChildInfo>,
 		key: &[u8],
 		backend_accessed: Option<&Vec<u8>>,
-	) -> Option<(&[u8], &mut OverlayedValue)> {
-		self.filters.guard_read_interval(None, key, backend_accessed.map(Vec::as_slice));
-		self.optimistic_logger.log_read_interval(None, key, backend_accessed.map(Vec::as_slice));
-		self.top.next_change(key)
+	) {
+		self.filters.guard_read_interval(child_info, key, backend_accessed.map(Vec::as_slice));
+		self.optimistic_logger.log_read_interval(child_info, key, backend_accessed.map(Vec::as_slice));
+	}
+	
+	/// Returns an iterator over the keys (in lexicographic order) following `key` (excluding `key`)
+	/// alongside its value.
+	pub fn iter_after(&mut self, key: &[u8]) -> impl Iterator<Item = (&[u8], &mut OverlayedValue)> {
+		self.top.changes_after(key)
 	}
 
-	/// Returns the next (in lexicographic order) child storage key in the overlayed alongside its
-	/// value.  If no value is next then `None` is returned.
-	pub fn next_child_storage_key_change(
+	/// Returns an iterator over the keys (in lexicographic order) following `key` (excluding `key`)
+	/// alongside its value for the given `storage_key` child.
+	pub fn child_iter_after(
 		&mut self,
-		child_info: &ChildInfo,
+		storage_key: &[u8],
 		key: &[u8],
-		backend_accessed: Option<&Vec<u8>>,
-	) -> Option<(&[u8], &mut OverlayedValue)> {
-		self.filters.guard_read_interval(Some(child_info), key, backend_accessed.map(Vec::as_slice));
-		self.optimistic_logger.log_read_interval(Some(child_info), key, backend_accessed.map(Vec::as_slice));
-		let storage_key = child_info.storage_key();
+	) -> impl Iterator<Item = (&[u8], &mut OverlayedValue)> {
 		self.children
 			.get_mut(storage_key)
-			.and_then(|(overlay, _)|
-				overlay.next_change(key)
-			)
+			.map(|(overlay, _)| overlay.changes_after(key))
+			.into_iter()
+			.flatten()
 	}
 
 	/// Read only access ot offchain overlay.
@@ -1440,28 +1446,28 @@ mod tests {
 		overlay.set_storage(vec![30], None);
 
 		// next_prospective < next_committed
-		let next_to_5 = overlay.next_storage_key_change(&[5], None).unwrap();
+		let next_to_5 = overlay.iter_after(&[5], None).next().unwrap();
 		assert_eq!(next_to_5.0.to_vec(), vec![10]);
 		assert_eq!(next_to_5.1.value(), Some(&vec![10]));
 
 		// next_committed < next_prospective
-		let next_to_10 = overlay.next_storage_key_change(&[10], None).unwrap();
+		let next_to_10 = overlay.iter_after(&[10], None).next().unwrap();
 		assert_eq!(next_to_10.0.to_vec(), vec![20]);
 		assert_eq!(next_to_10.1.value(), Some(&vec![20]));
 
 		// next_committed == next_prospective
-		let next_to_20 = overlay.next_storage_key_change(&[20], None).unwrap();
+		let next_to_20 = overlay.iter_after(&[20], None).next().unwrap();
 		assert_eq!(next_to_20.0.to_vec(), vec![30]);
 		assert_eq!(next_to_20.1.value(), None);
 
 		// next_committed, no next_prospective
-		let next_to_30 = overlay.next_storage_key_change(&[30], None).unwrap();
+		let next_to_30 = overlay.iter_after(&[30], None).next().unwrap();
 		assert_eq!(next_to_30.0.to_vec(), vec![40]);
 		assert_eq!(next_to_30.1.value(), Some(&vec![40]));
 
 		overlay.set_storage(vec![50], Some(vec![50]));
 		// next_prospective, no next_committed
-		let next_to_40 = overlay.next_storage_key_change(&[40], None).unwrap();
+		let next_to_40 = overlay.iter_after(&[40], None).next().unwrap();
 		assert_eq!(next_to_40.0.to_vec(), vec![50]);
 		assert_eq!(next_to_40.1.value(), Some(&vec![50]));
 	}
@@ -1480,28 +1486,28 @@ mod tests {
 		overlay.set_child_storage(child_info, vec![30], None);
 
 		// next_prospective < next_committed
-		let next_to_5 = overlay.next_child_storage_key_change(child_info, &[5], None).unwrap();
+		let next_to_5 = overlay.child_iter_after(child, &[5], None).next().unwrap();
 		assert_eq!(next_to_5.0.to_vec(), vec![10]);
 		assert_eq!(next_to_5.1.value(), Some(&vec![10]));
 
 		// next_committed < next_prospective
-		let next_to_10 = overlay.next_child_storage_key_change(child_info, &[10], None).unwrap();
+		let next_to_10 = overlay.child_iter_after(child, &[10], None).next().unwrap();
 		assert_eq!(next_to_10.0.to_vec(), vec![20]);
 		assert_eq!(next_to_10.1.value(), Some(&vec![20]));
 
 		// next_committed == next_prospective
-		let next_to_20 = overlay.next_child_storage_key_change(child_info, &[20], None).unwrap();
+		let next_to_20 = overlay.child_iter_after(child, &[20], None).next().unwrap();
 		assert_eq!(next_to_20.0.to_vec(), vec![30]);
 		assert_eq!(next_to_20.1.value(), None);
 
 		// next_committed, no next_prospective
-		let next_to_30 = overlay.next_child_storage_key_change(child_info, &[30], None).unwrap();
+		let next_to_30 = overlay.child_iter_after(child, &[30], None).next().unwrap();
 		assert_eq!(next_to_30.0.to_vec(), vec![40]);
 		assert_eq!(next_to_30.1.value(), Some(&vec![40]));
 
 		overlay.set_child_storage(child_info, vec![50], Some(vec![50]));
 		// next_prospective, no next_committed
-		let next_to_40 = overlay.next_child_storage_key_change(child_info, &[40], None).unwrap();
+		let next_to_40 = overlay.child_iter_after(child, &[40], None).next().unwrap();
 		assert_eq!(next_to_40.0.to_vec(), vec![50]);
 		assert_eq!(next_to_40.1.value(), Some(&vec![50]));
 	}

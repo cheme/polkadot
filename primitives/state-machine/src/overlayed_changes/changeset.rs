@@ -442,11 +442,11 @@ impl OverlayedChangeSet {
 		}
 	}
 
-	/// Get the change that is next to the supplied key.
-	pub fn next_change(&mut self, key: &[u8]) -> Option<(&[u8], &mut OverlayedValue)> {
+	/// Get the iterator over all changes that follow the supplied `key`.
+	pub fn changes_after(&mut self, key: &[u8]) -> impl Iterator<Item = (&[u8], &mut OverlayedValue)> {
 		use sp_std::ops::Bound;
 		let range = (Bound::Excluded(key), Bound::Unbounded);
-		self.changes.range_mut::<[u8], _>(range).next().map(|(k, v)| (&k[..], v))
+		self.changes.range_mut::<[u8], _>(range).map(|(k, v)| (k.as_slice(), v))
 	}
 }
 
@@ -727,29 +727,29 @@ mod test {
 		changeset.set(b"key4".to_vec(), Some(b"val4".to_vec()).into(), Some(4));
 		changeset.set(b"key11".to_vec(), Some(b"val11".to_vec()).into(), Some(11));
 
-		assert_eq!(changeset.next_change(b"key0").unwrap().0, b"key1");
-		assert_eq!(changeset.next_change(b"key0").unwrap().1.value(), Some(&b"val1".to_vec()));
-		assert_eq!(changeset.next_change(b"key1").unwrap().0, b"key11");
-		assert_eq!(changeset.next_change(b"key1").unwrap().1.value(), Some(&b"val11".to_vec()));
-		assert_eq!(changeset.next_change(b"key11").unwrap().0, b"key2");
-		assert_eq!(changeset.next_change(b"key11").unwrap().1.value(), Some(&b"val2".to_vec()));
-		assert_eq!(changeset.next_change(b"key2").unwrap().0, b"key3");
-		assert_eq!(changeset.next_change(b"key2").unwrap().1.value(), Some(&b"val3".to_vec()));
-		assert_eq!(changeset.next_change(b"key3").unwrap().0, b"key4");
-		assert_eq!(changeset.next_change(b"key3").unwrap().1.value(), Some(&b"val4".to_vec()));
-		assert_eq!(changeset.next_change(b"key4"), None);
+		assert_eq!(changeset.changes_after(b"key0").next().unwrap().0, b"key1");
+		assert_eq!(changeset.changes_after(b"key0").next().unwrap().1.value(), Some(&b"val1".to_vec()));
+		assert_eq!(changeset.changes_after(b"key1").next().unwrap().0, b"key11");
+		assert_eq!(changeset.changes_after(b"key1").next().unwrap().1.value(), Some(&b"val11".to_vec()));
+		assert_eq!(changeset.changes_after(b"key11").next().unwrap().0, b"key2");
+		assert_eq!(changeset.changes_after(b"key11").next().unwrap().1.value(), Some(&b"val2".to_vec()));
+		assert_eq!(changeset.changes_after(b"key2").next().unwrap().0, b"key3");
+		assert_eq!(changeset.changes_after(b"key2").next().unwrap().1.value(), Some(&b"val3".to_vec()));
+		assert_eq!(changeset.changes_after(b"key3").next().unwrap().0, b"key4");
+		assert_eq!(changeset.changes_after(b"key3").next().unwrap().1.value(), Some(&b"val4".to_vec()));
+		assert_eq!(changeset.changes_after(b"key4").next(), None);
 
 		changeset.rollback_transaction().unwrap();
 
-		assert_eq!(changeset.next_change(b"key0").unwrap().0, b"key1");
-		assert_eq!(changeset.next_change(b"key0").unwrap().1.value(), Some(&b"val1".to_vec()));
-		assert_eq!(changeset.next_change(b"key1").unwrap().0, b"key2");
-		assert_eq!(changeset.next_change(b"key1").unwrap().1.value(), Some(&b"val2".to_vec()));
-		assert_eq!(changeset.next_change(b"key11").unwrap().0, b"key2");
-		assert_eq!(changeset.next_change(b"key11").unwrap().1.value(), Some(&b"val2".to_vec()));
-		assert_eq!(changeset.next_change(b"key2"), None);
-		assert_eq!(changeset.next_change(b"key3"), None);
-		assert_eq!(changeset.next_change(b"key4"), None);
+		assert_eq!(changeset.changes_after(b"key0").next().unwrap().0, b"key1");
+		assert_eq!(changeset.changes_after(b"key0").next().unwrap().1.value(), Some(&b"val1".to_vec()));
+		assert_eq!(changeset.changes_after(b"key1").next().unwrap().0, b"key2");
+		assert_eq!(changeset.changes_after(b"key1").next().unwrap().1.value(), Some(&b"val2".to_vec()));
+		assert_eq!(changeset.changes_after(b"key11").next().unwrap().0, b"key2");
+		assert_eq!(changeset.changes_after(b"key11").next().unwrap().1.value(), Some(&b"val2".to_vec()));
+		assert_eq!(changeset.changes_after(b"key2").next(), None);
+		assert_eq!(changeset.changes_after(b"key3").next(), None);
+		assert_eq!(changeset.changes_after(b"key4").next(), None);
 
 	}
 

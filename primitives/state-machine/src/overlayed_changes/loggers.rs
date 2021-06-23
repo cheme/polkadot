@@ -706,7 +706,7 @@ impl AccessLogger {
 				&mut self.top_logger
 			};
 			let mut children = sp_std::iter::Iterator::peekable(self.log_read.children.difference(&self.read_all.children));
-			let mut parent = self.log_read.parent;
+			let parent = self.log_read.parent;
 			if children.peek().is_some() || parent {
 				let mut entry = logger.read_intervals.entry((key.to_vec(), key_end.map(|end| end.to_vec())))
 					.or_default();

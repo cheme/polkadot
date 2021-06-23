@@ -220,6 +220,7 @@ mod tests {
 	fn basic() {
 		test_externalities().execute_with(|| {
 			let a1 = spawn(async_runner, vec![5, 2, 1], WorkerDeclaration::stateless())
+				.unwrap()
 				.join();
 			assert_eq!(a1, Some(vec![1, 2, 5]));
 		})
@@ -229,6 +230,7 @@ mod tests {
 	fn panicking() {
 		let res = test_externalities().execute_with_safe(||{
 			spawn(async_panicker, vec![5, 2, 1], WorkerDeclaration::stateless())
+				.unwrap()
 				.join();
 		});
 
@@ -249,7 +251,7 @@ mod tests {
 						3 * running_val + 1
 					};
 					data.push(running_val as u8);
-					(spawn(async_runner, data.clone(), WorkerDeclaration::stateless()), data.clone())
+					(spawn(async_runner, data.clone(), WorkerDeclaration::stateless()).unwrap(), data.clone())
 				}
 			).collect::<Vec<_>>();
 
