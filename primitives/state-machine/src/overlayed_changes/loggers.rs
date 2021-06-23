@@ -847,7 +847,7 @@ mod test {
 	use super::*;
 
 	#[test]
-	fn test_check_write_write() {
+	fn test_check_child_write() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		let task2 = 2u64;
@@ -857,24 +857,24 @@ mod test {
 		parent_access_base.log_reads_against(Some(task1));
 		parent_access_base.log_reads_against(Some(task2));
 		let mut child_access = StateLog::default();
-		child_access.read_write_keys.push(b"key1".to_vec());
-		child_access.read_write_prefix.push(b"prefix".to_vec());
-		assert!(parent_access_base.top_logger.check_write_write(&child_access, task1));
-		assert!(parent_access_base.top_logger.check_write_write(&child_access, task2));
+		child_access.write_keys.push(b"key1".to_vec());
+		child_access.write_prefix.push(b"prefix".to_vec());
+		assert!(parent_access_base.top_logger.check_child_write(&child_access, task1));
+		assert!(parent_access_base.top_logger.check_child_write(&child_access, task2));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"key1"[..]);
 		parent_access.log_read_interval(None, &b""[..], None);
-		assert!(parent_access.top_logger.check_write_write(&child_access, task1));
-		assert!(parent_access.top_logger.check_write_write(&child_access, task2));
+		assert!(parent_access.top_logger.check_child_write(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_write(&child_access, task2));
 
 		parent_access.log_write(None, &b"key1"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task2));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task2));
 
 		parent_access.remove_worker_eager(task2);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
-		assert!(parent_access.top_logger.check_write_write(&child_access, task2));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_write(&child_access, task2));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"key12"[..]);
@@ -884,34 +884,34 @@ mod test {
 		parent_access.log_write(None, &b"prefi"[..]);
 		parent_access.log_write_prefix(None, &b"a"[..]);
 		parent_access.log_write_prefix(None, &b"key10"[..]);
-		assert!(parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(parent_access.top_logger.check_child_write(&child_access, task1));
 
 		parent_access.log_write(None, &b"prefixed"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write(None, &b"prefix"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"key1"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"ke"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"pre"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"prefix"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
 		parent_access.log_write_prefix(None, &b"prefixed"[..]);
-		assert!(!parent_access.top_logger.check_write_write(&child_access, task1));
+		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 	}
 
 	#[test]
@@ -922,10 +922,10 @@ mod test {
 		// log read in parent should not interfere
 		parent_access_base.log_reads_against(Some(task1));
 		let mut child_access = StateLog::default();
-		child_access.read_write_keys.push(b"keyw".to_vec());
-		child_access.read_write_prefix.push(b"prefixw".to_vec());
-		child_access.read_write_prefix.push(b"prefixx".to_vec());
-		child_access.read_write_prefix.push(b"prefixz".to_vec());
+		child_access.write_keys.push(b"keyw".to_vec());
+		child_access.write_prefix.push(b"prefixw".to_vec());
+		child_access.write_prefix.push(b"prefixx".to_vec());
+		child_access.write_prefix.push(b"prefixz".to_vec());
 		child_access.read_keys.push(b"keyr".to_vec());
 		child_access.read_intervals.push((b"st_int".to_vec(), Some(b"w".to_vec())));
 		child_access.read_intervals.push((b"z_int".to_vec(), Some(b"z_inter".to_vec())));
@@ -988,17 +988,17 @@ mod test {
 	}
 
 	#[test]
-	fn test_check_child_write() {
+	fn test_check_child_write2() { // TODO useless TODO test check_child_append + TODO some append in child access of other tests
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		parent_access_base.log_writes_against(Some(task1));
 		// log read in parent should not interfere
 		parent_access_base.log_reads_against(Some(task1));
 		let mut child_access = StateLog::default();
-		child_access.read_write_keys.push(b"keyw".to_vec());
-		child_access.read_write_prefix.push(b"prefixw".to_vec());
-		child_access.read_write_prefix.push(b"prefixx".to_vec());
-		child_access.read_write_prefix.push(b"prefixz".to_vec());
+		child_access.write_keys.push(b"keyw".to_vec());
+		child_access.write_prefix.push(b"prefixw".to_vec());
+		child_access.write_prefix.push(b"prefixx".to_vec());
+		child_access.write_prefix.push(b"prefixz".to_vec());
 		child_access.read_keys.push(b"keyr".to_vec());
 		child_access.read_intervals.push((b"st_int".to_vec(), Some(b"w".to_vec())));
 		child_access.read_intervals.push((b"z_int".to_vec(), Some(b"z_inter".to_vec())));
@@ -1024,19 +1024,19 @@ mod test {
 		parent_access.log_read(None, &b"keyw"[..]);
 		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
-		let parent_access = parent_access_base.clone();
+		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"prefixx"[..]);
 		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
-		let parent_access = parent_access_base.clone();
+		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read(None, &b"prefixxa"[..]);
 		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
-		let parent_access = parent_access_base.clone();
+		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read_interval(None, &b"pre"[..], Some(&b"prefixx"[..]));
 		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 
-		let parent_access = parent_access_base.clone();
+		let mut parent_access = parent_access_base.clone();
 		parent_access.log_read_interval(None, &b"pre"[..], None);
 		assert!(!parent_access.top_logger.check_child_write(&child_access, task1));
 	}

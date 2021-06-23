@@ -1072,7 +1072,7 @@ mod tests {
 			children_default: map![]
 		}.into();
 
-		let ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
+		let mut ext = TestExt::new(&mut overlay, &mut cache, &backend, None, None);
 
 		assert_eq!(ext.next_storage_key(&[5]), Some(vec![30]));
 
