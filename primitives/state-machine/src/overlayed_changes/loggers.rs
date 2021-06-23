@@ -847,7 +847,7 @@ mod test {
 	use super::*;
 
 	#[test]
-	fn test_check_child_write() {
+	fn test_check_child_insert() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		let task2 = 2u64;
@@ -922,6 +922,7 @@ mod test {
 		// log read in parent should not interfere
 		parent_access_base.log_reads_against(Some(task1));
 		let mut child_access = StateLog::default();
+		child_access.append_keys.push(b"appendkey".to_vec());
 		child_access.write_keys.push(b"keyw".to_vec());
 		child_access.write_prefix.push(b"prefixw".to_vec());
 		child_access.write_prefix.push(b"prefixx".to_vec());
@@ -936,11 +937,12 @@ mod test {
 		parent_access.log_read(None, &b"keyw"[..]);
 		parent_access.log_read(None, &b"keyr"[..]);
 		parent_access.log_read_interval(None, &b"z_int"[..], None);
+		parent_access.log_append(None, &b"append_key"[..]);
 		parent_access.log_write(None, &b"ke"[..]);
 		parent_access.log_write(None, &b""[..]);
 		parent_access.log_write(None, &b"prefixy"[..]);
 		parent_access.log_write(None, &b"st_in"[..]);
-		parent_access.log_write(None, &b"w0"[..]);
+		parent_access.log_append(None, &b"w0"[..]);
 		assert!(parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
@@ -954,12 +956,12 @@ mod test {
 		parent_access.log_write(None, &b"z_ins"[..]);
 		parent_access.log_write_prefix(None, &b"p"[..]);
 		parent_access.log_write_prefix(None, &b"prefixwed"[..]);
-		// Note that these logical conflict (log write involve a read) are done by
-		// check_write_write when write is enabled.
-		// (we rely on the fact that check_child_read is only for read only.
 		assert!(parent_access.top_logger.check_child_read(&child_access, task1));
 
 		parent_access.log_write(None, &b"keyr"[..]);
+		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
+
+		parent_access.log_append(None, &b"prefixwappend"[..]);
 		assert!(!parent_access.top_logger.check_child_read(&child_access, task1));
 
 		let mut parent_access = parent_access_base.clone();
@@ -988,13 +990,14 @@ mod test {
 	}
 
 	#[test]
-	fn test_check_child_write2() { // TODO useless TODO test check_child_append + TODO some append in child access of other tests
+	fn test_check_child_write() {
 		let mut parent_access_base = AccessLogger::default();
 		let task1 = 1u64;
 		parent_access_base.log_writes_against(Some(task1));
 		// log read in parent should not interfere
 		parent_access_base.log_reads_against(Some(task1));
 		let mut child_access = StateLog::default();
+		child_access.append_keys.push(b"appendkey".to_vec());
 		child_access.write_keys.push(b"keyw".to_vec());
 		child_access.write_prefix.push(b"prefixw".to_vec());
 		child_access.write_prefix.push(b"prefixx".to_vec());
