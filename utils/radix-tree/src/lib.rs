@@ -60,6 +60,23 @@ pub trait Value: Clone + Debug { }
 
 impl<V: Clone + Debug> Value for V { }
 
+
+/// Partial key stored in nodes.
+/// This is basically an enum implemented in a trait.
+pub trait NodeKey: Clone + Debug + Borrow<[u8]> {
+	const WITH_KEY: bool;
+
+	fn from_slice(slice: &[u8]) -> Self;
+
+	fn key(&self) -> Option<&[u8]>; // TODO rem in favor of borrow?
+
+	fn key_mut(&mut self) -> Option<&mut NodeKeyBuff>;
+
+	fn len2(&self) -> usize;
+
+	fn split_off2(&mut self, at: usize) -> Self;
+}
+
 /// This is a partial key.
 /// It contains part of a value key.
 /// For unaligned radix, inclusive mask for start
@@ -67,7 +84,7 @@ impl<V: Clone + Debug> Value for V { }
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Debug)]
-struct PrefixKey<D, P>
+pub struct PrefixKey<D, P>
 	where
 		P: PrefixKeyConf,
 {
@@ -117,9 +134,10 @@ impl<D, P> PrefixKey<D, P>
 	}
 }
 
-impl<P> PrefixKey<NodeKeyBuff, P>
+impl<N, P> PrefixKey<N, P>
 	where
 		P: PrefixKeyConf,
+		N: NodeKey,
 {
 	// TODO consider returning the skipped byte aka key index (avoid fetching it before split_off)
 	fn child_split_off<R: RadixConf<Alignment = P>>(&mut self, position: Position<P>) -> Self {
@@ -132,7 +150,7 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 		// No splitoff for smallvec(
 		//let split = self.data[position.index..].into();
 		//self.data.truncate(position.index);)
-		let mut split = self.data.split_off(position.index + shift);
+		let mut split = self.data.split_off2(position.index + shift);
 		self.end = position.mask;
 
 		// remove one for child.
@@ -140,14 +158,14 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 		debug_assert!(increment < 2);
 		if shift > 0 {
 			if increment == 0 {
-				let last_ix = self.data.len() - 1;
-				let last = self.data[last_ix];
-				split.insert(0, split_start.mask_start(last));
-				self.data[last_ix] = self.end.mask_end_excl(last);
+				let last_ix = self.data.len2() - 1;
+				let last = self.data.borrow()[last_ix];
+				split.key_mut().expect("TODO").insert(0, split_start.mask_start(last));
+				self.data.key_mut().expect("TODO")[last_ix] = self.end.mask_end_excl(last);
 			}
 		} else {
 			if increment > 0 {
-				split = split.split_off(increment);
+				split = split.split_off2(increment);
 			}
 		}
 		PrefixKey {
@@ -158,16 +176,76 @@ impl<P> PrefixKey<NodeKeyBuff, P>
 	}
 }
 
+impl NodeKey for NodeKeyBuff
+{
+	const WITH_KEY: bool = true;
+
+	fn key(&self) -> Option<&[u8]> {
+		Some(self.borrow())
+	}
+
+	fn key_mut(&mut self) -> Option<&mut NodeKeyBuff> {
+		Some(self)
+	}
+
+	fn from_slice(slice: &[u8]) -> Self {
+		slice.into()
+	}
+
+	fn len2(&self) -> usize {
+		self.len()
+	}
+
+	fn split_off2(&mut self, at: usize) -> Self {
+		self.split_off(at)
+	}
+}
+
+/// Omit key buffer in nodes.
+#[derive(Debug, Clone)]
+pub struct NoKey(usize);
+
+impl Borrow<[u8]> for NoKey {
+	fn borrow(&self) -> &[u8] {
+		panic!("Do not contain key.")
+	}
+}
+
+impl NodeKey for NoKey {
+	const WITH_KEY: bool = false;
+
+	fn key(&self) -> Option<&[u8]> {
+		None
+	}
+
+	fn key_mut(&mut self) -> Option<&mut NodeKeyBuff> {
+		None
+	}
+
+	fn from_slice(slice: &[u8]) -> Self {
+		NoKey(slice.len())
+	}
+
+	fn len2(&self) -> usize {
+		self.0
+	}
+
+	fn split_off2(&mut self, at: usize) -> Self {
+		let result = self.0 - at;
+		self.0 = at;
+		NoKey(result)
+	}
+}
 
 /// Returns first position where position differs.
 fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<D2, N::Alignment>) -> Position<N::Alignment>
 	where
-		D1: Borrow<[u8]>,
+		D1: NodeKey,
 		D2: Borrow<[u8]>,
 		N: RadixConf,
 {
 	if N::Alignment::ALIGNED {
-		let left = one.data.borrow();
+		let left = one.data.key().expect("TODO manage no key optim");
 		let right = other.data.borrow();
 		let upper_bound = min(left.len(), right.len());
 		for index in 0..upper_bound {
@@ -188,7 +266,7 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 			panic!("Unaligned call to common_until.");
 		}
 
-		let left = one.data.borrow();
+		let left = one.data.key().expect("TODO manage no key optim");
 		let right = other.data.borrow();
 		if left.len() == 0 || right.len() == 0 {
 			return Position::zero();
@@ -341,18 +419,19 @@ fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<
 	}
 */
 
-impl<P> PrefixKey<NodeKeyBuff, P>
+impl<N, P> PrefixKey<N, P>
 	where
 		P: PrefixKeyConf,
+		N: NodeKey,
 {
 	/// start is inclusive, end is exclusive.
 	/// This function cannot build an empty `PrefixKey`,
 	/// if needed `empty` should be use.
 	fn new_offset<Q: Borrow<[u8]>>(key: Q, start: Position<P>, end: Position<P>) -> Self {
 		let data = if end.mask == P::Mask::FIRST {
-			key.borrow()[start.index..end.index].into()
+			N::from_slice(&key.borrow()[start.index..end.index])
 		} else {
-			key.borrow()[start.index..end.index + 1].into()
+			N::from_slice(&key.borrow()[start.index..end.index + 1])
 		};
 
 		PrefixKey {
@@ -388,6 +467,7 @@ pub trait TreeConf: Debug + Clone + Sized {
 	type Value: Value;
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
 	type Backend: Backend<Self>;
+	type NodeKey: NodeKey;
 
 	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::Backend {
 		if let Some(backend) = Self::Backend::DEFAULT {
@@ -438,7 +518,7 @@ pub struct Node<N>
 	/// also maybe position of the closest child value (instert
 	/// will need to query in depth to resolve key position in children).
 	/// Can probably be gated behind an associated type in N.
-	key: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
+	key: PrefixKey<N::NodeKey, AlignmentFor<N>>,
 
 	/// A value if a value is stored for this node.
 	value: Option<N::Value>,
@@ -660,9 +740,9 @@ impl<N: TreeConf> Node<N> {
 					mask: self.key.start,
 				};
 				let position_start = position.next_by::<N::Radix>(self.depth());
-				position_start.set_index::<N::Radix>(&mut self.key.data, index);
+				position_start.set_index::<N::Radix>(self.key.data.key_mut().expect("TODO"), index);
 				let position_cat = position_start.next::<N::Radix>();
-				child.new_end(&mut self.key.data, position_cat);
+				child.new_end(self.key.data.key_mut().expect("TODO"), position_cat);
 				self.key.end = child.key.end;
 				self.value = child.value.take();
 				self.children = replace(&mut child.children, N::Children::empty());
@@ -1065,6 +1145,7 @@ macro_rules! flatten_children {
 		$inner_node_type: ident,
 		$inner_type: ident,
 		$inner_radix: ty,
+		$node_key: ty,
 		$backend: ty,
 		$($backend_gen: ident, )?
 		$({ $backend_ty: ident: $backend_const: tt $(+ $backend_const2: tt)* })?
@@ -1079,6 +1160,7 @@ macro_rules! flatten_children {
 			type Value = V;
 			type Children = $type_alias<V, $($backend_gen)?>;
 			type Backend = $backend;
+			type NodeKey = $node_key;
 		}
 		type $inner_children_type<V, $($backend_gen)?> = Node<$inner_node_type<V, $($backend_gen)?>>;
 		#[derive(Derivative)]
@@ -1139,6 +1221,7 @@ flatten_children!(
 	Node256NoBackend,
 	Children256,
 	Radix256Conf,
+	NodeKeyBuff,
 	(),
 );
 
@@ -1148,6 +1231,7 @@ flatten_children!(
 	Node256NoBackendART,
 	ART48_256,
 	Radix256Conf,
+	NodeKeyBuff,
 	(),
 );
 
@@ -1158,6 +1242,7 @@ flatten_children!(
 	Node256HashBackend,
 	Children256,
 	Radix256Conf,
+	NodeKeyBuff,
 	backends::DirectBackend<
 		backends::RcBackend<
 			backends::MapBackend
@@ -1172,6 +1257,7 @@ flatten_children!(
 	Node256LazyHashBackend,
 	Children256,
 	Radix256Conf,
+	NodeKeyBuff,
 	backends::LazyBackend<
 		backends::RcBackend<
 			backends::MapBackend
@@ -1186,6 +1272,7 @@ flatten_children!(
 	Node256TxBackend,
 	Children256,
 	Radix256Conf,
+	NodeKeyBuff,
 	backends::DirectBackend<
 		backends::RcBackend<
 			backends::MapBackend
@@ -1199,6 +1286,7 @@ flatten_children!(
 	Node16NoBackend,
 	Children16,
 	Radix16Conf,
+	NodeKeyBuff,
 	(),
 );
 
@@ -1208,5 +1296,16 @@ flatten_children!(
 	Node4NoBackend,
 	Children4,
 	Radix4Conf,
+	NodeKeyBuff,
+	(),
+);
+
+flatten_children!(
+	Children16FlattenNokey,
+	Node16FlattenNoKey,
+	Node16NoBackendNoKey,
+	Children16,
+	Radix16Conf,
+	NoKey,
 	(),
 );

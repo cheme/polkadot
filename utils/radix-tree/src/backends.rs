@@ -335,7 +335,8 @@ fn encode_node<N>(node: &Node<N>) -> Vec<u8>
 		let mask = <N::Radix as RadixConf>::Alignment::encode_mask(node.key.end);
 		result.push(mask);
 	}
-	node.key.data.as_slice().encode_to(&mut result);
+	use alloc::borrow::Borrow;
+	node.key.data.borrow().encode_to(&mut result);
 	node.value.encode_to(&mut result);
 
 	let mut key_index = KeyIndexFor::<N>::zero();
