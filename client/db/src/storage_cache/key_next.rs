@@ -660,8 +660,8 @@ impl<'a, H: AsRef<[u8]>> LRUHashes<'a, StorageKey, H> {
 				vacant_entry.insert(entry); 
 			},
 			HashEntry::Occupied(mut entry) => {
-				self.0.used_size -= entry.get().entry.storage().estimate_size();
-				self.0.used_size += entry.get().entry.storage().estimate_size();
+				self.0.used_size -= entry.get().entry.hash().estimate_size();
+				self.0.used_size += entry.get().entry.hash().estimate_size();
 				*entry.get_mut().entry.hash_mut() = Box::new(value);
 				entry.get_mut().lru_touched(&mut self.0.lru_bound);
 			},
