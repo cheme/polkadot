@@ -63,8 +63,6 @@ pub struct Configuration {
 	pub database: DatabaseConfig,
 	/// Size of internal state cache in Bytes
 	pub state_cache_size: usize,
-	/// Size in percent of cache size dedicated to child tries
-	pub state_cache_child_ratio: Option<usize>,
 	/// State pruning settings.
 	pub state_pruning: PruningMode,
 	/// Number of blocks to keep in the db.

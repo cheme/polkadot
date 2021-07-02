@@ -192,7 +192,7 @@ impl<K: EstimateSize, H: AsRef<[u8]>> Entry<K, H> {
 		let enum_size = 3 * 4; // assuming enum of 3 64 bit pointers.
 		// apply 2 * on keys to account for btreemap internal key storage.
 		enum_size + match self {
-			Entry::OrderedKey { key, child_storage_key, state } => {
+			Entry::OrderedKey { key, child_storage_key, .. } => {
 				(key.estimate_size() + child_storage_key.as_ref().map(|k| k.len()).unwrap_or(0) + 1) * 2
 					+ 1
 			},

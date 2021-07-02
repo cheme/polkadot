@@ -110,7 +110,6 @@ pub fn default_config(task_executor: TaskExecutor, mut chain_spec: Box<dyn Chain
 			cache_size: 128,
 		},
 		state_cache_size: 16777216,
-		state_cache_child_ratio: None,
 		chain_spec,
 		wasm_method: WasmExecutionMethod::Interpreted,
 		execution_strategies: ExecutionStrategies {

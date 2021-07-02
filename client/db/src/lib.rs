@@ -94,17 +94,8 @@ pub use sc_state_db::PruningMode;
 #[cfg(any(feature = "with-kvdb-rocksdb", test))]
 pub use bench::BenchmarkingState;
 
-pub use storage_cache::CacheRatios;
-
 const MIN_BLOCKS_TO_KEEP_CHANGES_TRIES_FOR: u32 = 32768;
 const CACHE_HEADERS: usize = 8;
-
-/// Default value for different lru ration storage.
-const DEFAULT_RATIOS: CacheRatios = CacheRatios {
-	values_top: 8,
-	values_children: 1,
-	ordered_keys: 1,
-};
 
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
 pub type DbState<B> = sp_state_machine::TrieBackend<
@@ -290,8 +281,6 @@ impl<B: BlockT> StateBackend<HashFor<B>> for RefTrackingState<B> {
 pub struct DatabaseSettings {
 	/// State cache size.
 	pub state_cache_size: usize,
-	/// Ratios to apply on different caches.
-	pub state_cache_ratios: Option<CacheRatios>,
 	/// State pruning mode.
 	pub state_pruning: PruningMode,
 	/// Where to find the database.
@@ -1083,11 +1072,6 @@ impl<Block: BlockT> Backend<Block> {
 		let db = sp_database::as_database(db);
 		let db_setting = DatabaseSettings {
 			state_cache_size: 16777216,
-			state_cache_ratios: Some(CacheRatios {
-				values_top: 1,
-				values_children: 1,
-				ordered_keys: 1,
-			}),
 			state_pruning: PruningMode::keep_blocks(keep_blocks),
 			source: DatabaseSettingsSrc::Custom(db),
 			keep_blocks: KeepBlocks::Some(keep_blocks),
@@ -1139,10 +1123,7 @@ impl<Block: BlockT> Backend<Block> {
 			changes_tries_storage,
 			blockchain,
 			canonicalization_delay,
-			shared_cache: new_shared_cache(
-				config.state_cache_size,
-				config.state_cache_ratios.clone().unwrap_or(DEFAULT_RATIOS),
-			),
+			shared_cache: new_shared_cache(config.state_cache_size),
 			import_lock: Default::default(),
 			is_archive: is_archive_pruning,
 			io_stats: FrozenForDuration::new(std::time::Duration::from_secs(1)),
@@ -2499,11 +2480,6 @@ pub(crate) mod tests {
 
 		let backend = Backend::<Block>::new(DatabaseSettings {
 			state_cache_size: 16777216,
-			state_cache_ratios: Some(CacheRatios {
-				values_top: 1,
-				values_children: 1,
-				ordered_keys: 1,
-			}),
 			state_pruning: PruningMode::keep_blocks(1),
 			source: DatabaseSettingsSrc::Custom(backing),
 			keep_blocks: KeepBlocks::All,

@@ -24,9 +24,7 @@ mod key_next;
 
 use std::collections::{VecDeque, HashSet, BTreeSet, HashMap};
 use std::sync::Arc;
-use std::hash::Hash as StdHash;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use linked_hash_map::{LinkedHashMap, Entry};
 use hash_db::Hasher;
 use sp_runtime::traits::{Block as BlockT, Header, HashFor, NumberFor};
 use sp_core::hexdisplay::HexDisplay;
@@ -52,8 +50,6 @@ pub struct Cache<B: BlockT> {
 	/// changed in which block. Ordered by block number.
 	modifications: VecDeque<BlockChanges<B::Header>>,
 }
-
-struct LRUMap<K, V>(LinkedHashMap<K, V>, usize, usize);
 
 /// Internal trait similar to `heapsize` but using
 /// a simply estimation.
@@ -98,64 +94,6 @@ impl<T: EstimateSize> EstimateSize for (T, T) {
 	fn estimate_size(&self) -> usize {
 		self.0.estimate_size() + self.1.estimate_size()
 	}
-}
-
-impl<K: EstimateSize + Eq + StdHash, V: EstimateSize> LRUMap<K, V> {
-	fn remove(&mut self, k: &K) {
-		let map = &mut self.0;
-		let storage_used_size = &mut self.1;
-		if let Some(v) = map.remove(k) {
-			*storage_used_size -= k.estimate_size();
-			*storage_used_size -= v.estimate_size();
-		}
-	}
-
-	fn add(&mut self, k: K, v: V) {
-		let lmap = &mut self.0;
-		let storage_used_size = &mut self.1;
-		let limit = self.2;
-		let klen = k.estimate_size();
-		*storage_used_size += v.estimate_size();
-		// TODO assert k v size fit into limit?? to avoid insert remove?
-		match lmap.entry(k) {
-			Entry::Occupied(mut entry) => {
-				// note that in this case we are not running pure lru as
-				// it would require to remove first
-				*storage_used_size -= entry.get().estimate_size();
-				entry.insert(v);
-			},
-			Entry::Vacant(entry) => {
-				*storage_used_size += klen;
-				entry.insert(v);
-			},
-		};
-
-		while *storage_used_size > limit {
-			if let Some((k,v)) = lmap.pop_front() {
-				*storage_used_size -= k.estimate_size();
-				*storage_used_size -= v.estimate_size();
-			} else {
-				// can happen fairly often as we get value from multiple lru
-				// and only remove from a single lru
-				break;
-			}
-		}
-	}
-
-	fn get<Q:?Sized>(&mut self, k: &Q) -> Option<&mut V>
-		where K: std::borrow::Borrow<Q>,
-			Q: StdHash + Eq {
-		self.0.get_refresh(k)
-	}
-
-	fn used_size(&self) -> usize {
-		self.1
-	}
-	fn clear(&mut self) {
-		self.0.clear();
-		self.1 = 0;
-	}
-
 }
 
 impl<B: BlockT> Cache<B> {
@@ -234,41 +172,9 @@ impl<B: BlockT> Cache<B> {
 
 pub type SharedCache<B> = Arc<Mutex<Cache<B>>>;
 
-/// Ratio of shared cache for different cache components.
-/// Total ratio size is always sum of all ratios.
-#[derive(Clone, Debug)]
-pub struct CacheRatios {
-	/// Key value accessed from top state.
-	pub values_top: usize,
-	/// Key values accessed from all default children states.
-	pub values_children: usize,
-	/// `next_storage_key` and `next_child_storage_key` cached keys.
-	pub ordered_keys: usize,
-}
-
-impl CacheRatios {
-	fn total_ratio(&self) -> usize {
-		self.values_top + self.values_children + self.ordered_keys
-	}
-
-	fn top_cache(&self, total_cache: usize) -> usize {
-		total_cache * self.values_top / self.total_ratio()
-	}
-	fn children_cache(&self, total_cache: usize) -> usize {
-		total_cache * self.values_children / self.total_ratio()
-	}
-	fn ordered_cache(&self, total_cache: usize) -> usize {
-		total_cache * self.ordered_keys / self.total_ratio()
-	}
-}
-
-/// Fix lru storage size for hash (small 64ko).
-const FIX_LRU_HASH_SIZE: usize = 65_536;
-
 /// Create a new shared cache instance with given max memory usage.
 pub fn new_shared_cache<B: BlockT>(
 	shared_cache_size: usize,
-	cache_ratios: CacheRatios,
 ) -> SharedCache<B> {
 	Arc::new(
 		Mutex::new(
@@ -1077,11 +983,7 @@ mod tests {
 		let h3a = H256::random();
 		let h3b = H256::random();
 
-		let shared = new_shared_cache::<Block>(256*1024, CacheRatios {
-			values_top: 1,
-			values_children: 0,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(256*1024);
 
 		// blocks  [ 3a(c) 2a(c) 2b 1b 1a(c) 0 ]
 		// state   [ 5     5     4  3  2     2 ]
@@ -1222,11 +1124,7 @@ mod tests {
 		let h2b = H256::random();
 		let h3b = H256::random();
 
-		let shared = new_shared_cache::<Block>(256*1024, CacheRatios {
-			values_top: 1,
-			values_children: 0,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(256*1024);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1298,11 +1196,7 @@ mod tests {
 		let h3a = H256::random();
 		let h3b = H256::random();
 
-		let shared = new_shared_cache::<Block>(256*1024, CacheRatios {
-			values_top: 1,
-			values_children: 0,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(256*1024);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1370,11 +1264,7 @@ mod tests {
 		let h1a = H256::random();
 		let h1b = H256::random();
 
-		let shared = new_shared_cache::<Block>(256*1024, CacheRatios {
-			values_top: 1,
-			values_children: 0,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(256*1024);
 
 		let mut backend = InMemoryBackend::<BlakeTwo256>::default();
 		backend.insert(std::iter::once((None, vec![(key.clone(), Some(vec![1]))])));
@@ -1412,11 +1302,7 @@ mod tests {
 	#[test]
 	fn should_track_used_size_correctly() {
 		let root_parent = H256::random();
-		let shared = new_shared_cache::<Block>(109, CacheRatios {
-			values_top: 36,
-			values_children: 109 - 36,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(88);
 		let h0 = H256::random();
 
 		let mut s = CachingState::new(
@@ -1434,8 +1320,8 @@ mod tests {
 			Some(0),
 			true,
 		);
-		// 32 key, 3 byte size
-		assert_eq!(shared.lock().used_storage_cache_size(), 35 /* bytes */);
+		// 32 * 2 key, 3 * 4 ptr, 2 * 4 ptr, 3 byte size
+		assert_eq!(shared.lock().used_storage_cache_size(), 87 /* bytes */);
 
 		let key = H256::random()[..].to_vec();
 		s.cache.sync_cache(
@@ -1447,18 +1333,15 @@ mod tests {
 			Some(0),
 			true,
 		);
-		// 35 + (2 * 32) key, 2 byte size
-		assert_eq!(shared.lock().used_storage_cache_size(), 101 /* bytes */);
+		// only last item remaining.
+		// (32 * 2) * 2 key, 3 * 4 ptr, 2 * 4 ptr, 2 byte size
+		assert_eq!(shared.lock().used_storage_cache_size(), 150 /* bytes */);
 	}
 
 	#[test]
 	fn should_remove_lru_items_based_on_tracking_used_size() {
 		let root_parent = H256::random();
-		let shared = new_shared_cache::<Block>(36 * 3, CacheRatios {
-			values_top: 1,
-			values_children: 2,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(88);
 		let h0 = H256::random();
 
 		let mut s = CachingState::new(
@@ -1477,8 +1360,8 @@ mod tests {
 			Some(0),
 			true,
 		);
-		// 32 key, 4 byte size
-		assert_eq!(shared.lock().used_storage_cache_size(), 36 /* bytes */);
+		// 32 * 2 key, 3 * 4 ptr, 2 * 4 ptr, 4 byte size
+		assert_eq!(shared.lock().used_storage_cache_size(), 88 /* bytes */);
 
 		let key = H256::random()[..].to_vec();
 		s.cache.sync_cache(
@@ -1490,8 +1373,8 @@ mod tests {
 			Some(0),
 			true,
 		);
-		// 32 key, 2 byte size
-		assert_eq!(shared.lock().used_storage_cache_size(), 34 /* bytes */);
+		// minus 2 byte size
+		assert_eq!(shared.lock().used_storage_cache_size(), 86 /* bytes */);
 	}
 
 	#[test]
@@ -1503,11 +1386,7 @@ mod tests {
 
 		let h0 = H256::random();
 		let h1 = H256::random();
-		let shared = new_shared_cache::<Block>(256 * 1024, CacheRatios {
-			values_top: 1,
-			values_children: 0,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(256 * 1024);
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
 			shared.clone(),
@@ -1576,11 +1455,7 @@ mod tests {
 		let h1 = H256::random();
 		let h2 = H256::random();
 
-		let shared = new_shared_cache::<Block>(256 * 1024, CacheRatios {
-			values_top: 1,
-			values_children: 0,
-			ordered_keys: 0,
-		});
+		let shared = new_shared_cache::<Block>(256 * 1024);
 
 		let mut s = CachingState::new(
 			InMemoryBackend::<BlakeTwo256>::default(),
@@ -1762,11 +1637,7 @@ mod qc {
 
 	impl Mutator {
 		fn new_empty() -> Self {
-			let shared = new_shared_cache::<Block>(256*1024, CacheRatios {
-				values_top: 1,
-				values_children: 0,
-				ordered_keys: 0,
-			});
+			let shared = new_shared_cache::<Block>(256*1024);
 
 			Self {
 				shared,

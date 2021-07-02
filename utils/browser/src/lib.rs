@@ -104,7 +104,6 @@ where
 		rpc_http_threads: Default::default(),
 		rpc_methods: Default::default(),
 		rpc_max_payload: Default::default(),
-		state_cache_child_ratio: Default::default(),
 		state_cache_size: Default::default(),
 		tracing_receiver: Default::default(),
 		tracing_targets: Default::default(),

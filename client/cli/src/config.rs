@@ -247,13 +247,6 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 			.unwrap_or_default())
 	}
 
-	/// Get the state cache child ratio (if any).
-	///
-	/// By default this is `None`.
-	fn state_cache_child_ratio(&self) -> Result<Option<usize>> {
-		Ok(Default::default())
-	}
-
 	/// Get the state pruning mode.
 	///
 	/// By default this is retrieved from `PruningMode` if it is available. Otherwise its
@@ -526,7 +519,6 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 			keystore,
 			database: self.database_config(&config_dir, database_cache_size, database)?,
 			state_cache_size: self.state_cache_size()?,
-			state_cache_child_ratio: self.state_cache_child_ratio()?,
 			state_pruning: self.state_pruning(unsafe_pruning, &role)?,
 			keep_blocks: self.keep_blocks()?,
 			transaction_storage: self.database_transaction_storage()?,
