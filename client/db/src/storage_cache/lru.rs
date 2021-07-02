@@ -16,8 +16,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Structure and implementation used for caching `next_key` calls.
-//! This uses ordered mapping with key intervals, see `CachedInterval`.
+//! LRU structure for different contents to cache.
 
 
 use std::collections::{HashMap, BTreeMap, hash_map::Entry as HashEntry};
@@ -34,6 +33,7 @@ pub(super) struct LRU<K, H: AsRef<[u8]>> {
 	/// Cached hashes.
 	hashes: HashMap<K, Box<CachedEntry<K, H>>>,
 	/// We use a BTreeMap for storage internally.
+	/// This uses ordered mapping with key intervals, see `CachedInterval`.
 	intervals: BTreeMap<K, Box<CachedEntry<K, H>>>,
 	/// Intervals for child storages.
 	child_intervals: HashMap<Vec<u8>, BTreeMap<K, Box<CachedEntry<K, H>>>>,

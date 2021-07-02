@@ -20,7 +20,7 @@
 //! Tracks changes over the span of a few recent blocks and handles forks
 //! by tracking/removing cache entries for conflicting changes.
 
-mod key_next;
+mod lru;
 
 use std::collections::{VecDeque, HashSet, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -35,7 +35,7 @@ use sp_state_machine::{
 };
 use log::trace;
 use crate::{utils::Meta, stats::StateUsageStats};
-use key_next::{LocalOrderedKeys, LRU};
+use lru::{LocalOrderedKeys, LRU};
 
 const STATE_CACHE_BLOCKS: usize = 12;
 
