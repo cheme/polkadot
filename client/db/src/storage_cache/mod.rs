@@ -53,7 +53,7 @@ pub struct Cache<B: BlockT> {
 	lru_child_storage: LRUMap<ChildStorageKey, Option<StorageValue>>,
 	/// Next key storage cache. Contains ordered mapping of existing key and their next and
 	/// previous element state.
-	lru_next_keys: LRUOrderedKeys<StorageKey>,
+	lru_next_keys: LRUOrderedKeys<StorageKey, B::Hash>,
 	/// Information on the modifications in recently committed blocks; specifically which keys
 	/// changed in which block. Ordered by block number.
 	modifications: VecDeque<BlockChanges<B::Header>>,
