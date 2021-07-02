@@ -21,6 +21,7 @@
 
 
 use std::collections::{HashMap, BTreeMap, hash_map::Entry as HashEntry};
+use std::hash::Hash;
 use sp_core::storage::ChildInfo;
 use super::{EstimateSize, ChildStorageKey, StorageKey,
 	StorageValue, OptionHOut};
@@ -47,16 +48,22 @@ pub(super) struct LRU<K, H: AsRef<[u8]>> {
 	lru_bound: Box<CachedEntry<K, H>>,
 }
 
-pub(super) struct LRUOrderedKeys<'a, K, H: AsRef<[u8]>>(&'a mut LRU<K, H>);
 pub(super) struct LRUStorage<'a, K, H: AsRef<[u8]>>(&'a mut LRU<K, H>);
+pub(super) struct LRUChildStorage<'a, K, H: AsRef<[u8]>>(&'a mut LRU<K, H>);
+pub(super) struct LRUHashes<'a, K, H: AsRef<[u8]>>(&'a mut LRU<K, H>);
+
 impl<K, H: AsRef<[u8]>> LRU<K, H> {
-	/// Access methods specific to key intervals.
-	pub(super) fn ordered_keys(&mut self) -> LRUOrderedKeys<K, H> {
-		LRUOrderedKeys(self)
-	}
 	/// Access methods specific to storage cache.
 	pub(super) fn storage(&mut self) -> LRUStorage<K, H> {
 		LRUStorage(self)
+	}
+	/// Access methods specific to child storage cache.
+	pub(super) fn child_storage(&mut self) -> LRUChildStorage<K, H> {
+		LRUChildStorage(self)
+	}
+	/// Access methods specific to hashes cache.
+	pub(super) fn hashes(&mut self) -> LRUHashes<K, H> {
+		LRUHashes(self)
 	}
 }
 
@@ -100,7 +107,7 @@ enum Entry<K, H: AsRef<[u8]>> {
 		/// Actual content.
 		state: Option<StorageValue>,
 	},
-	Hashes {
+	Hash {
 		/// Used to remove from hashmap.
 		key: K,
 		/// Actual content.
@@ -143,26 +150,44 @@ impl<K: EstimateSize, H: AsRef<[u8]>> Entry<K, H> {
 			_ => panic!("Ordered state use on wrong enum"),
 		}
 	}
-	fn storage(&self) -> &Option<StorageValue> {
-		match self {
-			Entry::KeyValue { state, .. } => state,
-			Entry::ChildKeyValue { state, .. } => state,
-			_ => panic!("Ordered state use on wrong enum"),
-		}
-	}
-	fn storage_mut(&mut self) -> &mut Option<StorageValue> {
-		match self {
-			Entry::KeyValue { state, .. } => state,
-			Entry::ChildKeyValue { state, .. } => state,
-			_ => panic!("Ordered state use on wrong enum"),
-		}
-	}
+
 	fn ordered_state_mut(&mut self) -> &mut CachedInterval {
 		match self {
 			Entry::OrderedKey { state, .. } => state,
 			_ => panic!("Ordered state use on wrong enum"),
 		}
 	}
+
+	fn storage(&self) -> &Option<StorageValue> {
+		match self {
+			Entry::KeyValue { state, .. } => state,
+			Entry::ChildKeyValue { state, .. } => state,
+			_ => panic!("Storage state use on wrong enum"),
+		}
+	}
+
+	fn storage_mut(&mut self) -> &mut Option<StorageValue> {
+		match self {
+			Entry::KeyValue { state, .. } => state,
+			Entry::ChildKeyValue { state, .. } => state,
+			_ => panic!("Storage state use on wrong enum"),
+		}
+	}
+
+	fn hash(&self) -> &Box<OptionHOut<H>> {
+		match self {
+			Entry::Hash { state, .. } => state,
+			_ => panic!("Hash state use on wrong enum"),
+		}
+	}
+
+	fn hash_mut(&mut self) -> &mut Box<OptionHOut<H>> {
+		match self {
+			Entry::Hash { state, .. } => state,
+			_ => panic!("Hash state use on wrong enum"),
+		}
+	}
+
 	fn estimate_size(&self) -> usize {
 		let enum_size = 3 * 4; // assuming enum of 3 64 bit pointers.
 		// apply 2 * on keys to account for btreemap internal key storage.
@@ -173,7 +198,7 @@ impl<K: EstimateSize, H: AsRef<[u8]>> Entry<K, H> {
 			},
 			Entry::KeyValue { key, state } => key.estimate_size() * 2 + state.estimate_size(),
 			Entry::ChildKeyValue { key, state } => key.estimate_size() * 2 + state.estimate_size(),
-			Entry::Hashes { key, state } => key.estimate_size() * 2 + state.estimate_size(),
+			Entry::Hash { key, state } => key.estimate_size() * 2 + state.estimate_size(),
 			Entry::Dummy => 0, 
 		}
 	}
@@ -215,7 +240,7 @@ impl<K, H: AsRef<[u8]>> CachedEntry<K, H> {
 	}
 }
 
-impl<K: Default + Ord + Clone + EstimateSize + 'static, H: AsRef<[u8]>> LRU<K, H> {
+impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> LRU<K, H> {
 	pub(super) fn new(limit: usize) -> Self {
 		LRU {
 			storage: HashMap::new(),
@@ -249,14 +274,17 @@ impl<K: Default + Ord + Clone + EstimateSize + 'static, H: AsRef<[u8]>> LRU<K, H
 			
 				Self::remove_interval_entry(intervals, key, false)
 			},
-			Entry::KeyValue { key, state } => {
-				unimplemented!()
+			Entry::KeyValue { key, .. } => {
+				self.storage().remove(key);
+				0
 			},
-			Entry::ChildKeyValue { key, state } => {
-				unimplemented!()
+			Entry::ChildKeyValue { key, .. } => {
+				self.child_storage().remove(key);
+				0
 			},
-			Entry::Hashes { key, state } => {
-				unimplemented!()
+			Entry::Hash { key, .. } => {
+				self.hashes().remove(key);
+				0
 			},
 			Entry::Dummy => unsafe { (*to_rem).estimate_size() },
 		};
@@ -601,6 +629,56 @@ impl<K: Default + Ord + Clone + EstimateSize + 'static, H: AsRef<[u8]>> LRU<K, H
 	}
 }
 
+impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUHashes<'a, K, H> {
+	pub(super) fn remove(&mut self, key: &K) {
+		if let Some(mut value) = self.0.hashes.remove(key) {
+			self.0.used_size -= value.estimate_size();
+			value.detach();
+		}
+	}
+}
+
+impl<'a, H: AsRef<[u8]>> LRUHashes<'a, StorageKey, H> {
+	pub(super) fn get(&mut self, key: &[u8]) -> Option<&OptionHOut<H>> {
+		if let Some(value) = self.0.hashes.get_mut(key) {
+			value.lru_touched(&mut self.0.lru_bound);
+			Some(value.entry.hash())
+		} else {
+			None
+		}
+	}
+	pub(super) fn add(&mut self, key: StorageKey, value: OptionHOut<H>) {
+		match self.0.hashes.entry(key.clone()) {
+			HashEntry::Vacant(vacant_entry) => {
+				let mut entry = CachedEntry::empty();
+				entry.entry = Entry::Hash {
+					key,
+					state: Box::new(value),
+				};
+				self.0.used_size += entry.estimate_size();
+				entry.lru_touched(&mut self.0.lru_bound);
+				vacant_entry.insert(entry); 
+			},
+			HashEntry::Occupied(mut entry) => {
+				self.0.used_size -= entry.get().entry.storage().estimate_size();
+				self.0.used_size += entry.get().entry.storage().estimate_size();
+				*entry.get_mut().entry.hash_mut() = Box::new(value);
+				entry.get_mut().lru_touched(&mut self.0.lru_bound);
+			},
+		}
+		self.0.apply_lru_limit();
+	}
+}
+
+impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUStorage<'a, K, H> {
+	pub(super) fn remove(&mut self, key: &K) {
+		if let Some(mut value) = self.0.storage.remove(key) {
+			self.0.used_size -= value.estimate_size();
+			value.detach();
+		}
+	}
+}
+
 impl<'a, H: AsRef<[u8]>> LRUStorage<'a, StorageKey, H> {
 	pub(super) fn get(&mut self, key: &[u8]) -> Option<&Option<StorageValue>> {
 		if let Some(value) = self.0.storage.get_mut(key) {
@@ -610,17 +688,52 @@ impl<'a, H: AsRef<[u8]>> LRUStorage<'a, StorageKey, H> {
 			None
 		}
 	}
-	pub(super) fn remove(&mut self, key: &StorageKey) {
-		if let Some(mut value) = self.0.storage.remove(key) {
-			self.0.used_size -= value.estimate_size();
-			value.detach();
-		}
-	}
 	pub(super) fn add(&mut self, key: StorageKey, value: Option<StorageValue>) {
 		match self.0.storage.entry(key.clone()) {
 			HashEntry::Vacant(vacant_entry) => {
 				let mut entry = CachedEntry::empty();
 				entry.entry = Entry::KeyValue {
+					key,
+					state: value,
+				};
+				self.0.used_size += entry.estimate_size();
+				entry.lru_touched(&mut self.0.lru_bound);
+				vacant_entry.insert(entry); 
+			},
+			HashEntry::Occupied(mut entry) => {
+				self.0.used_size -= entry.get().entry.storage().estimate_size();
+				self.0.used_size += entry.get().entry.storage().estimate_size();
+				*entry.get_mut().entry.storage_mut() = value;
+				entry.get_mut().lru_touched(&mut self.0.lru_bound);
+			},
+		}
+		self.0.apply_lru_limit();
+	}
+}
+
+impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUChildStorage<'a, K, H> {
+	pub(super) fn remove(&mut self, key: &ChildStorageKey) {
+		if let Some(mut value) = self.0.child_storage.remove(key) {
+			self.0.used_size -= value.estimate_size();
+			value.detach();
+		}
+	}
+}
+
+impl<'a, H: AsRef<[u8]>> LRUChildStorage<'a, StorageKey, H> {
+	pub(super) fn get(&mut self, key: &ChildStorageKey) -> Option<&Option<StorageValue>> {
+		if let Some(value) = self.0.child_storage.get_mut(key) {
+			value.lru_touched(&mut self.0.lru_bound);
+			Some(value.entry.storage())
+		} else {
+			None
+		}
+	}
+	pub(super) fn add(&mut self, key: ChildStorageKey, value: Option<StorageValue>) {
+		match self.0.child_storage.entry(key.clone()) {
+			HashEntry::Vacant(vacant_entry) => {
+				let mut entry = CachedEntry::empty();
+				entry.entry = Entry::ChildKeyValue {
 					key,
 					state: value,
 				};

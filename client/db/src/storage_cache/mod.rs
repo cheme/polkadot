@@ -45,10 +45,7 @@ type ChildStorageKey = (Vec<u8>, Vec<u8>);
 
 /// Shared canonical state cache.
 pub struct Cache<B: BlockT> {
-	/// Storage hashes cache. `None` indicates that key is known to be missing.
-	lru_hashes: LRUMap<StorageKey, OptionHOut<B::Hash>>,
 	/// Storage cache for child trie. `None` indicates that key is known to be missing.
-	lru_child_storage: LRUMap<ChildStorageKey, Option<StorageValue>>,
 	/// LRU cache.
 	lru: LRU<StorageKey, B::Hash>,
 	/// Information on the modifications in recently committed blocks; specifically which keys
@@ -164,9 +161,7 @@ impl<K: EstimateSize + Eq + StdHash, V: EstimateSize> LRUMap<K, V> {
 impl<B: BlockT> Cache<B> {
 	/// Returns the used memory size of the storage cache in bytes.
 	pub fn used_storage_cache_size(&self) -> usize {
-		self.lru_child_storage.used_size()
-			+ self.lru.used_size()
-			//  ignore small hashes storage and self.lru_hashes.used_size()
+		self.lru.used_size()
 	}
 
 	/// Synchronize the shared cache with the best block state.
@@ -187,12 +182,12 @@ impl<B: BlockT> Cache<B> {
 					for a in &m.storage {
 						trace!("Reverting enacted key {:?}", HexDisplay::from(a));
 						self.lru.storage().remove(a);
-						self.lru_hashes.remove(a);
+						self.lru.hashes().remove(a);
 					}
 					self.lru.retract_value_changes(m.ordered_storage.iter(), None);
 					for a in &m.child_storage {
 						trace!("Reverting enacted child key {:?}", a);
-						self.lru_child_storage.remove(a);
+						self.lru.child_storage().remove(a);
 					}
 					for (child_key, ordered_storage) in m.ordered_child_storage.iter() {
 						self.lru.retract_value_changes(ordered_storage.iter(), Some(child_key));
@@ -212,12 +207,12 @@ impl<B: BlockT> Cache<B> {
 					for a in &m.storage {
 						trace!("Retracted key {:?}", HexDisplay::from(a));
 						self.lru.storage().remove(a);
-						self.lru_hashes.remove(a);
+						self.lru.hashes().remove(a);
 					}
 					self.lru.retract_value_changes(m.ordered_storage.iter(), None);
 					for a in &m.child_storage {
 						trace!("Retracted child key {:?}", a);
-						self.lru_child_storage.remove(a);
+						self.lru.child_storage().remove(a);
 					}
 					for (child_key, ordered_storage) in m.ordered_child_storage.iter() {
 						self.lru.retract_value_changes(ordered_storage.iter(), Some(child_key));
@@ -231,9 +226,7 @@ impl<B: BlockT> Cache<B> {
 		if clear {
 			// We don't know anything about the block; clear everything
 			trace!("Wiping cache");
-			self.lru_child_storage.clear();
 			self.lru.clear();
-			self.lru_hashes.clear();
 			self.modifications.clear();
 		}
 	}
@@ -280,10 +273,6 @@ pub fn new_shared_cache<B: BlockT>(
 	Arc::new(
 		Mutex::new(
 			Cache {
-				lru_hashes: LRUMap(LinkedHashMap::new(), 0, FIX_LRU_HASH_SIZE),
-				lru_child_storage: LRUMap(
-					LinkedHashMap::new(), 0, cache_ratios.children_cache(shared_cache_size)
-				),
 				lru: LRU::new(shared_cache_size),
 				modifications: VecDeque::new(),
 			}
@@ -437,10 +426,10 @@ impl<B: BlockT> CacheChanges<B> {
 				}
 				cache.lru.merge_local_cache(&mut local_cache.next_keys);
 				for (k, v) in local_cache.child_storage.drain() {
-					cache.lru_child_storage.add(k, v);
+					cache.lru.child_storage().add(k, v);
 				}
 				for (k, v) in local_cache.hashes.drain() {
-					cache.lru_hashes.add(k, OptionHOut(v));
+					cache.lru.hashes().add(k, OptionHOut(v));
 				}
 			}
 		}
@@ -468,7 +457,7 @@ impl<B: BlockT> CacheChanges<B> {
 					ordered_entry.insert(k.clone());
 					let k = (sk.clone(), k);
 					if is_best {
-						cache.lru_child_storage.add(k.clone(), v);
+						cache.lru.child_storage().add(k.clone(), v);
 					}
 					child_modifications.insert(k);
 				}
@@ -481,7 +470,7 @@ impl<B: BlockT> CacheChanges<B> {
 			}
 			for (k, v) in changes.into_iter() {
 				if is_best {
-					cache.lru_hashes.remove(&k);
+					cache.lru.hashes().remove(&k);
 					cache.lru.storage().add(k.clone(), v);
 				}
 				ordered_storage.insert(k.clone());
@@ -665,7 +654,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		}
 		let mut cache = self.cache.shared_cache.lock();
 		if Self::is_allowed(Some(key), None, &self.cache.parent_hash, &cache.modifications) {
-			if let Some(entry) = cache.lru_hashes.get(key).map(|a| a.0.clone()) {
+			if let Some(entry) = cache.lru.hashes().get(key).map(|a| a.0.clone()) {
 				trace!("Found hash in shared cache: {:?}", HexDisplay::from(&key));
 				return Ok(entry)
 			}
@@ -691,7 +680,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		}
 		let mut cache = self.cache.shared_cache.lock();
 		if Self::is_allowed(None, Some(&key), &self.cache.parent_hash, &cache.modifications) {
-			if let Some(entry) = cache.lru_child_storage.get(&key).map(|a| a.clone()) {
+			if let Some(entry) = cache.lru.child_storage().get(&key).map(|a| a.clone()) {
 				trace!("Found in shared cache: {:?}", key);
 				return Ok(
 					self.usage.tally_child_key_read(&key, entry, true)
@@ -1561,8 +1550,6 @@ mod tests {
 			let mut cache = s.cache.shared_cache.lock();
 			let cache = &mut *cache;
 			cache.lru.clear();
-			cache.lru_hashes.clear();
-			cache.lru_child_storage.clear();
 			cache.modifications.clear();
 		}
 
