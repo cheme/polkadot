@@ -20,12 +20,12 @@
 //! This uses ordered mapping with key intervals, see `CachedInterval`.
 
 
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{HashMap, BTreeMap, hash_map::Entry as HashEntry};
 use sp_core::storage::ChildInfo;
-use super::{EstimateSize, ChildStorageKey,
+use super::{EstimateSize, ChildStorageKey, StorageKey,
 	StorageValue, OptionHOut};
 
-pub(super) struct LRUOrderedKeys<K, H: AsRef<[u8]>> {
+pub(super) struct LRU<K, H: AsRef<[u8]>> {
 	/// Cached key values.
 	storage: HashMap<K, Box<CachedEntry<K, H>>>,
 	/// Child child state key values.
@@ -47,11 +47,16 @@ pub(super) struct LRUOrderedKeys<K, H: AsRef<[u8]>> {
 	lru_bound: Box<CachedEntry<K, H>>,
 }
 
-pub(super) struct LRUOrderedKeys2<'a, K, H: AsRef<[u8]>>(&'a mut LRUOrderedKeys<K, H>);
-impl<K, H: AsRef<[u8]>> LRUOrderedKeys<K, H> {
+pub(super) struct LRUOrderedKeys<'a, K, H: AsRef<[u8]>>(&'a mut LRU<K, H>);
+pub(super) struct LRUStorage<'a, K, H: AsRef<[u8]>>(&'a mut LRU<K, H>);
+impl<K, H: AsRef<[u8]>> LRU<K, H> {
 	/// Access methods specific to key intervals.
-	pub(super) fn ordered_keys(&mut self) -> LRUOrderedKeys2<K, H> {
-		LRUOrderedKeys2(self)
+	pub(super) fn ordered_keys(&mut self) -> LRUOrderedKeys<K, H> {
+		LRUOrderedKeys(self)
+	}
+	/// Access methods specific to storage cache.
+	pub(super) fn storage(&mut self) -> LRUStorage<K, H> {
+		LRUStorage(self)
 	}
 }
 
@@ -104,8 +109,8 @@ enum Entry<K, H: AsRef<[u8]>> {
 	Dummy,
 }
 
-unsafe impl<K: Send, H: Send + AsRef<[u8]>> Send for LRUOrderedKeys<K, H> {}
-unsafe impl<K: Sync, H: Sync + AsRef<[u8]>> Sync for LRUOrderedKeys<K, H> {}
+unsafe impl<K: Send, H: Send + AsRef<[u8]>> Send for LRU<K, H> {}
+unsafe impl<K: Sync, H: Sync + AsRef<[u8]>> Sync for LRU<K, H> {}
 
 impl<K: EstimateSize, H: AsRef<[u8]>> CachedEntry<K, H> {
 	fn empty() -> Box<Self> {
@@ -135,6 +140,20 @@ impl<K: EstimateSize, H: AsRef<[u8]>> Entry<K, H> {
 	fn ordered_state(&self) -> &CachedInterval {
 		match self {
 			Entry::OrderedKey { state, .. } => state,
+			_ => panic!("Ordered state use on wrong enum"),
+		}
+	}
+	fn storage(&self) -> &Option<StorageValue> {
+		match self {
+			Entry::KeyValue { state, .. } => state,
+			Entry::ChildKeyValue { state, .. } => state,
+			_ => panic!("Ordered state use on wrong enum"),
+		}
+	}
+	fn storage_mut(&mut self) -> &mut Option<StorageValue> {
+		match self {
+			Entry::KeyValue { state, .. } => state,
+			Entry::ChildKeyValue { state, .. } => state,
 			_ => panic!("Ordered state use on wrong enum"),
 		}
 	}
@@ -196,9 +215,9 @@ impl<K, H: AsRef<[u8]>> CachedEntry<K, H> {
 	}
 }
 
-impl<K: Default + Ord + Clone + EstimateSize + 'static, H: AsRef<[u8]>> LRUOrderedKeys<K, H> {
+impl<K: Default + Ord + Clone + EstimateSize + 'static, H: AsRef<[u8]>> LRU<K, H> {
 	pub(super) fn new(limit: usize) -> Self {
-		LRUOrderedKeys {
+		LRU {
 			storage: HashMap::new(),
 			child_storage: HashMap::new(),
 			hashes: HashMap::new(),
@@ -582,6 +601,44 @@ impl<K: Default + Ord + Clone + EstimateSize + 'static, H: AsRef<[u8]>> LRUOrder
 	}
 }
 
+impl<'a, H: AsRef<[u8]>> LRUStorage<'a, StorageKey, H> {
+	pub(super) fn get(&mut self, key: &[u8]) -> Option<&Option<StorageValue>> {
+		if let Some(value) = self.0.storage.get_mut(key) {
+			value.lru_touched(&mut self.0.lru_bound);
+			Some(value.entry.storage())
+		} else {
+			None
+		}
+	}
+	pub(super) fn remove(&mut self, key: &StorageKey) {
+		if let Some(mut value) = self.0.storage.remove(key) {
+			self.0.used_size -= value.estimate_size();
+			value.detach();
+		}
+	}
+	pub(super) fn add(&mut self, key: StorageKey, value: Option<StorageValue>) {
+		match self.0.storage.entry(key.clone()) {
+			HashEntry::Vacant(vacant_entry) => {
+				let mut entry = CachedEntry::empty();
+				entry.entry = Entry::KeyValue {
+					key,
+					state: value,
+				};
+				self.0.used_size += entry.estimate_size();
+				entry.lru_touched(&mut self.0.lru_bound);
+				vacant_entry.insert(entry); 
+			},
+			HashEntry::Occupied(mut entry) => {
+				self.0.used_size -= entry.get().entry.storage().estimate_size();
+				self.0.used_size += entry.get().entry.storage().estimate_size();
+				*entry.get_mut().entry.storage_mut() = value;
+				entry.get_mut().lru_touched(&mut self.0.lru_bound);
+			},
+		}
+		self.0.apply_lru_limit();
+	}
+}
+
 impl<K: Ord + Clone> LocalOrderedKeys<K> {
 	pub(super) fn next_storage_key(&self, key: &K, child: Option<&ChildInfo>) -> Option<Option<&K>> {
 		let intervals = if let Some(info) = child {
@@ -877,7 +934,7 @@ mod tests {
 		let mut input = LocalOrderedKeys::<u32>::default();
 		input.insert(4, None, Some(6));
 
-		let mut cache = LRUOrderedKeys::<u32, H256>::new(3 * entry_size);
+		let mut cache = LRU::<u32, H256>::new(3 * entry_size);
 		cache.merge_local_cache(&mut input);
 		cache.merge_local_cache(&mut input);
 
