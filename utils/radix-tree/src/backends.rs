@@ -274,9 +274,19 @@ fn fetch_and_decode_node<N>(
 		}
 	};
 
-	let value: Option<N::Value> = Decode::decode(input)?;
+	let mut buf_with_key = Vec::<u8>::new();
+	let (key, value) = if N::node_with_key() {
+		let value: Option<N::Value> = Decode::decode(input)?;
+		(prefix.as_slice(), value)
+	} else {
+		let value: Option<N::Value> = Decode::decode(input)?;
+		if value.is_some() {
+			buf_with_key = Decode::decode(input)?;
+		}
+		(buf_with_key.as_slice(), value)
+	};
 	let mut node = Node::<N>::new(
-		prefix.as_slice(),
+		key,
 		PositionFor::<N> {
 			index: 0,
 			mask: start.mask,
@@ -337,7 +347,11 @@ fn encode_node<N>(node: &Node<N>) -> Vec<u8>
 	}
 	use alloc::borrow::Borrow;
 	node.key.data.borrow().encode_to(&mut result);
-	node.value.encode_to(&mut result);
+	node.value().encode_to(&mut result);
+	if let Some(key) = node.key_with_value(){
+		// optional is encoded in node.value.
+		key.encode_to(&mut result);
+	}
 
 	let mut key_index = KeyIndexFor::<N>::zero();
 	let mut byte_index = 0;

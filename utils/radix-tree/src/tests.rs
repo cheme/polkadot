@@ -197,8 +197,7 @@ pub mod $module_name {
 				index += 1;
 			}
 			assert_eq!(index, key_iter_prefix_path.len());
-
-		};
+		}
 
 		let keys = &[b"key".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];

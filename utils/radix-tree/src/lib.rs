@@ -66,6 +66,8 @@ impl<V: Clone + Debug> Value for V { }
 pub trait NodeKey: Clone + Debug + Borrow<[u8]> {
 	const WITH_KEY: bool;
 
+	type KeyWithValue: KeyWithValue;
+
 	fn from_slice(slice: &[u8]) -> Self;
 
 	fn key(&self) -> Option<&[u8]>; // TODO rem in favor of borrow?
@@ -75,6 +77,22 @@ pub trait NodeKey: Clone + Debug + Borrow<[u8]> {
 	fn len2(&self) -> usize;
 
 	fn split_off2(&mut self, at: usize) -> Self;
+}
+
+pub trait KeyWithValue: Clone + Debug + Borrow<[u8]> {
+	fn from_slice(slice: &[u8]) -> Self;
+}
+
+impl KeyWithValue for NoKeyWithValue {
+	fn from_slice(_slice: &[u8]) -> Self {
+		NoKeyWithValue
+	}
+}
+
+impl KeyWithValue for Vec<u8> {
+	fn from_slice(slice: &[u8]) -> Self {
+		slice.to_vec()
+	}
 }
 
 /// This is a partial key.
@@ -180,6 +198,8 @@ impl NodeKey for NodeKeyBuff
 {
 	const WITH_KEY: bool = true;
 
+	type KeyWithValue = NoKeyWithValue;
+
 	fn key(&self) -> Option<&[u8]> {
 		Some(self.borrow())
 	}
@@ -205,6 +225,16 @@ impl NodeKey for NodeKeyBuff
 #[derive(Debug, Clone)]
 pub struct NoKey(usize);
 
+/// Omit key with value.
+#[derive(Debug, Clone)]
+pub struct NoKeyWithValue;
+
+impl Borrow<[u8]> for NoKeyWithValue {
+	fn borrow(&self) -> &[u8] {
+		panic!("Do not contain key.")
+	}
+}
+
 impl Borrow<[u8]> for NoKey {
 	fn borrow(&self) -> &[u8] {
 		panic!("Do not contain key.")
@@ -213,6 +243,8 @@ impl Borrow<[u8]> for NoKey {
 
 impl NodeKey for NoKey {
 	const WITH_KEY: bool = false;
+
+	type KeyWithValue = Vec<u8>;
 
 	fn key(&self) -> Option<&[u8]> {
 		None
@@ -236,6 +268,43 @@ impl NodeKey for NoKey {
 		NoKey(result)
 	}
 }
+
+/*
+fn common_until_no_key<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<D2, N::Alignment>) -> Position<N::Alignment>
+	where
+		D1: NodeKey,
+		D2: Borrow<[u8]>,
+		N: RadixConf,
+{
+	let left = one.data.key().expect("TODO manage no key optim");
+	let right = other.data.borrow();
+	if N::Alignment::ALIGNED {
+		let upper_bound = min(left.len(), right.len());
+		return Position {
+			index: upper_bound,
+			mask: MaskFor::<N>::FIRST,
+		}
+	} else {
+		if left.len() == right.len() {
+			return Position {
+				index: left.len(),
+				mask: MaskFor::<N>::FIRST,
+			}
+		} else if left.len() < right.len() {
+			return Position {
+				index: left.len(),
+				mask: one.mask,
+			}
+		} else {
+			return Position {
+				index: right.len(),
+				mask: other.mask,
+			}
+
+		}
+	}
+}
+*/
 
 /// Returns first position where position differs.
 fn common_until<D1, D2, N>(one: &PrefixKey<D1, N::Alignment>, other: &PrefixKey<D2, N::Alignment>) -> Position<N::Alignment>
@@ -469,6 +538,11 @@ pub trait TreeConf: Debug + Clone + Sized {
 	type Backend: Backend<Self>;
 	type NodeKey: NodeKey;
 
+	#[inline]
+	fn node_with_key() -> bool {
+		<Self::NodeKey as NodeKey>::WITH_KEY
+	}
+
 	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::Backend {
 		if let Some(backend) = Self::Backend::DEFAULT {
 			backend
@@ -504,6 +578,7 @@ pub(crate) type PositionFor<N> = Position<<<N as TreeConf>::Radix as RadixConf>:
 pub(crate) type AlignmentFor<N> = <<N as TreeConf>::Radix as RadixConf>::Alignment;
 pub(crate) type KeyIndexFor<N> = <<N as TreeConf>::Radix as RadixConf>::KeyIndex;
 pub(crate) type BackendFor<N> = <<N as TreeConf>::Backend as Backend<N>>::Backend;
+pub(crate) type KeyWithValueFor<N> = <<N as TreeConf>::NodeKey as NodeKey>::KeyWithValue;
 
 /// Node of a tree.
 #[derive(Derivative)]
@@ -521,7 +596,7 @@ pub struct Node<N>
 	key: PrefixKey<N::NodeKey, AlignmentFor<N>>,
 
 	/// A value if a value is stored for this node.
-	value: Option<N::Value>,
+	value: Option<(N::Value, KeyWithValueFor<N>)>,
 
 	/// Children of this node
 	children: N::Children,
@@ -572,7 +647,7 @@ impl<N: TreeConf> Node<N> {
 	) -> Node<N> {
 		Node {
 			key: PrefixKey::new_offset(key, start_position, end_position),
-			value,
+			value: value.map(|value| (value, KeyWithValueFor::<N>::from_slice(key))),
 			children: N::Children::empty(),
 			backend,
 		}
@@ -632,26 +707,37 @@ impl<N: TreeConf> Node<N> {
 	fn value(
 		&self,
 	) -> Option<&N::Value> {
-		self.value.as_ref()
+		self.value.as_ref().map(|v| &v.0)
 	}
+
+	fn key_with_value(
+		&self,
+	) -> Option<&[u8]> {
+		if N::node_with_key() {
+			None
+		} else {
+			self.value.as_ref().map(|v| v.1.borrow())
+		}
+	}
+
 
 	fn value_mut(
 		&mut self,
 	) -> Option<&mut N::Value> {
-		self.value.as_mut()
+		self.value.as_mut().map(|v| &mut v.0)
 	}
 
 	fn set_value(
 		&mut self,
 		value: N::Value,
 	) -> Option<N::Value> {
-		replace(&mut self.value, Some(value))
+		self.value_mut().map(|self_value| replace(self_value, value))
 	}
 
 	fn remove_value(
 		&mut self,
 	) -> Option<N::Value> {
-		replace(&mut self.value, None)
+		replace(&mut self.value, None).map(|value| value.0)
 	}
 
 	fn number_child(
