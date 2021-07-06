@@ -25,6 +25,7 @@
 extern crate alloc;
 
 pub mod backends;
+pub mod backends2;
 pub mod radix;
 pub mod children;
 pub mod iterators;
@@ -496,6 +497,18 @@ impl<N: TreeConf> Node<N> {
 			children: N::Children::empty(),
 			backend,
 		}
+	}
+
+	fn new_box_unfetched(
+		prefix: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
+		backend: N::Backend,
+	) -> NodeBox<N> {
+		Box::new(Node {
+			key: prefix,
+			value: None,
+			children: N::Children::empty(),
+			backend,
+		})
 	}
 
 	fn descend(
