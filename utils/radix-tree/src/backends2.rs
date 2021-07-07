@@ -304,10 +304,50 @@ fn decode<N>(
 	}, prefix)
 }
 
+fn encode_node<N>(node: &Node<N>) -> Vec<u8>
+where
+		N: TreeConf<Backend = NodeTestBackend<N>>,
+		N::Value: Encode,
+{
+	let mut result = Vec::new();
+
+	if node.backend.value_changed {
+		node.value.encode_to(&mut result);
+	} else {
+		node.backend.value.encode_to(&mut result);
+	}
+
+	for i in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
+		let (ref_index, fetched) = node.backend.child_index[i];
+		let ref_index: Option<usize> = if fetched {
+			if let Some(child) = node.get_child(KeyIndexFor::<N>::from_usize(i)) {
+				child.backend.index
+			} else {
+				unreachable!("was fetched");
+			}
+		} else {
+			ref_index
+		};
+		ref_index.map(|i| i as u64).encode_to(&mut result);
+	}
+	if let Some(_) = <N::Radix as RadixConf>::Alignment::DEFAULT {
+	} else {
+		result.push(<N::Radix as RadixConf>::Alignment::encode_mask(node.key.start));
+	};
+	node.key.data.encode_to(&mut result);
+	if let Some(_) = <N::Radix as RadixConf>::Alignment::DEFAULT {
+	} else {
+		result.push(<N::Radix as RadixConf>::Alignment::encode_mask(node.key.end));
+	};
+	
+	result
+}
+
+
 impl<N> TreeBackend<N> for NodeTestBackend<N>
 	where
 		N: TreeConf<Backend = Self>,
-		N::Value: Decode,
+		N::Value: Decode + Encode,
 {
 	const Active: bool = true;
 
@@ -389,16 +429,37 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	fn commit_change(node: &mut Node<N>) -> Option<Self::Index> {
 		let changed = node.backend.children_changed || node.backend.value_changed;
+		if !changed {
+			return None;
+		}
 		if node.backend.children_changed {
 			// recurse commit of resolved children and update backend indexes.
-			unimplemented!("TODO + nb_children")
+			for i in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
+				let (_ref_index, fetched) = node.backend.child_index[i];
+				if fetched {
+					if let Some(mut child) = node.get_child_mut(KeyIndexFor::<N>::from_usize(i)) {
+						// TODO also delete and create and update num children.
+						if let Some(_ix) = Self::commit_change(&mut child) {
+							// read in child on encode.
+						}
+					} else {
+						unreachable!("was fetched");
+					}
+				}
+			}
 		}
 		if node.backend.value_changed {
-			unimplemented!("TODO change backend value")
+			node.backend.value = node.value.clone();
 		}
 
-		unimplemented!("TODO encode and write at index");
 		node.backend.children_changed = false;
 		node.backend.value_changed = false;
+
+		let encoded = encode_node::<N>(node);
+		if let Some(i) = node.backend.index {
+			node.backend.backend.update_node(i, encoded)
+		} else {
+			Some(node.backend.backend.set_new_node(encoded))
+		}
 	}
 }
