@@ -24,7 +24,6 @@ use std::hash::Hash;
 use sp_core::storage::ChildInfo;
 use super::{EstimateSize, ChildStorageKey, StorageKey,
 	StorageValue, OptionHOut};
-use super::EstimateSize;
 use std::sync::Arc;
 use std::borrow::Borrow;
 
@@ -75,23 +74,23 @@ impl<K: Ord> PartialOrd<K> for RcKey<K> {
 	}
 }
 
-struct LRUList<K> {
+struct LRUList<K, H: AsRef<[u8]>> {
 	/// Dummy `CachedEntry` containing `next` pointer
 	/// as the oldest entry.
 	/// `prev` pointer is used as the lru entry, meaning
 	/// if `prev` equals to `next` the lru structure is empty.
-	lru_bound: Box<CachedEntry<K>>,
+	lru_bound: Box<CachedEntry<K, H>>,
 }
 
-struct LRUEntry<K> {
+struct LRUEntry<K, H: AsRef<[u8]>> {
 	/// Entry accessed before.
-	prev: *mut CachedEntry<K>,
+	prev: *mut CachedEntry<K, H>,
 	/// Entry access after.
-	next: *mut CachedEntry<K>,
+	next: *mut CachedEntry<K, H>,
 }
 
-impl<K> LRUList<K> {
-	fn next_pop(&mut self) -> Option<(&Entry<K>)> {
+impl<K, H: AsRef<[u8]>> LRUList<K, H> {
+	fn next_pop(&mut self) -> Option<&Entry<K, H>> {
 		let to_rem = self.lru_bound.lru_pos.next;
 
 		if to_rem == self.lru_bound.as_mut() {
@@ -102,12 +101,12 @@ impl<K> LRUList<K> {
 	}
 
 	fn touched(
-		self: &mut LRUList<K>,
-		entry: &mut LRUEntry<K>,
+		self: &mut LRUList<K, H>,
+		entry: &mut LRUEntry<K, H>,
 	) {
 		let s = entry.detach();
 		unsafe {
-			let ptr: *mut CachedEntry<K> = self.lru_bound.as_mut();
+			let ptr: *mut CachedEntry<K, H> = self.lru_bound.as_mut();
 			(*s).lru_pos.next = ptr;
 			(*s).lru_pos.prev = (*self.lru_bound).lru_pos.prev;
 			(*(*s).lru_pos.prev).lru_pos.next = s;
@@ -116,10 +115,10 @@ impl<K> LRUList<K> {
 	}
 }
 
-impl<K> LRUEntry<K> {
+impl<K, H: AsRef<[u8]>> LRUEntry<K, H> {
 	fn detach(
 		&mut self,
-	) -> *mut CachedEntry<K> {
+	) -> *mut CachedEntry<K, H> {
 		let prev = self.prev;
 		let next = self.next;
 		unsafe {
@@ -133,10 +132,10 @@ impl<K> LRUEntry<K> {
 	}
 }
 
-unsafe impl<K: Send> Send for LRUList<K> { }
-unsafe impl<K: Sync> Sync for LRUList<K> { }
-unsafe impl<K: Send> Send for LRUEntry<K> { }
-unsafe impl<K: Sync> Sync for LRUEntry<K> { }
+unsafe impl<K: Send, H: Send + AsRef<[u8]>> Send for LRUList<K, H> { }
+unsafe impl<K: Sync, H: Sync + AsRef<[u8]>> Sync for LRUList<K, H> { }
+unsafe impl<K: Send, H: Send + AsRef<[u8]>> Send for LRUEntry<K, H> { }
+unsafe impl<K: Sync, H: Sync + AsRef<[u8]>> Sync for LRUEntry<K, H> { }
 
 pub(super) struct LRU<K, H: AsRef<[u8]>> {
 	/// Cached key values.
@@ -158,7 +157,7 @@ pub(super) struct LRU<K, H: AsRef<[u8]>> {
 	/// Limit size of contents.
 	limit: usize,
 	/// Lru management.
-	lru: LRUList<K>,
+	lru: LRUList<K, H>,
 }
 
 pub(super) struct LRUStorage<'a, K, H: AsRef<[u8]>>(&'a mut LRU<K, H>);
@@ -190,7 +189,7 @@ pub(super) struct LocalOrderedKeys<K: Ord> {
 	
 struct CachedEntry<K, H: AsRef<[u8]>> {
 	/// Position in LRUList.
-	lru_pos: LRUEntry<K>,
+	lru_pos: LRUEntry<K, H>,
 	/// Data from this cached entry.
 	entry: Entry<K, H>,
 }
@@ -205,7 +204,6 @@ enum Entry<K, H: AsRef<[u8]>> {
 		child_storage_key: Option<RcKey<Vec<u8>>>,
 		/// Next key cached.
 		next_key: Option<RcKey<K>>,
-
 	},
 	KeyValue {
 		/// Used to remove from hashmap.
@@ -240,7 +238,7 @@ impl<K: EstimateSize, H: AsRef<[u8]>> CachedEntry<K, H> {
 			},
 			entry: Entry::Dummy,
 		});
-		let ptr: *mut KeyOrderedEntry<K> = (&mut lru_bound).as_mut();
+		let ptr: *mut CachedEntry<K, H> = (&mut lru_bound).as_mut();
 		lru_bound.lru_pos.prev = ptr;
 		lru_bound.lru_pos.next = ptr;
 		lru_bound
@@ -249,25 +247,25 @@ impl<K: EstimateSize, H: AsRef<[u8]>> CachedEntry<K, H> {
 			2 * 4 // assuming 64 bit arch
 			+ self.entry.estimate_size()
 	}
-	fn ordered_state(&self) -> &CachedInterval {
-		self.entry.ordered_state()
+	fn next_key(&self) -> &Option<RcKey<K>> {
+		self.entry.next_key()
 	}
-	fn ordered_state_mut(&mut self) -> &mut CachedInterval {
-		self.entry.ordered_state_mut()
+	fn next_key_mut(&mut self) -> &mut Option<RcKey<K>> {
+		self.entry.next_key_mut()
 	}
 }
 
 impl<K: EstimateSize, H: AsRef<[u8]>> Entry<K, H> {
-	fn ordered_state(&self) -> &CachedInterval {
+	fn next_key(&self) -> &Option<RcKey<K>> {
 		match self {
-			Entry::OrderedKey { state, .. } => state,
+			Entry::OrderedKey { next_key, .. } => next_key,
 			_ => panic!("Ordered state use on wrong enum"),
 		}
 	}
 
-	fn ordered_state_mut(&mut self) -> &mut CachedInterval {
+	fn next_key_mut(&mut self) -> &mut Option<RcKey<K>> {
 		match self {
-			Entry::OrderedKey { state, .. } => state,
+			Entry::OrderedKey { next_key, .. } => next_key,
 			_ => panic!("Ordered state use on wrong enum"),
 		}
 	}
@@ -306,10 +304,10 @@ impl<K: EstimateSize, H: AsRef<[u8]>> Entry<K, H> {
 		let enum_size = 3 * 4; // assuming enum of 3 64 bit pointers.
 		// apply 2 * on keys to account for btreemap internal key storage.
 		enum_size + match self {
-			Entry::OrderedKey { key, .. } => {
-				self.key.as_ref().estimate_size() * 2 // apply 2 to account for btreemap internal key storage.
+			Entry::OrderedKey { key, next_key, .. } => {
+				key.as_ref().estimate_size() * 2 // apply 2 to account for btreemap internal key storage.
 						+ 2 * 4 + 1 // ommitting child key as it is an Rc.
-						+ self.next_key.as_ref().map(|k| k.as_ref().estimate_size()).unwrap_or(0) + 1
+						+ next_key.as_ref().map(|k| k.as_ref().estimate_size()).unwrap_or(0) + 1
 			},
 			Entry::KeyValue { key, state } => key.estimate_size() * 2 + state.estimate_size(),
 			Entry::ChildKeyValue { key, state } => key.estimate_size() * 2 + state.estimate_size(),
@@ -322,13 +320,13 @@ impl<K: EstimateSize, H: AsRef<[u8]>> Entry<K, H> {
 impl<K, H: AsRef<[u8]>> CachedEntry<K, H> {
 	fn lru_touched(
 		&mut self,
-		lru_bound: &mut Box<CachedEntry<K, H>>,
+		lru_bound: &mut LRUList<K, H>,
 	) {
 		lru_bound.touched(&mut self.lru_pos)
 	}
 	fn lru_touched_opt(
 		&mut self,
-		lru_bound: &mut Option<&mut Box<CachedEntry<K, H>>>,
+		lru_bound: &mut Option<&mut LRUList<K, H>>,
 	) {
 		lru_bound.as_mut().map(|b| self.lru_touched(b));
 	}
@@ -354,32 +352,30 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 		&mut self
 	) -> bool {
 		if let Some(entry) = self.lru.next_pop() {
-			let intervals = if let Some(child) = child {
-				&mut self.child_intervals.get_mut(child.as_ref())
-					.expect("Removed only when no entry").0
-			} else {
-				&mut self.intervals
+			let remove = match entry {
+				Entry::OrderedKey { key, child_storage_key, .. } => {
+					let intervals = if let Some(child) = child_storage_key.as_ref() {
+						&mut self.child_intervals.get_mut(child)
+							.expect("Removed only when no entry").0
+					} else {
+						&mut self.intervals
+					};
+				
+					Self::remove_interval_entry(intervals, key.as_ref(), false, &mut self.used_size);
+					(None, None, None)
+				},
+				Entry::KeyValue { key, .. } => (Some(key.clone()), None, None),
+				Entry::ChildKeyValue { key, .. } => (None, Some(key.clone()), None),
+				Entry::Hash { key, .. } => (None, None, Some(key.clone())),
+				Entry::Dummy => unreachable!(),
 			};
-
-		match entry {
-			Entry::OrderedKey { key, child_storage_key, .. } => {
-				let intervals = if let Some(child) = child_storage_key.as_ref() {
-					self.child_intervals.get_mut(child)
-						.expect("Removed only when no entry")
-				} else {
-					&mut self.intervals
-				};
-			
-				Self::remove_interval_entry(intervals, key, false, &mut self.used_size)
-			},
-			Entry::KeyValue { key, .. } => self.storage().remove(key),
-			Entry::ChildKeyValue { key, .. } => self.child_storage().remove(key),
-			Entry::Hash { key, .. } => self.hashes().remove(key),
-			Entry::Dummy => unreachable!(),
-		};
-
-		self.used_size -= size;
-		true
+			match remove {
+				(Some(key), None, None) => self.storage().remove(&key),
+				(None, Some(key), None) => self.child_storage().remove(&key),
+				(None, None, Some(key)) => self.hashes().remove(&key),
+				_ => (),
+			}
+			true
 		} else {
 			false
 		}
@@ -399,20 +395,20 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 	}
 
 	fn next_storage_key_inner(
-		intervals: &mut BTreeMap<RcKey<K>, Box<KeyOrderedEntry<K>>>,
+		intervals: &mut BTreeMap<RcKey<K>, Box<CachedEntry<K, H>>>,
 		key: &K,
-		lru: &mut Option<&mut LRUList<K>>,
+		lru: &mut Option<&mut LRUList<K, H>>,
 	) -> Option<Option<K>> {
 		let mut iter = intervals.range_mut::<K, _>(..=key);
 		if let Some((prev_key, state)) = iter.next_back() {
-			let do_match = prev_key == key ||	if let Some(next_key) = state.next_key.as_ref() {
+			let do_match = prev_key == key ||	if let Some(next_key) = state.next_key() {
 				key < next_key.borrow()
 			} else {
 				true
 			};
 			if do_match {
 				state.lru_touched_opt(lru);
-				return Some(state.next_key.as_ref().map(|k| k.clone_key()));
+				return Some(state.next_key().as_ref().map(|k| k.clone_key()));
 			}
 		}
 		None
@@ -458,24 +454,24 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 		key: &RcKey<K>,
 		child: Option<&RcKey<Vec<u8>>>,
 		next_key: &Option<RcKey<K>>,
-		lru: &mut LRUList<K>,
+		lru: &mut LRUList<K, H>,
 		used_size: &mut usize,
 	) {
 		let mut rc_key = None;
 		let mut rc_next_key = None;
 		let mut iter = intervals.range::<K, _>(..=key.as_ref());
 		if let Some((prev_key, state)) = iter.next_back() {
-			let do_match = prev_key == key ||	if let Some(next_key) = state.next_key.as_ref() {
+			let do_match = prev_key == key ||	if let Some(next_key) = state.next_key() {
 				key < next_key
 			} else {
 				true
 			};
 
 			if do_match {
-				debug_assert!(&state.next_key == next_key);
+				debug_assert!(state.next_key() == next_key);
 				return;
 			}
-			if let Some(next_key) = state.next_key.as_ref() {
+			if let Some(next_key) = state.next_key() {
 				if next_key == key {
 					rc_key = Some(next_key.clone());
 				}
@@ -491,7 +487,7 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 				true
 			};
 			if do_match {
-				debug_assert!(&state.next_key == next_key);
+				debug_assert!(state.next_key() == next_key);
 				do_remove = Some(prev_key.clone());
 				rc_next_key = next_key.clone();
 			}
@@ -503,16 +499,18 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 			}
 		}
 
-		let mut entry = KeyOrderedEntry::empty();
+		let mut entry = CachedEntry::empty();
 		let key = rc_key.unwrap_or_else(|| key.clone());
 		let next_key = if rc_next_key.is_some() {
 			rc_next_key
 		} else {
 			next_key.clone()
 		};
-		entry.key = key.clone();
-		entry.child_storage_key = child.cloned();
-		entry.next_key = next_key.clone();
+		entry.entry = Entry::OrderedKey {
+			key: key.clone(),
+			child_storage_key: child.cloned(),
+			next_key: next_key.clone(),
+		};
 		entry.lru_touched(lru);
 		*used_size += entry.estimate_size();
 		intervals.insert(key.clone(), entry);
@@ -556,21 +554,21 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 		intervals: &mut BTreeMap<RcKey<K>, Box<CachedEntry<K, H>>>,
 		key: &K,
 		child: Option<&RcKey<Vec<u8>>>,
-		lru: &mut LRUList<K>,
+		lru: &mut LRUList<K, H>,
 		used_size: &mut usize,
 	) {
 		let mut iter = intervals.range_mut::<K, _>(..key);
 		let (end, key) = if let Some((_prev_key, state)) = iter.next_back() {
-			let do_split = if let Some(next_key) = state.next_key.as_ref() {
+			let do_split = if let Some(next_key) = state.next_key() {
 				key < next_key.as_ref()
 			} else {
 				true
 			};
 			if do_split {
 				*used_size -= state.estimate_size();
-				let end = state.next_key.take();
+				let end = state.next_key_mut().take();
 				let key = RcKey::new(key.clone());
-				state.next_key = Some(key.clone());
+				*state.next_key_mut() = Some(key.clone());
 				*used_size += state.estimate_size();
 				(end, key)
 			} else {
@@ -579,10 +577,12 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 		} else {
 			return;
 		};
-		let mut entry = KeyOrderedEntry::empty();
-		entry.key = key.clone();
-		entry.child_storage_key = child.cloned();
-		entry.next_key = end;
+		let mut entry = CachedEntry::empty();
+		entry.entry = Entry::OrderedKey {
+			key: key.clone(),
+			child_storage_key: child.cloned(),
+			next_key: end,
+		};
 		// Should actually use splitted entry lru order.
 		entry.lru_touched(lru);
 		*used_size += entry.estimate_size();
@@ -636,13 +636,13 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 	) {
 		let mut iter = intervals.range_mut::<K, _>(..=key);
 		let (do_remove, can_merge) = if let Some((prev_key, state)) = iter.next_back() {
-			let do_remove = prev_key == key ||	if let Some(next_key) = state.next_key.as_ref() {
+			let do_remove = prev_key == key ||	if let Some(next_key) = state.next_key() {
 				key < next_key.as_ref()
 			} else {
 				true
 			};
 			if do_remove {
-				(prev_key.clone(), (do_merge && prev_key == key).then(|| state.next_key.clone()))
+				(prev_key.clone(), (do_merge && prev_key == key).then(|| state.next_key().clone()))
 			} else {
 				return;
 			}
@@ -651,9 +651,9 @@ impl<K: Default + Ord + Hash + Clone + EstimateSize + 'static, H: AsRef<[u8]>> L
 		};
 		if let Some(next_next) = can_merge {
 			if let Some((_prev_key, state)) = iter.next_back() {
-				if state.next_key.as_ref().map(|k| k.as_ref()) == Some(key) {
+				if state.next_key().as_ref().map(|k| k.as_ref()) == Some(key) {
 					*used_size -= state.estimate_size();
-					state.next_key = next_next;
+					*state.next_key_mut() = next_next;
 					*used_size += state.estimate_size();
 				}
 			}
@@ -679,7 +679,7 @@ impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUHashes<'a, K, H> {
 	pub(super) fn remove(&mut self, key: &K) {
 		if let Some(mut value) = self.0.hashes.remove(key) {
 			self.0.used_size -= value.estimate_size();
-			value.detach();
+			value.lru_pos.detach();
 		}
 	}
 }
@@ -687,7 +687,7 @@ impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUHashes<'a, K, H> {
 impl<'a, H: AsRef<[u8]>> LRUHashes<'a, StorageKey, H> {
 	pub(super) fn get(&mut self, key: &[u8]) -> Option<&OptionHOut<H>> {
 		if let Some(value) = self.0.hashes.get_mut(key) {
-			value.lru_touched(&mut self.0.lru_bound);
+			value.lru_touched(&mut self.0.lru);
 			Some(value.entry.hash())
 		} else {
 			None
@@ -702,14 +702,14 @@ impl<'a, H: AsRef<[u8]>> LRUHashes<'a, StorageKey, H> {
 					state: Box::new(value),
 				};
 				self.0.used_size += entry.estimate_size();
-				entry.lru_touched(&mut self.0.lru_bound);
+				entry.lru_touched(&mut self.0.lru);
 				vacant_entry.insert(entry); 
 			},
 			HashEntry::Occupied(mut entry) => {
 				self.0.used_size -= entry.get().entry.hash().estimate_size();
 				self.0.used_size += entry.get().entry.hash().estimate_size();
 				*entry.get_mut().entry.hash_mut() = Box::new(value);
-				entry.get_mut().lru_touched(&mut self.0.lru_bound);
+				entry.get_mut().lru_touched(&mut self.0.lru);
 			},
 		}
 		self.0.apply_lru_limit();
@@ -720,7 +720,7 @@ impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUStorage<'a, K, H> {
 	pub(super) fn remove(&mut self, key: &K) {
 		if let Some(mut value) = self.0.storage.remove(key) {
 			self.0.used_size -= value.estimate_size();
-			value.detach();
+			value.lru_pos.detach();
 		}
 	}
 }
@@ -728,7 +728,7 @@ impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUStorage<'a, K, H> {
 impl<'a, H: AsRef<[u8]>> LRUStorage<'a, StorageKey, H> {
 	pub(super) fn get(&mut self, key: &[u8]) -> Option<&Option<StorageValue>> {
 		if let Some(value) = self.0.storage.get_mut(key) {
-			value.lru_touched(&mut self.0.lru_bound);
+			value.lru_touched(&mut self.0.lru);
 			Some(value.entry.storage())
 		} else {
 			None
@@ -743,14 +743,14 @@ impl<'a, H: AsRef<[u8]>> LRUStorage<'a, StorageKey, H> {
 					state: value,
 				};
 				self.0.used_size += entry.estimate_size();
-				entry.lru_touched(&mut self.0.lru_bound);
+				entry.lru_touched(&mut self.0.lru);
 				vacant_entry.insert(entry); 
 			},
 			HashEntry::Occupied(mut entry) => {
 				self.0.used_size -= entry.get().entry.storage().estimate_size();
 				self.0.used_size += entry.get().entry.storage().estimate_size();
 				*entry.get_mut().entry.storage_mut() = value;
-				entry.get_mut().lru_touched(&mut self.0.lru_bound);
+				entry.get_mut().lru_touched(&mut self.0.lru);
 			},
 		}
 		self.0.apply_lru_limit();
@@ -761,7 +761,7 @@ impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUChildStorage<'a, K, H> 
 	pub(super) fn remove(&mut self, key: &ChildStorageKey) {
 		if let Some(mut value) = self.0.child_storage.remove(key) {
 			self.0.used_size -= value.estimate_size();
-			value.detach();
+			value.lru_pos.detach();
 		}
 	}
 }
@@ -769,7 +769,7 @@ impl<'a, K: Hash + Eq + EstimateSize, H: AsRef<[u8]>> LRUChildStorage<'a, K, H> 
 impl<'a, H: AsRef<[u8]>> LRUChildStorage<'a, StorageKey, H> {
 	pub(super) fn get(&mut self, key: &ChildStorageKey) -> Option<&Option<StorageValue>> {
 		if let Some(value) = self.0.child_storage.get_mut(key) {
-			value.lru_touched(&mut self.0.lru_bound);
+			value.lru_touched(&mut self.0.lru);
 			Some(value.entry.storage())
 		} else {
 			None
@@ -784,14 +784,14 @@ impl<'a, H: AsRef<[u8]>> LRUChildStorage<'a, StorageKey, H> {
 					state: value,
 				};
 				self.0.used_size += entry.estimate_size();
-				entry.lru_touched(&mut self.0.lru_bound);
+				entry.lru_touched(&mut self.0.lru);
 				vacant_entry.insert(entry); 
 			},
 			HashEntry::Occupied(mut entry) => {
 				self.0.used_size -= entry.get().entry.storage().estimate_size();
 				self.0.used_size += entry.get().entry.storage().estimate_size();
 				*entry.get_mut().entry.storage_mut() = value;
-				entry.get_mut().lru_touched(&mut self.0.lru_bound);
+				entry.get_mut().lru_touched(&mut self.0.lru);
 			},
 		}
 		self.0.apply_lru_limit();
@@ -998,12 +998,12 @@ mod tests {
 	#[test]
 	fn interval_lru_works() {
 		// estimate size for entry is 
-		let entry_size = 31;
+		let entry_size = 42;
 
 		let mut input = LocalOrderedKeys::<u32>::default();
 		input.insert(4, None, Some(6));
 
-		let mut cache = LRUOrderedKeys::<u32>::new(2 * entry_size);
+		let mut cache = LRU::<u32, H256>::new(2 * entry_size);
 		cache.merge_local_cache(&mut input);
 		input.insert(4, None, Some(6));
 		cache.merge_local_cache(&mut input);

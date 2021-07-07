@@ -1302,7 +1302,7 @@ mod tests {
 	#[test]
 	fn should_track_used_size_correctly() {
 		let root_parent = H256::random();
-		let shared = new_shared_cache::<Block>(88);
+		let shared = new_shared_cache::<Block>(200);
 		let h0 = H256::random();
 
 		let mut s = CachingState::new(
