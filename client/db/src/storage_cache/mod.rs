@@ -752,6 +752,7 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		let local_cache = self.cache.local_cache.upgradable_read();
 		let key = key.to_vec();
 		if let Some(entry) = local_cache.next_keys.next_storage_key(&key, None) {
+			println!("Found next storage key in local cache: {:?}", HexDisplay::from(&key));
 			trace!("Found next storage key in local cache: {:?}", HexDisplay::from(&key));
 			return Ok(entry)
 		}
@@ -759,11 +760,13 @@ impl<S: StateBackend<HashFor<B>>, B: BlockT> StateBackend<HashFor<B>> for Cachin
 		if let Some(parent) = self.cache.parent_hash.as_ref() {
 			if let Some(entry) = cache.lru_next_keys.next_storage_key(&key, None) {
 				if Self::is_allowed_interval((&key, entry.as_ref()), None, parent, &cache.modifications) {
+					println!("Found next key in shared cache: {:?}", HexDisplay::from(&key));
 					trace!("Found next key in shared cache: {:?}", HexDisplay::from(&key));
 					return Ok(entry)
 				}
 			}
 		}
+		println!("Cache hash miss: {:?}", HexDisplay::from(&key));
 		trace!("Cache hash miss: {:?}", HexDisplay::from(&key));
 		let next  = self.state.next_storage_key(&key)?;
 		RwLockUpgradableReadGuard::upgrade(local_cache).next_keys.insert(key, None, next.clone());
