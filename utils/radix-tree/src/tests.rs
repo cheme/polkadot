@@ -18,8 +18,9 @@
 //! Tests an fuzzing base code.
 
 #[cfg(any(test, feature = "fuzzer"))]
-use crate::{Node256NoBackend, Node256NoBackendART, Node256HashBackend,
-	Node256TxBackend, Node256LazyHashBackend, Node16NoBackend, Node4NoBackend};
+use crate::{Node256NoBackend, Node256NoBackendART,
+	Node16NoBackend, Node4NoBackend};
+//use crate::{Node256HashBackend, Node256LazyHashBackend, Node256TxBackend};
 
 macro_rules! test_for {
 	($module_name: ident, $backend_conf: ident, $check_backend_ser: expr) => {
@@ -196,8 +197,7 @@ pub mod $module_name {
 				index += 1;
 			}
 			assert_eq!(index, key_iter_prefix_path.len());
-
-		};
+		}
 
 		let keys = &[b"key".to_vec()][..];
 		let key_seek_path = &[b"key".to_vec()][..];
@@ -402,72 +402,6 @@ test_for!(test_256, Node256NoBackend, false);
 test_for!(test_4, Node4NoBackend, false);
 test_for!(test_16, Node16NoBackend, false);
 test_for!(test_256_art, Node256NoBackendART, false);
-test_for!(test_256_hash, Node256HashBackend, true);
-test_for!(test_256_hash_tx, Node256TxBackend, true);
-test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);
-
-#[cfg(test)]
-mod lazy_test {
-	use crate::*;
-	use alloc::collections::btree_map::BTreeMap;
-
-	type Value = Vec<u8>;
-	type TreeConf = super::Node256LazyHashBackend<Value>;
-
-	fn new_backend() -> BackendFor<Node256LazyHashBackend<Value>> {
-		BackendFor::<Node256LazyHashBackend<Value>>::default()
-	}
-
-	fn compare_iter_mut<K: Borrow<[u8]>>(left: &mut Tree::<TreeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
-		let left_node = left.iter_mut();
-		let left = left_node.value_iter();
-		let mut right = right.iter();
-		for l in left {
-			if let Some(r) = right.next() {
-				if &l.0[..] != &r.0.borrow()[..] {
-					return false;
-				}
-				if &l.1[..] != &r.1[..] {
-					return false;
-				}
-			} else {
-				return false;
-			}
-		}
-		if right.next().is_some() {
-			return false;
-		}
-		true
-	}
-
-	#[test]
-	fn compare_btree() {
-		fn test(drop: bool) {
-			let backend = new_backend();
-			let mut t1 = Tree::<TreeConf>::new(backend.clone());
-			let mut t2 = BTreeMap::<&'static [u8], Vec<u8>>::new();
-			let mut value1 = b"value1".to_vec();
-			assert_eq!(None, t1.insert(b"key1", value1.clone()));
-			assert_eq!(None, t2.insert(b"key1", value1.clone()));
-			assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
-			assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
-			assert_eq!(None, t1.insert(b"key2", value1.clone()));
-			assert_eq!(None, t2.insert(b"key2", value1.clone()));
-			assert_eq!(None, t1.insert(b"key3", value1.clone()));
-			assert_eq!(None, t2.insert(b"key3", value1.clone()));
-			// Shouldn't call get on a lazy tree, but here we got all in memory.
-			assert_eq!(t1.get(&b"key3"[..]), Some(&value1));
-			assert_eq!(t1.get_mut(&b"key3"[..]), Some(&mut value1));
-			if drop {
-				core::mem::drop(t1);
-			} else {
-				t1.commit();
-			}
-			let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
-			assert_eq!(t3.get_mut(&b"key3"[..]), Some(&mut value1));
-			assert!(compare_iter_mut(&mut t3, &mut t2));
-		}
-		test(true);
-		test(false);
-	}
-}
+//test_for!(test_256_hash, Node256HashBackend, true);
+//test_for!(test_256_hash_tx, Node256TxBackend, true);
+//test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);

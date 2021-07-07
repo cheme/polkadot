@@ -44,6 +44,9 @@ pub trait Backend: Clone {
 	fn remove_node(&self, index: Self::Index);
 
 	fn set_new_node(&self, node: Vec<u8>) -> Self::Index;
+
+	/// Root call back.
+	fn set_root(&self, root: Self::Index);
 }
 
 impl Backend for () {
@@ -57,6 +60,8 @@ impl Backend for () {
 	fn remove_node(&self, _index: Self::Index) { }
 
 	fn set_new_node(&self, _node: Vec<u8>) -> Self::Index { () }
+
+	fn set_root(&self, root: Self::Index) { }
 }
 
 /// Node backend management.
@@ -67,14 +72,21 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	type Backend: Backend<Index = Self::Index>;
 	type Index;
 
+	/// TODO consider keeping backend out of node.
+	fn backend(&self) -> &Self::Backend;
+
 	/// Get a root node from the backend.
 	/// TODO specialize return node to commit recursively on drop.
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>>;
 
+	// TODO usefull ? fetch children?
 	fn get_node(&self, index: Self::Index) -> Option<NodeBox<N>>;
 
 	/// Get a child node from the backend.
+	/// TODO use Self::Index instead of usize??
 	fn fetch_children(&mut self, at: usize) -> Option<Option<NodeBox<N>>>;
+
+	fn fetch_children_no_cache(&self, at: usize) -> Option<NodeBox<N>>;
 
 //	fn resolve_parent(&self) -> Option<NodeBox<N>>;
 
@@ -87,6 +99,8 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 
 	// TODO &self? is fetched should be part of children from node.
 	fn fetch_value(&mut self) -> Option<Option<N::Value>>;
+
+	fn fetch_value_no_cache(&self) -> Option<N::Value>;
 
 	/// Indicate a child node was change.
 	/// TODO could consider adding position to avoid iterating on all child
@@ -112,6 +126,9 @@ impl<N: TreeConf> TreeBackend<N> for () {
 
 	type Backend = ();
 	type Index = ();
+
+	fn backend(&self) -> &Self::Backend { self }
+
 	fn get_root(_init: &Self::Backend) -> Option<NodeBox<N>> { None }
 
 	fn get_node(&self, _index: Self::Index) -> Option<NodeBox<N>> {
@@ -122,11 +139,19 @@ impl<N: TreeConf> TreeBackend<N> for () {
 		None
 	}
 
+	fn fetch_children_no_cache(&self, at: usize) -> Option<NodeBox<N>> {
+		None
+	}
+
 	fn fetch_nb_children(&mut self) -> Option<usize> {
 		None
 	}
 
 	fn fetch_value(&mut self) -> Option<Option<N::Value>> {
+		None
+	}
+
+	fn fetch_value_no_cache(&self) -> Option<N::Value> {
 		None
 	}
 
@@ -219,6 +244,10 @@ impl Backend for Rc<RefCell<TestBackend>> {
 
 	fn set_new_node(&self, node: Vec<u8>) -> Self::Index {
 		self.borrow_mut().insert(node)
+	}
+
+	fn set_root(&self, root: Self::Index) {
+		self.borrow_mut().root_index = root;
 	}
 }
 
@@ -353,6 +382,11 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	type Backend = Rc<RefCell<TestBackend>>;
 	type Index = usize;
+
+	fn backend(&self) -> &Self::Backend {
+		&self.backend
+	}
+
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>> {
 		if let Some((encoded, index)) = init.get_root() {
 			let (backend, prefix) = decode::<N>(encoded, init, index);
@@ -390,6 +424,15 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		None
 	}
 
+	fn fetch_children_no_cache(&self, at: usize) -> Option<NodeBox<N>> {
+		if let Some(child) = self.child_index.get(at) {
+			if let Some(index) = child.0.clone() {
+				return self.get_node(index);
+			}
+		}
+		None
+	}
+
 	fn fetch_nb_children(&mut self) -> Option<usize> {
 		Some(self.nb_children)
 	}
@@ -400,6 +443,9 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			self.fetched_value = false;
 			Some(self.value.clone())
 		}
+	}
+	fn fetch_value_no_cache(&self) -> Option<N::Value> {
+		self.value.clone()
 	}
 	fn set_change(&mut self) {
 		self.children_changed = true;

@@ -24,7 +24,7 @@
 
 extern crate alloc;
 
-pub mod backends;
+//pub mod backends;
 pub mod backends2;
 pub mod radix;
 pub mod children;
@@ -42,7 +42,7 @@ use codec::Codec;
 use radix::{PrefixKeyConf, RadixConf, Position,
 	MaskFor, MaskKeyByte};
 use children::Children;
-pub use backends::TreeBackend as Backend;
+pub use backends2::TreeBackend as Backend;
 
 /// Alias to type of a key as used by external api.
 pub type Key = NodeKeyBuff;
@@ -390,34 +390,18 @@ pub trait TreeConf: Debug + Clone + Sized {
 	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
 	type Backend: Backend<Self>;
 
-	fn new_node_split(node: &Node<Self>, key: &[u8], position: PositionFor<Self>, at: PositionFor<Self>) -> Self::Backend {
-		if let Some(backend) = Self::Backend::DEFAULT {
-			backend
-		} else {
-			let mut key = key.into();
-			node.new_end(&mut key, position);
-			let at = at.next::<Self::Radix>();
-			// TODO consider owned variant of `backend_key` !!
-			let key = Self::Backend::backend_key(key.as_slice(), at);
-			Self::Backend::new_node(&node.backend, key)
-		}
+	// TODO useless param and function.
+	fn new_node_split(node: &Node<Self>, _key: &[u8], _position: PositionFor<Self>, _at: PositionFor<Self>) -> Self::Backend {
+		Self::Backend::new_node_backend(&node.backend.backend())
 	}
 
-	fn new_node_contained(node: &Node<Self>, key: &[u8], position: PositionFor<Self>) -> Self::Backend {
-		if let Some(backend) = Self::Backend::DEFAULT {
-			backend
-		} else {
-			let key = Self::Backend::backend_key(key, position);
-			Self::Backend::new_node(&node.backend, key)
-		}
+	// TODO useless param and function.
+	fn new_node_contained(node: &Node<Self>, _key: &[u8], _position: PositionFor<Self>) -> Self::Backend {
+		Self::Backend::new_node_backend(&node.backend.backend())
 	}
 
 	fn new_node_root(init: &BackendFor<Self>) -> Self::Backend {
-		if let Some(backend) = Self::Backend::DEFAULT {
-			backend
-		} else {
-			Self::Backend::new_root(init)
-		}
+		Self::Backend::new_node_backend(init)
 	}
 }
 
@@ -453,21 +437,11 @@ pub struct Node<N>
 
 impl<N: TreeConf> Debug for Node<N> {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-		if N::Backend::DO_DEBUG {
-			"Node:".fmt(f)?;
-			self.key.fmt(f)?;
-			self.value.fmt(f)?;
-			self.children.fmt(f)?;
-		} else {
-			"Non debuggable node".fmt(f)?;
-		}
+		"Node:".fmt(f)?;
+		self.key.fmt(f)?;
+		self.value.fmt(f)?;
+		self.children.fmt(f)?;
 		Ok(())
-	}
-}
-
-impl<N: TreeConf> Drop for Node<N> {
-	fn drop(&mut self) {
-		N::Backend::commit_change(self, false);
 	}
 }
 
@@ -597,10 +571,20 @@ impl<N: TreeConf> Node<N> {
 		&self,
 		index: KeyIndexFor<N>,
 	) -> Option<&Self> {
-		//N::Backend::resolve(self);
-		let result = self.children.get_child(index);
-		result.as_ref().map(|c| N::Backend::resolve(c));
-		result
+		if N::Backend::Active {
+			panic!("Cannot fetch");
+		}
+		self.children.get_child(index)
+	}
+	fn get_child_no_cache(
+		&self,
+		index: KeyIndexFor<N>,
+	) -> Option<NodeBox<N>> {
+		use crate::children::NodeIndex;
+		if !N::Backend::Active {
+			panic!("No backend");
+		}
+		self.backend.fetch_children_no_cache(index.clone().to_usize())
 	}
 
 	fn has_child(
@@ -614,9 +598,11 @@ impl<N: TreeConf> Node<N> {
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<&mut Self> {
-		let mut result = self.children.get_child_mut(index);
-		result.as_mut().map(|c| N::Backend::resolve_mut(c));
-		result
+		use crate::children::NodeIndex;
+		if let Some(Some(result)) = self.backend.fetch_children(index.clone().to_usize()) {
+			self.children.set_child(index, result);
+		}
+		self.children.get_child_mut(index)
 	}
 
 	fn set_child(
@@ -667,7 +653,7 @@ impl<N: TreeConf> Node<N> {
 	) {
 		if let Some(index) = self.children.first_child_index() {
 			if let Some(mut child) = self.children.remove_child(index) {
-				N::Backend::resolve_mut(&mut child);
+				// TODO memoize removal in cached children (keep descendant).
 				let position = PositionFor::<N> {
 					index: 0,
 					mask: self.key.start,
@@ -679,7 +665,8 @@ impl<N: TreeConf> Node<N> {
 				self.key.end = child.key.end;
 				self.value = child.value.take();
 				self.children = replace(&mut child.children, N::Children::empty());
-				N::Backend::delete(child);
+				// TODO remove (when delete memoized).
+				N::Backend::delete(&mut *child);
 			} else {
 				unreachable!("fuse condition checked");
 			}
@@ -785,21 +772,18 @@ impl<N> Tree<N>
 	/// Instantiate an existing tree from its serializing
 	/// backend.
 	pub fn from_backend(init: BackendFor<N>) -> Self {
-		if N::Backend::DEFAULT.is_some() {
-			Self::new(init)
-		} else {
-			let tree =  N::Backend::get_root(&init);
-			Tree {
-				tree,
-				init,
-			}
+		let tree =  N::Backend::get_root(&init);
+		Tree {
+			tree,
+			init,
 		}
 	}
 
 	/// Commit tree changes to its underlying serializing backend.
 	pub fn commit(&mut self) {
-		self.tree.as_mut()
-			.map(|node| N::Backend::commit_change(node, true));
+		if let Some(mut node) = self.tree.as_mut() {
+			N::Backend::commit_change(&mut node);
+		}
 	}
 }
 
@@ -1163,7 +1147,7 @@ flatten_children!(
 	Radix256Conf,
 	(),
 );
-
+/*
 flatten_children!(
 	!value_bound: Codec,
 	Children256Flatten2,
@@ -1205,7 +1189,7 @@ flatten_children!(
 		>
 	>,
 );
-
+*/
 flatten_children!(
 	Children16Flatten,
 	Node16Flatten,
