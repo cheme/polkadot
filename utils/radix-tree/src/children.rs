@@ -961,7 +961,12 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 	}
 
 	fn need_init_unfetched(&self) -> bool {
-		true
+		match self {
+			ART48_256::ART4(inner) => true,
+			ART48_256::ART16(inner) => true,
+			ART48_256::ART48(inner) => true,
+			ART48_256::ART256(inner) => true,
+		}
 	}
 
 	fn set_child(
@@ -1014,6 +1019,10 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 		let (result, do_reduce) = match self {
 			ART48_256::ART256(inner) => {
 				let result = inner.remove_child(index);
+				// Note that  this is not compatible with a backend
+				// usage (would need to resolve from backend), but backend
+				// do no node removal until commit. TODO consider consuming
+				// commit or remove this piece of code when use with backend
 				if result.is_some() && inner.need_reduce() {
 					(result, Some(ART48_256::ART48(inner.reduce_node())))
 				} else {
