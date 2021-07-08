@@ -127,13 +127,6 @@ pub trait Children: Clone + Debug {
 		&self,
 	) -> usize;
 
-	fn has_child(
-		&self,
-		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> bool {
-		self.get_child(index).is_some()
-	}
-
 	fn get_child(
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
@@ -143,27 +136,6 @@ pub trait Children: Clone + Debug {
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut Self::Node>;
-
-	fn first_child_index(
-		&self,
-	) -> Option<<Self::Radix as RadixConf>::KeyIndex> {
-		let mut ix = <Self::Radix as RadixConf>::KeyIndex::zero();
-		loop {
-			// TODO avoid this double query? (need unsafe)
-			// at least make a contains_child fn.
-			let result = self.get_child(ix);
-			if result.is_some() {
-				return Some(ix)
-			}
-
-			ix = if let Some(ix) = ix.next() {
-				ix
-			} else {
-				break;
-			};
-		}
-		None
-	}
 }
 
 #[derive(Derivative)]

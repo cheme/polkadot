@@ -67,6 +67,8 @@ impl Backend for () {
 /// Node backend management.
 pub trait TreeBackend<N: TreeConf>: Clone {
 	const Active: bool = true;
+	/// Always use () if inactive or ChildState if active
+	type ChildState: crate::WithChildState;
 
 	/// Inner backend used.
 	type Backend: Backend<Index = Self::Index>;
@@ -79,14 +81,16 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	/// TODO specialize return node to commit recursively on drop.
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>>;
 
+	/// Get next defined node starting from this index (inclusive).
+	fn get_next_children_index(&self, at: KeyIndexFor<N>) -> Option<KeyIndexFor<N>>;
 	// TODO usefull ? fetch children?
 	fn get_node(&self, index: Self::Index) -> Option<NodeBox<N>>;
 
 	/// Get a child node from the backend.
 	/// TODO use Self::Index instead of usize??
-	fn fetch_children(&mut self, at: usize) -> Option<Option<NodeBox<N>>>;
+	fn fetch_children(&mut self, at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>>;
 
-	fn fetch_children_no_cache(&self, at: usize) -> Option<NodeBox<N>>;
+	fn fetch_children_no_cache(&self, at: KeyIndexFor<N>) -> Option<NodeBox<N>>;
 
 //	fn resolve_parent(&self) -> Option<NodeBox<N>>;
 
@@ -123,6 +127,7 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 
 impl<N: TreeConf> TreeBackend<N> for () {
 	const Active: bool = false;
+	type ChildState = ();
 
 	type Backend = ();
 	type Index = ();
@@ -134,12 +139,14 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	fn get_node(&self, _index: Self::Index) -> Option<NodeBox<N>> {
 		None
 	}
-
-	fn fetch_children(&mut self, _at: usize) -> Option<Option<NodeBox<N>>> {
+	fn get_next_children_index(&self, index: KeyIndexFor<N>) -> Option<KeyIndexFor<N>> {
+		None
+	}
+	fn fetch_children(&mut self, _at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>> {
 		None
 	}
 
-	fn fetch_children_no_cache(&self, at: usize) -> Option<NodeBox<N>> {
+	fn fetch_children_no_cache(&self, at: KeyIndexFor<N>) -> Option<NodeBox<N>> {
 		None
 	}
 
@@ -379,6 +386,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		N::Value: Decode + Encode,
 {
 	const Active: bool = true;
+	type ChildState = crate::ChildState;
 
 	type Backend = Rc<RefCell<TestBackend>>;
 	type Index = usize;
@@ -410,8 +418,22 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		}
 	}
 
-	fn fetch_children(&mut self, at: usize) -> Option<Option<NodeBox<N>>> {
-		if let Some(child) = self.child_index.get_mut(at) {
+	fn get_next_children_index(&self, mut index: KeyIndexFor<N>) -> Option<KeyIndexFor<N>> {
+		loop {
+			if self.child_index.get(index.to_usize()).is_some() {
+				return Some(index);
+			}
+			if let Some(i) = index.next() {
+				index = i;
+			} else {
+				break;
+			}
+		}
+		None
+	}
+
+	fn fetch_children(&mut self, at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>> {
+		if let Some(child) = self.child_index.get_mut(at.to_usize()) {
 			if !child.1 {
 				child.1 = true;
 				if let Some(index) = child.0.clone() {
@@ -424,8 +446,8 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		None
 	}
 
-	fn fetch_children_no_cache(&self, at: usize) -> Option<NodeBox<N>> {
-		if let Some(child) = self.child_index.get(at) {
+	fn fetch_children_no_cache(&self, at: KeyIndexFor<N>) -> Option<NodeBox<N>> {
+		if let Some(child) = self.child_index.get(at.to_usize()) {
 			if let Some(index) = child.0.clone() {
 				return self.get_node(index);
 			}

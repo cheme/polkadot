@@ -580,26 +580,24 @@ impl<N: TreeConf> Node<N> {
 		&self,
 		index: KeyIndexFor<N>,
 	) -> Option<NodeBox<N>> {
-		use crate::children::NodeIndex;
 		if !N::Backend::Active {
 			panic!("No backend");
 		}
-		self.backend.fetch_children_no_cache(index.clone().to_usize())
+		self.backend.fetch_children_no_cache(index)
 	}
 
 	fn has_child(
 		&self,
 		index: KeyIndexFor<N>,
 	) -> bool {
-		self.children.has_child(index)
+		self.children.get_child(index).is_some()
 	}
 
 	fn get_child_mut(
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<&mut Self> {
-		use crate::children::NodeIndex;
-		if let Some(Some(result)) = self.backend.fetch_children(index.clone().to_usize()) {
+		if let Some(Some(result)) = self.backend.fetch_children(index) {
 			self.children.set_child(index, result);
 		}
 		self.children.get_child_mut(index)
@@ -651,7 +649,7 @@ impl<N: TreeConf> Node<N> {
 	fn fuse_child(
 		&mut self,
 	) {
-		if let Some(index) = self.children.first_child_index() {
+		if let Some(index) = self.first_child_index() {
 			if let Some(mut child) = self.children.remove_child(index) {
 				// TODO memoize removal in cached children (keep descendant).
 				let position = PositionFor::<N> {
@@ -725,6 +723,30 @@ impl<N: TreeConf> Node<N> {
 		let mut position = position.clone();
 		position.index -= node_offset_position.index;
 		position.index::<N::Radix>(self.key.data.borrow())
+	}
+
+	// TODO useless? or change to get_next_children_index as in backend?
+	fn first_child_index(
+		&self,
+	) -> Option<KeyIndexFor<N>> {
+		use crate::children::NodeIndex;
+		let mut ix = KeyIndexFor::<N>::zero();
+		loop {
+			// TODO add backend resolution.
+			// TODO avoid this double query? (need unsafe)
+			// at least make a contains_child fn.
+			let result = self.children.get_child(ix);
+			if result.is_some() {
+				return Some(ix)
+			}
+
+			ix = if let Some(ix) = ix.next() {
+				ix
+			} else {
+				break;
+			};
+		}
+		None
 	}
 }
 
@@ -933,7 +955,7 @@ impl<N: TreeConf> Tree<N> {
 						);
 						//let child_index = middle_position.index::<N::Radix>(key)
 						//	.expect("Middle resolved from key");
-						assert!(current.set_child(index, new_child).is_none());
+						current.set_child(index, new_child);
 						return None;
 					},
 					Descent::Middle(middle_position, None) => {
@@ -1047,7 +1069,89 @@ impl<N: TreeConf> Tree<N> {
 			self.remove(key.as_slice());
 		}
 	}
+
 }
+
+pub trait WithChildState: Debug + Clone + Copy + Default {
+	const UseBackend: bool;
+	fn state(self) -> Option<ChildState>;
+	fn from_state(state: ChildState) -> Self;
+}
+
+/// Different possible children state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildState {
+	/// No child.
+	NoChild,
+	/// Child is defined.
+	Child,
+	/// When runing on backend, this child need to be resolve
+	/// from backend first.
+	/// Could be an existing child or not.
+	Unfetched,
+	/// Child is deleted (content is kept when backend is used
+	/// for removal or possible later reinsert of node).
+	Deleted,
+}
+
+impl Default for ChildState {
+	fn default() -> Self {
+		ChildState::Unfetched
+	}
+}
+
+impl WithChildState for ChildState {
+	const UseBackend: bool = true;
+
+	fn state(self) -> Option<ChildState> {
+		Some(self)
+	}
+	fn from_state(state: ChildState) -> Self {
+		state
+	}
+}
+
+impl WithChildState for () {
+	const UseBackend: bool = false;
+
+	fn state(self) -> Option<ChildState> {
+		None
+	}
+	fn from_state(_state: ChildState) -> Self {
+		()
+	}
+}
+
+// Node with state
+#[derive(Derivative)]
+#[derivative(Clone)]
+#[derivative(Debug)]
+struct Child<N, S>(Option<Box<N>>, S);
+
+impl<N, S: Default> Default for Child<N, S> {
+	fn default() -> Self {
+		Child(None, Default::default())
+	}
+}
+
+impl<N, S: WithChildState> Child<N, S> {
+	fn some(child: Box<N>) -> Self {
+		Child(Some(child), S::from_state(ChildState::Child))
+	}
+	fn none() -> Self {
+		Child(None, S::from_state(ChildState::NoChild))
+	}
+	fn unfetched() -> Self {
+		debug_assert!(S::UseBackend);
+		Child(None, S::from_state(ChildState::Unfetched))
+	}
+	fn set_deleted(&mut self) {
+		debug_assert!(S::UseBackend);
+		self.1 = S::from_state(ChildState::Deleted);
+	}
+}
+
+
 
 /// Flatten type for children of a given node type.
 ///
