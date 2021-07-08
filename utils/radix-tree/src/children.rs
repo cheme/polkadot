@@ -21,7 +21,6 @@ use core::fmt::Debug;
 use core::mem::replace;
 use derivative::Derivative;
 use crate::radix::RadixConf;
-use alloc::boxed::Box;
 
 /// Children node index, depending on the radix use
 /// different type can be use.
@@ -122,13 +121,13 @@ pub trait Children: Clone + Debug {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: Box<Self::Node>,
-	) -> Option<Box<Self::Node>>;
+		child: Self::Node,
+	) -> Option<Self::Node>;
 
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<Box<Self::Node>>;
+	) -> Option<Self::Node>;
 
 	fn number_child(
 		&self,
@@ -149,7 +148,7 @@ pub trait Children: Clone + Debug {
 #[derivative(Clone)]
 #[derivative(Debug)]
 struct Children2<N> (
-	Option<(Option<Box<N>>, Option<Box<N>>)>
+	Option<(Option<N>, Option<N>)>
 );
 
 impl<N: Debug + Clone> Children for Children2<N> {
@@ -169,8 +168,8 @@ impl<N: Debug + Clone> Children for Children2<N> {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: Box<N>,
-	) -> Option<Box<N>> {
+		child: N,
+	) -> Option<N> {
 		if self.0.is_none() {
 			self.0 = Some((None, None));
 		}
@@ -186,7 +185,7 @@ impl<N: Debug + Clone> Children for Children2<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<Box<N>> {
+	) -> Option<N> {
 		if let Some(children) = self.0.as_mut() {
 			if index {
 				replace(&mut children.0, None)
@@ -217,9 +216,9 @@ impl<N: Debug + Clone> Children for Children2<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&N> {
 		self.0.as_ref().and_then(|b| if index {
-			b.0.as_ref().map(AsRef::as_ref)
+			b.0.as_ref()
 		} else {
-			b.1.as_ref().map(AsRef::as_ref)
+			b.1.as_ref()
 		})
 	}
 
@@ -228,9 +227,9 @@ impl<N: Debug + Clone> Children for Children2<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
 		self.0.as_mut().and_then(|b| if index {
-			b.0.as_mut().map(AsMut::as_mut)
+			b.0.as_mut()
 		} else {
-			b.1.as_mut().map(AsMut::as_mut)
+			b.1.as_mut()
 		})
 	}
 }
@@ -239,7 +238,7 @@ impl<N: Debug + Clone> Children for Children2<N> {
 #[derivative(Clone)]
 pub struct Children256<N> (
 	// 256 array is to big but ok for initial implementation
-	Option<[Option<Box<N>>; 256]>,
+	Option<[Option<N>; 256]>,
 	u8,
 );
 
@@ -247,7 +246,7 @@ pub struct Children256<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct ART48<N> (
-	([u8; 256], [Option<Box<N>>; 48]),
+	([u8; 256], [Option<N>; 48]),
 	u8,
 );
 
@@ -255,7 +254,7 @@ pub struct ART48<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct ART16<N> (
-	([u8; 16], [Option<Box<N>>; 16]),
+	([u8; 16], [Option<N>; 16]),
 	u8,
 );
 
@@ -263,7 +262,7 @@ pub struct ART16<N> (
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct ART4<N> (
-	([u8; 4], [Option<Box<N>>; 4]),
+	([u8; 4], [Option<N>; 4]),
 	u8,
 );
 
@@ -360,8 +359,8 @@ impl<N: Debug + Clone> Children for Children256<N> {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: Box<N>,
-	) -> Option<Box<N>> {
+		child: N,
+	) -> Option<N> {
 		if self.0.is_none() {
 			self.0 = Some(empty_256_children());
 		}
@@ -377,7 +376,7 @@ impl<N: Debug + Clone> Children for Children256<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<Box<N>> {
+	) -> Option<N> {
 		if let Some(children) = self.0.as_mut() {
 			let result = replace(&mut children[index as usize], None);
 			if result.is_some() {
@@ -400,7 +399,6 @@ impl<N: Debug + Clone> Children for Children256<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&N> {
 		self.0.as_ref().and_then(|b| b[index as usize].as_ref())
-			.map(AsRef::as_ref)
 	}
 
 	fn get_child_mut(
@@ -408,7 +406,6 @@ impl<N: Debug + Clone> Children for Children256<N> {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
 		self.0.as_mut().and_then(|b| b[index as usize].as_mut())
-			.map(AsMut::as_mut)
 	}
 }
 
@@ -418,7 +415,7 @@ macro_rules! impl_children {
 #[derive(Derivative)]
 #[derivative(Clone)]
 pub struct $struct_name<N> (
-	[Option<Box<N>>; $size],
+	[Option<N>; $size],
 	u8,
 );
 
@@ -444,8 +441,8 @@ impl<N: Debug + Clone> Children for $struct_name<N> {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		child: Box<N>,
-	) -> Option<Box<N>> {
+		child: N,
+	) -> Option<N> {
 		let children = &mut self.0;
 		let result = replace(&mut children[index.to_usize()], Some(child));
 		if result.is_none() {
@@ -457,7 +454,7 @@ impl<N: Debug + Clone> Children for $struct_name<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<Box<N>> {
+	) -> Option<N> {
 		let children = &mut self.0.as_mut();
 		let result = replace(&mut children[index.to_usize()], None);
 		if result.is_some() {
@@ -476,14 +473,14 @@ impl<N: Debug + Clone> Children for $struct_name<N> {
 		&self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&N> {
-		self.0[index.to_usize()].as_ref().map(AsRef::as_ref)
+		self.0[index.to_usize()].as_ref()
 	}
 
 	fn get_child_mut(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut N> {
-		self.0[index.to_usize()].as_mut().map(AsMut::as_mut)
+		self.0[index.to_usize()].as_mut()
 	}
 }
 
@@ -588,8 +585,8 @@ impl<N: Debug + Clone> ART48<N> {
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-		child: Box<N>,
-	) -> Option<Option<Box<N>>> {
+		child: N,
+	) -> Option<Option<N>> {
 		let (indexes, values) = &mut self.0;
 		let is_new = indexes[index as usize] == UNSET48;
 		if is_new && self.1 >= ADD_TRESHOLD48 {
@@ -610,7 +607,7 @@ impl<N: Debug + Clone> ART48<N> {
 	fn remove_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-	) -> Option<Box<N>> {
+	) -> Option<N> {
 		if self.1 == 0 {
 			return None;
 		}
@@ -659,7 +656,7 @@ impl<N: Debug + Clone> ART48<N> {
 		if index == UNSET48 {
 			return None;
 		}
-		values[index as usize].as_ref().map(AsRef::as_ref)
+		values[index as usize].as_ref()
 	}
 
 	fn get_child_mut(
@@ -674,7 +671,7 @@ impl<N: Debug + Clone> ART48<N> {
 		if index == UNSET48 {
 			return None;
 		}
-		values[index as usize].as_mut().map(AsMut::as_mut)
+		values[index as usize].as_mut()
 	}
 }
 
@@ -721,8 +718,8 @@ impl<N: Debug + Clone> ART16<N> {
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-		child: Box<N>,
-	) -> (Option<Option<Box<N>>>, Option<Box<N>>) {
+		child: N,
+	) -> (Option<Option<N>>, Option<N>) {
 		let (indexes, values) = &mut self.0;
 		let mut existing_index = None;
 		// TODO something to do with bit expr
@@ -749,7 +746,7 @@ impl<N: Debug + Clone> ART16<N> {
 	fn remove_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-	) -> Option<Box<N>> {
+	) -> Option<N> {
 		if self.1 == 0 {
 			return None;
 		}
@@ -792,7 +789,7 @@ impl<N: Debug + Clone> ART16<N> {
 		let (indexes, values) = &self.0;
 		for i in 0..self.1 {
 			if indexes[i as usize] == index {
-				return values[i as usize].as_ref().map(AsRef::as_ref)
+				return values[i as usize].as_ref()
 			}
 		}
 		None
@@ -808,7 +805,7 @@ impl<N: Debug + Clone> ART16<N> {
 		let (indexes, values) = &mut self.0;
 		for i in 0..self.1 {
 			if indexes[i as usize] == index {
-				return values[i as usize].as_mut().map(AsMut::as_mut)
+				return values[i as usize].as_mut()
 			}
 		}
 		None
@@ -839,8 +836,8 @@ impl<N: Debug + Clone> ART4<N> {
 	fn set_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-		child: Box<N>,
-	) -> (Option<Option<Box<N>>>, Option<Box<N>>) {
+		child: N,
+	) -> (Option<Option<N>>, Option<N>) {
 		let (indexes, values) = &mut self.0;
 		let mut existing_index = None;
 		// TODO something to do with bit expr
@@ -867,7 +864,7 @@ impl<N: Debug + Clone> ART4<N> {
 	fn remove_child(
 		&mut self,
 		index: <Radix256Conf as RadixConf>::KeyIndex,
-	) -> Option<Box<N>> {
+	) -> Option<N> {
 		if self.1 == 0 {
 			return None;
 		}
@@ -910,7 +907,7 @@ impl<N: Debug + Clone> ART4<N> {
 		let (indexes, values) = &self.0;
 		for i in 0..self.1 {
 			if indexes[i as usize] == index {
-				return values[i as usize].as_ref().map(AsRef::as_ref)
+				return values[i as usize].as_ref()
 			}
 		}
 		None
@@ -926,7 +923,7 @@ impl<N: Debug + Clone> ART4<N> {
 		let (indexes, values) = &mut self.0;
 		for i in 0..self.1 {
 			if indexes[i as usize] == index {
-				return values[i as usize].as_mut().map(AsMut::as_mut)
+				return values[i as usize].as_mut()
 			}
 		}
 		None
@@ -972,8 +969,8 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 	fn set_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-		mut child: Box<N>,
-	) -> Option<Box<N>> {
+		mut child: N,
+	) -> Option<N> {
 		let mut new_256 = match self {
 			ART48_256::ART4(inner) => {
 				match inner.set_child(index, child) {
@@ -1015,7 +1012,7 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 	fn remove_child(
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
-	) -> Option<Box<N>> {
+	) -> Option<N> {
 		let (result, do_reduce) = match self {
 			ART48_256::ART256(inner) => {
 				let result = inner.remove_child(index);

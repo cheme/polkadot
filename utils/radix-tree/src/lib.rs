@@ -387,7 +387,7 @@ impl<'a, P> PrefixKey<&'a [u8], P>
 pub trait TreeConf: Debug + Clone + Sized {
 	type Radix: RadixConf;
 	type Value: Value;
-	type Children: Children<Node = Node<Self>, Radix = Self::Radix>;
+	type Children: Children<Node = Box<Node<Self>>, Radix = Self::Radix>;
 	type Backend: Backend<Self>;
 
 	// TODO useless param and function.
@@ -574,7 +574,7 @@ impl<N: TreeConf> Node<N> {
 		if N::Backend::Active {
 			panic!("Cannot fetch");
 		}
-		self.children.get_child(index)
+		self.children.get_child(index).map(AsRef::as_ref)
 	}
 	fn get_child_no_cache(
 		&self,
@@ -600,7 +600,7 @@ impl<N: TreeConf> Node<N> {
 		if let Some(Some(result)) = self.backend.fetch_children(index) {
 			self.children.set_child(index, result);
 		}
-		self.children.get_child_mut(index)
+		self.children.get_child_mut(index).map(AsMut::as_mut)
 	}
 
 	fn set_child(
@@ -1181,7 +1181,7 @@ macro_rules! flatten_children {
 			type Children = $type_alias<V, $($backend_gen)?>;
 			type Backend = $backend;
 		}
-		type $inner_children_type<V, $($backend_gen)?> = Node<$inner_node_type<V, $($backend_gen)?>>;
+		type $inner_children_type<V, $($backend_gen)?> = Box<Node<$inner_node_type<V, $($backend_gen)?>>>;
 		#[derive(Derivative)]
 		#[derivative(Clone)]
 		#[derivative(Debug)]
@@ -1192,7 +1192,7 @@ macro_rules! flatten_children {
 			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
 		{
 			type Radix = $inner_radix;
-			type Node = Node<$inner_node_type<V, $($backend_gen)?>>;
+			type Node = $inner_children_type<V, $($backend_gen)?>;
 
 			fn empty(capacity: usize) -> Self {
 				$type_alias($inner_type::empty(capacity))
@@ -1203,14 +1203,14 @@ macro_rules! flatten_children {
 			fn set_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-				child: Box<$inner_children_type<V, $($backend_gen)?>>,
-			) -> Option<Box<$inner_children_type<V, $($backend_gen)?>>> {
+				child: Self::Node,
+			) -> Option<Self::Node> {
 				self.0.set_child(index, child)
 			}
 			fn remove_child(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<Box<$inner_children_type<V, $($backend_gen)?>>> {
+			) -> Option<Self::Node> {
 				self.0.remove_child(index)
 			}
 			fn number_child(
@@ -1221,13 +1221,13 @@ macro_rules! flatten_children {
 			fn get_child(
 				&self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&$inner_children_type<V, $($backend_gen)?>> {
+			) -> Option<&Self::Node> {
 				self.0.get_child(index)
 			}
 			fn get_child_mut(
 				&mut self,
 				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&mut $inner_children_type<V, $($backend_gen)?>> {
+			) -> Option<&mut Self::Node> {
 				self.0.get_child_mut(index)
 			}
 		}
