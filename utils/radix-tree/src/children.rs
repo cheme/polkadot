@@ -107,10 +107,17 @@ mod node_indexes_impls {
 
 /// A children node container.
 pub trait Children: Clone + Debug {
+	/// if using backend and this is true,
+	/// all value present are initiated explicitelly
+	/// to unfetched (non stored value are therefore
+	/// empty), otherwhise all values are consider
+	/// unfetched.
 	type Radix: RadixConf;
 	type Node;
 
-	fn empty() -> Self;
+	fn empty(capacity: usize) -> Self;
+
+	fn need_init_unfetched(&self) -> bool;
 
 	fn set_child(
 		&mut self,
@@ -150,8 +157,13 @@ impl<N: Debug + Clone> Children for Children2<N> {
 
 	type Node = N;
 
-	fn empty() -> Self {
+
+	fn empty(_capacity: usize) -> Self {
 		Children2(None)
+	}
+
+	fn need_init_unfetched(&self) -> bool {
+		false
 	}
 
 	fn set_child(
@@ -337,8 +349,12 @@ impl<N: Debug + Clone> Children for Children256<N> {
 
 	type Node = N;
 
-	fn empty() -> Self {
+	fn empty(_capacity: usize) -> Self {
 		Children256(None, 0)
+	}
+
+	fn need_init_unfetched(&self) -> bool {
+		false
 	}
 
 	fn set_child(
@@ -417,8 +433,12 @@ impl<N: Debug + Clone> Children for $struct_name<N> {
 
 	type Node = N;
 
-	fn empty() -> Self {
+	fn empty(_capacity: usize) -> Self {
 		$struct_name($empty(), 0)
+	}
+
+	fn need_init_unfetched(&self) -> bool {
+		false
 	}
 
 	fn set_child(
@@ -535,9 +555,9 @@ impl<N: Debug + Clone> ART48<N> {
 
 	fn grow_node(&mut self) -> Children256<N> {
 		if self.1 == 0 {
-			return Children256::empty();
+			return Children256::empty(0);
 		}
-		let mut result = Children256::empty();
+		let mut result = Children256::empty(0);
 		let (indexes, values) = &mut self.0;
 		for i in 0..=255 {
 			let ix = indexes[i];
@@ -928,8 +948,20 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 	type Radix = Radix256Conf;
 	type Node = N;
 
-	fn empty() -> Self {
-		ART48_256::ART4(ART4::empty())
+	fn empty(capacity: usize) -> Self {
+		if capacity <= ADD_TRESHOLD4 as usize {
+			ART48_256::ART4(ART4::empty())
+		} else if capacity <= ADD_TRESHOLD16 as usize {
+			ART48_256::ART16(ART16::empty())
+		} else if capacity <= ADD_TRESHOLD48 as usize {
+			ART48_256::ART48(ART48::empty())
+		} else {
+			ART48_256::ART256(Children256::empty(0))
+		}
+	}
+
+	fn need_init_unfetched(&self) -> bool {
+		true
 	}
 
 	fn set_child(

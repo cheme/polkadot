@@ -463,24 +463,24 @@ impl<N: TreeConf> Node<N> {
 		end_position: PositionFor<N>,
 		value: Option<N::Value>,
 		_init: (),
-		backend: N::Backend,
+		mut backend: N::Backend,
 	) -> Node<N> {
 		Node {
 			key: PrefixKey::new_offset(key, start_position, end_position),
 			value,
-			children: N::Children::empty(),
+			children: N::Children::empty(backend.fetch_nb_children().unwrap_or(0)),
 			backend,
 		}
 	}
 
 	fn new_box_unfetched(
 		prefix: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
-		backend: N::Backend,
+		mut backend: N::Backend,
 	) -> NodeBox<N> {
 		Box::new(Node {
 			key: prefix,
 			value: None,
-			children: N::Children::empty(),
+			children: N::Children::empty(backend.fetch_nb_children().unwrap_or(0)),
 			backend,
 		})
 	}
@@ -635,7 +635,7 @@ impl<N: TreeConf> Node<N> {
 
 		let child_prefix = self.key.child_split_off::<N::Radix>(at);
 		let child_value = self.value.take();
-		let child_children = replace(&mut self.children, N::Children::empty());
+		let child_children = replace(&mut self.children, N::Children::empty(1));
 		let child = Box::new(Node {
 			key: child_prefix,
 			value: child_value,
@@ -662,7 +662,7 @@ impl<N: TreeConf> Node<N> {
 				child.new_end(&mut self.key.data, position_cat);
 				self.key.end = child.key.end;
 				self.value = child.value.take();
-				self.children = replace(&mut child.children, N::Children::empty());
+				self.children = replace(&mut child.children, N::Children::empty(0));
 				// TODO remove (when delete memoized).
 				N::Backend::delete(&mut *child);
 			} else {
@@ -1194,8 +1194,11 @@ macro_rules! flatten_children {
 			type Radix = $inner_radix;
 			type Node = Node<$inner_node_type<V, $($backend_gen)?>>;
 
-			fn empty() -> Self {
-				$type_alias($inner_type::empty())
+			fn empty(capacity: usize) -> Self {
+				$type_alias($inner_type::empty(capacity))
+			}
+			fn need_init_unfetched(&self) -> bool {
+				self.0.need_init_unfetched()
 			}
 			fn set_child(
 				&mut self,
