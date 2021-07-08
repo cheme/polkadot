@@ -387,7 +387,7 @@ impl<'a, P> PrefixKey<&'a [u8], P>
 pub trait TreeConf: Debug + Clone + Sized {
 	type Radix: RadixConf;
 	type Value: Value;
-	type Children: Children<Node = Box<Node<Self>>, Radix = Self::Radix>;
+	type Children: Children<Node = ChildFor<Self>, Radix = Self::Radix>;
 	type Backend: Backend<Self>;
 
 	// TODO useless param and function.
@@ -409,7 +409,7 @@ pub(crate) type PositionFor<N> = Position<<<N as TreeConf>::Radix as RadixConf>:
 pub(crate) type AlignmentFor<N> = <<N as TreeConf>::Radix as RadixConf>::Alignment;
 pub(crate) type KeyIndexFor<N> = <<N as TreeConf>::Radix as RadixConf>::KeyIndex;
 pub(crate) type BackendFor<N> = <<N as TreeConf>::Backend as Backend<N>>::Backend;
-
+pub(crate) type ChildFor<N> = <<N as TreeConf>::Backend as Backend<N>>::ChildState;
 /// Node of a tree.
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -574,7 +574,7 @@ impl<N: TreeConf> Node<N> {
 		if N::Backend::Active {
 			panic!("Cannot fetch");
 		}
-		self.children.get_child(index).map(AsRef::as_ref)
+		self.children.get_child(index).and_then(|c| c.node())
 	}
 	fn get_child_no_cache(
 		&self,
@@ -598,9 +598,10 @@ impl<N: TreeConf> Node<N> {
 		index: KeyIndexFor<N>,
 	) -> Option<&mut Self> {
 		if let Some(Some(result)) = self.backend.fetch_children(index) {
+			let result = ChildFor::<N>::from_state(ChildState::Child, Some(result));
 			self.children.set_child(index, result);
 		}
-		self.children.get_child_mut(index).map(AsMut::as_mut)
+		self.children.get_child_mut(index).and_then(|c| c.node_mut())
 	}
 
 	fn set_child(
@@ -609,9 +610,11 @@ impl<N: TreeConf> Node<N> {
 		child: Box<Self>,
 	) -> Option<Box<Self>> {
 		self.backend.set_change();
-		self.children.set_child(index, child)
+		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
+		self.children.set_child(index, child).and_then(|c| c.extract_node())
 	}
 
+	// TODO variant with or without child in result + resolve if with child!!
 	fn remove_child(
 		&mut self,
 		index: KeyIndexFor<N>,
@@ -620,7 +623,7 @@ impl<N: TreeConf> Node<N> {
 		if result.is_some() {
 			self.backend.set_change();
 		}
-		result
+		result.and_then(|c| c.extract_node())
 	}
 	// TODO this is truncate not split_off (and should use truncate internally).
 	fn split_off(
@@ -642,6 +645,7 @@ impl<N: TreeConf> Node<N> {
 			children: child_children,
 			backend, 
 		});
+		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
 		self.children.set_child(index, child);
 		self.backend.set_change();
 	}
@@ -659,6 +663,7 @@ impl<N: TreeConf> Node<N> {
 				let position_start = position.next_by::<N::Radix>(self.depth());
 				position_start.set_index::<N::Radix>(&mut self.key.data, index);
 				let position_cat = position_start.next::<N::Radix>();
+				let mut child = child.extract_node().expect("resolved on remove child");
 				child.new_end(&mut self.key.data, position_cat);
 				self.key.end = child.key.end;
 				self.value = child.value.take();
@@ -1076,8 +1081,34 @@ pub trait WithChildState<N> {
 	const UseBackend: bool;
 	fn state(&self) -> ChildState;
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self;
+	fn extract_node(self) -> Option<Box<N>>;
 	fn node(&self) -> Option<&N>;
 	fn node_mut(&mut self) -> Option<&mut N>;
+}
+
+fn resolve_state<'a, N: TreeConf, C: WithChildState<Node<N>>>(
+	child: &'a mut C,
+	index: KeyIndexFor<N>,
+	backend: &mut N::Backend,
+) -> Option<&'a mut Node<N>> {
+	match child.state() {
+		ChildState::NoChild => None,
+		ChildState::Child => child.node_mut(),
+		ChildState::Deleted => None,
+		ChildState::Unfetched => {
+			match backend.fetch_children(index) {
+				Some(Some(c)) => {
+					*child = C::from_state(ChildState::Child, Some(c));
+					child.node_mut()
+				},
+				Some(None) => {
+					*child = C::from_state(ChildState::Child, None);
+					None
+				},
+				None => None,
+			}
+		},
+	}
 }
 
 /// Different possible children state.
@@ -1111,6 +1142,13 @@ impl<N> WithChildState<N> for Child<N> {
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self {
 		Child(node, state)
 	}
+	fn extract_node(self) -> Option<Box<N>> {
+		assert!(self.1 != ChildState::Unfetched);
+		if self.1 == ChildState::Deleted {
+			return None
+		}
+		self.0
+	}
 	fn node(&self) -> Option<&N> {
 		self.0.as_ref().map(AsRef::as_ref)
 	}
@@ -1128,6 +1166,9 @@ impl<N> WithChildState<N> for Box<N> {
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self {
 		assert!(state == ChildState::Child);
 		node.expect("Child with node")
+	}
+	fn extract_node(self) -> Option<Box<N>> {
+		Some(self)
 	}
 	fn node(&self) -> Option<&N> {
 		Some(self.as_ref())
