@@ -1072,17 +1072,19 @@ impl<N: TreeConf> Tree<N> {
 
 }
 
-pub trait WithChildState: Debug + Clone + Copy + Default {
+pub trait WithChildState<N> {
 	const UseBackend: bool;
-	fn state(self) -> Option<ChildState>;
-	fn from_state(state: ChildState) -> Self;
+	fn state(&self) -> ChildState;
+	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self;
+	fn node(&self) -> Option<&N>;
+	fn node_mut(&mut self) -> Option<&mut N>;
 }
 
 /// Different possible children state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChildState {
 	/// No child.
-	NoChild,
+	NoChild, // TODO useless??
 	/// Child is defined.
 	Child,
 	/// When runing on backend, this child need to be resolve
@@ -1100,25 +1102,38 @@ impl Default for ChildState {
 	}
 }
 
-impl WithChildState for ChildState {
+impl<N> WithChildState<N> for Child<N> {
 	const UseBackend: bool = true;
 
-	fn state(self) -> Option<ChildState> {
-		Some(self)
+	fn state(&self) -> ChildState {
+		self.1
 	}
-	fn from_state(state: ChildState) -> Self {
-		state
+	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self {
+		Child(node, state)
+	}
+	fn node(&self) -> Option<&N> {
+		self.0.as_ref().map(AsRef::as_ref)
+	}
+	fn node_mut(&mut self) -> Option<&mut N> {
+		self.0.as_mut().map(AsMut::as_mut)
 	}
 }
 
-impl WithChildState for () {
+impl<N> WithChildState<N> for Box<N> {
 	const UseBackend: bool = false;
 
-	fn state(self) -> Option<ChildState> {
-		None
+	fn state(&self) -> ChildState {
+		ChildState::Child
 	}
-	fn from_state(_state: ChildState) -> Self {
-		()
+	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self {
+		assert!(state == ChildState::Child);
+		node.expect("Child with node")
+	}
+	fn node(&self) -> Option<&N> {
+		Some(self.as_ref())
+	}
+	fn node_mut(&mut self) -> Option<&mut N> {
+		Some(self.as_mut())
 	}
 }
 
@@ -1126,31 +1141,28 @@ impl WithChildState for () {
 #[derive(Derivative)]
 #[derivative(Clone)]
 #[derivative(Debug)]
-struct Child<N, S>(Option<Box<N>>, S);
+pub struct Child<N>(Option<Box<N>>, ChildState);
 
-impl<N, S: Default> Default for Child<N, S> {
+impl<N> Default for Child<N> {
 	fn default() -> Self {
 		Child(None, Default::default())
 	}
 }
 
-impl<N, S: WithChildState> Child<N, S> {
+impl<N> Child<N> {
 	fn some(child: Box<N>) -> Self {
-		Child(Some(child), S::from_state(ChildState::Child))
+		Child(Some(child), ChildState::Child)
 	}
 	fn none() -> Self {
-		Child(None, S::from_state(ChildState::NoChild))
+		Child(None, ChildState::NoChild)
 	}
 	fn unfetched() -> Self {
-		debug_assert!(S::UseBackend);
-		Child(None, S::from_state(ChildState::Unfetched))
+		Child(None, ChildState::Unfetched)
 	}
 	fn set_deleted(&mut self) {
-		debug_assert!(S::UseBackend);
-		self.1 = S::from_state(ChildState::Deleted);
+		self.1 = ChildState::Deleted;
 	}
 }
-
 
 
 /// Flatten type for children of a given node type.

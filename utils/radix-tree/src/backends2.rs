@@ -68,7 +68,8 @@ impl Backend for () {
 pub trait TreeBackend<N: TreeConf>: Clone {
 	const Active: bool = true;
 	/// Always use () if inactive or ChildState if active
-	type ChildState: crate::WithChildState;
+	/// TODO consider moving to Tree (leaks node type in this crate)
+	type ChildState: crate::WithChildState<crate::Node<N>>;
 
 	/// Inner backend used.
 	type Backend: Backend<Index = Self::Index>;
@@ -127,7 +128,7 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 
 impl<N: TreeConf> TreeBackend<N> for () {
 	const Active: bool = false;
-	type ChildState = ();
+	type ChildState = Box<Node<N>>;
 
 	type Backend = ();
 	type Index = ();
@@ -386,7 +387,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		N::Value: Decode + Encode,
 {
 	const Active: bool = true;
-	type ChildState = crate::ChildState;
+	type ChildState = crate::Child<Node<N>>;
 
 	type Backend = Rc<RefCell<TestBackend>>;
 	type Index = usize;
