@@ -651,8 +651,7 @@ impl<N: TreeConf> Node<N> {
 		}
 		if let Some(children) = self.children.get_child(index) {
 			match children.state() {
-				ChildState::Child
-				| ChildState::NoChild => {
+				ChildState::Resolved => {
 					children.node().is_some()
 				},
 				ChildState::Unfetched => {
@@ -689,7 +688,7 @@ impl<N: TreeConf> Node<N> {
 		index: KeyIndexFor<N>,
 	) -> Option<&mut Box<Self>> {
 		if let Some(Some(result)) = self.backend.fetch_children(index) {
-			let result = ChildFor::<N>::from_state(ChildState::Child, Some(result));
+			let result = ChildFor::<N>::from_state(ChildState::Resolved, Some(result));
 			self.children.set_child(index, result);
 		}
 		self.children.get_child_mut(index).and_then(|c| c.node_mut())
@@ -708,7 +707,7 @@ impl<N: TreeConf> Node<N> {
 		child: Box<Self>,
 	) -> Option<Box<Self>> {
 		self.backend.set_children_change();
-		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
+		let child = ChildFor::<N>::from_state(ChildState::Resolved, Some(child));
 		// TODO check is none when with backend? and don't return
 		let result = self.children.set_child(index, child).and_then(|c| c.extract_node());
 		if result.is_none() {
@@ -750,7 +749,7 @@ impl<N: TreeConf> Node<N> {
 			backend, 
 		});
 		let child = replace(node, parent);
-		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
+		let child = ChildFor::<N>::from_state(ChildState::Resolved, Some(child));
 		assert!(node.children.set_child(index, child).is_none());
 		node.children.increase_number();
 		node.backend.set_children_change();
@@ -1248,10 +1247,8 @@ pub trait WithChildState<N> {
 /// Different possible children state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChildState {
-	/// No child.
-	NoChild, // TODO useless??
-	/// Child is defined.
-	Child,
+	/// Fetched state.
+	Resolved,
 	/// When runing on backend, this child need to be resolve
 	/// from backend first.
 	/// Could be an existing child or not.
@@ -1267,7 +1264,7 @@ pub enum ValueState {
 	Resolved,
 	/// Modified
 	Modified,
-	/// Deleted. TODO can remove and use modified with None state instead?
+	/// Deleted.
 	Deleted,
 }
 
@@ -1278,7 +1275,6 @@ impl Default for ChildState {
 }
 
 impl<N> WithChildState<N> for Child<N> {
-
 	fn state(&self) -> ChildState {
 		self.1
 	}
@@ -1304,7 +1300,7 @@ impl<N> WithChildState<N> for Child<N> {
 
 impl<N> WithChildState<N> for Box<N> {
 	fn state(&self) -> ChildState {
-		ChildState::Child
+		ChildState::Resolved
 	}
 
 	fn state_mut(&mut self) -> &mut ChildState {
@@ -1312,7 +1308,7 @@ impl<N> WithChildState<N> for Box<N> {
 	}
 
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self {
-		assert!(state == ChildState::Child);
+		assert!(state == ChildState::Resolved);
 		node.expect("Child with node")
 	}
 	fn extract_node(self) -> Option<Box<N>> {
