@@ -88,6 +88,7 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	// TODO usefull ? fetch children?
 	fn get_node(&self, index: Self::Index) -> Option<NodeBox<N>>;
 
+	// TODO replace by backend_hash_index -> bool ?
 	fn fetch_children_index(&self, at: KeyIndexFor<N>) -> Option<Self::Index>;
 	/// Get a child node from the backend.
 	/// TODO use Self::Index instead of usize??
@@ -103,6 +104,9 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	// update from fetch not changing it.
 	/// Original number of children stored in backend.
 	fn fetch_nb_children(&mut self) -> Option<usize>;
+
+	// TODO replace by backend_hash_value -> bool ?
+	fn fetch_value_index (&self) -> Option<Self::Index>;
 
 	fn fetch_value(&mut self) -> Option<Option<N::Value>>;
 
@@ -167,6 +171,10 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	}
 
 	fn fetch_nb_children(&mut self) -> Option<usize> {
+		None
+	}
+
+	fn fetch_value_index (&self) -> Option<Self::Index> {
 		None
 	}
 
@@ -489,6 +497,13 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 	fn fetch_nb_children(&mut self) -> Option<usize> {
 		Some(self.nb_children)
 	}
+
+	fn fetch_value_index (&self) -> Option<Self::Index> {
+		debug_assert!(self.value_state == ValueState::Unfetched);
+		// dummy index just for testing purpose
+		self.value.as_ref().map(|_| Default::default())
+	}
+
 	fn fetch_value(&mut self) -> Option<Option<N::Value>> {
 		if self.value_state != ValueState::Unfetched {
 			None

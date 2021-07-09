@@ -458,6 +458,29 @@ impl<N: TreeConf> Node<N> {
 		Box::new(Self::new(key, start_position, end_position, value, init, backend))
 	}
 
+	fn children_from_backend(
+		backend: &mut N::Backend,
+	) -> N::Children {
+		let mut children = N::Children::empty(backend.fetch_nb_children().unwrap_or(0));
+		if N::Backend::Active && children.need_init_unfetched() {
+			use crate::children::NodeIndex;
+			let mut i = KeyIndexFor::<N>::zero();
+			loop {
+				if let Some(_) = backend.fetch_children_index(i) {
+					let child = ChildFor::<N>::from_state(ChildState::Unfetched, None);
+					children.set_child(i, child);
+				}
+
+				if let Some(n) = i.next() {
+					i = n;
+				} else {
+					break;
+				}
+			}
+		}
+		children
+	}
+	
 	fn new(
 		key: &[u8],
 		start_position: PositionFor<N>,
@@ -466,10 +489,11 @@ impl<N: TreeConf> Node<N> {
 		_init: (),
 		mut backend: N::Backend,
 	) -> Node<N> {
+		let children = Self::children_from_backend(&mut backend);
 		Node {
 			key: PrefixKey::new_offset(key, start_position, end_position),
 			value,
-			children: N::Children::empty(backend.fetch_nb_children().unwrap_or(0)),
+			children,
 			backend,
 		}
 	}
@@ -478,10 +502,11 @@ impl<N: TreeConf> Node<N> {
 		prefix: PrefixKey<NodeKeyBuff, AlignmentFor<N>>,
 		mut backend: N::Backend,
 	) -> NodeBox<N> {
+		let children = Self::children_from_backend(&mut backend);
 		Box::new(Node {
 			key: prefix,
 			value: None,
-			children: N::Children::empty(backend.fetch_nb_children().unwrap_or(0)),
+			children,
 			backend,
 		})
 	}
@@ -583,8 +608,12 @@ impl<N: TreeConf> Node<N> {
 
 	fn remove_value(
 		&mut self,
+		with_value: bool,
 	) -> Option<N::Value> {
 		if N::Backend::Active {
+			if with_value {
+				self.backend.fetch_value();
+			}
 			self.backend.set_value_state(ValueState::Deleted);
 		}
 		replace(&mut self.value, None)
@@ -646,6 +675,20 @@ impl<N: TreeConf> Node<N> {
 		}
 	}
 
+	fn has_value(
+		&self,
+	) -> bool {
+		if !N::Backend::Active {
+			return self.value.is_some()
+		}
+		match self.backend.value_state() {
+			ValueState::Unfetched => {
+				self.backend.fetch_value_index().is_some()
+			},
+			_ => self.value.is_some(),
+		}
+	}
+	
 	fn get_child_mut(
 		&mut self,
 		index: KeyIndexFor<N>,
@@ -671,7 +714,12 @@ impl<N: TreeConf> Node<N> {
 	) -> Option<Box<Self>> {
 		self.backend.set_children_change();
 		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
-		self.children.set_child(index, child).and_then(|c| c.extract_node())
+		// TODO check is none when with backend? and don't return
+		let result = self.children.set_child(index, child).and_then(|c| c.extract_node());
+		if result.is_none() {
+			self.children.increase_number();
+		}
+		result
 	}
 
 	// TODO variant with or without child in result + resolve if with child!!
@@ -708,7 +756,8 @@ impl<N: TreeConf> Node<N> {
 		});
 		let child = replace(node, parent);
 		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
-		node.children.set_child(index, child);
+		assert!(node.children.set_child(index, child).is_none());
+		node.children.increase_number();
 		node.backend.set_children_change();
 	}
 
@@ -1054,13 +1103,13 @@ impl<N: TreeConf> Tree<N> {
 	}
 
 	/// Remove value at a given location.
-	pub fn remove(&mut self, key: &[u8]) -> Option<N::Value> {
+	pub fn remove(&mut self, key: &[u8], with_value: bool) -> Option<N::Value> {
 		let mut position = PositionFor::<N>::zero();
 		let mut empty_tree = None;
 		if let Some(top) = self.tree.as_mut() {
 			let current: &mut Box<Node<N>> = top;
 			if key.len() == 0 && current.depth() == 0 {
-				let result = current.remove_value();
+				let result = current.remove_value(with_value);
 				if current.number_child() == 0 {
 					empty_tree = Some(result);
 //					self.tree = None;
@@ -1100,7 +1149,7 @@ impl<N: TreeConf> Tree<N> {
 						return None;
 					},
 					Descent::Match(_position) => {
-						let result = current.remove_value();
+						let result = current.remove_value(with_value);
 						if current.number_child() == 0 {
 							if let Some((parent, parent_position)) = parent {
 								let parent_index = parent_position.index::<N::Radix>(key)
@@ -1135,9 +1184,10 @@ impl<N: TreeConf> Tree<N> {
 	/// Empty a tree from all its key values.
 	pub fn clear(&mut self) {
 		// TODO use iter mut.
+		// TODO might not work with backend: consider just removal.
 		let keys: Vec<_> = self.iter().value_iter().map(|v| v.0).collect();
 		for key in keys {
-			self.remove(key.as_slice());
+			self.remove(key.as_slice(), false);
 		}
 	}
 
@@ -1202,7 +1252,7 @@ pub enum ValueState {
 	Resolved,
 	/// Modified
 	Modified,
-	/// Deleted.
+	/// Deleted. TODO can remove and use modified with None state instead?
 	Deleted,
 }
 
@@ -1326,8 +1376,11 @@ macro_rules! flatten_children {
 			type Radix = $inner_radix;
 			type Node = $inner_children_type<V, $($backend_gen)?>;
 
-			fn empty(capacity: usize) -> Self {
-				$type_alias($inner_type::empty(capacity))
+			fn empty(initial_size: usize) -> Self {
+				$type_alias($inner_type::empty(initial_size))
+			}
+			fn increase_number(&mut self) {
+				self.0.increase_number()
 			}
 			fn need_init_unfetched(&self) -> bool {
 				self.0.need_init_unfetched()

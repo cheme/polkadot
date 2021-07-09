@@ -114,7 +114,8 @@ pub trait Children: Clone + Debug {
 	type Radix: RadixConf;
 	type Node;
 
-	fn empty(capacity: usize) -> Self;
+	/// Initialize size is size from backend.
+	fn empty(initial_size: usize) -> Self;
 
 	fn need_init_unfetched(&self) -> bool;
 
@@ -123,6 +124,8 @@ pub trait Children: Clone + Debug {
 		index: <Self::Radix as RadixConf>::KeyIndex,
 		child: Self::Node,
 	) -> Option<Self::Node>;
+
+	fn increase_number(&mut self);
 
 	fn remove_child(
 		&mut self,
@@ -157,12 +160,12 @@ impl<N: Debug + Clone> Children for Children2<N> {
 	type Node = N;
 
 
-	fn empty(_capacity: usize) -> Self {
+	fn empty(_initial_size: usize) -> Self {
 		Children2(None)
 	}
 
 	fn need_init_unfetched(&self) -> bool {
-		false
+		true // to have working nb_children
 	}
 
 	fn set_child(
@@ -181,6 +184,8 @@ impl<N: Debug + Clone> Children for Children2<N> {
 			replace(&mut children.1, Some(child))
 		}
 	}
+
+	fn increase_number(&mut self) { }
 
 	fn remove_child(
 		&mut self,
@@ -348,8 +353,8 @@ impl<N: Debug + Clone> Children for Children256<N> {
 
 	type Node = N;
 
-	fn empty(_capacity: usize) -> Self {
-		Children256(None, 0)
+	fn empty(initial_size: usize) -> Self {
+		Children256(None, initial_size as u8)
 	}
 
 	fn need_init_unfetched(&self) -> bool {
@@ -366,11 +371,11 @@ impl<N: Debug + Clone> Children for Children256<N> {
 		}
 		let children = self.0.as_mut()
 			.expect("Lazy init above");
-		let result = replace(&mut children[index as usize], Some(child));
-		if result.is_none() {
-			self.1 += 1;
-		}
-		result
+		replace(&mut children[index as usize], Some(child))
+	}
+
+	fn increase_number(&mut self) {
+		self.1 += 1;
 	}
 
 	fn remove_child(
@@ -430,8 +435,8 @@ impl<N: Debug + Clone> Children for $struct_name<N> {
 
 	type Node = N;
 
-	fn empty(_capacity: usize) -> Self {
-		$struct_name($empty(), 0)
+	fn empty(initial_size: usize) -> Self {
+		$struct_name($empty(), initial_size as u8)
 	}
 
 	fn need_init_unfetched(&self) -> bool {
@@ -445,10 +450,11 @@ impl<N: Debug + Clone> Children for $struct_name<N> {
 	) -> Option<N> {
 		let children = &mut self.0;
 		let result = replace(&mut children[index.to_usize()], Some(child));
-		if result.is_none() {
-			self.1 += 1;
-		}
 		result
+	}
+
+	fn increase_number(&mut self) {
+		self.1 += 1;
 	}
 
 	fn remove_child(
@@ -498,10 +504,11 @@ impl<N: Debug + Clone> Children256<N> {
 
 	fn reduce_node(&mut self) -> ART48<N> {
 		debug_assert!(self.1 <= 48);
-		let mut result = ART48::empty();
+		let mut result = ART48::empty(0);
 		for i in 0..=255 {
 			if let Some(child) = self.remove_child(i) {
 				result.set_child(i, child);
+				result.increase_number();
 			}
 		}
 		result
@@ -525,8 +532,8 @@ const REM_TRESHOLD4: u8 = 4u8;
 use crate::radix::impls::Radix256Conf;
 
 impl<N: Debug + Clone> ART48<N> {
-	fn empty() -> Self {
-		ART48(([UNSET48; 256], empty_48_children()), 0)
+	fn empty(initial_size: usize) -> Self {
+		ART48(([UNSET48; 256], empty_48_children()), initial_size as u8)
 	}
 
 	fn need_reduce(
@@ -537,13 +544,14 @@ impl<N: Debug + Clone> ART48<N> {
 
 	fn reduce_node(&mut self) -> ART16<N> {
 		debug_assert!(self.1 <= 16);
-		let mut result = ART16::empty();
+		let mut result = ART16::empty(0);
 		let (indexes, values) = &mut self.0;
 		for i in 0..=255 {
 			let index = indexes[i as usize];
 			if index != UNSET48 {
 				if let Some(value) = values[index as usize].take() {
 					result.set_child(i, value);
+					result.increase_number();
 				}
 			}
 		}
@@ -562,6 +570,7 @@ impl<N: Debug + Clone> ART48<N> {
 				let value = values[ix as usize].take()
 					.expect("Not unset");
 				result.set_child(i as u8, value);
+				result.increase_number();
 			}
 		}
 		result
@@ -595,13 +604,16 @@ impl<N: Debug + Clone> ART48<N> {
 		let result = if is_new {
 			indexes[index as usize] = self.1;
 			values[self.1 as usize] = Some(child);
-			self.1 += 1;
 			None
 		} else {
 			let ix = indexes[index as usize];
 			replace(&mut values[ix as usize], Some(child))
 		};
 		Some(result)
+	}
+
+	fn increase_number(&mut self) {
+		self.1 += 1;
 	}
 
 	fn remove_child(
@@ -676,21 +688,22 @@ impl<N: Debug + Clone> ART48<N> {
 }
 
 impl<N: Debug + Clone> ART16<N> {
-	fn empty() -> Self {
-		ART16(([0u8; 16], empty_16_children()), 0)
+	fn empty(initial: usize) -> Self {
+		ART16(([0u8; 16], empty_16_children()), initial as u8)
 	}
 
 	fn grow_node(&mut self) -> ART48<N> {
 		if self.1 == 0 {
-			return ART48::empty();
+			return ART48::empty(0);
 		}
-		let mut result = ART48::empty();
+		let mut result = ART48::empty(0);
 		let (indexes, values) = &mut self.0;
 		for i in 0..self.1 {
 			let ix = indexes[i as usize];
 			let value = values[i as usize].take()
 				.expect("Restricted by size");
 			result.set_child(ix, value);
+			result.increase_number();
 		}
 		result
 	}
@@ -703,12 +716,13 @@ impl<N: Debug + Clone> ART16<N> {
 
 	fn reduce_node(&mut self) -> ART4<N> {
 		debug_assert!(self.1 <= 4);
-		let mut result = ART4::empty();
+		let mut result = ART4::empty(0);
 		let (indexes, values) = &mut self.0;
 		for i in 0..self.1 {
 			let index = indexes[i as usize];
 			if let Some(value) = values[i as usize].take() {
 				result.set_child(index, value);
+				result.increase_number();
 			}
 		}
 		result
@@ -737,10 +751,13 @@ impl<N: Debug + Clone> ART16<N> {
 		} else {
 			indexes[self.1 as usize] = index;
 			values[self.1 as usize] = Some(child);
-			self.1 += 1;
 			None
 		};
 		(Some(result), None)
+	}
+
+	fn increase_number(&mut self) {
+		self.1 += 1;
 	}
 
 	fn remove_child(
@@ -813,21 +830,22 @@ impl<N: Debug + Clone> ART16<N> {
 }
 
 impl<N: Debug + Clone> ART4<N> {
-	fn empty() -> Self {
-		ART4(([0u8; 4], empty_4_children()), 0)
+	fn empty(initial: usize) -> Self {
+		ART4(([0u8; 4], empty_4_children()), initial as u8)
 	}
 
 	fn grow_node(&mut self) -> ART16<N> {
 		if self.1 == 0 {
-			return ART16::empty();
+			return ART16::empty(0);
 		}
-		let mut result = ART16::empty();
+		let mut result = ART16::empty(0);
 		let (indexes, values) = &mut self.0;
 		for i in 0..self.1 {
 			let ix = indexes[i as usize];
 			let value = values[i as usize].take()
 				.expect("Restricted by size");
 			result.set_child(ix, value);
+			result.increase_number();
 		}
 		result
 	}
@@ -855,10 +873,13 @@ impl<N: Debug + Clone> ART4<N> {
 		} else {
 			indexes[self.1 as usize] = index;
 			values[self.1 as usize] = Some(child);
-			self.1 += 1;
 			None
 		};
 		(Some(result), None)
+	}
+
+	fn increase_number(&mut self) {
+		self.1 += 1;
 	}
 
 	fn remove_child(
@@ -947,13 +968,13 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 
 	fn empty(capacity: usize) -> Self {
 		if capacity <= ADD_TRESHOLD4 as usize {
-			ART48_256::ART4(ART4::empty())
+			ART48_256::ART4(ART4::empty(capacity))
 		} else if capacity <= ADD_TRESHOLD16 as usize {
-			ART48_256::ART16(ART16::empty())
+			ART48_256::ART16(ART16::empty(capacity))
 		} else if capacity <= ADD_TRESHOLD48 as usize {
-			ART48_256::ART48(ART48::empty())
+			ART48_256::ART48(ART48::empty(capacity))
 		} else {
-			ART48_256::ART256(Children256::empty(0))
+			ART48_256::ART256(Children256::empty(capacity))
 		}
 	}
 
@@ -963,6 +984,15 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 			ART48_256::ART16(inner) => true,
 			ART48_256::ART48(inner) => true,
 			ART48_256::ART256(inner) => true,
+		}
+	}
+
+	fn increase_number(&mut self) {
+		match self {
+			ART48_256::ART4(inner) => inner.increase_number(),
+			ART48_256::ART16(inner) => inner.increase_number(),
+			ART48_256::ART48(inner) => inner.increase_number(),
+			ART48_256::ART256(inner) => inner.increase_number(),
 		}
 	}
 

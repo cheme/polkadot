@@ -357,7 +357,7 @@ pub mod $module_name {
 		while a < data.len() {
 			if data[a].0 {
 				// remove
-				t1.remove(&data[a].1[..]);
+				t1.remove(&data[a].1[..], false);
 				t2.remove(&data[a].1[..]);
 			} else {
 				// add
