@@ -19,7 +19,8 @@
 
 use crate::{TreeConf, PositionFor, KeyIndexFor,
 	Position, NodeBox, RadixConf, BackendFor,
-	PrefixKeyConf, Node, Key, PrefixKey, AlignmentFor};
+	PrefixKeyConf, Node, Key, PrefixKey, AlignmentFor,
+	ValueState};
 use crate::radix::{MaskFor, MaskKeyByte};
 use crate::children::{Children, NodeIndex};
 use alloc::vec::Vec;
@@ -102,7 +103,6 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	/// Original number of children stored in backend.
 	fn fetch_nb_children(&mut self) -> Option<usize>;
 
-	// TODO &self? is fetched should be part of children from node.
 	fn fetch_value(&mut self) -> Option<Option<N::Value>>;
 
 	fn fetch_value_no_cache(&self) -> Option<N::Value>;
@@ -111,9 +111,6 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	/// TODO could consider adding position to avoid iterating on all child
 	fn set_change(&mut self);
 	
-	/// Indicate value did change.
-	fn set_changed_value(&mut self);
-
 	/// Delete a node.
 	/// Does flush change immediatly.
 	fn delete(node: &mut Node<N>);
@@ -123,6 +120,12 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	fn commit_change(node: &mut Node<N>) -> Option<Self::Index>;
 
 	fn new_node_backend(backend: &Self::Backend) -> Self;
+
+	/// Value state is stored in backend.
+	fn value_state(&self) -> ValueState;
+
+	/// Value state is stored in backend.
+	fn set_value_state(&mut self, state: ValueState);
 }
 
 
@@ -166,9 +169,6 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	fn set_change(&mut self) {
 	}
 	
-	fn set_changed_value(&mut self) {
-	}
-
 	fn delete(_node: &mut Node<N>) {
 	}
 
@@ -177,6 +177,12 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	}
 
 	fn new_node_backend(_backend: &Self::Backend) -> Self {
+		()
+	}
+	fn value_state(&self) -> ValueState {
+		ValueState::Resolved
+	}
+	fn set_value_state(&mut self, _state: ValueState) {
 		()
 	}
 }
@@ -269,10 +275,9 @@ pub struct NodeTestBackend<N: TreeConf> {
 	child_index: Vec<(Option<usize>, bool)>,
 	nb_children: usize,
 	value: Option<N::Value>,
-	fetched_value: bool,
+	value_state: ValueState,
 	backend: Rc<RefCell<TestBackend>>,
 	children_changed: bool,
-	value_changed: bool,
 }
 
 // TODO replace backend by N::Backend when attached
@@ -333,11 +338,10 @@ fn decode<N>(
 		encoded,
 		child_index,
 		value,
+		value_state: ValueState::Unfetched,
 		nb_children,
-		fetched_value: false,
 		backend: backend.clone(),
 		children_changed: false,
-		value_changed: false,
 	}, prefix)
 }
 
@@ -348,7 +352,8 @@ where
 {
 	let mut result = Vec::new();
 
-	if node.backend.value_changed {
+	if node.backend.value_state == ValueState::Modified
+		|| node.backend.value_state == ValueState::Deleted {
 		node.value.encode_to(&mut result);
 	} else {
 		node.backend.value.encode_to(&mut result);
@@ -460,10 +465,10 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		Some(self.nb_children)
 	}
 	fn fetch_value(&mut self) -> Option<Option<N::Value>> {
-		if self.fetched_value {
+		if self.value_state != ValueState::Unfetched {
 			None
 		} else {
-			self.fetched_value = false;
+			self.value_state = ValueState::Resolved;
 			Some(self.value.clone())
 		}
 	}
@@ -472,9 +477,6 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 	}
 	fn set_change(&mut self) {
 		self.children_changed = true;
-	}
-	fn set_changed_value(&mut self) {
-		self.value_changed = true;
 	}
 	fn delete(node: &mut Node<N>) {
 		if let Some(index) = node.backend.index {
@@ -491,13 +493,14 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			nb_children: 0,
 			backend: backend.clone(),
 			children_changed: false,
-			value_changed: false,
-			fetched_value: false,
+			value_state: ValueState::Unfetched,
 		}
 	}
 
 	fn commit_change(node: &mut Node<N>) -> Option<Self::Index> {
-		let changed = node.backend.children_changed || node.backend.value_changed;
+		let changed = node.backend.children_changed
+			|| node.backend.value_state == ValueState::Modified
+			|| node.backend.value_state == ValueState::Deleted;
 		if !changed {
 			return None;
 		}
@@ -517,12 +520,13 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 				}
 			}
 		}
-		if node.backend.value_changed {
+		if node.backend.value_state == ValueState::Modified
+			|| node.backend.value_state == ValueState::Deleted {
 			node.backend.value = node.value.clone();
+			node.backend.value_state = ValueState::Resolved;
 		}
 
 		node.backend.children_changed = false;
-		node.backend.value_changed = false;
 
 		let encoded = encode_node::<N>(node);
 		if let Some(i) = node.backend.index {
@@ -530,5 +534,13 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		} else {
 			Some(node.backend.backend.set_new_node(encoded))
 		}
+	}
+
+	fn value_state(&self) -> ValueState {
+		self.value_state
+	}
+
+	fn set_value_state(&mut self, state: ValueState) {
+		self.value_state = state
 	}
 }

@@ -410,6 +410,7 @@ pub(crate) type AlignmentFor<N> = <<N as TreeConf>::Radix as RadixConf>::Alignme
 pub(crate) type KeyIndexFor<N> = <<N as TreeConf>::Radix as RadixConf>::KeyIndex;
 pub(crate) type BackendFor<N> = <<N as TreeConf>::Backend as Backend<N>>::Backend;
 pub(crate) type ChildFor<N> = <<N as TreeConf>::Backend as Backend<N>>::ChildState;
+
 /// Node of a tree.
 #[derive(Derivative)]
 #[derivative(Clone)]
@@ -539,25 +540,53 @@ impl<N: TreeConf> Node<N> {
 	fn value(
 		&self,
 	) -> Option<&N::Value> {
+		if N::Backend::Active {
+			panic!("Cannot fetch");
+		}
 		self.value.as_ref()
 	}
 
 	fn value_mut(
 		&mut self,
 	) -> Option<&mut N::Value> {
+		if N::Backend::Active {
+			match self.backend.value_state()  {
+				ValueState::Unfetched => {
+					if let Some(option_value) = self.backend.fetch_value() {
+						self.value = option_value;
+					}
+				},
+				_ => (),
+			}
+		}
 		self.value.as_mut()
+	}
+
+	fn value_no_cache(
+		&self,
+	) -> Option<N::Value> {
+		if !N::Backend::Active {
+			panic!("No backend");
+		}
+		self.backend.fetch_value_no_cache()
 	}
 
 	fn set_value(
 		&mut self,
 		value: N::Value,
 	) -> Option<N::Value> {
+		if N::Backend::Active {
+			self.backend.set_value_state(ValueState::Modified);
+		}
 		replace(&mut self.value, Some(value))
 	}
 
 	fn remove_value(
 		&mut self,
 	) -> Option<N::Value> {
+		if N::Backend::Active {
+			self.backend.set_value_state(ValueState::Deleted);
+		}
 		replace(&mut self.value, None)
 	}
 
@@ -576,7 +605,7 @@ impl<N: TreeConf> Node<N> {
 		}
 		self.children.get_child(index).and_then(|c| c.node())
 	}
-	fn get_child_no_cache(
+	fn get_child_no_cache( // TODO useless except if backend non mutable no_cache get 
 		&self,
 		index: KeyIndexFor<N>,
 	) -> Option<NodeBox<N>> {
@@ -1124,6 +1153,19 @@ pub enum ChildState {
 	Unfetched,
 	/// Child is deleted (content is kept when backend is used
 	/// for removal or possible later reinsert of node).
+	Deleted,
+}
+
+/// Different possible value state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueState {
+	/// Unfetched
+	Unfetched,
+	/// Resolved
+	Resolved,
+	/// Modified
+	Modified,
+	/// Deleted.
 	Deleted,
 }
 
