@@ -222,6 +222,17 @@ pub struct TestBackend {
 	root_index: usize,
 }
 
+impl Default for TestBackend {
+	fn default() -> Self {
+		TestBackend {
+			encoded_nodes: Vec::new(),
+			free_node: 0,
+			new_node_on_update: true,
+			root_index: 0,
+		}
+	}
+}
+
 impl TestBackend {
 	fn remove(&mut self, index: usize) {
 		if let Some(node) = self.encoded_nodes.get_mut(index) {
@@ -421,6 +432,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 {
 	const ACTIVE: bool = true;
 	type ChildState = crate::Child<Node<N>>;
+	//type ChildState = Box<Node<N>>;
 
 	type Backend = Rc<RefCell<TestBackend>>;
 	type Index = usize;

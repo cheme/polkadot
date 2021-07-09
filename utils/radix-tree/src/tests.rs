@@ -18,8 +18,8 @@
 //! Tests an fuzzing base code.
 
 #[cfg(any(test, feature = "fuzzer"))]
-use crate::{Node256NoBackend, Node256NoBackendART,
-	Node16NoBackend, Node4NoBackend};
+use crate::{Node256NoBackend, Node256NoBackendART, Node256TestBackendART,
+	Node16NoBackend, Node4NoBackend, Node256TestBackend};
 //use crate::{Node256HashBackend, Node256LazyHashBackend, Node256TxBackend};
 
 macro_rules! test_for {
@@ -402,6 +402,7 @@ test_for!(test_256, Node256NoBackend, false);
 test_for!(test_4, Node4NoBackend, false);
 test_for!(test_16, Node16NoBackend, false);
 test_for!(test_256_art, Node256NoBackendART, false);
+test_for!(test_256_backend, Node256TestBackend, true);
+test_for!(test_256_backend_art, Node256TestBackendART, true);
 //test_for!(test_256_hash, Node256HashBackend, true);
-//test_for!(test_256_hash_tx, Node256TxBackend, true);
 //test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);

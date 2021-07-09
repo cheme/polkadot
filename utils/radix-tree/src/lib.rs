@@ -41,6 +41,7 @@ use core::mem::replace;
 use radix::{PrefixKeyConf, RadixConf, Position,
 	MaskFor, MaskKeyByte};
 use children::Children;
+use codec::Codec;
 pub use backends::TreeBackend as Backend;
 
 /// Alias to type of a key as used by external api.
@@ -1068,7 +1069,7 @@ impl<N: TreeConf> Tree<N> {
 		};
 		let mut position = PositionFor::<N>::zero();
 		if let Some(top) = self.tree.as_mut() {
-			let mut current: &mut Box<Node<N>> = top;
+			let mut current: &mut NodeBox<N> = top;
 			if key.len() == 0 && current.depth() == 0 {
 				return current.set_value(value);
 			}
@@ -1145,7 +1146,7 @@ impl<N: TreeConf> Tree<N> {
 		let mut position = PositionFor::<N>::zero();
 		let mut empty_tree = None;
 		if let Some(top) = self.tree.as_mut() {
-			let current: &mut Box<Node<N>> = top;
+			let current: &mut NodeBox<N> = top;
 			if key.len() == 0 && current.depth() == 0 {
 				let result = current.remove_value(with_value);
 				if current.number_child() == 0 {
@@ -1166,17 +1167,17 @@ impl<N: TreeConf> Tree<N> {
 				return result;
 			}
 			let mut parent = None;
-			let mut current_ptr: *mut Box<Node<N>> = current;
+			let mut current_ptr: *mut NodeBox<N> = current;
 			loop {
 				// Note that this can produce dangling pointer when removing
 				// node.
-				let current: &mut Box<Node<N>> = unsafe { current_ptr.as_mut().unwrap() };
+				let current: &mut NodeBox<N> = unsafe { current_ptr.as_mut().unwrap() };
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
 						if let Some(child) = current.get_child_mut(index) {
 							let old_position = child_position;
 							position = child_position.next::<N::Radix>();
-							current_ptr = child as *mut Box<Node<N>>;
+							current_ptr = child as *mut NodeBox<N>;
 							parent = Some((current, old_position));
 						} else {
 							return None;
@@ -1365,7 +1366,7 @@ macro_rules! flatten_children {
 			type Children = $type_alias<V, $($backend_gen)?>;
 			type Backend = $backend;
 		}
-		type $inner_children_type<V, $($backend_gen)?> = Box<Node<$inner_node_type<V, $($backend_gen)?>>>;
+		type $inner_children_type<V, $($backend_gen)?> = ChildFor<$inner_node_type<V, $($backend_gen)?>>;
 		#[derive(Derivative)]
 		#[derivative(Clone)]
 		#[derivative(Debug)]
@@ -1503,4 +1504,27 @@ flatten_children!(
 	Children4,
 	Radix4Conf,
 	(),
+);
+
+flatten_children!(
+	!value_bound: Codec,
+	Children256FlattenART2,
+	Node256FlattenART2,
+	Node256TestBackendART,
+	ART48_256,
+	Radix256Conf,
+	backends::NodeTestBackend<
+		Node256TestBackendART<V>
+	>,
+);
+flatten_children!(
+	!value_bound: Codec,
+	Children256Flatten4,
+	Node256Flatten4,
+	Node256TestBackend,
+	Children256,
+	Radix256Conf,
+	backends::NodeTestBackend<
+		Node256TestBackend<V>
+	>,
 );
