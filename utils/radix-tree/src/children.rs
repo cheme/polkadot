@@ -994,10 +994,10 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 
 	fn need_init_unfetched(&self) -> bool {
 		match self {
-			ART48_256::ART4(inner) => true,
-			ART48_256::ART16(inner) => true,
-			ART48_256::ART48(inner) => true,
-			ART48_256::ART256(inner) => true, // TODO switch false (see issue in case of reduce
+			ART48_256::ART4(_) => true,
+			ART48_256::ART16(_) => true,
+			ART48_256::ART48(_) => true,
+			ART48_256::ART256(_) => true, // TODO switch false (see issue in case of reduce
 		}
 	}
 

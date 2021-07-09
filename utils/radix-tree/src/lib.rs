@@ -25,7 +25,7 @@
 extern crate alloc;
 
 //pub mod backends;
-pub mod backends2;
+pub mod backends;
 pub mod radix;
 pub mod children;
 pub mod iterators;
@@ -38,11 +38,10 @@ use alloc::borrow::Borrow;
 use core::cmp::{min, Ordering};
 use core::fmt::Debug;
 use core::mem::replace;
-use codec::Codec;
 use radix::{PrefixKeyConf, RadixConf, Position,
 	MaskFor, MaskKeyByte};
 use children::Children;
-pub use backends2::TreeBackend as Backend;
+pub use backends::TreeBackend as Backend;
 
 /// Alias to type of a key as used by external api.
 pub type Key = NodeKeyBuff;
@@ -460,7 +459,7 @@ impl<N: TreeConf> Node<N> {
 		backend: &mut N::Backend,
 	) -> N::Children {
 		let mut children = N::Children::empty(backend.fetch_nb_children().unwrap_or(0));
-		if N::Backend::Active && children.need_init_unfetched() {
+		if N::Backend::ACTIVE && children.need_init_unfetched() {
 			use crate::children::NodeIndex;
 			let mut i = KeyIndexFor::<N>::zero();
 			loop {
@@ -563,7 +562,7 @@ impl<N: TreeConf> Node<N> {
 	fn value(
 		&self,
 	) -> Option<&N::Value> {
-		if N::Backend::Active {
+		if N::Backend::ACTIVE {
 			panic!("Cannot fetch");
 		}
 		self.value.as_ref()
@@ -572,7 +571,7 @@ impl<N: TreeConf> Node<N> {
 	fn value_mut(
 		&mut self,
 	) -> Option<&mut N::Value> {
-		if N::Backend::Active {
+		if N::Backend::ACTIVE {
 			match self.backend.value_state()  {
 				ValueState::Unfetched => {
 					if let Some(option_value) = self.backend.fetch_value() {
@@ -588,7 +587,7 @@ impl<N: TreeConf> Node<N> {
 	fn value_no_cache(
 		&self,
 	) -> Option<N::Value> {
-		if !N::Backend::Active {
+		if !N::Backend::ACTIVE {
 			panic!("No backend");
 		}
 		self.backend.fetch_value_no_cache()
@@ -598,7 +597,7 @@ impl<N: TreeConf> Node<N> {
 		&mut self,
 		value: N::Value,
 	) -> Option<N::Value> {
-		if N::Backend::Active {
+		if N::Backend::ACTIVE {
 			self.backend.set_value_state(ValueState::Modified);
 		}
 		replace(&mut self.value, Some(value))
@@ -608,7 +607,7 @@ impl<N: TreeConf> Node<N> {
 		&mut self,
 		with_value: bool,
 	) -> Option<N::Value> {
-		if N::Backend::Active {
+		if N::Backend::ACTIVE {
 			if with_value {
 				self.backend.fetch_value();
 			}
@@ -627,7 +626,7 @@ impl<N: TreeConf> Node<N> {
 		&self,
 		index: KeyIndexFor<N>,
 	) -> Option<&Self> {
-		if N::Backend::Active {
+		if N::Backend::ACTIVE {
 			panic!("Cannot fetch");
 		}
 		self.children.get_child(index).and_then(|c| c.node())
@@ -636,7 +635,7 @@ impl<N: TreeConf> Node<N> {
 		&self,
 		index: KeyIndexFor<N>,
 	) -> Option<NodeBox<N>> {
-		if !N::Backend::Active {
+		if !N::Backend::ACTIVE {
 			panic!("No backend");
 		}
 		self.backend.fetch_children_no_cache(index)
@@ -646,7 +645,7 @@ impl<N: TreeConf> Node<N> {
 		&self,
 		index: KeyIndexFor<N>,
 	) -> bool {
-		if !N::Backend::Active {
+		if !N::Backend::ACTIVE {
 			return self.children.get_child(index).is_some();
 		}
 		if let Some(children) = self.children.get_child(index) {
@@ -673,7 +672,7 @@ impl<N: TreeConf> Node<N> {
 	fn has_value(
 		&self,
 	) -> bool {
-		if !N::Backend::Active {
+		if !N::Backend::ACTIVE {
 			return self.value.is_some()
 		}
 		match self.backend.value_state() {
@@ -732,7 +731,6 @@ impl<N: TreeConf> Node<N> {
 	}
 	fn split_off(
 		node: &mut Box<Self>,
-		key: &[u8],
 		position: PositionFor<N>,
 		mut at: PositionFor<N>,
 		removed_node: &mut Vec<N::Backend>,
@@ -778,7 +776,7 @@ impl<N: TreeConf> Node<N> {
 				child.key = replace(&mut node.key, child.key);
 				child.backend.set_prefix_change();
 				let mut parent = replace(node, child);
-				if N::Backend::Active {
+				if N::Backend::ACTIVE {
 					parent.backend.clear_content();
 					removed_node.push(parent.backend);
 				}
@@ -925,11 +923,14 @@ impl<N> Tree<N>
 	/// Commit tree changes to its underlying serializing backend.
 	pub fn commit(&mut self) {
 		if let Some(mut node) = self.tree.as_mut() {
-			for mut node in self.removed_node.drain(..) {
+			for node in self.removed_node.drain(..) {
 				N::Backend::delete(node);
 			}
+			// TODO here could/should apply fuse_node on all node (doing it lazilly
+			// is sometime better: less child access). Should be define by
+			// backend constant.
 			if let Some(result) = N::Backend::commit_change(&mut node) {
-				use crate::backends2::Backend;
+				use crate::backends::Backend;
 				node.backend.backend().set_root(result);
 			}
 		}
@@ -1031,6 +1032,46 @@ tree_get!(
 );
 
 impl<N: TreeConf> Tree<N> {
+	/// Get reference to a tree value for a given key, do not cache backend query.
+	pub fn get_no_cache(self, key: &[u8]) -> Option<N::Value> {
+		if let Some(top) = self.tree {
+			let mut current = top;
+			// TODO is this limit condition of any use
+			if key.len() == 0 {
+				if current.depth() == 0 {
+					return current.value_no_cache();
+				} else {
+					return None;
+				}
+			}
+			let dest_position = Position {
+				index: key.len(),
+				mask: MaskFor::<N::Radix>::FIRST,
+			};
+			let mut position = PositionFor::<N>::zero();
+			loop {
+				match current.descend(key, position, dest_position) {
+					Descent::Child(child_position, index) => {
+						if let Some(child) = current.get_child_no_cache(index) {
+							position = child_position.next::<N::Radix>();
+							current = child;
+						} else {
+							return None;
+						}
+					},
+					Descent::Middle(_position, _index) => {
+						return None;
+					},
+					Descent::Match(_position) => {
+						return current.value_no_cache();
+					},
+				}
+			}
+		} else {
+			None
+		}
+	}
+
 	/// Add new key value to the tree, and return previous value if any.
 	pub fn insert(&mut self, key: &[u8], value: N::Value) -> Option<N::Value> {
 		let dest_position = PositionFor::<N> {
@@ -1071,7 +1112,7 @@ impl<N: TreeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, Some(index)) => {
 						// insert middle node
-						Node::<N>::split_off(current, key, position, middle_position, &mut self.removed_node);
+						Node::<N>::split_off(current, position, middle_position, &mut self.removed_node);
 						let child_start = middle_position.next::<N::Radix>();
 						let new_child = Node::<N>::new_box(
 							key,
@@ -1088,7 +1129,7 @@ impl<N: TreeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, None) => {
 						// insert middle node
-						Node::<N>::split_off(current, key, position, middle_position, &mut self.removed_node);
+						Node::<N>::split_off(current, position, middle_position, &mut self.removed_node);
 						// TODO need to put this set_value in a test code path.
 						assert!(current.set_value(value).is_none());
 						return None;
@@ -1163,7 +1204,7 @@ impl<N: TreeConf> Tree<N> {
 								let parent_index = parent_position.index::<N::Radix>(key)
 									.expect("was resolved from key");
 								if let Some(mut removed) = parent.remove_child(parent_index) {
-									if N::Backend::Active {
+									if N::Backend::ACTIVE {
 										removed.backend.clear_content();
 										self.removed_node.push(removed.backend);
 									}

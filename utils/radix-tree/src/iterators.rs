@@ -487,12 +487,13 @@ fn from_stack<'a, N: TreeConf>(s: &'a Node<N>) -> &'a Node<N> {
 fn to_stack<'a, N: TreeConf>(s: &'a Node<N>) -> &'a Node<N> {
 	s
 }
+
 fn unsafe_from_stack_mut<'a, N: TreeConf>(s: *mut Node<N>) -> &'a mut Node<N> {
 	unsafe { s.as_mut().unwrap() }
 }
+
 fn to_stack_mut<'a, N: TreeConf>(s: &'a mut Node<N>) -> *mut Node<N> {
 	s as *mut _
-	// s.as_mut()  TODO instead??
 }
 
 seek_iter_impl!(
