@@ -616,10 +616,34 @@ impl<N: TreeConf> Node<N> {
 	}
 
 	fn has_child(
-		&self,
+		&mut self,
 		index: KeyIndexFor<N>,
 	) -> bool {
-		self.children.get_child(index).is_some()
+		if !N::Backend::Active {
+			return self.children.get_child(index).is_some();
+		}
+		if let Some(children) = self.children.get_child(index) {
+			match children.state() {
+				ChildState::Child
+				| ChildState::NoChild => {
+					children.node().is_some()
+				},
+				ChildState::Unfetched => {
+					// Do not resolve child, just check for existing index.
+					if let Some(_) = self.backend.fetch_children_index(index) {
+						// do not fetch
+						true
+					} else {
+						false
+					}
+				},
+				ChildState::Deleted => {
+					false
+				},
+			}
+		} else {
+			false
+		}
 	}
 
 	fn get_child_mut(
@@ -645,7 +669,7 @@ impl<N: TreeConf> Node<N> {
 		index: KeyIndexFor<N>,
 		child: Box<Self>,
 	) -> Option<Box<Self>> {
-		self.backend.set_change();
+		self.backend.set_children_change();
 		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
 		self.children.set_child(index, child).and_then(|c| c.extract_node())
 	}
@@ -663,7 +687,6 @@ impl<N: TreeConf> Node<N> {
 		}
 		result.and_then(|c| c.extract_node())
 	}
-	// TODO this is truncate not split_off (and should use truncate internally).
 	fn split_off(
 		node: &mut Box<Self>,
 		key: &[u8],
@@ -719,7 +742,7 @@ impl<N: TreeConf> Node<N> {
 		}
 	}
 
-	// TODO make it a trait function for Radix_conf?
+	// TODO make it a trait function for Radix_conf? TODO reverse logic (update the other way)
 	/// Push node partial on the current stacked key, given the node start position.
 	fn new_end(&self, stack: &mut Key, node_position: PositionFor<N>) {
 		let depth = self.depth();
@@ -965,7 +988,7 @@ impl<N: TreeConf> Tree<N> {
 			loop {
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
-						if current.has_child(index) {
+						if current.has_child(index) { // has child for lifetime only
 							if let Some(child) = current.get_child_mut(index) {
 								position = child_position.next::<N::Radix>();
 								//position = child_position;
@@ -984,6 +1007,7 @@ impl<N: TreeConf> Tree<N> {
 								N::new_node_contained(current, key, child_position),
 							);
 							assert!(current.set_child(index, new_child).is_none());
+							current.backend.set_children_change();
 							return None;
 						}
 					},
@@ -1007,7 +1031,8 @@ impl<N: TreeConf> Tree<N> {
 					Descent::Middle(middle_position, None) => {
 						// insert middle node
 						Node::<N>::split_off(current, key, position, middle_position);
-						current.set_value(value);
+						// TODO need to put this set_value in a test code path.
+						assert!(current.set_value(value).is_none());
 						return None;
 					},
 					Descent::Match(_position) => {

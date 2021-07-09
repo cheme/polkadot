@@ -88,6 +88,7 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	// TODO usefull ? fetch children?
 	fn get_node(&self, index: Self::Index) -> Option<NodeBox<N>>;
 
+	fn fetch_children_index(&self, at: KeyIndexFor<N>) -> Option<Self::Index>;
 	/// Get a child node from the backend.
 	/// TODO use Self::Index instead of usize??
 	fn fetch_children(&mut self, at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>>;
@@ -154,6 +155,10 @@ impl<N: TreeConf> TreeBackend<N> for () {
 		None
 	}
 	fn fetch_children(&mut self, _at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>> {
+		None
+	}
+
+	fn fetch_children_index(&self, _at: KeyIndexFor<N>) -> Option<Self::Index> {
 		None
 	}
 
@@ -448,6 +453,14 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			}
 		}
 		None
+	}
+
+	fn fetch_children_index(&self, at: KeyIndexFor<N>) -> Option<Self::Index> {
+		if let Some((Some(ix), _)) = self.child_index.get(at.to_usize()) {
+			Some(ix.clone())
+		} else {
+			None
+		}
 	}
 
 	fn fetch_children(&mut self, at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>> {
