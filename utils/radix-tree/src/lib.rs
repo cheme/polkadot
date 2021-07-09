@@ -822,18 +822,6 @@ impl<N: TreeConf> Node<N> {
 		}
 	}
 
-	fn backend(
-		&self,
-	) -> &N::Backend {
-		&self.backend
-	}
-
-	fn backend_mut(
-		&mut self,
-	) -> &mut N::Backend {
-		&mut self.backend
-	}
-	
 	fn partial_index(&self, node_offset_position: PositionFor<N>, position: PositionFor<N>) -> Option<KeyIndexFor<N>> {
 		let mut position = position.clone();
 		position.index -= node_offset_position.index;
@@ -1248,37 +1236,12 @@ impl<N: TreeConf> Tree<N> {
 }
 
 pub trait WithChildState<N> {
-	const UseBackend: bool;
 	fn state(&self) -> ChildState;
 	fn state_mut(&mut self) -> &mut ChildState;
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self;
 	fn extract_node(self) -> Option<Box<N>>;
 	fn node(&self) -> Option<&N>;
 	fn node_mut(&mut self) -> Option<&mut Box<N>>;
-}
-
-fn resolve_state<'a, N: TreeConf, C: WithChildState<Node<N>>>(
-	child: &'a mut C,
-	index: KeyIndexFor<N>,
-	backend: &mut N::Backend,
-) -> Option<&'a mut Box<Node<N>>> {
-	match child.state() {
-		ChildState::NoChild => None,
-		ChildState::Child => child.node_mut(),
-		ChildState::Unfetched => {
-			match backend.fetch_children(index) {
-				Some(Some(c)) => {
-					*child = C::from_state(ChildState::Child, Some(c));
-					child.node_mut()
-				},
-				Some(None) => {
-					*child = C::from_state(ChildState::Child, None);
-					None
-				},
-				None => None,
-			}
-		},
-	}
 }
 
 /// Different possible children state.
@@ -1314,7 +1277,6 @@ impl Default for ChildState {
 }
 
 impl<N> WithChildState<N> for Child<N> {
-	const UseBackend: bool = true;
 
 	fn state(&self) -> ChildState {
 		self.1
@@ -1340,8 +1302,6 @@ impl<N> WithChildState<N> for Child<N> {
 }
 
 impl<N> WithChildState<N> for Box<N> {
-	const UseBackend: bool = false;
-
 	fn state(&self) -> ChildState {
 		ChildState::Child
 	}
