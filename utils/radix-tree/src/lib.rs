@@ -1338,193 +1338,71 @@ impl<N> Default for Child<N> {
 	}
 }
 
-/// Flatten type for children of a given node type.
-///
-/// `inner_node_type` is expected to be parametered by a `Children` type
-/// and a `RadixConf` type.
-#[macro_export]
-macro_rules! flatten_children {
-	(
-		$(!value_bound: $( $value_const: ident)*,)?
-		$type_alias: ident,
-		$inner_children_type: ident,
-		$inner_node_type: ident,
-		$inner_type: ident,
-		$inner_radix: ty,
-		$backend: ty,
-		$($backend_gen: ident, )?
-		$({ $backend_ty: ident: $backend_const: tt $(+ $backend_const2: tt)* })?
-	) => {
-		#[derive(Clone)]
-		#[derive(Debug)]
-		pub struct $inner_node_type<V: Value, $($backend_gen)?>(core::marker::PhantomData<V>, $(core::marker::PhantomData<$backend_gen>)?);
-		impl<V: Value $($(+ $value_const)*)?, $($backend_gen)?> TreeConf for $inner_node_type<V, $($backend_gen)?>
-			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
-		{
-			type Radix = $inner_radix;
-			type Value = V;
-			type Children = $type_alias<V, $($backend_gen)?>;
-			type Backend = $backend;
-		}
-		type $inner_children_type<V, $($backend_gen)?> = ChildFor<$inner_node_type<V, $($backend_gen)?>>;
-		#[derive(Derivative)]
-		#[derivative(Clone)]
-		#[derivative(Debug)]
-		pub struct $type_alias<V: Value $($(+ $value_const)*)?, $($backend_gen)?>($inner_type<$inner_children_type<V, $($backend_gen)?>>)
-			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?;
-
-		impl<V: Value $($(+ $value_const)*)?, $($backend_gen)?> Children for $type_alias<V, $($backend_gen)?>
-			$(where $backend_ty: $backend_const $(+ $backend_const2)*)?
-		{
-			type Radix = $inner_radix;
-			type Node = $inner_children_type<V, $($backend_gen)?>;
-
-			fn empty(initial_size: usize) -> Self {
-				$type_alias($inner_type::empty(initial_size))
-			}
-			fn increase_number(&mut self) {
-				self.0.increase_number()
-			}
-			fn decrease_number(&mut self) {
-				self.0.decrease_number()
-			}
-			fn need_init_unfetched(&self) -> bool {
-				self.0.need_init_unfetched()
-			}
-			fn set_child(
-				&mut self,
-				index: <Self::Radix as RadixConf>::KeyIndex,
-				child: Self::Node,
-			) -> Option<Self::Node> {
-				self.0.set_child(index, child)
-			}
-			fn remove_child(
-				&mut self,
-				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<Self::Node> {
-				self.0.remove_child(index)
-			}
-			fn number_child(
-				&self,
-			) -> usize {
-				self.0.number_child()
-			}
-			fn get_child(
-				&self,
-				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&Self::Node> {
-				self.0.get_child(index)
-			}
-			fn get_child_mut(
-				&mut self,
-				index: <Self::Radix as RadixConf>::KeyIndex,
-			) -> Option<&mut Self::Node> {
-				self.0.get_child_mut(index)
-			}
-		}
-	}
-}
-
 use crate::children::{Children256, ART48_256, Children16, Children4};
 use crate::radix::impls::{Radix256Conf, Radix16Conf, Radix4Conf};
 
-flatten_children!(
-	Children256Flatten,
-	Node256Flatten,
-	Node256NoBackend,
-	Children256,
-	Radix256Conf,
-	(),
-);
+#[derive(Derivative)]
+#[derivative(Clone)]
+#[derivative(Debug)]
+pub struct Node256NoBackend<V>(core::marker::PhantomData<V>);
+impl <V: Value> TreeConf for Node256NoBackend<V> {
+    type Radix = Radix256Conf;
+    type Value = V;
+    type Children = Children256<ChildFor<Self>>;
+    type Backend = ();
+}
 
-flatten_children!(
-	Children256FlattenART,
-	Node256FlattenART,
-	Node256NoBackendART,
-	ART48_256,
-	Radix256Conf,
-	(),
-);
-/*
-flatten_children!(
-	!value_bound: Codec,
-	Children256Flatten2,
-	Node256Flatten2,
-	Node256HashBackend,
-	Children256,
-	Radix256Conf,
-	backends::DirectBackend<
-		backends::RcBackend<
-			backends::MapBackend
-		>
-	>,
-);
+#[derive(Derivative)]
+#[derivative(Clone)]
+#[derivative(Debug)]
+pub struct Node256NoBackendART<V>(core::marker::PhantomData<V>);
+impl <V: Value> TreeConf for Node256NoBackendART<V> {
+    type Radix = Radix256Conf;
+    type Value = V;
+    type Children = ART48_256<ChildFor<Self>>;
+    type Backend = ();
+}
 
-flatten_children!(
-	!value_bound: Codec,
-	Children256Flatten3,
-	Node256Flatten3,
-	Node256LazyHashBackend,
-	Children256,
-	Radix256Conf,
-	backends::LazyBackend<
-		backends::RcBackend<
-			backends::MapBackend
-		>
-	>,
-);
+#[derive(Derivative)]
+#[derivative(Clone)]
+#[derivative(Debug)]
+pub struct Node16NoBackend<V>(core::marker::PhantomData<V>);
+impl <V: Value> TreeConf for Node16NoBackend<V> {
+    type Radix = Radix16Conf;
+    type Value = V;
+    type Children = Children16<ChildFor<Self>>;
+    type Backend = ();
+}
 
-flatten_children!(
-	!value_bound: Codec,
-	Children256Flatten4,
-	Node256Flatten4,
-	Node256TxBackend,
-	Children256,
-	Radix256Conf,
-	backends::DirectBackend<
-		backends::RcBackend<
-			backends::MapBackend
-		>
-	>,
-);
-*/
-flatten_children!(
-	Children16Flatten,
-	Node16Flatten,
-	Node16NoBackend,
-	Children16,
-	Radix16Conf,
-	(),
-);
+#[derive(Derivative)]
+#[derivative(Clone)]
+#[derivative(Debug)]
+pub struct Node4NoBackend<V>(core::marker::PhantomData<V>);
+impl <V: Value> TreeConf for Node4NoBackend<V> {
+    type Radix = Radix4Conf;
+    type Value = V;
+    type Children = Children4<ChildFor<Self>>;
+    type Backend = ();
+}
 
-flatten_children!(
-	Children4Flatten,
-	Node4Flatten,
-	Node4NoBackend,
-	Children4,
-	Radix4Conf,
-	(),
-);
+#[derive(Derivative)]
+#[derivative(Clone)]
+#[derivative(Debug)]
+pub struct Node256TestBackendART<V>(core::marker::PhantomData<V>);
+impl <V: Value + Codec> TreeConf for Node256TestBackendART<V> {
+    type Radix = Radix256Conf;
+    type Value = V;
+    type Children = ART48_256<ChildFor<Self>>;
+    type Backend = backends::NodeTestBackend<Self>;
+}
 
-flatten_children!(
-	!value_bound: Codec,
-	Children256FlattenART2,
-	Node256FlattenART2,
-	Node256TestBackendART,
-	ART48_256,
-	Radix256Conf,
-	backends::NodeTestBackend<
-		Node256TestBackendART<V>
-	>,
-);
-flatten_children!(
-	!value_bound: Codec,
-	Children256Flatten4,
-	Node256Flatten4,
-	Node256TestBackend,
-	Children256,
-	Radix256Conf,
-	backends::NodeTestBackend<
-		Node256TestBackend<V>
-	>,
-);
+#[derive(Derivative)]
+#[derivative(Clone)]
+#[derivative(Debug)]
+pub struct Node256TestBackend<V>(core::marker::PhantomData<V>);
+impl <V: Value + Codec> TreeConf for Node256TestBackend<V> {
+    type Radix = Radix256Conf;
+    type Value = V;
+    type Children = Children256<ChildFor<Self>>;
+    type Backend = backends::NodeTestBackend<Self>;
+}

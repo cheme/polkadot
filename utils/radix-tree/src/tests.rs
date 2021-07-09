@@ -404,5 +404,3 @@ test_for!(test_16, Node16NoBackend, false);
 test_for!(test_256_art, Node256NoBackendART, false);
 test_for!(test_256_backend, Node256TestBackend, true);
 test_for!(test_256_backend_art, Node256TestBackendART, true);
-//test_for!(test_256_hash, Node256HashBackend, true);
-//test_for!(test_256_lazy_hash, Node256LazyHashBackend, false);
