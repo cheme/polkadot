@@ -655,9 +655,11 @@ impl<N: TreeConf> Node<N> {
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<Box<Self>> {
+		// TODO flag ChildState to deleted!! actually do not remove child but
+		// use variant.
 		let result = self.children.remove_child(index);
 		if result.is_some() {
-			self.backend.set_change();
+			self.backend.set_children_change();
 		}
 		result.and_then(|c| c.extract_node())
 	}
@@ -688,25 +690,27 @@ impl<N: TreeConf> Node<N> {
 	}
 
 	fn fuse_child(
-		&mut self,
+		node: &mut Box<Self>,
 	) {
-		if let Some(index) = self.first_child_index() {
-			if let Some(mut child) = self.children.remove_child(index) {
+		if let Some(index) = node.first_child_index() {
+			// even with backend we do a removal in this case (cannot keep deleted).
+			if let Some(child) = node.children.remove_child(index) {
 				// TODO memoize removal in cached children (keep descendant).
 				let position = PositionFor::<N> {
 					index: 0,
-					mask: self.key.start,
+					mask: node.key.start,
 				};
-				let position_start = position.next_by::<N::Radix>(self.depth());
-				position_start.set_index::<N::Radix>(&mut self.key.data, index);
+				let position_start = position.next_by::<N::Radix>(node.depth());
+				position_start.set_index::<N::Radix>(&mut node.key.data, index);
 				let position_cat = position_start.next::<N::Radix>();
 				let mut child = child.extract_node().expect("resolved on remove child");
-				child.new_end(&mut self.key.data, position_cat);
-				self.key.end = child.key.end;
-				self.value = child.value.take();
-				self.children = replace(&mut child.children, N::Children::empty(0));
-				// TODO remove (when delete memoized).
-				N::Backend::delete(&mut *child);
+				child.new_end(&mut node.key.data, position_cat);
+				node.key.end = child.key.end;
+				child.key = replace(&mut node.key, child.key);
+				child.backend.set_prefix_change();
+				let mut parent = replace(node, child);
+				// Direct removal even if backend.
+				N::Backend::delete(&mut *parent);
 			} else {
 				unreachable!("fuse condition checked");
 			}
@@ -1029,7 +1033,7 @@ impl<N: TreeConf> Tree<N> {
 		let mut position = PositionFor::<N>::zero();
 		let mut empty_tree = None;
 		if let Some(top) = self.tree.as_mut() {
-			let current: &mut Node<N> = top;
+			let current: &mut Box<Node<N>> = top;
 			if key.len() == 0 && current.depth() == 0 {
 				let result = current.remove_value();
 				if current.number_child() == 0 {
@@ -1037,7 +1041,7 @@ impl<N: TreeConf> Tree<N> {
 //					self.tree = None;
 				} else {
 					if current.number_child() == 1 {
-						current.fuse_child();
+						Node::<N>::fuse_child(current);
 					}
 					return result;
 				}
@@ -1051,17 +1055,17 @@ impl<N: TreeConf> Tree<N> {
 				return result;
 			}
 			let mut parent = None;
-			let mut current_ptr: *mut Node<N> = current;
+			let mut current_ptr: *mut Box<Node<N>> = current;
 			loop {
 				// Note that this can produce dangling pointer when removing
 				// node.
-				let current = unsafe { current_ptr.as_mut().unwrap() };
+				let current: &mut Box<Node<N>> = unsafe { current_ptr.as_mut().unwrap() };
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
 						if let Some(child) = current.get_child_mut(index) {
 							let old_position = child_position; // TODO probably incorrect
 							position = child_position.next::<N::Radix>();
-							current_ptr = child.as_mut() as *mut Node<N>;
+							current_ptr = child as *mut Box<Node<N>>;
 							parent = Some((current, old_position));
 						} else {
 							return None;
@@ -1078,7 +1082,7 @@ impl<N: TreeConf> Tree<N> {
 									.expect("was resolved from key");
 								parent.remove_child(parent_index);
 								if parent.value().is_none() && parent.number_child() == 1 {
-									parent.fuse_child();
+									Node::<N>::fuse_child(parent);
 								}
 							} else {
 								// root
@@ -1087,7 +1091,7 @@ impl<N: TreeConf> Tree<N> {
 								break;
 							}
 						} else if current.number_child() == 1 {
-							current.fuse_child();
+							Node::<N>::fuse_child(current);
 						}
 
 						//return current.set_value(value);
