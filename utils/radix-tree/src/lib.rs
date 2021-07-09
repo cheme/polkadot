@@ -390,18 +390,16 @@ pub trait TreeConf: Debug + Clone + Sized {
 	type Children: Children<Node = ChildFor<Self>, Radix = Self::Radix>;
 	type Backend: Backend<Self>;
 
-	// TODO useless param and function.
-	fn new_node_split(node: &Node<Self>, _key: &[u8], _position: PositionFor<Self>, _at: PositionFor<Self>) -> Self::Backend {
-		Self::Backend::new_node_backend(&node.backend.backend())
+	fn new_node_backend(node: &Node<Self>, removed_node: &mut Vec<Self::Backend>) -> Self::Backend {
+		Self::new_node_backend_root(&node.backend.backend(), removed_node)
 	}
 
-	// TODO useless param and function.
-	fn new_node_contained(node: &Node<Self>, _key: &[u8], _position: PositionFor<Self>) -> Self::Backend {
-		Self::Backend::new_node_backend(&node.backend.backend())
-	}
-
-	fn new_node_root(init: &BackendFor<Self>) -> Self::Backend {
-		Self::Backend::new_node_backend(init)
+	fn new_node_backend_root(init: &BackendFor<Self>, removed_node: &mut Vec<Self::Backend>) -> Self::Backend {
+		if let Some(backend) = removed_node.pop() {
+			backend
+		} else {
+			Self::Backend::new_node_backend(init)
+		}
 	}
 }
 
@@ -666,9 +664,6 @@ impl<N: TreeConf> Node<N> {
 						false
 					}
 				},
-				ChildState::Deleted => {
-					false
-				},
 			}
 		} else {
 			false
@@ -718,17 +713,16 @@ impl<N: TreeConf> Node<N> {
 		let result = self.children.set_child(index, child).and_then(|c| c.extract_node());
 		if result.is_none() {
 			self.children.increase_number();
+		} else {
+			unreachable!("should not set child on existing, set value in this case");
 		}
 		result
 	}
 
-	// TODO variant with or without child in result + resolve if with child!!
 	fn remove_child(
 		&mut self,
 		index: KeyIndexFor<N>,
 	) -> Option<Box<Self>> {
-		// TODO flag ChildState to deleted!! actually do not remove child but
-		// use variant.
 		let result = self.children.remove_child(index).and_then(|c| c.extract_node());
 		if result.is_some() {
 			self.backend.set_children_change();
@@ -741,10 +735,11 @@ impl<N: TreeConf> Node<N> {
 		key: &[u8],
 		position: PositionFor<N>,
 		mut at: PositionFor<N>,
+		removed_node: &mut Vec<N::Backend>,
 	) {
 		at.index -= position.index;
 		let index = node.key.index::<N::Radix>(at);
-		let backend = N::new_node_split(node.as_ref(), key, position, at);
+		let backend = N::new_node_backend(node.as_ref(), removed_node);
 
 		let child_prefix = node.key.child_split_off::<N::Radix>(at);
 		node.backend.set_prefix_change();
@@ -764,6 +759,7 @@ impl<N: TreeConf> Node<N> {
 
 	fn fuse_child(
 		node: &mut Box<Self>,
+		removed_node: &mut Vec<N::Backend>,
 	) {
 		if let Some(index) = node.first_child_index() {
 			// even with backend we do a removal in this case (cannot keep deleted).
@@ -782,8 +778,10 @@ impl<N: TreeConf> Node<N> {
 				child.key = replace(&mut node.key, child.key);
 				child.backend.set_prefix_change();
 				let mut parent = replace(node, child);
-				// Direct removal even if backend.
-				N::Backend::delete(&mut *parent);
+				if N::Backend::Active {
+					parent.backend.clear_content();
+					removed_node.push(parent.backend);
+				}
 			} else {
 				unreachable!("fuse condition checked");
 			}
@@ -879,6 +877,11 @@ pub struct Tree<N>
 	/// A backend if needed.
 	#[derivative(Debug="ignore")]
 	pub init: BackendFor<N>,
+
+	/// When using backend, removed
+	/// node can be reuse, and removal is only done on commit.
+	#[derivative(Debug="ignore")]
+	pub removed_node: Vec<N::Backend>,
 }
 
 impl<N> Default for Tree<N>
@@ -890,6 +893,7 @@ impl<N> Default for Tree<N>
 		Tree {
 			tree: None,
 			init: Default::default(),
+			removed_node: Vec::new(),
 		}
 	}
 }
@@ -903,6 +907,7 @@ impl<N> Tree<N>
 		Tree {
 			tree: None,
 			init,
+			removed_node: Vec::new(),
 		}
 	}
 	
@@ -913,13 +918,20 @@ impl<N> Tree<N>
 		Tree {
 			tree,
 			init,
+			removed_node: Vec::new(),
 		}
 	}
 
 	/// Commit tree changes to its underlying serializing backend.
 	pub fn commit(&mut self) {
 		if let Some(mut node) = self.tree.as_mut() {
-			N::Backend::commit_change(&mut node);
+			for mut node in self.removed_node.drain(..) {
+				N::Backend::delete(node);
+			}
+			if let Some(result) = N::Backend::commit_change(&mut node) {
+				use crate::backends2::Backend;
+				node.backend.backend().set_root(result);
+			}
 		}
 	}
 }
@@ -1050,7 +1062,7 @@ impl<N: TreeConf> Tree<N> {
 								dest_position,
 								Some(value),
 								(),
-								N::new_node_contained(current, key, child_position),
+								N::new_node_backend(current, &mut self.removed_node),
 							);
 							assert!(current.set_child(index, new_child).is_none());
 							current.backend.set_children_change();
@@ -1059,7 +1071,7 @@ impl<N: TreeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, Some(index)) => {
 						// insert middle node
-						Node::<N>::split_off(current, key, position, middle_position);
+						Node::<N>::split_off(current, key, position, middle_position, &mut self.removed_node);
 						let child_start = middle_position.next::<N::Radix>();
 						let new_child = Node::<N>::new_box(
 							key,
@@ -1067,7 +1079,7 @@ impl<N: TreeConf> Tree<N> {
 							dest_position,
 							Some(value),
 							(),
-							N::new_node_contained(current, key, child_start),
+							N::new_node_backend(current, &mut self.removed_node),
 						);
 						//let child_index = middle_position.index::<N::Radix>(key)
 						//	.expect("Middle resolved from key");
@@ -1076,7 +1088,7 @@ impl<N: TreeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, None) => {
 						// insert middle node
-						Node::<N>::split_off(current, key, position, middle_position);
+						Node::<N>::split_off(current, key, position, middle_position, &mut self.removed_node);
 						// TODO need to put this set_value in a test code path.
 						assert!(current.set_value(value).is_none());
 						return None;
@@ -1093,7 +1105,7 @@ impl<N: TreeConf> Tree<N> {
 				dest_position,
 				Some(value),
 				(),
-				N::new_node_root(&self.init),
+				N::new_node_backend_root(&self.init, &mut self.removed_node),
 			));
 			None
 		}
@@ -1111,7 +1123,7 @@ impl<N: TreeConf> Tree<N> {
 					empty_tree = Some(result);
 				} else {
 					if current.number_child() == 1 {
-						Node::<N>::fuse_child(current);
+						Node::<N>::fuse_child(current, &mut self.removed_node);
 					}
 					return result;
 				}
@@ -1150,18 +1162,24 @@ impl<N: TreeConf> Tree<N> {
 							if let Some((parent, parent_position)) = parent {
 								let parent_index = parent_position.index::<N::Radix>(key)
 									.expect("was resolved from key");
-								assert!(parent.remove_child(parent_index).is_some());
+								if let Some(mut removed) = parent.remove_child(parent_index) {
+									if N::Backend::Active {
+										removed.backend.clear_content();
+										self.removed_node.push(removed.backend);
+									}
+								} else {
+									unreachable!();
+								}
 								if !parent.has_value() && parent.number_child() == 1 {
-									Node::<N>::fuse_child(parent);
+									Node::<N>::fuse_child(parent, &mut self.removed_node);
 								}
 							} else {
 								// root
-//								self.tree = None;
 								empty_tree = Some(result);
 								break;
 							}
 						} else if current.number_child() == 1 {
-							Node::<N>::fuse_child(current);
+							Node::<N>::fuse_child(current, &mut self.removed_node);
 						}
 
 						//return current.set_value(value);
@@ -1186,12 +1204,12 @@ impl<N: TreeConf> Tree<N> {
 			self.remove(key.as_slice(), false);
 		}
 	}
-
 }
 
 pub trait WithChildState<N> {
 	const UseBackend: bool;
 	fn state(&self) -> ChildState;
+	fn state_mut(&mut self) -> &mut ChildState;
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self;
 	fn extract_node(self) -> Option<Box<N>>;
 	fn node(&self) -> Option<&N>;
@@ -1206,7 +1224,6 @@ fn resolve_state<'a, N: TreeConf, C: WithChildState<Node<N>>>(
 	match child.state() {
 		ChildState::NoChild => None,
 		ChildState::Child => child.node_mut(),
-		ChildState::Deleted => None,
 		ChildState::Unfetched => {
 			match backend.fetch_children(index) {
 				Some(Some(c)) => {
@@ -1234,9 +1251,6 @@ pub enum ChildState {
 	/// from backend first.
 	/// Could be an existing child or not.
 	Unfetched,
-	/// Child is deleted (content is kept when backend is used
-	/// for removal or possible later reinsert of node).
-	Deleted,
 }
 
 /// Different possible value state.
@@ -1264,14 +1278,16 @@ impl<N> WithChildState<N> for Child<N> {
 	fn state(&self) -> ChildState {
 		self.1
 	}
+
+	fn state_mut(&mut self) -> &mut ChildState {
+		&mut self.1
+	}
+
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self {
 		Child(node, state)
 	}
 	fn extract_node(self) -> Option<Box<N>> {
 		assert!(self.1 != ChildState::Unfetched);
-		if self.1 == ChildState::Deleted {
-			return None
-		}
 		self.0
 	}
 	fn node(&self) -> Option<&N> {
@@ -1288,6 +1304,11 @@ impl<N> WithChildState<N> for Box<N> {
 	fn state(&self) -> ChildState {
 		ChildState::Child
 	}
+
+	fn state_mut(&mut self) -> &mut ChildState {
+		unreachable!("only for active backends");
+	}
+
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self {
 		assert!(state == ChildState::Child);
 		node.expect("Child with node")
@@ -1314,22 +1335,6 @@ impl<N> Default for Child<N> {
 		Child(None, Default::default())
 	}
 }
-
-impl<N> Child<N> {
-	fn some(child: Box<N>) -> Self {
-		Child(Some(child), ChildState::Child)
-	}
-	fn none() -> Self {
-		Child(None, ChildState::NoChild)
-	}
-	fn unfetched() -> Self {
-		Child(None, ChildState::Unfetched)
-	}
-	fn set_deleted(&mut self) {
-		self.1 = ChildState::Deleted;
-	}
-}
-
 
 /// Flatten type for children of a given node type.
 ///

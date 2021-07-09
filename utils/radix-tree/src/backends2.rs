@@ -125,7 +125,7 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	
 	/// Delete a node.
 	/// Does flush change immediatly.
-	fn delete(node: &mut Node<N>);
+	fn delete(self);
 
 	/// Flush changes that happens to a node.
 	/// return new backend index if changed.
@@ -138,6 +138,9 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 
 	/// Value state is stored in backend.
 	fn set_value_state(&mut self, state: ValueState);
+
+	/// Clear content to allow rewriting a different node instead.
+	fn clear_content(&mut self);
 }
 
 
@@ -192,7 +195,7 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	fn set_prefix_change(&mut self) {
 	}
 
-	fn delete(_node: &mut Node<N>) {
+	fn delete(self) {
 	}
 
 	fn commit_change(_node: &mut Node<N>) -> Option<Self::Index> {
@@ -208,6 +211,8 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	fn set_value_state(&mut self, _state: ValueState) {
 		()
 	}
+
+	fn clear_content(&mut self) { }
 }
 
 /// Backend containing encoded nodes.
@@ -522,9 +527,9 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		self.prefix_changed = true;
 	}
 
-	fn delete(node: &mut Node<N>) {
-		if let Some(index) = node.backend.index {
-			node.backend.backend.remove_node(index);
+	fn delete(self) {
+		if let Some(index) = self.index {
+			self.backend.remove_node(index);
 		}
 	}
 
@@ -538,7 +543,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			backend: backend.clone(),
 			children_changed: false,
 			prefix_changed: true, // new node need update
-			value_state: ValueState::Modified,
+			value_state: ValueState::Resolved,
 		}
 	}
 
@@ -589,5 +594,16 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	fn set_value_state(&mut self, state: ValueState) {
 		self.value_state = state
+	}
+
+	fn clear_content(&mut self) {
+		self.encoded.clear();
+		self.child_index.clear();
+		// Note here if value is stored in different node, we would need to remove it.
+		self.value = None;
+		self.nb_children = 0;
+		self.children_changed = false;
+		self.prefix_changed = true; // to ensure update
+		self.value_state = ValueState::Resolved;
 	}
 }
