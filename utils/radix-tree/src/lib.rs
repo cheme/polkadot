@@ -645,7 +645,7 @@ impl<N: TreeConf> Node<N> {
 	}
 
 	fn has_child(
-		&mut self,
+		&self,
 		index: KeyIndexFor<N>,
 	) -> bool {
 		if !N::Backend::Active {
@@ -729,11 +729,12 @@ impl<N: TreeConf> Node<N> {
 	) -> Option<Box<Self>> {
 		// TODO flag ChildState to deleted!! actually do not remove child but
 		// use variant.
-		let result = self.children.remove_child(index);
+		let result = self.children.remove_child(index).and_then(|c| c.extract_node());
 		if result.is_some() {
 			self.backend.set_children_change();
+			self.children.decrease_number();
 		}
-		result.and_then(|c| c.extract_node())
+		result
 	}
 	fn split_off(
 		node: &mut Box<Self>,
@@ -767,7 +768,7 @@ impl<N: TreeConf> Node<N> {
 		if let Some(index) = node.first_child_index() {
 			// even with backend we do a removal in this case (cannot keep deleted).
 			if let Some(child) = node.children.remove_child(index) {
-				// TODO memoize removal in cached children (keep descendant).
+				node.children.decrease_number();
 				let position = PositionFor::<N> {
 					index: 0,
 					mask: node.key.start,
@@ -847,14 +848,10 @@ impl<N: TreeConf> Node<N> {
 	fn first_child_index(
 		&self,
 	) -> Option<KeyIndexFor<N>> {
-		use crate::children::NodeIndex;
+		use crate::children::NodeIndex; // TODO inefficient have next defined children index.
 		let mut ix = KeyIndexFor::<N>::zero();
 		loop {
-			// TODO add backend resolution.
-			// TODO avoid this double query? (need unsafe)
-			// at least make a contains_child fn.
-			let result = self.children.get_child(ix);
-			if result.is_some() {
+			if self.has_child(ix) {
 				return Some(ix)
 			}
 
@@ -1112,7 +1109,6 @@ impl<N: TreeConf> Tree<N> {
 				let result = current.remove_value(with_value);
 				if current.number_child() == 0 {
 					empty_tree = Some(result);
-//					self.tree = None;
 				} else {
 					if current.number_child() == 1 {
 						Node::<N>::fuse_child(current);
@@ -1137,7 +1133,7 @@ impl<N: TreeConf> Tree<N> {
 				match current.descend(key, position, dest_position) {
 					Descent::Child(child_position, index) => {
 						if let Some(child) = current.get_child_mut(index) {
-							let old_position = child_position; // TODO probably incorrect
+							let old_position = child_position;
 							position = child_position.next::<N::Radix>();
 							current_ptr = child as *mut Box<Node<N>>;
 							parent = Some((current, old_position));
@@ -1154,8 +1150,8 @@ impl<N: TreeConf> Tree<N> {
 							if let Some((parent, parent_position)) = parent {
 								let parent_index = parent_position.index::<N::Radix>(key)
 									.expect("was resolved from key");
-								parent.remove_child(parent_index);
-								if parent.value().is_none() && parent.number_child() == 1 {
+								assert!(parent.remove_child(parent_index).is_some());
+								if !parent.has_value() && parent.number_child() == 1 {
 									Node::<N>::fuse_child(parent);
 								}
 							} else {
@@ -1381,6 +1377,9 @@ macro_rules! flatten_children {
 			}
 			fn increase_number(&mut self) {
 				self.0.increase_number()
+			}
+			fn decrease_number(&mut self) {
+				self.0.decrease_number()
 			}
 			fn need_init_unfetched(&self) -> bool {
 				self.0.need_init_unfetched()
