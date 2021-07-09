@@ -625,12 +625,19 @@ impl<N: TreeConf> Node<N> {
 	fn get_child_mut(
 		&mut self,
 		index: KeyIndexFor<N>,
-	) -> Option<&mut Self> {
+	) -> Option<&mut Box<Self>> {
 		if let Some(Some(result)) = self.backend.fetch_children(index) {
 			let result = ChildFor::<N>::from_state(ChildState::Child, Some(result));
 			self.children.set_child(index, result);
 		}
 		self.children.get_child_mut(index).and_then(|c| c.node_mut())
+	}
+
+	fn get_child_mut_deref(
+		&mut self,
+		index: KeyIndexFor<N>,
+	) -> Option<&mut Self> {
+		self.get_child_mut(index).map(AsMut::as_mut)
 	}
 
 	fn set_child(
@@ -656,27 +663,28 @@ impl<N: TreeConf> Node<N> {
 	}
 	// TODO this is truncate not split_off (and should use truncate internally).
 	fn split_off(
-		&mut self,
+		node: &mut Box<Self>,
 		key: &[u8],
 		position: PositionFor<N>,
 		mut at: PositionFor<N>,
 	) {
 		at.index -= position.index;
-		let index = self.key.index::<N::Radix>(at);
-		let backend = N::new_node_split(self, key, position, at);
+		let index = node.key.index::<N::Radix>(at);
+		let backend = N::new_node_split(node.as_ref(), key, position, at);
 
-		let child_prefix = self.key.child_split_off::<N::Radix>(at);
-		let child_value = self.value.take();
-		let child_children = replace(&mut self.children, N::Children::empty(1));
-		let child = Box::new(Node {
-			key: child_prefix,
-			value: child_value,
-			children: child_children,
+		let child_prefix = node.key.child_split_off::<N::Radix>(at);
+		node.backend.set_prefix_change();
+		let parent_prefix = replace(&mut node.key, child_prefix);
+		let parent = Box::new(Node {
+			key: parent_prefix,
+			value: None,
+			children: N::Children::empty(0),
 			backend, 
 		});
+		let child = replace(node, parent);
 		let child = ChildFor::<N>::from_state(ChildState::Child, Some(child));
-		self.children.set_child(index, child);
-		self.backend.set_change();
+		node.children.set_child(index, child);
+		node.backend.set_children_change();
 	}
 
 	fn fuse_child(
@@ -946,7 +954,7 @@ impl<N: TreeConf> Tree<N> {
 		};
 		let mut position = PositionFor::<N>::zero();
 		if let Some(top) = self.tree.as_mut() {
-			let mut current = top.as_mut();
+			let mut current: &mut Box<Node<N>> = top;
 			if key.len() == 0 && current.depth() == 0 {
 				return current.set_value(value);
 			}
@@ -977,7 +985,7 @@ impl<N: TreeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, Some(index)) => {
 						// insert middle node
-						current.split_off(key, position, middle_position);
+						Node::<N>::split_off(current, key, position, middle_position);
 						let child_start = middle_position.next::<N::Radix>();
 						let new_child = Node::<N>::new_box(
 							key,
@@ -994,7 +1002,7 @@ impl<N: TreeConf> Tree<N> {
 					},
 					Descent::Middle(middle_position, None) => {
 						// insert middle node
-						current.split_off(key, position, middle_position);
+						Node::<N>::split_off(current, key, position, middle_position);
 						current.set_value(value);
 						return None;
 					},
@@ -1053,7 +1061,7 @@ impl<N: TreeConf> Tree<N> {
 						if let Some(child) = current.get_child_mut(index) {
 							let old_position = child_position; // TODO probably incorrect
 							position = child_position.next::<N::Radix>();
-							current_ptr = child as *mut Node<N>;
+							current_ptr = child.as_mut() as *mut Node<N>;
 							parent = Some((current, old_position));
 						} else {
 							return None;
@@ -1112,14 +1120,14 @@ pub trait WithChildState<N> {
 	fn from_state(state: ChildState, node: Option<Box<N>>) -> Self;
 	fn extract_node(self) -> Option<Box<N>>;
 	fn node(&self) -> Option<&N>;
-	fn node_mut(&mut self) -> Option<&mut N>;
+	fn node_mut(&mut self) -> Option<&mut Box<N>>;
 }
 
 fn resolve_state<'a, N: TreeConf, C: WithChildState<Node<N>>>(
 	child: &'a mut C,
 	index: KeyIndexFor<N>,
 	backend: &mut N::Backend,
-) -> Option<&'a mut Node<N>> {
+) -> Option<&'a mut Box<Node<N>>> {
 	match child.state() {
 		ChildState::NoChild => None,
 		ChildState::Child => child.node_mut(),
@@ -1194,8 +1202,8 @@ impl<N> WithChildState<N> for Child<N> {
 	fn node(&self) -> Option<&N> {
 		self.0.as_ref().map(AsRef::as_ref)
 	}
-	fn node_mut(&mut self) -> Option<&mut N> {
-		self.0.as_mut().map(AsMut::as_mut)
+	fn node_mut(&mut self) -> Option<&mut Box<N>> {
+		self.0.as_mut()
 	}
 }
 
@@ -1215,8 +1223,8 @@ impl<N> WithChildState<N> for Box<N> {
 	fn node(&self) -> Option<&N> {
 		Some(self.as_ref())
 	}
-	fn node_mut(&mut self) -> Option<&mut N> {
-		Some(self.as_mut())
+	fn node_mut(&mut self) -> Option<&mut Box<N>> {
+		Some(self)
 	}
 }
 

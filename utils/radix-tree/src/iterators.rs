@@ -520,7 +520,7 @@ seek_iter_impl!(
 	unsafe_from_stack_mut,
 	to_stack_mut,
 	as_mut,
-	get_child_mut,
+	get_child_mut_deref,
 );
 
 /// Iterator on nodes that follows a given key (all nodes seeked

@@ -109,7 +109,14 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 
 	/// Indicate a child node was change.
 	/// TODO could consider adding position to avoid iterating on all child
+	/// TODO remove
 	fn set_change(&mut self);
+
+	fn set_children_change(&mut self) {
+		self.set_change()
+	}
+
+	fn set_prefix_change(&mut self);
 	
 	/// Delete a node.
 	/// Does flush change immediatly.
@@ -169,6 +176,9 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	fn set_change(&mut self) {
 	}
 	
+	fn set_prefix_change(&mut self) {
+	}
+
 	fn delete(_node: &mut Node<N>) {
 	}
 
@@ -278,6 +288,7 @@ pub struct NodeTestBackend<N: TreeConf> {
 	value_state: ValueState,
 	backend: Rc<RefCell<TestBackend>>,
 	children_changed: bool,
+	prefix_changed: bool,
 }
 
 // TODO replace backend by N::Backend when attached
@@ -342,6 +353,7 @@ fn decode<N>(
 		nb_children,
 		backend: backend.clone(),
 		children_changed: false,
+		prefix_changed: false,
 	}, prefix)
 }
 
@@ -478,6 +490,10 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 	fn set_change(&mut self) {
 		self.children_changed = true;
 	}
+	fn set_prefix_change(&mut self) {
+		self.prefix_changed = true;
+	}
+
 	fn delete(node: &mut Node<N>) {
 		if let Some(index) = node.backend.index {
 			node.backend.backend.remove_node(index);
@@ -493,12 +509,14 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			nb_children: 0,
 			backend: backend.clone(),
 			children_changed: false,
-			value_state: ValueState::Unfetched,
+			prefix_changed: true, // new node need update
+			value_state: ValueState::Modified,
 		}
 	}
 
 	fn commit_change(node: &mut Node<N>) -> Option<Self::Index> {
 		let changed = node.backend.children_changed
+			|| node.backend.prefix_changed
 			|| node.backend.value_state == ValueState::Modified
 			|| node.backend.value_state == ValueState::Deleted;
 		if !changed {
@@ -527,6 +545,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		}
 
 		node.backend.children_changed = false;
+		node.backend.prefix_changed = false;
 
 		let encoded = encode_node::<N>(node);
 		if let Some(i) = node.backend.index {
