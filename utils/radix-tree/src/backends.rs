@@ -66,6 +66,10 @@ impl Backend for () {
 /// Node backend management.
 pub trait TreeBackend<N: TreeConf>: Clone {
 	const ACTIVE: bool = true;
+	// fuse node only on commit allows making change
+	// without querying additional nodes, but also
+	// creates empty node until commit.
+	const FUSE_ON_COMMIT: bool = false;
 	/// Always use () if inactive or ChildState if active
 	/// TODO consider moving to Tree (leaks node type in this crate)
 	type ChildState: crate::WithChildState<crate::Node<N>>;
@@ -127,7 +131,17 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 
 	/// Flush changes that happens to a node.
 	/// return new backend index if changed.
-	fn commit_change(node: &mut Node<N>) -> Option<Self::Index>;
+	fn commit_change(node: &mut NodeBox<N>, remove_node: &mut Vec<N::Backend>) -> Option<Self::Index>;
+
+	fn commit_change_fuse(node: &mut NodeBox<N>, remove_node: &mut Vec<N::Backend>) -> Option<Self::Index> {
+		if Self::FUSE_ON_COMMIT
+			&& node.number_child() == 1
+			&& !node.has_value()
+		{
+			Node::<N>::fuse_child(node, remove_node);
+		}
+		Self::commit_change(node, remove_node)
+	}
 
 	fn new_node_backend(backend: &Self::Backend) -> Self;
 
@@ -196,7 +210,7 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	fn delete(self) {
 	}
 
-	fn commit_change(_node: &mut Node<N>) -> Option<Self::Index> {
+	fn commit_change(_node: &mut NodeBox<N>, _remove_node: &mut Vec<N::Backend>) -> Option<Self::Index> {
 		None
 	}
 
@@ -431,6 +445,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		N::Value: Decode + Encode,
 {
 	const ACTIVE: bool = true;
+	const FUSE_ON_COMMIT: bool = true;
 	type ChildState = crate::Child<Node<N>>;
 	//type ChildState = Box<Node<N>>;
 
@@ -557,7 +572,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		}
 	}
 
-	fn commit_change(node: &mut Node<N>) -> Option<Self::Index> {
+	fn commit_change(node: &mut NodeBox<N>, remove_node: &mut Vec<N::Backend>) -> Option<Self::Index> {
 		let changed = node.backend.children_changed
 			|| node.backend.prefix_changed
 			|| node.backend.value_state == ValueState::Modified
@@ -572,7 +587,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 				if fetched {
 					if let Some(mut child) = node.get_child_mut(KeyIndexFor::<N>::from_usize(i)) {
 						// TODO also delete and create and update num children.
-						if let Some(_ix) = Self::commit_change(&mut child) {
+						if let Some(_ix) = Self::commit_change_fuse(&mut child, remove_node) {
 							// read in child on encode.
 						}
 					} else {

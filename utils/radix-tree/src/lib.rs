@@ -914,10 +914,7 @@ impl<N> Tree<N>
 			for node in self.removed_node.drain(..) {
 				N::Backend::delete(node);
 			}
-			// TODO here could/should apply fuse_node on all node (doing it lazilly
-			// is sometime better: less child access). Should be define by
-			// backend constant.
-			if let Some(result) = N::Backend::commit_change(&mut node) {
+			if let Some(result) = N::Backend::commit_change_fuse(&mut node, &mut self.removed_node) {
 				use crate::backends::Backend;
 				node.backend.backend().set_root(result);
 			}
@@ -1151,10 +1148,12 @@ impl<N: TreeConf> Tree<N> {
 				if current.number_child() == 0 {
 					empty_tree = Some(result);
 				} else {
-					if current.number_child() == 1 {
-						Node::<N>::fuse_child(current, &mut self.removed_node);
+					if !N::Backend::FUSE_ON_COMMIT {
+						if current.number_child() == 1 {
+							Node::<N>::fuse_child(current, &mut self.removed_node);
+						}
+						return result;
 					}
-					return result;
 				}
 			}
 			let dest_position = Position {
@@ -1199,15 +1198,17 @@ impl<N: TreeConf> Tree<N> {
 								} else {
 									unreachable!();
 								}
-								if !parent.has_value() && parent.number_child() == 1 {
-									Node::<N>::fuse_child(parent, &mut self.removed_node);
+								if !N::Backend::FUSE_ON_COMMIT { // TODO this could ignore fuse on commit (do not query additional nodes).
+									if !parent.has_value() && parent.number_child() == 1 {
+										Node::<N>::fuse_child(parent, &mut self.removed_node);
+									}
 								}
 							} else {
 								// root
 								empty_tree = Some(result);
 								break;
 							}
-						} else if current.number_child() == 1 {
+						} else if !N::Backend::FUSE_ON_COMMIT && current.number_child() == 1 {
 							Node::<N>::fuse_child(current, &mut self.removed_node);
 						}
 
