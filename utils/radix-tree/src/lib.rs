@@ -759,7 +759,7 @@ impl<N: TreeConf> Node<N> {
 		node: &mut Box<Self>,
 		removed_node: &mut Vec<N::Backend>,
 	) {
-		if let Some(index) = node.first_child_index() {
+		if let Some(index) = node.get_next_child_index(None) {
 			// even with backend we do a removal in this case (cannot keep deleted).
 			if let Some(child) = node.children.remove_child(index) {
 				node.children.decrease_number();
@@ -828,24 +828,16 @@ impl<N: TreeConf> Node<N> {
 		position.index::<N::Radix>(self.key.data.borrow())
 	}
 
-	// TODO useless? or change to get_next_children_index as in backend?
-	fn first_child_index(
+	fn get_next_child_index(
 		&self,
+		from: Option<KeyIndexFor<N>>,
 	) -> Option<KeyIndexFor<N>> {
-		use crate::children::NodeIndex; // TODO inefficient have next defined children index.
-		let mut ix = KeyIndexFor::<N>::zero();
-		loop {
-			if self.has_child(ix) {
-				return Some(ix)
-			}
-
-			ix = if let Some(ix) = ix.next() {
-				ix
-			} else {
-				break;
-			};
+		let next = self.children.get_next_child_index(from);
+		if N::Backend::ACTIVE {
+			next.and_then(|n| self.has_child(n).then(|| n))
+		} else {
+			next
 		}
-		None
 	}
 }
 

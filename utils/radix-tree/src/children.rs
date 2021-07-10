@@ -153,6 +153,22 @@ pub trait Children: Clone + Debug {
 		&mut self,
 		index: <Self::Radix as RadixConf>::KeyIndex,
 	) -> Option<&mut Self::Node>;
+
+	fn get_next_child_index(
+		&self,
+		mut index: Option<<Self::Radix as RadixConf>::KeyIndex>,
+	) -> Option<<Self::Radix as RadixConf>::KeyIndex> {
+		while let Some(i) = match index {
+			Some(i) => i.next(),
+			None => Some(<Self::Radix as RadixConf>::KeyIndex::zero()),
+		} {
+			if self.get_child(i).is_some() {
+				return Some(i);
+			}
+			index = Some(i);
+		}
+		None
+	}
 }
 
 #[derive(Derivative)]
@@ -695,6 +711,22 @@ impl<N: Debug + Clone> ART48<N> {
 		}
 		values[index as usize].as_mut()
 	}
+
+	fn get_next_child_index(
+		&self,
+		mut index: Option<<Radix256Conf as RadixConf>::KeyIndex>,
+	) -> Option<<Radix256Conf as RadixConf>::KeyIndex> {
+		while let Some(i) = match index {
+			Some(i) => i.next(),
+			None => Some(<Radix256Conf as RadixConf>::KeyIndex::zero()),
+		} {
+			if self.get_child(i).is_some() {
+				return Some(i);
+			}
+			index = Some(i);
+		}
+		None
+	}
 }
 
 impl<N: Debug + Clone> ART16<N> {
@@ -839,6 +871,27 @@ impl<N: Debug + Clone> ART16<N> {
 		}
 		None
 	}
+
+	fn get_next_child_index(
+		&self,
+		index: Option<<Radix256Conf as RadixConf>::KeyIndex>,
+	) -> Option<<Radix256Conf as RadixConf>::KeyIndex> {
+		let mut result = None;
+		if let Some(from) = match index {
+			Some(i) => i.next(),
+			None => Some(<Radix256Conf as RadixConf>::KeyIndex::zero()),
+		} {
+			for i in 0..self.1 {
+				let ix = self.0.0[i as usize];
+				if ix >= from {
+					if result.map(|r| r > ix).unwrap_or(true) {
+						result = Some(ix);
+					}
+				}
+			}
+		}
+		result
+	}
 }
 
 impl<N: Debug + Clone> ART4<N> {
@@ -962,6 +1015,27 @@ impl<N: Debug + Clone> ART4<N> {
 			}
 		}
 		None
+	}
+
+	fn get_next_child_index(
+		&self,
+		index: Option<<Radix256Conf as RadixConf>::KeyIndex>,
+	) -> Option<<Radix256Conf as RadixConf>::KeyIndex> {
+		let mut result = None;
+		if let Some(from) = match index {
+			Some(i) => i.next(),
+			None => Some(<Radix256Conf as RadixConf>::KeyIndex::zero()),
+		} {
+			for i in 0..self.1 {
+				let ix = self.0.0[i as usize];
+				if ix >= from {
+					if result.map(|r| r > ix).unwrap_or(true) {
+						result = Some(ix);
+					}
+				}
+			}
+		}
+		result
 	}
 }
 
@@ -1137,6 +1211,18 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 			ART48_256::ART48(inner) => inner.get_child_mut(index),
 			ART48_256::ART16(inner) => inner.get_child_mut(index),
 			ART48_256::ART4(inner) => inner.get_child_mut(index),
+		}
+	}
+
+	fn get_next_child_index(
+		&self,
+		index: Option<<Self::Radix as RadixConf>::KeyIndex>,
+	) -> Option<<Self::Radix as RadixConf>::KeyIndex> {
+		match self {
+			ART48_256::ART256(inner) => inner.get_next_child_index(index),
+			ART48_256::ART48(inner) => inner.get_next_child_index(index),
+			ART48_256::ART16(inner) => inner.get_next_child_index(index),
+			ART48_256::ART4(inner) => inner.get_next_child_index(index),
 		}
 	}
 }

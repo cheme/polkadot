@@ -221,7 +221,7 @@ impl<'a, N: TreeConf> $seek_iter<'a, N> {
 						while do_pop {
 							stack.pop();
 							if let Some(last) = stack.last_mut() {
-								if let Some(next) = last.2.next() {
+								if let Some(next) = $from_stack(last.1).get_next_child_index(Some(last.2)) {
 									last.2 = next;
 								} else {
 									continue;
@@ -420,7 +420,7 @@ impl<'a, N: TreeConf> $iter<'a, N> {
 				self.stack.stack.pop();
 				if let Some(last) = self.stack.stack.last_mut() {
 					// move cursor to next
-					if let Some(next) = last.2.next() {
+					if let Some(next) = $from_stack(last.1).get_next_child_index(Some(last.2)) {
 						last.2 = next;
 					} else {
 						// try descend in next from parent
@@ -443,13 +443,15 @@ impl<'a, N: TreeConf> $iter<'a, N> {
 					let position = position.next::<N::Radix>();
 					child.new_end(&mut self.stack.key, position);
 					let position = position.next_by::<N::Radix>(child.depth());
-					let first_key = KeyIndexFor::<N>::zero();
+
+					let first_key = child.get_next_child_index(None)
+						.unwrap_or(KeyIndexFor::<N>::zero());
 					self.stack.stack.push((position, child, first_key));
 					break;
 				}
 	
 				// try descend in next
-				if let Some(next) = last.2.next() {
+				if let Some(next) = $from_stack(last.1).get_next_child_index(Some(last.2)) {
 					last.2 = next;
 				} else {
 					// try descend in next from parent
@@ -459,7 +461,8 @@ impl<'a, N: TreeConf> $iter<'a, N> {
 				// empty, this is start iteration
 				if let Some(node) = self.tree.tree.$as_ref() {
 					let zero = PositionFor::<N>::zero();
-					let first_key = KeyIndexFor::<N>::zero();
+					let first_key = node.get_next_child_index(None)
+						.unwrap_or(KeyIndexFor::<N>::zero());
 					node.new_end(&mut self.stack.key, zero);
 					let zero = zero.next_by::<N::Radix>(node.depth()); // could just use node prefix end and index
 					self.stack.stack.push((zero, $to_stack(node), first_key));

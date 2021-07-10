@@ -85,8 +85,8 @@ pub trait TreeBackend<N: TreeConf>: Clone {
 	/// TODO specialize return node to commit recursively on drop.
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>>;
 
-	/// Get next defined node starting from this index (inclusive).
-	fn get_next_children_index(&self, at: KeyIndexFor<N>) -> Option<KeyIndexFor<N>>;
+	/// Get next defined node.
+	fn get_next_child_index(&self, from: Option<KeyIndexFor<N>>) -> Option<KeyIndexFor<N>>;
 	// TODO usefull ? fetch children?
 	fn get_node(&self, index: Self::Index) -> Option<NodeBox<N>>;
 
@@ -170,7 +170,7 @@ impl<N: TreeConf> TreeBackend<N> for () {
 	fn get_node(&self, _index: Self::Index) -> Option<NodeBox<N>> {
 		None
 	}
-	fn get_next_children_index(&self, _index: KeyIndexFor<N>) -> Option<KeyIndexFor<N>> {
+	fn get_next_child_index(&self, _index: Option<KeyIndexFor<N>>) -> Option<KeyIndexFor<N>> {
 		None
 	}
 	fn fetch_children(&mut self, _at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>> {
@@ -479,16 +479,15 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		}
 	}
 
-	fn get_next_children_index(&self, mut index: KeyIndexFor<N>) -> Option<KeyIndexFor<N>> {
-		loop {
-			if self.child_index.get(index.to_usize()).is_some() {
-				return Some(index);
+	fn get_next_child_index(&self, mut index: Option<KeyIndexFor<N>>) -> Option<KeyIndexFor<N>> {
+		while let Some(i) = match index {
+			Some(i) => i.next(),
+			None => Some(KeyIndexFor::<N>::zero()),
+		} {
+			if self.child_index.get(i.to_usize()).is_some() {
+				return Some(i);
 			}
-			if let Some(i) = index.next() {
-				index = i;
-			} else {
-				break;
-			}
+			index = Some(i);
 		}
 		None
 	}
