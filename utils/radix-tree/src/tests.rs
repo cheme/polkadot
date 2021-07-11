@@ -374,7 +374,7 @@ pub mod $module_name {
 		result
 	}
 
-	fn fuzz_removal(data: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<(bool, Vec<u8>, Vec<u8>)> {
+	fn fuzz_removal(data: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<Do> {
 		let mut res = Vec::new();
 		let mut existing = None;
 		for (a, d) in data.into_iter().enumerate() {
@@ -386,11 +386,11 @@ pub mod $module_name {
 				|| a % 9 == 7
 				|| a % 9 == 8 {
 					// a random removal some time
-					res.push((true, d.0, d.1));
+					res.push(Do::Insert(d.0, d.1));
 					continue;
 				}
 			}
-			res.push((false, d.0, d.1));
+			res.push(Do::Remove(d.0));
 		}
 		res
 	}
@@ -401,28 +401,39 @@ pub mod $module_name {
 		test_insert_remove(data)
 	}
 
-	pub fn test_insert_remove(data: Vec<(bool, Vec<u8>, Vec<u8>)>) {
+	pub enum Do {
+		Insert(Vec<u8>, Vec<u8>),
+		Remove(Vec<u8>),
+		Commit,
+	}
+
+	pub fn test_insert_remove(mut data: Vec<Do>) {
+		// ensure test at end
+		data.push(Do::Commit);
 		let backend = new_backend();
 		let mut a = 0;
 		let mut t1 = Tree::<TreeConf>::new(backend.clone());
 		let mut t2 = BTreeMap::<Vec<u8>, Vec<u8>>::new();
 		while a < data.len() {
-			if data[a].0 {
-				// remove
-				t1.remove(&data[a].1[..], false);
-				t2.remove(&data[a].1[..]);
-			} else {
-				// add
-				t1.insert(&data[a].1[..], data[a].2.clone());
-				t2.insert(data[a].1.clone(), data[a].2.clone());
+			match &data[a] {
+				Do::Remove(key) => {
+					t1.remove(&key[..], false);
+					t2.remove(&key[..]);
+				},
+				Do::Insert(key, value) => {
+					t1.insert(&key[..], value.clone());
+					t2.insert(key.clone(), value.clone());
+				},
+				Do::Commit => {
+					assert!(compare_iter(&mut t1, &mut t2));
+					t1.commit();
+					if CHECK_BACKEND {
+						let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
+						assert!(compare_iter(&mut t3, &mut t2));
+					}
+				},
 			}
 			a += 1;
-		}
-		assert!(compare_iter(&mut t1, &mut t2));
-		t1.commit();
-		if CHECK_BACKEND {
-			let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
-			assert!(compare_iter(&mut t3, &mut t2));
 		}
 	}
 
@@ -449,8 +460,10 @@ pub mod $module_name {
 	#[test]
 	fn insert_middle() {
 		test_insert_remove(vec![
-			(false, b"start_long".to_vec(), b"value1".to_vec()),
-			(false, b"start".to_vec(), b"value2".to_vec()),
+			Do::Insert(b"start_long".to_vec(), b"value1".to_vec()),
+			Do::Insert(b"start".to_vec(), b"value2".to_vec()),
+			Do::Commit,
+			Do::Remove(b"start".to_vec()),
 		]);
 	}
 }
