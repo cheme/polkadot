@@ -323,8 +323,7 @@ pub struct NodeTestBackend<N: TreeConf> {
 	// None for new node only.
 	index: Option<usize>,
 	encoded: Vec<u8>,
-	// bool indicate if fetched TODO move is fetched in node children struct (as associated type).
-	child_index: Vec<(Option<usize>, bool)>,
+	child_index: Vec<Option<usize>>,
 	nb_children: usize,
 	value: Option<N::Value>,
 	value_state: ValueState,
@@ -353,7 +352,7 @@ fn decode<N>(
 		if child.is_some() {
 			nb_children += 1;
 		}
-		child_index.push((child.map(|v| v as usize), false));
+		child_index.push(child.map(|v| v as usize));
 	}
 
 	let start_mask = if let Some(mask) = <N::Radix as RadixConf>::Alignment::DEFAULT {
@@ -414,7 +413,7 @@ where
 	//}
 
 	for i in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
-		let (ref_index, _fetched) = node.backend.child_index[i];
+		let ref_index = node.backend.child_index[i];
 		/*let ref_index: Option<usize> = if fetched {
 			if let Some(child) = node.get_child(KeyIndexFor::<N>::from_usize(i)) {
 				child.backend.index
@@ -485,7 +484,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			Some(i) => i.next(),
 			None => Some(KeyIndexFor::<N>::zero()),
 		} {
-			if let Some((Some(_), _)) = self.child_index.get(i.to_usize()) {
+			if let Some(Some(_)) = self.child_index.get(i.to_usize()) {
 				return Some(i);
 			}
 			index = Some(i);
@@ -494,7 +493,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 	}
 
 	fn fetch_children_index(&self, at: KeyIndexFor<N>) -> Option<Self::Index> {
-		if let Some((Some(ix), _)) = self.child_index.get(at.to_usize()) {
+		if let Some(Some(ix)) = self.child_index.get(at.to_usize()) {
 			Some(ix.clone())
 		} else {
 			None
@@ -503,13 +502,10 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	fn fetch_children(&mut self, at: KeyIndexFor<N>) -> Option<Option<NodeBox<N>>> {
 		if let Some(child) = self.child_index.get_mut(at.to_usize()) {
-			if !child.1 {
-				child.1 = true;
-				if let Some(index) = child.0.clone() {
-					return Some(self.get_node(index));
-				} else {
-					return Some(None);
-				}
+			if let Some(index) = child.clone() {
+				return Some(self.get_node(index));
+			} else {
+				return Some(None);
 			}
 		}
 		None
@@ -517,7 +513,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	fn fetch_children_no_cache(&self, at: KeyIndexFor<N>) -> Option<NodeBox<N>> {
 		if let Some(child) = self.child_index.get(at.to_usize()) {
-			if let Some(index) = child.0.clone() {
+			if let Some(index) = child.clone() {
 				return self.get_node(index);
 			}
 		}
@@ -562,7 +558,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		NodeTestBackend {
 			index: None,
 			encoded: Vec::new(),
-			child_index: vec![(None, true); <<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY],
+			child_index: vec![None; <<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY],
 			value: None,
 			nb_children: 0,
 			backend: backend.clone(),
@@ -586,23 +582,21 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			let mut backend_ix = 0;
 			while let Some(i) = node.get_next_child_index(index) {
 				while backend_ix < i.to_usize() {
-					node.backend.child_index[backend_ix] = (None, true);
+					node.backend.child_index[backend_ix] = None; // ensure deleted (could also get next on both).
 					backend_ix += 1;
 				}
 				use crate::children::Children;
 				use crate::WithChildState;
 				if let Some(mut child) = node.children.get_child_mut(i).and_then(|c| c.node_mut()) {
 					if let Some(ix) = Self::commit_change_fuse(&mut child, remove_node) {
-						node.backend.child_index[backend_ix] = (Some(ix), true);
-					} else {
-						node.backend.child_index[backend_ix].1 = true;
+						node.backend.child_index[backend_ix] = Some(ix);
 					}
 				}
 				backend_ix = i.to_usize() + 1;
 				index = Some(i);
 			}
 			while backend_ix < <<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
-				node.backend.child_index[backend_ix] = (None, true);
+				node.backend.child_index[backend_ix] = None;
 				backend_ix += 1;
 			}
 		}
@@ -633,7 +627,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	fn clear_content(&mut self) {
 		self.encoded.clear();
-		self.child_index.clear();
+		self.child_index = vec![None; <<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY];
 		// Note here if value is stored in different node, we would need to remove it.
 		self.value = None;
 		self.nb_children = 0;
