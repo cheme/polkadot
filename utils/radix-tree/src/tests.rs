@@ -97,22 +97,38 @@ pub mod $module_name {
 		true
 	}
 
-	fn compare_iter<K: Borrow<[u8]>>(left: &Tree::<TreeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
-		let left_node = left.iter();
-		let left = left_node.value_iter();
+	fn compare_iter<K: Borrow<[u8]>>(left: &mut Tree::<TreeConf>, right: &BTreeMap<K, Vec<u8>>, with_backend: bool) -> bool {
 		let mut right = right.iter();
-		for l in left {
-			if let Some(r) = right.next() {
-				if &l.0[..] != &r.0.borrow()[..] {
+		let mut left_iter = if with_backend {
+			let left_node = left.iter_mut();
+			for l in left_node.value_iter() {
+				if let Some(r) = right.next() {
+					if &l.0[..] != &r.0.borrow()[..] {
+						return false;
+					}
+					if &l.1[..] != &r.1[..] {
+						return false;
+					}
+				} else {
 					return false;
 				}
-				if &l.1[..] != &r.1[..] {
-					return false;
-				}
-			} else {
-				return false;
 			}
-		}
+		} else {
+			let left_node = left.iter();
+			for l in left_node.value_iter() {
+				if let Some(r) = right.next() {
+					if &l.0[..] != &r.0.borrow()[..] {
+						return false;
+					}
+					if &l.1[..] != &r.1[..] {
+						return false;
+					}
+				} else {
+					return false;
+				}
+			}
+		};
+
 		if right.next().is_some() {
 			return false;
 		}
@@ -127,20 +143,20 @@ pub mod $module_name {
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
-		assert!(compare_iter(&t1, &t2));
+		assert!(compare_iter(&mut t1, &t2, CHECK_BACKEND));
 		assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
 		assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
-		assert!(compare_iter(&t1, &t2));
+		assert!(compare_iter(&mut t1, &t2, CHECK_BACKEND));
 		assert_eq!(None, t1.insert(b"key2", value1.clone()));
 		assert_eq!(None, t2.insert(b"key2", value1.clone()));
-		assert!(compare_iter(&t1, &t2));
+		assert!(compare_iter(&mut t1, &t2, CHECK_BACKEND));
 		assert_eq!(None, t1.insert(b"key3", value1.clone()));
-		assert!(!compare_iter(&t1, &t2));
-		core::mem::drop(t1);
+		assert!(!compare_iter(&mut t1, &t2, CHECK_BACKEND));
+		t1.commit();
 		if CHECK_BACKEND {
 			assert_eq!(None, t2.insert(b"key3", value1.clone()));
 			let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
-			assert!(compare_iter(&mut t3, &mut t2));
+			assert!(compare_iter(&mut t3, &mut t2, CHECK_BACKEND));
 		}
 	}
 
@@ -370,11 +386,11 @@ pub mod $module_name {
 			}
 			a += 1;
 		}
-		assert!(compare_iter(&mut t1, &mut t2));
-		core::mem::drop(t1);
+		assert!(compare_iter(&mut t1, &mut t2, check_backend));
+		t1.commit();
 		if check_backend {
 			let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
-			assert!(compare_iter(&mut t3, &mut t2));
+			assert!(compare_iter(&mut t3, &mut t2, check_backend));
 		}
 	}
 

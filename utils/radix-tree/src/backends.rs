@@ -26,6 +26,7 @@ use crate::children::NodeIndex;
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use alloc::boxed::Box;
+use alloc::vec;
 use codec::{Encode, Decode, Input};
 use core::cell::RefCell;
 
@@ -405,16 +406,16 @@ where
 {
 	let mut result = Vec::new();
 
-	if node.backend.value_state == ValueState::Modified
+	/*if node.backend.value_state == ValueState::Modified
 		|| node.backend.value_state == ValueState::Deleted {
 		node.value.encode_to(&mut result);
-	} else {
-		node.backend.value.encode_to(&mut result);
-	}
+	} else {*/
+	node.backend.value.encode_to(&mut result);
+	//}
 
 	for i in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
-		let (ref_index, fetched) = node.backend.child_index[i];
-		let ref_index: Option<usize> = if fetched {
+		let (ref_index, _fetched) = node.backend.child_index[i];
+		/*let ref_index: Option<usize> = if fetched {
 			if let Some(child) = node.get_child(KeyIndexFor::<N>::from_usize(i)) {
 				child.backend.index
 			} else {
@@ -422,7 +423,7 @@ where
 			}
 		} else {
 			ref_index
-		};
+		};*/
 		ref_index.map(|i| i as u64).encode_to(&mut result);
 	}
 	if let Some(_) = <N::Radix as RadixConf>::Alignment::DEFAULT {
@@ -484,7 +485,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			Some(i) => i.next(),
 			None => Some(KeyIndexFor::<N>::zero()),
 		} {
-			if self.child_index.get(i.to_usize()).is_some() {
+			if let Some((Some(_), _)) = self.child_index.get(i.to_usize()) {
 				return Some(i);
 			}
 			index = Some(i);
@@ -561,7 +562,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		NodeTestBackend {
 			index: None,
 			encoded: Vec::new(),
-			child_index: Vec::new(),
+			child_index: vec![(None, true); <<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY],
 			value: None,
 			nb_children: 0,
 			backend: backend.clone(),
@@ -581,18 +582,28 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		}
 		if node.backend.children_changed {
 			// recurse commit of resolved children and update backend indexes.
-			for i in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
-				let (_ref_index, fetched) = node.backend.child_index[i];
-				if fetched {
-					if let Some(mut child) = node.get_child_mut(KeyIndexFor::<N>::from_usize(i)) {
-						// TODO also delete and create and update num children.
-						if let Some(_ix) = Self::commit_change_fuse(&mut child, remove_node) {
-							// read in child on encode.
-						}
+			let mut index = None;
+			let mut backend_ix = 0;
+			while let Some(i) = node.get_next_child_index(index) {
+				while backend_ix < i.to_usize() {
+					node.backend.child_index[backend_ix] = (None, true);
+					backend_ix += 1;
+				}
+				use crate::children::Children;
+				use crate::WithChildState;
+				if let Some(mut child) = node.children.get_child_mut(i).and_then(|c| c.node_mut()) {
+					if let Some(ix) = Self::commit_change_fuse(&mut child, remove_node) {
+						node.backend.child_index[backend_ix] = (Some(ix), true);
 					} else {
-						unreachable!("was fetched");
+						node.backend.child_index[backend_ix].1 = true;
 					}
 				}
+				backend_ix = i.to_usize() + 1;
+				index = Some(i);
+			}
+			while backend_ix < <<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
+				node.backend.child_index[backend_ix] = (None, true);
+				backend_ix += 1;
 			}
 		}
 		if node.backend.value_state == ValueState::Modified

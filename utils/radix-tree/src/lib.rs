@@ -564,7 +564,15 @@ impl<N: TreeConf> Node<N> {
 		&self,
 	) -> Option<&N::Value> {
 		if N::Backend::ACTIVE {
-			panic!("Cannot fetch");
+			match self.backend.value_state()  {
+				ValueState::Deleted => {
+					return None;
+				},
+				ValueState::Unfetched => {
+					panic!("Cannot fetch");
+				},
+				_ => (),
+			}
 		}
 		self.value.as_ref()
 	}
@@ -574,6 +582,9 @@ impl<N: TreeConf> Node<N> {
 	) -> Option<&mut N::Value> {
 		if N::Backend::ACTIVE {
 			match self.backend.value_state()  {
+				ValueState::Deleted => {
+					return None;
+				},
 				ValueState::Unfetched => {
 					if let Some(option_value) = self.backend.fetch_value() {
 						self.value = option_value;
@@ -834,6 +845,11 @@ impl<N: TreeConf> Node<N> {
 	) -> Option<KeyIndexFor<N>> {
 		let next = self.children.get_next_child_index(from);
 		if N::Backend::ACTIVE {
+			if let Some(next_backend) = self.backend.get_next_child_index(from) {
+				if next.as_ref().map(|n| &next_backend < n).unwrap_or(true) {
+					return Some(next_backend)
+				}
+			}
 			next.and_then(|n| self.has_child(n).then(|| n))
 		} else {
 			next
@@ -1074,14 +1090,15 @@ impl<N: TreeConf> Tree<N> {
 							}
 						} else {
 							let child_position = child_position.next::<N::Radix>();
-							let new_child = Node::<N>::new_box(
+							let mut new_child = Node::<N>::new_box(
 								key,
 								child_position,
 								dest_position,
-								Some(value),
+								None,
 								(),
 								N::new_node_backend(current, &mut self.removed_node),
 							);
+							new_child.set_value(value);
 							assert!(current.set_child(index, new_child).is_none());
 							current.backend.set_children_change();
 							return None;
@@ -1091,14 +1108,15 @@ impl<N: TreeConf> Tree<N> {
 						// insert middle node
 						Node::<N>::split_off(current, position, middle_position, &mut self.removed_node);
 						let child_start = middle_position.next::<N::Radix>();
-						let new_child = Node::<N>::new_box(
+						let mut new_child = Node::<N>::new_box(
 							key,
 							child_start,
 							dest_position,
-							Some(value),
+							None,
 							(),
 							N::new_node_backend(current, &mut self.removed_node),
 						);
+						new_child.set_value(value);
 						//let child_index = middle_position.index::<N::Radix>(key)
 						//	.expect("Middle resolved from key");
 						current.set_child(index, new_child);
@@ -1120,10 +1138,11 @@ impl<N: TreeConf> Tree<N> {
 				key,
 				position,
 				dest_position,
-				Some(value),
+				None,
 				(),
 				N::new_node_backend_root(&self.init, &mut self.removed_node),
 			));
+			self.tree.as_mut().map(|node| node.set_value(value));
 			None
 		}
 	}
