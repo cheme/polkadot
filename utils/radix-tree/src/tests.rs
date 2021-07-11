@@ -44,9 +44,9 @@ pub mod $module_name {
 	#[test]
 	fn empty_are_equals() {
 		let backend = new_backend();
-		let t1 = Tree::<TreeConf>::new(backend.clone());
-		let t2 = Tree::<TreeConf>::new(backend.clone());
-		assert!(compare_tree(&t1, &t2, Some(0)));
+		let mut t1 = Tree::<TreeConf>::new(backend.clone());
+		let mut t2 = Tree::<TreeConf>::new(backend.clone());
+		assert!(compare_tree(&mut t1, &mut t2, Some(0)));
 	}
 
 	#[test]
@@ -57,49 +57,78 @@ pub mod $module_name {
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
-		assert!(compare_tree(&t1, &t2, Some(1)));
+		assert!(compare_tree(&mut t1, &mut t2, Some(1)));
 		assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
 		assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
-		assert!(compare_tree(&t1, &t2, Some(1)));
+		assert!(compare_tree(&mut t1, &mut t2, Some(1)));
 		assert_eq!(None, t1.insert(b"key2", value1.clone()));
 		assert_eq!(None, t2.insert(b"key2", value1.clone()));
-		assert!(compare_tree(&t1, &t2, Some(2)));
+		assert!(compare_tree(&mut t1, &mut t2, Some(2)));
 		assert_eq!(None, t2.insert(b"key3", value1.clone()));
-		assert!(!compare_tree(&t1, &t2, None));
+		assert!(!compare_tree(&mut t1, &mut t2, None));
 	}
 
+	// TODO this compare tree is a bit useless.
 	#[cfg(test)]
-	fn compare_tree(left: &Tree::<TreeConf>, right: &Tree::<TreeConf>, mut nb_elt: Option<usize>) -> bool {
-		let left_node = left.iter();
-		let left = left_node.value_iter();
-		let right_node = right.iter();
-		let mut right = right_node.value_iter();
-		for l in left {
-			if nb_elt == Some(0) {
-				return false;
-			} else {
-				nb_elt = nb_elt.map(|nb_elt| nb_elt - 1);
-			}
-			if let Some(r) = right.next() {
-				if &l.0[..] != &r.0[..] {
+	fn compare_tree(left: &mut Tree::<TreeConf>, right: &mut Tree::<TreeConf>, mut nb_elt: Option<usize>) -> bool {
+		if CHECK_BACKEND {
+			let left_node = left.iter_mut();
+			let left = left_node.value_iter();
+			let right_node = right.iter_mut();
+			let mut right = right_node.value_iter();
+			for l in left {
+				if nb_elt == Some(0) {
+					return false;
+				} else {
+					nb_elt = nb_elt.map(|nb_elt| nb_elt - 1);
+				}
+				if let Some(r) = right.next() {
+					if &l.0[..] != &r.0[..] {
+						return false;
+					}
+					if &l.1[..] != &r.1[..] {
+						return false;
+					}
+				} else {
 					return false;
 				}
-				if &l.1[..] != &r.1[..] {
-					return false;
-				}
-			} else {
+			}
+			if right.next().is_some() || nb_elt.map(|nb| nb > 0).unwrap_or(false) {
 				return false;
 			}
+			true
+		} else {
+			let left_node = left.iter();
+			let left = left_node.value_iter();
+			let right_node = right.iter();
+			let mut right = right_node.value_iter();
+			for l in left {
+				if nb_elt == Some(0) {
+					return false;
+				} else {
+					nb_elt = nb_elt.map(|nb_elt| nb_elt - 1);
+				}
+				if let Some(r) = right.next() {
+					if &l.0[..] != &r.0[..] {
+						return false;
+					}
+					if &l.1[..] != &r.1[..] {
+						return false;
+					}
+				} else {
+					return false;
+				}
+			}
+			if right.next().is_some() || nb_elt.map(|nb| nb > 0).unwrap_or(false) {
+				return false;
+			}
+			true
 		}
-		if right.next().is_some() || nb_elt.map(|nb| nb > 0).unwrap_or(false) {
-			return false;
-		}
-		true
 	}
 
-	fn compare_iter<K: Borrow<[u8]>>(left: &mut Tree::<TreeConf>, right: &BTreeMap<K, Vec<u8>>, with_backend: bool) -> bool {
+	fn compare_iter<K: Borrow<[u8]>>(left: &mut Tree::<TreeConf>, right: &BTreeMap<K, Vec<u8>>) -> bool {
 		let mut right = right.iter();
-		let mut left_iter = if with_backend {
+		if CHECK_BACKEND {
 			let left_node = left.iter_mut();
 			for l in left_node.value_iter() {
 				if let Some(r) = right.next() {
@@ -143,20 +172,20 @@ pub mod $module_name {
 		let value1 = b"value1".to_vec();
 		assert_eq!(None, t1.insert(b"key1", value1.clone()));
 		assert_eq!(None, t2.insert(b"key1", value1.clone()));
-		assert!(compare_iter(&mut t1, &t2, CHECK_BACKEND));
+		assert!(compare_iter(&mut t1, &t2));
 		assert_eq!(Some(value1.clone()), t1.insert(b"key1", b"value2".to_vec()));
 		assert_eq!(Some(value1.clone()), t2.insert(b"key1", b"value2".to_vec()));
-		assert!(compare_iter(&mut t1, &t2, CHECK_BACKEND));
+		assert!(compare_iter(&mut t1, &t2));
 		assert_eq!(None, t1.insert(b"key2", value1.clone()));
 		assert_eq!(None, t2.insert(b"key2", value1.clone()));
-		assert!(compare_iter(&mut t1, &t2, CHECK_BACKEND));
+		assert!(compare_iter(&mut t1, &t2));
 		assert_eq!(None, t1.insert(b"key3", value1.clone()));
-		assert!(!compare_iter(&mut t1, &t2, CHECK_BACKEND));
+		assert!(!compare_iter(&mut t1, &t2));
 		t1.commit();
 		if CHECK_BACKEND {
 			assert_eq!(None, t2.insert(b"key3", value1.clone()));
 			let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
-			assert!(compare_iter(&mut t3, &mut t2, CHECK_BACKEND));
+			assert!(compare_iter(&mut t3, &mut t2));
 		}
 	}
 
@@ -176,29 +205,32 @@ pub mod $module_name {
 				assert_eq!(None, t1.insert(key.as_slice(), value1.clone()));
 			}
 			let dest = &b"key1"[..];
-			let mut seek_iter = t1.seek_iter(dest).value_iter();
 			let mut index = 0;
-			while let Some((key, _value)) = seek_iter.next() {
-				assert_eq!(key, key_seek_path[index]);
-				index += 1;
+			if !CHECK_BACKEND {
+				let mut seek_iter = t1.seek_iter(dest).value_iter();
+				while let Some((key, _value)) = seek_iter.next() {
+					assert_eq!(key, key_seek_path[index]);
+					index += 1;
+				}
+				assert_eq!(index, key_seek_path.len());
+				index = 0;
+				let mut iter = seek_iter.node_iter().iter().value_iter();
+				while let Some((key, _value)) = iter.next() {
+					assert_eq!(key, key_iter_path[index]);
+					index += 1;
+				}
+				assert_eq!(index, key_iter_path.len());
+
+				let mut seek_iter = t1.seek_iter(dest).value_iter();
+				while seek_iter.next().is_some() { }
+				index = 0;
+				let mut iter = seek_iter.node_iter().iter_prefix().value_iter();
+				while let Some((key, _value)) = iter.next() {
+					assert_eq!(key, key_iter_prefix_path[index]);
+					index += 1;
+				}
+				assert_eq!(index, key_iter_prefix_path.len());
 			}
-			assert_eq!(index, key_seek_path.len());
-			index = 0;
-			let mut iter = seek_iter.node_iter().iter().value_iter();
-			while let Some((key, _value)) = iter.next() {
-				assert_eq!(key, key_iter_path[index]);
-				index += 1;
-			}
-			assert_eq!(index, key_iter_path.len());
-			let mut seek_iter = t1.seek_iter(dest).value_iter();
-			while seek_iter.next().is_some() { }
-			index = 0;
-			let mut iter = seek_iter.node_iter().iter_prefix().value_iter();
-			while let Some((key, _value)) = iter.next() {
-				assert_eq!(key, key_iter_prefix_path[index]);
-				index += 1;
-			}
-			assert_eq!(index, key_iter_prefix_path.len());
 			let mut seek_iter = t1.seek_iter_mut(dest).value_iter();
 			let mut index = 0;
 			while let Some((key, _value)) = seek_iter.next() {
@@ -363,13 +395,13 @@ pub mod $module_name {
 		res
 	}
 
-	pub fn fuzz_insert_remove(input: &[u8], check_backend: bool) {
+	pub fn fuzz_insert_remove(input: &[u8]) {
 		let data = fuzz_to_data(input);
 		let data = fuzz_removal(data);
-		test_insert_remove(data, check_backend)
+		test_insert_remove(data)
 	}
 
-	pub fn test_insert_remove(data: Vec<(bool, Vec<u8>, Vec<u8>)>, check_backend: bool) {
+	pub fn test_insert_remove(data: Vec<(bool, Vec<u8>, Vec<u8>)>) {
 		let backend = new_backend();
 		let mut a = 0;
 		let mut t1 = Tree::<TreeConf>::new(backend.clone());
@@ -386,11 +418,11 @@ pub mod $module_name {
 			}
 			a += 1;
 		}
-		assert!(compare_iter(&mut t1, &mut t2, check_backend));
+		assert!(compare_iter(&mut t1, &mut t2));
 		t1.commit();
-		if check_backend {
+		if CHECK_BACKEND {
 			let mut t3 = Tree::<TreeConf>::from_backend(backend.clone());
-			assert!(compare_iter(&mut t3, &mut t2, check_backend));
+			assert!(compare_iter(&mut t3, &mut t2));
 		}
 	}
 
@@ -410,7 +442,7 @@ pub mod $module_name {
 			vec![0u8, 202, 1, 4, 64, 49, 0, 0],
 		];
 		for data in datas.iter() {
-			fuzz_insert_remove(&data[..], CHECK_BACKEND);
+			fuzz_insert_remove(&data[..]);
 		}
 	}
 
@@ -419,7 +451,7 @@ pub mod $module_name {
 		test_insert_remove(vec![
 			(false, b"start_long".to_vec(), b"value1".to_vec()),
 			(false, b"start".to_vec(), b"value2".to_vec()),
-		], CHECK_BACKEND);
+		]);
 	}
 }
 
