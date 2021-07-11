@@ -1107,7 +1107,6 @@ impl<N: TreeConf> Tree<N> {
 					Descent::Middle(middle_position, None) => {
 						// insert middle node
 						Node::<N>::split_off(current, position, middle_position, &mut self.removed_node);
-						// TODO need to put this set_value in a test code path.
 						assert!(current.set_value(value).is_none());
 						return None;
 					},

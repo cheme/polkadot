@@ -285,7 +285,7 @@ pub mod $module_name {
 		test(keys, key_seek_path, key_iter_path, key_iter_prefix_path);
 	}
 
-	fn fuzz_to_data(input: &[u8]) -> Vec<(Vec<u8>,Vec<u8>)> {
+	fn fuzz_to_data(input: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 		let mut result = Vec::new();
 		// enc = (minkeylen, maxkeylen (min max up to 32), datas)
 		// fix data len 2 bytes
@@ -326,7 +326,7 @@ pub mod $module_name {
 		result
 	}
 
-	fn fuzz_removal(data: Vec<(Vec<u8>,Vec<u8>)>) -> Vec<(bool, Vec<u8>,Vec<u8>)> {
+	fn fuzz_removal(data: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<(bool, Vec<u8>, Vec<u8>)> {
 		let mut res = Vec::new();
 		let mut existing = None;
 		for (a, d) in data.into_iter().enumerate() {
@@ -350,6 +350,10 @@ pub mod $module_name {
 	pub fn fuzz_insert_remove(input: &[u8], check_backend: bool) {
 		let data = fuzz_to_data(input);
 		let data = fuzz_removal(data);
+		test_insert_remove(data, check_backend)
+	}
+
+	pub fn test_insert_remove(data: Vec<(bool, Vec<u8>, Vec<u8>)>, check_backend: bool) {
 		let backend = new_backend();
 		let mut a = 0;
 		let mut t1 = Tree::<TreeConf>::new(backend.clone());
@@ -392,6 +396,14 @@ pub mod $module_name {
 		for data in datas.iter() {
 			fuzz_insert_remove(&data[..], CHECK_BACKEND);
 		}
+	}
+
+	#[test]
+	fn insert_middle() {
+		test_insert_remove(vec![
+			(false, b"start_long".to_vec(), b"value1".to_vec()),
+			(false, b"start".to_vec(), b"value2".to_vec()),
+		], CHECK_BACKEND);
 	}
 }
 
