@@ -117,7 +117,7 @@ pub trait Children: Clone + Debug {
 	/// Initialize size is size from backend.
 	fn empty(initial_size: usize) -> Self;
 
-	fn need_init_unfetched(&self) -> bool;
+	fn need_init_unfetched(initial_size: usize) -> bool;
 
 	/// Set or replace child.
 	/// Warning this does not update the total
@@ -188,7 +188,7 @@ impl<N: Debug + Clone> Children for Children2<N> {
 		Children2(None)
 	}
 
-	fn need_init_unfetched(&self) -> bool {
+	fn need_init_unfetched(_initial_size: usize) -> bool {
 		true // to have working nb_children
 	}
 
@@ -382,7 +382,7 @@ impl<N: Debug + Clone> Children for Children256<N> {
 		Children256(None, initial_size as u8)
 	}
 
-	fn need_init_unfetched(&self) -> bool {
+	fn need_init_unfetched(_initial_size: usize) -> bool {
 		false
 	}
 
@@ -464,7 +464,7 @@ impl<N: Debug + Clone> Children for $struct_name<N> {
 		$struct_name($empty(), initial_size as u8)
 	}
 
-	fn need_init_unfetched(&self) -> bool {
+	fn need_init_unfetched(_initial_size: usize) -> bool {
 		false
 	}
 
@@ -1066,13 +1066,11 @@ impl<N: Debug + Clone> Children for ART48_256<N> {
 		}
 	}
 
-	fn need_init_unfetched(&self) -> bool {
-		match self {
-			ART48_256::ART4(_) => true,
-			ART48_256::ART16(_) => true,
-			ART48_256::ART48(_) => true,
-			ART48_256::ART256(_) => true, // TODO switch false (see issue in case of reduce
-		}
+	fn need_init_unfetched(_initial_size: usize) -> bool {
+/*		if initial_size > ADD_TRESHOLD48 {
+			// TODO switch false (but need to disalow reduce if with backend
+		}*/
+		true
 	}
 
 	fn increase_number(&mut self) {

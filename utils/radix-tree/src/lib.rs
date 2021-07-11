@@ -459,14 +459,16 @@ impl<N: TreeConf> Node<N> {
 	fn children_from_backend(
 		backend: &mut N::Backend,
 	) -> N::Children {
-		let mut children = N::Children::empty(backend.fetch_nb_children().unwrap_or(0));
-		if N::Backend::ACTIVE && children.need_init_unfetched() {
+		let nb_children = backend.fetch_nb_children().unwrap_or(0);
+		if N::Backend::ACTIVE && N::Children::need_init_unfetched(nb_children) {
 			use crate::children::NodeIndex;
+			let mut children = N::Children::empty(0);
 			let mut i = KeyIndexFor::<N>::zero();
 			loop {
 				if let Some(_) = backend.fetch_children_index(i) {
 					let child = ChildFor::<N>::from_state(ChildState::Unfetched, None);
 					children.set_child(i, child);
+					children.increase_number();
 				}
 
 				if let Some(n) = i.next() {
@@ -475,8 +477,10 @@ impl<N: TreeConf> Node<N> {
 					break;
 				}
 			}
+			children
+		} else {
+			N::Children::empty(nb_children)
 		}
-		children
 	}
 	
 	fn new(
