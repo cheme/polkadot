@@ -231,10 +231,10 @@ impl<N: TreeConf> TreeBackend<N> for () {
 /// Backend containing encoded nodes.
 #[derive(Clone, Debug)]
 pub struct TestBackend {
-	encoded_nodes: Vec<(Vec<u8>, Option<usize>)>,
-	free_node: usize,
+	encoded_nodes: Vec<(Vec<u8>, Option<u64>)>,
+	free_node: u64,
 	new_node_on_update: bool,
-	root_index: usize,
+	root_index: u64,
 }
 
 impl Default for TestBackend {
@@ -249,8 +249,8 @@ impl Default for TestBackend {
 }
 
 impl TestBackend {
-	fn remove(&mut self, index: usize) {
-		if let Some(node) = self.encoded_nodes.get_mut(index) {
+	fn remove(&mut self, index: u64) {
+		if let Some(node) = self.encoded_nodes.get_mut(index as usize) {
 			if node.1.is_none() {
 				node.1 = Some(self.free_node);
 				self.free_node = index;
@@ -265,13 +265,13 @@ impl TestBackend {
 		}
 		None
 	}
-	fn insert(&mut self, content: Vec<u8>) -> usize {
+	fn insert(&mut self, content: Vec<u8>) -> u64 {
 		let result = self.free_node;
-		if self.free_node == self.encoded_nodes.len() {
+		if self.free_node == self.encoded_nodes.len() as u64 {
 			self.encoded_nodes.push((content, None));
-			self.free_node = self.encoded_nodes.len();
+			self.free_node = self.encoded_nodes.len() as u64;
 		} else {
-			let node = self.encoded_nodes.get_mut(self.free_node).expect("Free node oversized.");
+			let node = self.encoded_nodes.get_mut(self.free_node as usize).expect("Free node oversized.");
 			self.free_node = node.1.take().expect("free node contains pointer");
 			node.0 = content;
 		}
@@ -280,15 +280,15 @@ impl TestBackend {
 }
 
 impl Backend for Rc<RefCell<TestBackend>> {
-	type Index = usize;
+	type Index = u64;
 
-	fn get_root(&self) -> Option<(Vec<u8>, usize)> {
+	fn get_root(&self) -> Option<(Vec<u8>, u64)> {
 		let s = self.borrow();
-		s.get(s.root_index).map(|v| (v, s.root_index))
+		s.get(s.root_index as usize).map(|v| (v, s.root_index))
 	}
 
 	fn get_node(&self, index: Self::Index) -> Option<Vec<u8>> {
-		self.borrow().get(index)
+		self.borrow().get(index as usize)
 	}
 
 	fn update_node(&self, index: Self::Index, node: Vec<u8>) -> Option<Self::Index> {
@@ -296,10 +296,10 @@ impl Backend for Rc<RefCell<TestBackend>> {
 		if s.new_node_on_update {
 			let result = s.insert(node);
 			s.remove(index);
-			Some(result)
+			Some(result as u64)
 		} else {
-			s.encoded_nodes[index].0 = node;
-			debug_assert!(s.encoded_nodes[index].1.is_none());
+			s.encoded_nodes[index as usize].0 = node;
+			debug_assert!(s.encoded_nodes[index as usize].1.is_none());
 			None
 		}
 	}
@@ -319,41 +319,43 @@ impl Backend for Rc<RefCell<TestBackend>> {
 
 /// Test only backend with lazy access.
 #[derive(Clone, Debug)]
-pub struct NodeTestBackend<N: TreeConf> {
+pub struct NodeTestBackend<N: TreeConf, B: Backend> {
 	// None for new node only.
-	index: Option<usize>,
+	index: Option<B::Index>,
 	encoded: Vec<u8>,
-	child_index: Vec<Option<usize>>,
+	child_index: Vec<Option<B::Index>>,
 	nb_children: usize,
-	value: Option<u64>,
+	value: Option<B::Index>,
 	value_state: ValueState,
-	backend: Rc<RefCell<TestBackend>>,
+	backend: B,
 	children_changed: bool,
 	prefix_changed: bool,
-	_ph: core::marker::PhantomData<N>,// TODO try remove N.
+	_ph: core::marker::PhantomData<N>,
 }
 
 // TODO replace backend by N::Backend when attached
-fn decode<N>(
+fn decode<N, B>(
 	encoded: Vec<u8>,
-	backend: &Rc<RefCell<TestBackend>>,
-	index: usize,
-) -> (NodeTestBackend<N>, PrefixKey<Vec<u8>, AlignmentFor<N>>)
+	backend: &B,
+	index: B::Index,
+) -> (NodeTestBackend<N, B>, PrefixKey<Vec<u8>, AlignmentFor<N>>)
 	where
 		N: TreeConf,
 		N::Value: Decode,
+		B: Backend,
+		B::Index: Decode,
 {
 
 	let input = &mut encoded.as_slice();
-	let value: Option<u64> = Decode::decode(input).unwrap();
+	let value: Option<B::Index> = Decode::decode(input).unwrap();
 	let mut child_index = Vec::new();
 	let mut nb_children = 0;
 	for _ in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
-		let child: Option<u64> = Decode::decode(input).unwrap();
+		let child: Option<B::Index> = Decode::decode(input).unwrap();
 		if child.is_some() {
 			nb_children += 1;
 		}
-		child_index.push(child.map(|v| v as usize));
+		child_index.push(child.map(|v| v));
 	}
 
 	let start_mask = if let Some(mask) = <N::Radix as RadixConf>::Alignment::DEFAULT {
@@ -400,10 +402,12 @@ fn decode<N>(
 	}, prefix)
 }
 
-fn encode_node<N>(node: &Node<N>) -> Vec<u8>
+fn encode_node<N, B>(node: &Node<N>) -> Vec<u8>
 where
-		N: TreeConf<Backend = NodeTestBackend<N>>,
+		N: TreeConf<Backend = NodeTestBackend<N, B>>,
 		N::Value: Encode,
+		B: Backend,
+		B::Index: Encode,
 {
 	let mut result = Vec::new();
 
@@ -415,7 +419,7 @@ where
 	//}
 
 	for i in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
-		let ref_index = node.backend.child_index[i];
+		let ref_index = &node.backend.child_index[i];
 		/*let ref_index: Option<usize> = if fetched {
 			if let Some(child) = node.get_child(KeyIndexFor::<N>::from_usize(i)) {
 				child.backend.index
@@ -425,7 +429,7 @@ where
 		} else {
 			ref_index
 		};*/
-		ref_index.map(|i| i as u64).encode_to(&mut result);
+		ref_index.encode_to(&mut result);
 	}
 	if let Some(_) = <N::Radix as RadixConf>::Alignment::DEFAULT {
 	} else {
@@ -441,18 +445,20 @@ where
 }
 
 
-impl<N> TreeBackend<N> for NodeTestBackend<N>
+impl<N, B> TreeBackend<N> for NodeTestBackend<N, B>
 	where
 		N: TreeConf<Backend = Self>,
 		N::Value: Decode + Encode,
+		B: Backend,
+		B::Index: Clone + Decode + Encode,
 {
 	const ACTIVE: bool = true;
 	const FUSE_ON_COMMIT: bool = true;
 	type ChildState = crate::Child<Node<N>>;
 	//type ChildState = Box<Node<N>>;
 
-	type Backend = Rc<RefCell<TestBackend>>;
-	type Index = usize;
+	type Backend = B;
+	type Index = <Self::Backend as Backend>::Index;
 
 	fn backend(&self) -> &Self::Backend {
 		&self.backend
@@ -460,7 +466,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	fn get_root(init: &Self::Backend) -> Option<NodeBox<N>> {
 		if let Some((encoded, index)) = init.get_root() {
-			let (backend, prefix) = decode::<N>(encoded, init, index);
+			let (backend, prefix) = decode::<N, B>(encoded, init, index);
 			Some(Node::<N>::new_box_unfetched(
 				prefix,
 				backend,
@@ -470,8 +476,8 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		}
 	}
 	fn get_node(&self, index: Self::Index) -> Option<NodeBox<N>> {
-		if let Some(encoded) = self.backend.get_node(index) {
-			let (backend, prefix) = decode::<N>(encoded, &self.backend, index);
+		if let Some(encoded) = self.backend.get_node(index.clone()) {
+			let (backend, prefix) = decode::<N, B>(encoded, &self.backend, index);
 			Some(Node::<N>::new_box_unfetched(
 				prefix,
 				backend,
@@ -528,8 +534,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 
 	fn fetch_value_index (&self) -> Option<Self::Index> {
 		debug_assert!(self.value_state == ValueState::Unfetched);
-		// dummy index just for testing purpose
-		self.value.as_ref().map(|_| Default::default())
+		self.value.clone()
 	}
 
 	fn fetch_value(&mut self) -> Option<Option<N::Value>> {
@@ -538,7 +543,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		} else {
 			self.value_state = ValueState::Resolved;
 			if let Some(ix) = self.value.clone() {
-				let value = self.backend.get_node(ix as usize).expect("Value stored with node.");
+				let value = self.backend.get_node(ix).expect("Value stored with node.");
 				Some(Some(Decode::decode(&mut value.as_slice()).unwrap()))
 			} else {
 				Some(None)
@@ -547,7 +552,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 	}
 	fn fetch_value_no_cache(&self) -> Option<N::Value> {
 		if let Some(ix) = self.value.clone() {
-			self.backend.get_node(ix as usize).map(|value| Decode::decode(&mut value.as_slice()).unwrap())
+			self.backend.get_node(ix).map(|value| Decode::decode(&mut value.as_slice()).unwrap())
 		} else {
 			None
 		}
@@ -616,12 +621,12 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			if let Some(value) = node.value.as_ref() {
 				let encoded = value.encode();
 				let ix = if let Some(previous) = node.backend.value.clone() {
-					node.backend.backend.update_node(previous as usize, encoded).unwrap_or(previous as usize)
+					node.backend.backend.update_node(previous.clone(), encoded).unwrap_or(previous)
 				} else {
 					node.backend.backend.set_new_node(encoded)
 				};
 
-				node.backend.value = Some(ix as u64);
+				node.backend.value = Some(ix);
 				node.backend.value_state = ValueState::Resolved;
 			} else {
 				unreachable!("modified should be some");
@@ -629,7 +634,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		}
 		if node.backend.value_state == ValueState::Deleted {
 			if let Some(previous) = node.backend.value.clone() {
-				node.backend.backend.remove_node(previous as usize);
+				node.backend.backend.remove_node(previous);
 			} else {
 				unreachable!("deleted should be some");
 			};
@@ -640,9 +645,9 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 		node.backend.children_changed = false;
 		node.backend.prefix_changed = false;
 
-		let encoded = encode_node::<N>(node);
-		if let Some(i) = node.backend.index {
-			node.backend.backend.update_node(i, encoded)
+		let encoded = encode_node::<N, B>(node);
+		if let Some(i) = node.backend.index.as_ref() {
+			node.backend.backend.update_node(i.clone(), encoded)
 		} else {
 			Some(node.backend.backend.set_new_node(encoded))
 		}

@@ -43,6 +43,9 @@ use radix::{PrefixKeyConf, RadixConf, Position,
 use children::Children;
 use codec::Codec;
 pub use backends::TreeBackend as Backend;
+use alloc::rc::Rc;
+use core::cell::RefCell;
+use backends::TestBackend;
 
 /// Alias to type of a key as used by external api.
 pub type Key = NodeKeyBuff;
@@ -1404,7 +1407,7 @@ impl <V: Value + Codec> TreeConf for Node256TestBackendART<V> {
     type Radix = Radix256Conf;
     type Value = V;
     type Children = ART48_256<ChildFor<Self>>;
-    type Backend = backends::NodeTestBackend<Self>;
+    type Backend = backends::NodeTestBackend<Self, Rc<RefCell<TestBackend>>>;
 }
 
 #[derive(Derivative)]
@@ -1415,5 +1418,5 @@ impl <V: Value + Codec> TreeConf for Node256TestBackend<V> {
     type Radix = Radix256Conf;
     type Value = V;
     type Children = Children256<ChildFor<Self>>;
-    type Backend = backends::NodeTestBackend<Self>;
+    type Backend = backends::NodeTestBackend<Self, Rc<RefCell<TestBackend>>>;
 }
