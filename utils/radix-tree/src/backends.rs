@@ -325,11 +325,12 @@ pub struct NodeTestBackend<N: TreeConf> {
 	encoded: Vec<u8>,
 	child_index: Vec<Option<usize>>,
 	nb_children: usize,
-	value: Option<N::Value>,
+	value: Option<u64>,
 	value_state: ValueState,
 	backend: Rc<RefCell<TestBackend>>,
 	children_changed: bool,
 	prefix_changed: bool,
+	_ph: core::marker::PhantomData<N>,// TODO try remove N.
 }
 
 // TODO replace backend by N::Backend when attached
@@ -344,7 +345,7 @@ fn decode<N>(
 {
 
 	let input = &mut encoded.as_slice();
-	let value: Option<N::Value> = Decode::decode(input).unwrap();
+	let value: Option<u64> = Decode::decode(input).unwrap();
 	let mut child_index = Vec::new();
 	let mut nb_children = 0;
 	for _ in 0..<<N as TreeConf>::Radix as RadixConf>::CHILDREN_CAPACITY {
@@ -395,6 +396,7 @@ fn decode<N>(
 		backend: backend.clone(),
 		children_changed: false,
 		prefix_changed: false,
+		_ph: Default::default(),
 	}, prefix)
 }
 
@@ -535,11 +537,20 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			None
 		} else {
 			self.value_state = ValueState::Resolved;
-			Some(self.value.clone())
+			if let Some(ix) = self.value.clone() {
+				let value = self.backend.get_node(ix as usize).expect("Value stored with node.");
+				Some(Some(Decode::decode(&mut value.as_slice()).unwrap()))
+			} else {
+				Some(None)
+			}
 		}
 	}
 	fn fetch_value_no_cache(&self) -> Option<N::Value> {
-		self.value.clone()
+		if let Some(ix) = self.value.clone() {
+			self.backend.get_node(ix as usize).map(|value| Decode::decode(&mut value.as_slice()).unwrap())
+		} else {
+			None
+		}
 	}
 	fn set_change(&mut self) {
 		self.children_changed = true;
@@ -565,6 +576,7 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 			children_changed: false,
 			prefix_changed: true, // new node need update
 			value_state: ValueState::Resolved,
+			_ph: Default::default(),
 		}
 	}
 
@@ -600,9 +612,28 @@ impl<N> TreeBackend<N> for NodeTestBackend<N>
 				backend_ix += 1;
 			}
 		}
-		if node.backend.value_state == ValueState::Modified
-			|| node.backend.value_state == ValueState::Deleted {
-			node.backend.value = node.value.clone();
+		if node.backend.value_state == ValueState::Modified {
+			if let Some(value) = node.value.as_ref() {
+				let encoded = value.encode();
+				let ix = if let Some(previous) = node.backend.value.clone() {
+					node.backend.backend.update_node(previous as usize, encoded).unwrap_or(previous as usize)
+				} else {
+					node.backend.backend.set_new_node(encoded)
+				};
+
+				node.backend.value = Some(ix as u64);
+				node.backend.value_state = ValueState::Resolved;
+			} else {
+				unreachable!("modified should be some");
+			}
+		}
+		if node.backend.value_state == ValueState::Deleted {
+			if let Some(previous) = node.backend.value.clone() {
+				node.backend.backend.remove_node(previous as usize);
+			} else {
+				unreachable!("deleted should be some");
+			};
+			node.backend.value = None;
 			node.backend.value_state = ValueState::Resolved;
 		}
 
